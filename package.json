@@ -1,5 +1,5 @@
 {
-  "name": "switchbot-openapi-cli",
+  "name": "@switchbot/openapi-cli",
   "version": "1.0.0",
   "description": "Command-line interface for SwitchBot API v1.1",
   "keywords": [
@@ -12,17 +12,17 @@
   ],
   "license": "MIT",
   "author": "chenliuyun <chenliuyun@onero.com>",
-  "homepage": "https://github.com/OpenWonderLabs/switchbot-openapi-cli#readme",
+  "homepage": "https://github.com/chenliuyun/switchbot-openapi-cli#readme",
   "bugs": {
-    "url": "https://github.com/OpenWonderLabs/switchbot-openapi-cli/issues"
+    "url": "https://github.com/chenliuyun/switchbot-openapi-cli/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/OpenWonderLabs/switchbot-openapi-cli.git"
+    "url": "git+https://github.com/chenliuyun/switchbot-openapi-cli.git"
   },
   "type": "module",
   "bin": {
-    "switchbot": "./dist/index.js"
+    "switchbot": "dist/index.js"
   },
   "files": [
     "dist",
@@ -31,6 +31,9 @@
   ],
   "engines": {
     "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "build": "tsc",
