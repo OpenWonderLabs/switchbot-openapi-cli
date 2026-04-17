@@ -4,14 +4,14 @@
 [![npm downloads](https://img.shields.io/npm/dm/@switchbot/openapi-cli.svg)](https://www.npmjs.com/package/@switchbot/openapi-cli)
 [![license](https://img.shields.io/npm/l/@switchbot/openapi-cli.svg)](./LICENSE)
 [![node](https://img.shields.io/node/v/@switchbot/openapi-cli.svg)](https://nodejs.org)
-[![CI](https://github.com/chenliuyun/switchbot-openapi-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/chenliuyun/switchbot-openapi-cli/actions/workflows/ci.yml)
+[![CI](https://github.com/OpenWonderLabs/switchbot-openapi-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/OpenWonderLabs/switchbot-openapi-cli/actions/workflows/ci.yml)
 
 Command-line interface for the [SwitchBot API v1.1](https://github.com/OpenWonderLabs/SwitchBotAPI).
 List devices, query live status, send control commands, run scenes, and manage webhooks — all from your terminal or shell scripts.
 
 - **npm package:** [`@switchbot/openapi-cli`](https://www.npmjs.com/package/@switchbot/openapi-cli)
-- **Source code:** [github.com/chenliuyun/switchbot-openapi-cli](https://github.com/chenliuyun/switchbot-openapi-cli)
-- **Issues / feature requests:** [GitHub Issues](https://github.com/chenliuyun/switchbot-openapi-cli/issues)
+- **Source code:** [github.com/OpenWonderLabs/switchbot-openapi-cli](https://github.com/OpenWonderLabs/switchbot-openapi-cli)
+- **Issues / feature requests:** [GitHub Issues](https://github.com/OpenWonderLabs/switchbot-openapi-cli/issues)
 
 ---
 
@@ -68,7 +68,7 @@ This adds the `switchbot` binary to your `$PATH`.
 ### From source
 
 ```bash
-git clone https://github.com/chenliuyun/switchbot-openapi-cli.git
+git clone https://github.com/OpenWonderLabs/switchbot-openapi-cli.git
 cd switchbot-openapi-cli
 npm install
 npm run build
@@ -312,7 +312,7 @@ switchbot scenes list --json | jq -r '.[] | "\(.sceneId) \(.sceneName)"'
 ## Development
 
 ```bash
-git clone https://github.com/chenliuyun/switchbot-openapi-cli.git
+git clone https://github.com/OpenWonderLabs/switchbot-openapi-cli.git
 cd switchbot-openapi-cli
 npm install
 
