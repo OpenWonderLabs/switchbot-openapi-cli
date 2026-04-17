@@ -1,4 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 
 const clientInstance = vi.hoisted(() => ({
   get: vi.fn(),
@@ -34,6 +37,7 @@ vi.mock('../../src/api/client.js', () => ({
 
 import { registerDevicesCommand } from '../../src/commands/devices.js';
 import { runCli } from '../helpers/cli.js';
+import { updateCacheFromDeviceList } from '../../src/devices/cache.js';
 
 // ---- Helpers -----------------------------------------------------------
 const DID = 'DEV-ID';
@@ -1204,6 +1208,106 @@ describe('devices command', () => {
     it('fails when <deviceId> is missing (commander error)', async () => {
       const res = await runCli(registerDevicesCommand, ['devices', 'describe']);
       expect(res.stderr.join('\n').toLowerCase()).toContain('missing required');
+    });
+  });
+
+  // =====================================================================
+  // command — cache-backed validation
+  // =====================================================================
+  describe('command — cache-backed validation', () => {
+    let tmpDir: string;
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sbcli-cmd-validate-'));
+      vi.spyOn(os, 'homedir').mockReturnValue(tmpDir);
+      // Seed the cache: DID → Bot (commands: turnOn/turnOff/press, all param '—').
+      updateCacheFromDeviceList({
+        deviceList: [
+          { deviceId: DID, deviceName: 'Living Bot', deviceType: 'Bot' },
+          { deviceId: 'BULB-1', deviceName: 'Lamp', deviceType: 'Color Bulb' },
+        ],
+        infraredRemoteList: [
+          { deviceId: 'IR-X', deviceName: 'Remote', remoteType: 'TV' },
+        ],
+      });
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it('rejects an unsupported command with exit 2 and prints supported list', async () => {
+      const res = await runCmd('doesNotExist');
+      expect(res.exitCode).toBe(2);
+      const err = res.stderr.join('\n');
+      expect(err).toContain('"doesNotExist" is not a supported command');
+      expect(err).toContain('Living Bot');
+      expect(err).toContain('Bot');
+      expect(err).toContain('Supported commands:');
+      expect(err).toContain('turnOn');
+      expect(err).toContain('press');
+      expect(err).toContain("switchbot devices commands");
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
+    });
+
+    it('rejects a parameter on a no-param command with exit 2', async () => {
+      const res = await runCmd('turnOn', 'someparam');
+      expect(res.exitCode).toBe(2);
+      const err = res.stderr.join('\n');
+      expect(err).toContain('"turnOn" takes no parameter');
+      expect(err).toContain('someparam');
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
+    });
+
+    it('allows a supported no-param command to pass through', async () => {
+      const res = await runCmd('turnOn');
+      expect(res.exitCode).toBeNull();
+      expectPost('turnOn', 'default');
+    });
+
+    it('allows "default" literal as parameter on a no-param command', async () => {
+      const res = await runCmd('turnOn', 'default');
+      expect(res.exitCode).toBeNull();
+      expectPost('turnOn', 'default');
+    });
+
+    it('skips validation entirely for --type customize (arbitrary IR button names)', async () => {
+      const res = await runCmd('AnyCustomName', 'extra', '--type', 'customize');
+      expect(res.exitCode).toBeNull();
+      expectPost('AnyCustomName', 'extra', 'customize');
+    });
+
+    it('validates against a parameterized command (Color Bulb setBrightness)', async () => {
+      // For BULB-1 (Color Bulb), setBrightness takes a param — a numeric value is fine.
+      const res = await runCli(registerDevicesCommand, [
+        'devices', 'command', 'BULB-1', 'setBrightness', '50',
+      ]);
+      expect(res.exitCode).toBeNull();
+      expect(apiMock.__instance.post).toHaveBeenCalledWith(
+        '/v1.1/devices/BULB-1/commands',
+        { command: 'setBrightness', parameter: 50, commandType: 'command' }
+      );
+    });
+
+    it('rejects an unsupported command on an IR remote (TV) with exit 2', async () => {
+      const res = await runCli(registerDevicesCommand, [
+        'devices', 'command', 'IR-X', 'explode',
+      ]);
+      expect(res.exitCode).toBe(2);
+      expect(res.stderr.join('\n')).toContain('is not a supported command');
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
+    });
+
+    it('passes through commands for devices not in the cache', async () => {
+      const res = await runCli(registerDevicesCommand, [
+        'devices', 'command', 'UNKNOWN-ID', 'anyCommand',
+      ]);
+      expect(res.exitCode).toBeNull();
+      expect(apiMock.__instance.post).toHaveBeenCalledWith(
+        '/v1.1/devices/UNKNOWN-ID/commands',
+        { command: 'anyCommand', parameter: 'default', commandType: 'command' }
+      );
     });
   });
 });

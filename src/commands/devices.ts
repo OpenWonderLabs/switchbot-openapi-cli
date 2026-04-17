@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { createClient } from '../api/client.js';
 import { printTable, printKeyValue, printJson, isJsonMode, handleError } from '../utils/output.js';
 import { DEVICE_CATALOG, findCatalogEntry, DeviceCatalogEntry } from '../devices/catalog.js';
+import { getCachedDevice, updateCacheFromDeviceList } from '../devices/cache.js';
 
 interface Device {
   deviceId: string;
@@ -87,6 +88,8 @@ Examples:
         const client = createClient();
         const res = await client.get<{ body: DeviceListBody }>('/v1.1/devices');
         const { deviceList, infraredRemoteList } = res.data.body;
+
+        updateCacheFromDeviceList(res.data.body);
 
         if (isJsonMode()) {
           printJson(res.data.body);
@@ -228,6 +231,8 @@ Examples:
   $ switchbot devices command ABC123 "MyButton" --type customize
 `)
     .action(async (deviceId: string, cmd: string, parameter: string | undefined, options: { type: string }) => {
+      validateCommandAgainstCache(deviceId, cmd, parameter, options.type);
+
       try {
         const client = createClient();
 
@@ -355,6 +360,8 @@ Examples:
         const res = await client.get<{ body: DeviceListBody }>('/v1.1/devices');
         const { deviceList, infraredRemoteList } = res.data.body;
 
+        updateCacheFromDeviceList(res.data.body);
+
         const physical = deviceList.find((d) => d.deviceId === deviceId);
         const ir = infraredRemoteList.find((d) => d.deviceId === deviceId);
 
@@ -429,6 +436,52 @@ function buildHubLocationMap(
     });
   }
   return map;
+}
+
+function validateCommandAgainstCache(
+  deviceId: string,
+  cmd: string,
+  parameter: string | undefined,
+  commandType: string
+): void {
+  // Custom IR buttons have arbitrary names — skip validation.
+  if (commandType === 'customize') return;
+
+  const cached = getCachedDevice(deviceId);
+  if (!cached) return;
+
+  const match = findCatalogEntry(cached.type);
+  if (!match || Array.isArray(match)) return;
+  const entry = match;
+
+  const builtinCommands = entry.commands.filter((c) => c.commandType !== 'customize');
+  if (builtinCommands.length === 0) return;
+
+  const spec = builtinCommands.find((c) => c.command === cmd);
+  if (!spec) {
+    const unique = [...new Set(builtinCommands.map((c) => c.command))];
+    console.error(
+      `Error: "${cmd}" is not a supported command for ${cached.name} (${cached.type}).`
+    );
+    console.error(`Supported commands: ${unique.join(', ')}`);
+    console.error(
+      `Run 'switchbot devices commands ${JSON.stringify(cached.type)}' for parameter formats and descriptions.`
+    );
+    console.error(
+      `(If the catalog is out of date, run 'switchbot devices list' to refresh the local cache, or pass --type customize for custom IR buttons.)`
+    );
+    process.exit(2);
+  }
+
+  const noParamExpected = spec.parameter === '—';
+  const userProvidedParam = parameter !== undefined && parameter !== 'default';
+  if (noParamExpected && userProvidedParam) {
+    console.error(
+      `Error: "${cmd}" takes no parameter, but one was provided: "${parameter}".`
+    );
+    console.error(`Try: switchbot devices command ${deviceId} ${cmd}`);
+    process.exit(2);
+  }
 }
 
 function renderCatalogEntry(entry: DeviceCatalogEntry): void {
