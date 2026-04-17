@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Test coverage
+coverage/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment & credentials
+.env
+.env.*
+.switchbot/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Claude Code local settings
+.claude/
+CLAUDE.md
+
+# Init transcript
+2026-04-10-155920-command-messageinitcommand-message.txt

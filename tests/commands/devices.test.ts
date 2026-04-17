@@ -1,0 +1,1209 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+const clientInstance = vi.hoisted(() => ({
+  get: vi.fn(),
+  post: vi.fn(),
+}));
+
+const apiMock = vi.hoisted(() => {
+  const instance = { get: vi.fn(), post: vi.fn() };
+  return {
+    createClient: vi.fn(() => instance),
+    __instance: instance,
+  };
+});
+
+vi.mock('../../src/api/client.js', () => ({
+  createClient: apiMock.createClient,
+  ApiError: class ApiError extends Error {
+    constructor(
+      message: string,
+      public readonly code: number
+    ) {
+      super(message);
+      this.name = 'ApiError';
+    }
+  },
+  DryRunSignal: class DryRunSignal extends Error {
+    constructor(public readonly method: string, public readonly url: string) {
+      super('dry-run');
+      this.name = 'DryRunSignal';
+    }
+  },
+}));
+
+import { registerDevicesCommand } from '../../src/commands/devices.js';
+import { runCli } from '../helpers/cli.js';
+
+// ---- Helpers -----------------------------------------------------------
+const DID = 'DEV-ID';
+
+async function runCmd(...extra: string[]) {
+  return runCli(registerDevicesCommand, ['devices', 'command', DID, ...extra]);
+}
+
+function expectPost(command: string, parameter: unknown, commandType = 'command') {
+  expect(apiMock.__instance.post).toHaveBeenCalledWith(
+    `/v1.1/devices/${DID}/commands`,
+    { command, parameter, commandType }
+  );
+}
+
+// ---- Sample data for list/status ---------------------------------------
+const sampleBody = {
+  deviceList: [
+    {
+      deviceId: 'ABC123',
+      deviceName: 'Living Lamp',
+      deviceType: 'Color Bulb',
+      hubDeviceId: 'HUB-1',
+      enableCloudService: true,
+      roomID: 'R-LIVING',
+      roomName: 'Living Room',
+      familyName: 'Home',
+      controlType: 'Light',
+    },
+    {
+      deviceId: 'BLE-001',
+      deviceName: 'Kitchen Bot',
+      deviceType: 'Bot',
+      hubDeviceId: '000000000000',
+      enableCloudService: false,
+      roomID: 'defaultRoom',
+      roomName: null,
+      familyName: 'Home',
+      controlType: 'Bot',
+    },
+    {
+      deviceId: 'NOHUB-1',
+      deviceName: 'Strip Light',
+      deviceType: 'Strip Light 3',
+      hubDeviceId: '',
+      enableCloudService: true,
+      roomID: 'R-LIVING',
+      roomName: 'Living Room',
+      familyName: 'Home',
+      controlType: 'Light',
+    },
+  ],
+  infraredRemoteList: [
+    {
+      deviceId: 'IR-001',
+      deviceName: 'TV',
+      remoteType: 'TV',
+      hubDeviceId: 'HUB-1',
+      controlType: 'TV',
+    },
+  ],
+};
+
+describe('devices command', () => {
+  beforeEach(() => {
+    apiMock.__instance.get.mockReset();
+    apiMock.__instance.post.mockReset();
+    apiMock.createClient.mockReset();
+    apiMock.createClient.mockImplementation(() => apiMock.__instance);
+    apiMock.__instance.post.mockResolvedValue({ data: { body: {} } });
+  });
+
+  // =====================================================================
+  // list
+  // =====================================================================
+  describe('list', () => {
+    it('renders a table with physical + IR devices in default mode', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list']);
+      const out = res.stdout.join('\n');
+      expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/devices');
+      expect(out).toContain('ABC123');
+      expect(out).toContain('Living Lamp');
+      expect(out).toContain('[IR] TV');
+      expect(out).toContain('—');
+      expect(out).toContain('3 physical device');
+      expect(out).toContain('1 IR remote');
+    });
+
+    it('shows family and room columns for physical devices', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list']);
+      const out = res.stdout.join('\n');
+      expect(out).toContain('family');
+      expect(out).toContain('room');
+      expect(out).toContain('Home');
+      expect(out).toContain('Living Room');
+    });
+
+    it('renders controlType column for physical and IR devices', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list']);
+      const out = res.stdout.join('\n');
+      expect(out).toContain('controlType');
+      // physical row: 'Light' from controlType
+      const lampRow = out.split('\n').find((l) => l.includes('ABC123'));
+      expect(lampRow).toContain('Light');
+      // IR row also surfaces controlType
+      const tvRow = out.split('\n').find((l) => l.includes('IR-001'));
+      expect(tvRow).toContain('TV');
+    });
+
+    it('renders missing controlType as em-dash', async () => {
+      apiMock.__instance.get.mockResolvedValue({
+        data: {
+          body: {
+            deviceList: [
+              {
+                deviceId: 'NO-CTYPE',
+                deviceName: 'Legacy',
+                deviceType: 'Bot',
+                hubDeviceId: 'HUB',
+                enableCloudService: true,
+              },
+            ],
+            infraredRemoteList: [],
+          },
+        },
+      });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list']);
+      const row = res.stdout.join('\n').split('\n').find((l) => l.includes('NO-CTYPE'));
+      expect(row).toContain('—');
+    });
+
+    it('renders empty-string controlType and missing deviceType as em-dash', async () => {
+      apiMock.__instance.get.mockResolvedValue({
+        data: {
+          body: {
+            deviceList: [
+              {
+                deviceId: 'AI-DEV',
+                deviceName: 'AI MindClip',
+                hubDeviceId: '',
+                enableCloudService: true,
+                familyName: 'Home',
+                roomID: 'R1',
+                roomName: 'Office',
+                controlType: '',
+              },
+            ],
+            infraredRemoteList: [],
+          },
+        },
+      });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list']);
+      const row = res.stdout.join('\n').split('\n').find((l) => l.includes('AI-DEV'));
+      expect(row).toBeDefined();
+      expect(row).not.toContain('undefined');
+      // type column (position 3) and controlType column (position 4) should both render as em-dash
+      expect(row!.match(/—/g)?.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('renders roomID column for physical devices', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list']);
+      const out = res.stdout.join('\n');
+      expect(out).toContain('roomID');
+      const lampRow = out.split('\n').find((l) => l.includes('ABC123'));
+      expect(lampRow).toContain('R-LIVING');
+    });
+
+    it('renders null roomName as em-dash', async () => {
+      apiMock.__instance.get.mockResolvedValue({
+        data: {
+          body: {
+            deviceList: [
+              {
+                deviceId: 'X',
+                deviceName: 'N',
+                deviceType: 'T',
+                hubDeviceId: 'HUB',
+                enableCloudService: true,
+                familyName: 'F',
+                roomName: null,
+              },
+            ],
+            infraredRemoteList: [],
+          },
+        },
+      });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list']);
+      expect(res.stdout.join('\n')).toContain('—');
+    });
+
+    it('renders empty-string hubDeviceId as em-dash', async () => {
+      apiMock.__instance.get.mockResolvedValue({
+        data: {
+          body: {
+            deviceList: [
+              {
+                deviceId: 'EMPTY-HUB',
+                deviceName: 'Gadget',
+                deviceType: 'Strip Light 3',
+                hubDeviceId: '',
+                enableCloudService: true,
+                familyName: 'Home',
+                roomName: 'Bedroom',
+              },
+            ],
+            infraredRemoteList: [],
+          },
+        },
+      });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list']);
+      const out = res.stdout.join('\n');
+      expect(out).toContain('EMPTY-HUB');
+      expect(out).toContain('—');
+    });
+
+    it('in --json mode, outputs raw body and skips the table', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list', '--json']);
+      const out = res.stdout.join('\n');
+      expect(out).toContain('"deviceList"');
+      expect(out).toContain('"infraredRemoteList"');
+      expect(out).not.toContain('| deviceName');
+    });
+
+    it('prints "No devices found" when both lists are empty', async () => {
+      apiMock.__instance.get.mockResolvedValue({
+        data: { body: { deviceList: [], infraredRemoteList: [] } },
+      });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list']);
+      expect(res.stdout.join('\n')).toContain('No devices found');
+    });
+
+    it('invokes handleError (exit 1) when the client throws', async () => {
+      apiMock.__instance.get.mockRejectedValue(new Error('network down'));
+      const res = await runCli(registerDevicesCommand, ['devices', 'list']);
+      expect(res.exitCode).toBe(1);
+      expect(res.stderr.join('\n')).toContain('network down');
+    });
+
+    it('IR remotes inherit family/room/roomID from their bound Hub', async () => {
+      apiMock.__instance.get.mockResolvedValue({
+        data: {
+          body: {
+            deviceList: [
+              {
+                deviceId: 'HUB-MAIN',
+                deviceName: 'Living Room Hub',
+                deviceType: 'Hub 2',
+                hubDeviceId: '',
+                enableCloudService: true,
+                familyName: 'HomeA',
+                roomID: 'R-HUB-ROOM',
+                roomName: 'Living Room',
+              },
+            ],
+            infraredRemoteList: [
+              {
+                deviceId: 'IR-TV',
+                deviceName: 'TV',
+                remoteType: 'TV',
+                hubDeviceId: 'HUB-MAIN',
+              },
+              {
+                deviceId: 'IR-ORPHAN',
+                deviceName: 'Orphan',
+                remoteType: 'Fan',
+                hubDeviceId: 'HUB-MISSING',
+              },
+            ],
+          },
+        },
+      });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list']);
+      const out = res.stdout.join('\n');
+      // Row for IR-TV should show HomeA / R-HUB-ROOM / Living Room inherited from HUB-MAIN
+      const irTvRow = out.split('\n').find((l) => l.includes('IR-TV'));
+      expect(irTvRow).toBeDefined();
+      expect(irTvRow).toContain('HomeA');
+      expect(irTvRow).toContain('R-HUB-ROOM');
+      expect(irTvRow).toContain('Living Room');
+      // Row for IR-ORPHAN points at a missing hub → both columns fall back to —
+      const orphanRow = out.split('\n').find((l) => l.includes('IR-ORPHAN'));
+      expect(orphanRow).toBeDefined();
+      expect(orphanRow).not.toContain('HomeA');
+    });
+  });
+
+  // =====================================================================
+  // status
+  // =====================================================================
+  describe('status', () => {
+    it('key-value prints every field in the response body', async () => {
+      apiMock.__instance.get.mockResolvedValue({
+        data: { body: { power: 'on', battery: 87 } },
+      });
+      const res = await runCli(registerDevicesCommand, ['devices', 'status', 'ABC']);
+      expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/devices/ABC/status');
+      const out = res.stdout.join('\n');
+      expect(out).toContain('power');
+      expect(out).toContain('on');
+      expect(out).toContain('battery');
+      expect(out).toContain('87');
+    });
+
+    it('in --json mode, outputs the raw body as JSON', async () => {
+      apiMock.__instance.get.mockResolvedValue({
+        data: { body: { power: 'off' } },
+      });
+      const res = await runCli(registerDevicesCommand, ['devices', 'status', 'XYZ', '--json']);
+      expect(res.stdout.join('\n')).toContain('"power"');
+    });
+
+    it('exits 1 when the API throws', async () => {
+      apiMock.__instance.get.mockRejectedValue(new Error('device offline'));
+      const res = await runCli(registerDevicesCommand, ['devices', 'status', 'BLE']);
+      expect(res.exitCode).toBe(1);
+      expect(res.stderr.join('\n')).toContain('device offline');
+    });
+  });
+
+  // =====================================================================
+  // command — generic behavior (parameter parsing, flags, error paths)
+  // =====================================================================
+  describe('command — generic behavior', () => {
+    it('defaults parameter to "default" and commandType to "command" when none given', async () => {
+      await runCmd('turnOn');
+      expectPost('turnOn', 'default');
+    });
+
+    it('passes plain-string parameter through unchanged', async () => {
+      await runCmd('setColor', '255:0:0');
+      expectPost('setColor', '255:0:0');
+    });
+
+    it('parses JSON-object parameter into an object', async () => {
+      await runCmd('startClean', '{"action":"sweep","param":{"fanLevel":2}}');
+      expectPost('startClean', { action: 'sweep', param: { fanLevel: 2 } });
+    });
+
+    it('keeps malformed JSON parameter as a plain string (no throw)', async () => {
+      await runCmd('setAll', 'not json {');
+      expectPost('setAll', 'not json {');
+    });
+
+    it('passes --type customize through as commandType', async () => {
+      await runCmd('MyButton', '--type', 'customize');
+      expectPost('MyButton', 'default', 'customize');
+    });
+
+    it('prints a success line in default output mode', async () => {
+      const res = await runCmd('turnOn');
+      expect(res.stdout.join('\n')).toContain('Command sent: turnOn');
+    });
+
+    it('prints key-value extras when response body has fields', async () => {
+      apiMock.__instance.post.mockResolvedValue({
+        data: { body: { commandId: 'cmd-xyz' } },
+      });
+      const res = await runCmd('turnOn');
+      const out = res.stdout.join('\n');
+      expect(out).toContain('commandId');
+      expect(out).toContain('cmd-xyz');
+    });
+
+    it('does not try to print key-value when body is empty', async () => {
+      const res = await runCmd('turnOn');
+      expect(res.stdout.length).toBe(1);
+    });
+
+    it('in --json mode, outputs raw body and skips success line', async () => {
+      apiMock.__instance.post.mockResolvedValue({
+        data: { body: { commandId: 'cmd-json' } },
+      });
+      const res = await runCmd('turnOn', '--json');
+      const out = res.stdout.join('\n');
+      expect(out).toContain('"commandId": "cmd-json"');
+      expect(out).not.toContain('Command sent');
+    });
+
+    it('exits 1 when the API throws (e.g. 161 device offline)', async () => {
+      apiMock.__instance.post.mockRejectedValue(
+        new Error('Device offline (check Wi-Fi / Bluetooth connection)')
+      );
+      const res = await runCmd('turnOn');
+      expect(res.exitCode).toBe(1);
+      expect(res.stderr.join('\n')).toContain('Device offline');
+    });
+  });
+
+  // =====================================================================
+  // Physical devices — by type
+  // =====================================================================
+
+  describe('device: Bot', () => {
+    it('turnOn', async () => {
+      await runCmd('turnOn');
+      expectPost('turnOn', 'default');
+    });
+    it('turnOff', async () => {
+      await runCmd('turnOff');
+      expectPost('turnOff', 'default');
+    });
+    it('press', async () => {
+      await runCmd('press');
+      expectPost('press', 'default');
+    });
+  });
+
+  describe('device: Curtain / Curtain 3', () => {
+    it('turnOn opens the curtain', async () => {
+      await runCmd('turnOn');
+      expectPost('turnOn', 'default');
+    });
+    it('turnOff closes the curtain', async () => {
+      await runCmd('turnOff');
+      expectPost('turnOff', 'default');
+    });
+    it('pause', async () => {
+      await runCmd('pause');
+      expectPost('pause', 'default');
+    });
+    it('setPosition with "index,mode,position" string', async () => {
+      await runCmd('setPosition', '0,ff,80');
+      expectPost('setPosition', '0,ff,80');
+    });
+  });
+
+  describe('device: Lock / Lock Pro / Lock Ultra', () => {
+    it('lock', async () => {
+      await runCmd('lock');
+      expectPost('lock', 'default');
+    });
+    it('unlock', async () => {
+      await runCmd('unlock');
+      expectPost('unlock', 'default');
+    });
+    it('deadbolt (release latch)', async () => {
+      await runCmd('deadbolt');
+      expectPost('deadbolt', 'default');
+    });
+  });
+
+  describe('device: Lock Lite', () => {
+    it('lock', async () => {
+      await runCmd('lock');
+      expectPost('lock', 'default');
+    });
+    it('unlock', async () => {
+      await runCmd('unlock');
+      expectPost('unlock', 'default');
+    });
+  });
+
+  describe('device: Plug / Plug Mini', () => {
+    it('turnOn', async () => {
+      await runCmd('turnOn');
+      expectPost('turnOn', 'default');
+    });
+    it('turnOff', async () => {
+      await runCmd('turnOff');
+      expectPost('turnOff', 'default');
+    });
+    it('toggle (Plug Mini)', async () => {
+      await runCmd('toggle');
+      expectPost('toggle', 'default');
+    });
+  });
+
+  describe('device: Relay Switch 1 / 1PM', () => {
+    it('turnOn', async () => {
+      await runCmd('turnOn');
+      expectPost('turnOn', 'default');
+    });
+    it('turnOff', async () => {
+      await runCmd('turnOff');
+      expectPost('turnOff', 'default');
+    });
+    it('toggle', async () => {
+      await runCmd('toggle');
+      expectPost('toggle', 'default');
+    });
+    it('setMode 0 (toggle)', async () => {
+      await runCmd('setMode', '0');
+      expectPost('setMode', 0);
+    });
+    it('setMode 3 (momentary)', async () => {
+      await runCmd('setMode', '3');
+      expectPost('setMode', 3);
+    });
+  });
+
+  describe('device: Relay Switch 2PM (dual-channel)', () => {
+    it('turnOn channel 1', async () => {
+      await runCmd('turnOn', '1');
+      expectPost('turnOn', 1);
+    });
+    it('turnOff channel 2', async () => {
+      await runCmd('turnOff', '2');
+      expectPost('turnOff', 2);
+    });
+    it('toggle channel 1', async () => {
+      await runCmd('toggle', '1');
+      expectPost('toggle', 1);
+    });
+    it('setMode "1;0" (channel;mode)', async () => {
+      await runCmd('setMode', '1;0');
+      expectPost('setMode', '1;0');
+    });
+    it('setPosition 50 (roller percent)', async () => {
+      await runCmd('setPosition', '50');
+      expectPost('setPosition', 50);
+    });
+  });
+
+  describe('device: Humidifier', () => {
+    it('turnOn', async () => {
+      await runCmd('turnOn');
+      expectPost('turnOn', 'default');
+    });
+    it('setMode auto', async () => {
+      await runCmd('setMode', 'auto');
+      expectPost('setMode', 'auto');
+    });
+    it('setMode preset 101 (34%)', async () => {
+      await runCmd('setMode', '101');
+      expectPost('setMode', 101);
+    });
+    it('setMode preset 103 (100%)', async () => {
+      await runCmd('setMode', '103');
+      expectPost('setMode', 103);
+    });
+    it('setMode with custom humidity 55', async () => {
+      await runCmd('setMode', '55');
+      expectPost('setMode', 55);
+    });
+  });
+
+  describe('device: Evaporative Humidifier', () => {
+    it('setMode with JSON object {mode, targetHumidify}', async () => {
+      await runCmd('setMode', '{"mode":7,"targetHumidify":50}');
+      expectPost('setMode', { mode: 7, targetHumidify: 50 });
+    });
+    it('setChildLock true', async () => {
+      await runCmd('setChildLock', 'true');
+      expectPost('setChildLock', true);
+    });
+    it('setChildLock false', async () => {
+      await runCmd('setChildLock', 'false');
+      expectPost('setChildLock', false);
+    });
+  });
+
+  describe('device: Air Purifier VOC / PM2.5', () => {
+    it('setMode JSON with mode + fanGear', async () => {
+      await runCmd('setMode', '{"mode":2,"fanGear":3}');
+      expectPost('setMode', { mode: 2, fanGear: 3 });
+    });
+    it('setChildLock "1"', async () => {
+      await runCmd('setChildLock', '1');
+      expectPost('setChildLock', 1);
+    });
+  });
+
+  describe('device: Color Bulb', () => {
+    it('turnOn', async () => {
+      await runCmd('turnOn');
+      expectPost('turnOn', 'default');
+    });
+    it('toggle', async () => {
+      await runCmd('toggle');
+      expectPost('toggle', 'default');
+    });
+    it('setBrightness mid-range', async () => {
+      await runCmd('setBrightness', '75');
+      expectPost('setBrightness', 75);
+    });
+    it('setColor R:G:B', async () => {
+      await runCmd('setColor', '122:80:20');
+      expectPost('setColor', '122:80:20');
+    });
+    it('setColorTemperature 2700', async () => {
+      await runCmd('setColorTemperature', '2700');
+      expectPost('setColorTemperature', 2700);
+    });
+    it('setColorTemperature 6500', async () => {
+      await runCmd('setColorTemperature', '6500');
+      expectPost('setColorTemperature', 6500);
+    });
+  });
+
+  describe('device: Strip Light', () => {
+    it('setBrightness', async () => {
+      await runCmd('setBrightness', '30');
+      expectPost('setBrightness', 30);
+    });
+    it('setColor', async () => {
+      await runCmd('setColor', '0:255:0');
+      expectPost('setColor', '0:255:0');
+    });
+  });
+
+  describe('device: Ceiling Light / Ceiling Light Pro', () => {
+    it('setBrightness 1 (min)', async () => {
+      await runCmd('setBrightness', '1');
+      expectPost('setBrightness', 1);
+    });
+    it('setBrightness 100 (max)', async () => {
+      await runCmd('setBrightness', '100');
+      expectPost('setBrightness', 100);
+    });
+    it('setColorTemperature', async () => {
+      await runCmd('setColorTemperature', '4000');
+      expectPost('setColorTemperature', 4000);
+    });
+  });
+
+  describe('device: Smart Radiator Thermostat', () => {
+    it('turnOn / turnOff', async () => {
+      await runCmd('turnOff');
+      expectPost('turnOff', 'default');
+    });
+    it('setMode 4 (comfort)', async () => {
+      await runCmd('setMode', '4');
+      expectPost('setMode', 4);
+    });
+    it('setManualModeTemperature 22', async () => {
+      await runCmd('setManualModeTemperature', '22');
+      expectPost('setManualModeTemperature', 22);
+    });
+  });
+
+  describe('device: Robot Vacuum S1 / S1 Plus / K10+', () => {
+    it('start', async () => {
+      await runCmd('start');
+      expectPost('start', 'default');
+    });
+    it('stop', async () => {
+      await runCmd('stop');
+      expectPost('stop', 'default');
+    });
+    it('dock (return to charging)', async () => {
+      await runCmd('dock');
+      expectPost('dock', 'default');
+    });
+    it('PowLevel 3 (max suction)', async () => {
+      await runCmd('PowLevel', '3');
+      expectPost('PowLevel', 3);
+    });
+  });
+
+  describe('device: Robot Vacuum K10+ Pro Combo / K20+ Pro', () => {
+    it('startClean JSON with sweep action', async () => {
+      await runCmd('startClean', '{"action":"sweep","param":{"fanLevel":2,"times":1}}');
+      expectPost('startClean', {
+        action: 'sweep',
+        param: { fanLevel: 2, times: 1 },
+      });
+    });
+    it('startClean JSON with mop action', async () => {
+      await runCmd('startClean', '{"action":"mop","param":{"fanLevel":4,"times":2}}');
+      expectPost('startClean', {
+        action: 'mop',
+        param: { fanLevel: 4, times: 2 },
+      });
+    });
+    it('pause', async () => {
+      await runCmd('pause');
+      expectPost('pause', 'default');
+    });
+    it('setVolume', async () => {
+      await runCmd('setVolume', '60');
+      expectPost('setVolume', 60);
+    });
+    it('changeParam', async () => {
+      await runCmd('changeParam', '{"fanLevel":3,"waterLevel":2,"times":1}');
+      expectPost('changeParam', { fanLevel: 3, waterLevel: 2, times: 1 });
+    });
+  });
+
+  describe('device: Floor Cleaning Robot S10 / S20', () => {
+    it('startClean with sweep_mop action', async () => {
+      await runCmd(
+        'startClean',
+        '{"action":"sweep_mop","param":{"fanLevel":3,"waterLevel":2,"times":1}}'
+      );
+      expectPost('startClean', {
+        action: 'sweep_mop',
+        param: { fanLevel: 3, waterLevel: 2, times: 1 },
+      });
+    });
+    it('addWaterForHumi', async () => {
+      await runCmd('addWaterForHumi');
+      expectPost('addWaterForHumi', 'default');
+    });
+    it('selfClean 1 (wash mop)', async () => {
+      await runCmd('selfClean', '1');
+      expectPost('selfClean', 1);
+    });
+    it('selfClean 2 (dry)', async () => {
+      await runCmd('selfClean', '2');
+      expectPost('selfClean', 2);
+    });
+    it('selfClean 3 (terminate)', async () => {
+      await runCmd('selfClean', '3');
+      expectPost('selfClean', 3);
+    });
+  });
+
+  describe('device: Battery Circulator Fan / Circulator Fan', () => {
+    it('setNightLightMode off', async () => {
+      await runCmd('setNightLightMode', 'off');
+      expectPost('setNightLightMode', 'off');
+    });
+    it('setWindMode natural', async () => {
+      await runCmd('setWindMode', 'natural');
+      expectPost('setWindMode', 'natural');
+    });
+    it('setWindMode baby', async () => {
+      await runCmd('setWindMode', 'baby');
+      expectPost('setWindMode', 'baby');
+    });
+    it('setWindSpeed 50', async () => {
+      await runCmd('setWindSpeed', '50');
+      expectPost('setWindSpeed', 50);
+    });
+    it('closeDelay 600 (seconds)', async () => {
+      await runCmd('closeDelay', '600');
+      expectPost('closeDelay', 600);
+    });
+  });
+
+  describe('device: Blind Tilt', () => {
+    it('setPosition up;60', async () => {
+      await runCmd('setPosition', 'up;60');
+      expectPost('setPosition', 'up;60');
+    });
+    it('setPosition down;40', async () => {
+      await runCmd('setPosition', 'down;40');
+      expectPost('setPosition', 'down;40');
+    });
+    it('fullyOpen', async () => {
+      await runCmd('fullyOpen');
+      expectPost('fullyOpen', 'default');
+    });
+    it('closeUp', async () => {
+      await runCmd('closeUp');
+      expectPost('closeUp', 'default');
+    });
+    it('closeDown', async () => {
+      await runCmd('closeDown');
+      expectPost('closeDown', 'default');
+    });
+  });
+
+  describe('device: Roller Shade', () => {
+    it('setPosition 0 (open)', async () => {
+      await runCmd('setPosition', '0');
+      expectPost('setPosition', 0);
+    });
+    it('setPosition 100 (closed)', async () => {
+      await runCmd('setPosition', '100');
+      expectPost('setPosition', 100);
+    });
+  });
+
+  describe('device: Garage Door Opener', () => {
+    it('turnOn (open)', async () => {
+      await runCmd('turnOn');
+      expectPost('turnOn', 'default');
+    });
+    it('turnOff (close)', async () => {
+      await runCmd('turnOff');
+      expectPost('turnOff', 'default');
+    });
+  });
+
+  describe('device: Video Doorbell', () => {
+    it('enableMotionDetection', async () => {
+      await runCmd('enableMotionDetection');
+      expectPost('enableMotionDetection', 'default');
+    });
+    it('disableMotionDetection', async () => {
+      await runCmd('disableMotionDetection');
+      expectPost('disableMotionDetection', 'default');
+    });
+  });
+
+  describe('device: Keypad / Keypad Touch', () => {
+    it('createKey with JSON object (permanent)', async () => {
+      await runCmd(
+        'createKey',
+        '{"name":"Guest","type":"permanent","password":"12345678"}'
+      );
+      expectPost('createKey', {
+        name: 'Guest',
+        type: 'permanent',
+        password: '12345678',
+      });
+    });
+    it('createKey timeLimit with start/end timestamps', async () => {
+      await runCmd(
+        'createKey',
+        '{"name":"Temp","type":"timeLimit","password":"87654321","startTime":1700000000,"endTime":1700600000}'
+      );
+      expectPost('createKey', {
+        name: 'Temp',
+        type: 'timeLimit',
+        password: '87654321',
+        startTime: 1700000000,
+        endTime: 1700600000,
+      });
+    });
+    it('deleteKey with JSON id', async () => {
+      await runCmd('deleteKey', '{"id":42}');
+      expectPost('deleteKey', { id: 42 });
+    });
+  });
+
+  describe('device: Candle Warmer Lamp', () => {
+    it('turnOn / toggle / setBrightness / setColorTemperature', async () => {
+      await runCmd('setBrightness', '80');
+      expectPost('setBrightness', 80);
+    });
+  });
+
+  // =====================================================================
+  // Virtual IR remotes — by device class
+  // =====================================================================
+
+  describe('IR remote: common (all types)', () => {
+    it('turnOn', async () => {
+      await runCmd('turnOn');
+      expectPost('turnOn', 'default');
+    });
+    it('turnOff', async () => {
+      await runCmd('turnOff');
+      expectPost('turnOff', 'default');
+    });
+  });
+
+  describe('IR remote: Air Conditioner', () => {
+    it('setAll "temperature,mode,fanSpeed,power" (cool 26°C, mid fan, on)', async () => {
+      await runCmd('setAll', '26,2,3,on');
+      expectPost('setAll', '26,2,3,on');
+    });
+    it('setAll for heat mode', async () => {
+      await runCmd('setAll', '22,5,2,on');
+      expectPost('setAll', '22,5,2,on');
+    });
+    it('setAll off', async () => {
+      await runCmd('setAll', '26,1,3,off');
+      expectPost('setAll', '26,1,3,off');
+    });
+  });
+
+  describe('IR remote: TV / IPTV / Set Top Box', () => {
+    it('SetChannel', async () => {
+      await runCmd('SetChannel', '15');
+      expectPost('SetChannel', 15);
+    });
+    it('volumeAdd', async () => {
+      await runCmd('volumeAdd');
+      expectPost('volumeAdd', 'default');
+    });
+    it('volumeSub', async () => {
+      await runCmd('volumeSub');
+      expectPost('volumeSub', 'default');
+    });
+    it('channelAdd', async () => {
+      await runCmd('channelAdd');
+      expectPost('channelAdd', 'default');
+    });
+    it('channelSub', async () => {
+      await runCmd('channelSub');
+      expectPost('channelSub', 'default');
+    });
+  });
+
+  describe('IR remote: DVD / Speaker', () => {
+    it('setMute', async () => {
+      await runCmd('setMute');
+      expectPost('setMute', 'default');
+    });
+    it('FastForward', async () => {
+      await runCmd('FastForward');
+      expectPost('FastForward', 'default');
+    });
+    it('Rewind', async () => {
+      await runCmd('Rewind');
+      expectPost('Rewind', 'default');
+    });
+    it('Next', async () => {
+      await runCmd('Next');
+      expectPost('Next', 'default');
+    });
+    it('Previous', async () => {
+      await runCmd('Previous');
+      expectPost('Previous', 'default');
+    });
+    it('Pause', async () => {
+      await runCmd('Pause');
+      expectPost('Pause', 'default');
+    });
+    it('Play', async () => {
+      await runCmd('Play');
+      expectPost('Play', 'default');
+    });
+    it('Stop', async () => {
+      await runCmd('Stop');
+      expectPost('Stop', 'default');
+    });
+  });
+
+  describe('IR remote: Fan', () => {
+    it('swing', async () => {
+      await runCmd('swing');
+      expectPost('swing', 'default');
+    });
+    it('timer', async () => {
+      await runCmd('timer');
+      expectPost('timer', 'default');
+    });
+    it('lowSpeed / middleSpeed / highSpeed', async () => {
+      await runCmd('highSpeed');
+      expectPost('highSpeed', 'default');
+    });
+  });
+
+  describe('IR remote: Light', () => {
+    it('brightnessUp', async () => {
+      await runCmd('brightnessUp');
+      expectPost('brightnessUp', 'default');
+    });
+    it('brightnessDown', async () => {
+      await runCmd('brightnessDown');
+      expectPost('brightnessDown', 'default');
+    });
+  });
+
+  describe('IR remote: Others (custom button)', () => {
+    it('sends custom button name with commandType=customize', async () => {
+      await runCmd('NightMode', '--type', 'customize');
+      expectPost('NightMode', 'default', 'customize');
+    });
+    it('custom button with a plain-string parameter and customize type', async () => {
+      await runCmd('MyScene', 'extra', '--type', 'customize');
+      expectPost('MyScene', 'extra', 'customize');
+    });
+  });
+
+  // =====================================================================
+  // devices types / commands — offline catalog lookups (no API calls)
+  // =====================================================================
+
+  describe('types (catalog listing)', () => {
+    it('prints a table of known device types', async () => {
+      const res = await runCli(registerDevicesCommand, ['devices', 'types']);
+      const out = res.stdout.join('\n');
+      expect(out).toContain('Bot');
+      expect(out).toContain('Curtain');
+      expect(out).toContain('Air Conditioner');
+      expect(out).toMatch(/Total: \d+ device type/);
+      expect(apiMock.__instance.get).not.toHaveBeenCalled();
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
+    });
+
+    it('with --json, outputs the raw catalog array', async () => {
+      const res = await runCli(registerDevicesCommand, ['devices', 'types', '--json']);
+      const out = res.stdout.join('\n');
+      expect(out).toContain('"type"');
+      expect(out).toContain('"category"');
+      expect(out).toContain('"Bot"');
+    });
+  });
+
+  describe('commands <type> (catalog lookup)', () => {
+    it('prints commands and status fields for an exact match', async () => {
+      const res = await runCli(registerDevicesCommand, ['devices', 'commands', 'Bot']);
+      const out = res.stdout.join('\n');
+      expect(out).toContain('Type:');
+      expect(out).toContain('Bot');
+      expect(out).toContain('turnOn');
+      expect(out).toContain('press');
+      expect(out).toContain('Status fields');
+      expect(out).toContain('battery');
+    });
+
+    it('matches aliases', async () => {
+      const res = await runCli(registerDevicesCommand, ['devices', 'commands', 'Curtain 3']);
+      const out = res.stdout.join('\n');
+      expect(out).toContain('Type:');
+      expect(out).toContain('Curtain');
+      expect(out).toContain('setPosition');
+    });
+
+    it('matches case-insensitively and by substring', async () => {
+      const res = await runCli(registerDevicesCommand, ['devices', 'commands', 'blind']);
+      expect(res.stdout.join('\n')).toContain('Blind Tilt');
+    });
+
+    it('accepts multi-word type without quoting (variadic joining)', async () => {
+      const res = await runCli(registerDevicesCommand, ['devices', 'commands', 'Air', 'Conditioner']);
+      const out = res.stdout.join('\n');
+      expect(res.stderr.join('\n')).toBe('');
+      expect(out).toContain('Type:');
+      expect(out).toContain('Air Conditioner');
+      expect(out).toContain('setAll');
+    });
+
+    it('accepts quoted multi-word type (single argument form still works)', async () => {
+      const res = await runCli(registerDevicesCommand, ['devices', 'commands', 'Smart Lock']);
+      const out = res.stdout.join('\n');
+      expect(out).toContain('Smart Lock');
+      expect(out).toContain('lock');
+      expect(out).toContain('unlock');
+    });
+
+    it('lists disambiguation when the query matches multiple types', async () => {
+      const res = await runCli(registerDevicesCommand, ['devices', 'commands', 'Robot']);
+      expect(res.exitCode).toBe(2);
+      const err = res.stderr.join('\n');
+      expect(err).toContain('matches multiple types');
+      expect(err).toContain('Robot Vacuum Cleaner S1');
+    });
+
+    it('exits 2 with guidance when the type is unknown', async () => {
+      const res = await runCli(registerDevicesCommand, ['devices', 'commands', 'Nonexistent']);
+      expect(res.exitCode).toBe(2);
+      const err = res.stderr.join('\n');
+      expect(err).toContain('No device type matches');
+      expect(err).toContain('switchbot devices types');
+    });
+
+    it('notes "status-only" devices with no commands', async () => {
+      const res = await runCli(registerDevicesCommand, ['devices', 'commands', 'Motion Sensor']);
+      const out = res.stdout.join('\n');
+      expect(out).toContain('status-only');
+      expect(out).toContain('moveDetected');
+    });
+
+    it('--json mode outputs the catalog entry as JSON', async () => {
+      const res = await runCli(registerDevicesCommand, ['devices', 'commands', 'Bot', '--json']);
+      const out = res.stdout.join('\n');
+      expect(out).toContain('"type": "Bot"');
+      expect(out).toContain('"commands"');
+    });
+
+    it('fails when <type> is missing (commander error)', async () => {
+      const res = await runCli(registerDevicesCommand, ['devices', 'commands']);
+      expect(res.stderr.join('\n').toLowerCase()).toContain('missing required');
+    });
+  });
+
+  describe('describe <deviceId>', () => {
+    it('prints metadata + catalog entry for a physical device in the catalog', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'describe', 'BLE-001']);
+
+      expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/devices');
+      expect(apiMock.__instance.get).toHaveBeenCalledTimes(1);
+
+      const out = res.stdout.join('\n');
+      // metadata
+      expect(out).toContain('BLE-001');
+      expect(out).toContain('Kitchen Bot');
+      expect(out).toContain('Bot');
+      // catalog
+      expect(out).toContain('turnOn');
+      expect(out).toContain('press');
+      expect(out).toContain('Status fields');
+    });
+
+    it('prints metadata + catalog for an IR remote with known remoteType', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'describe', 'IR-001']);
+      const out = res.stdout.join('\n');
+      expect(out).toContain('IR-001');
+      expect(out).toContain('remoteType');
+      expect(out).toContain('TV');
+      expect(out).toContain('SetChannel');
+    });
+
+    it('IR remote inherits family/room from its bound Hub in describe output', async () => {
+      apiMock.__instance.get.mockResolvedValue({
+        data: {
+          body: {
+            deviceList: [
+              {
+                deviceId: 'HUB-LR',
+                deviceName: 'Living Hub',
+                deviceType: 'Hub 2',
+                hubDeviceId: '',
+                enableCloudService: true,
+                familyName: 'MyHome',
+                roomName: 'Living Room',
+              },
+            ],
+            infraredRemoteList: [
+              { deviceId: 'IR-Z', deviceName: 'Fan', remoteType: 'Fan', hubDeviceId: 'HUB-LR' },
+            ],
+          },
+        },
+      });
+      const res = await runCli(registerDevicesCommand, ['devices', 'describe', 'IR-Z']);
+      const out = res.stdout.join('\n');
+      expect(out).toContain('MyHome');
+      expect(out).toContain('Living Room');
+    });
+
+    it('shows metadata + warning when the deviceType is not in the catalog', async () => {
+      const body = {
+        deviceList: [{
+          deviceId: 'HUB-X',
+          deviceName: 'Gateway',
+          deviceType: 'Hub Mini2',
+          hubDeviceId: '',
+          enableCloudService: true,
+        }],
+        infraredRemoteList: [],
+      };
+      apiMock.__instance.get.mockResolvedValue({ data: { body } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'describe', 'HUB-X']);
+      const out = res.stdout.join('\n');
+      expect(out).toContain('Hub Mini2');
+      expect(out).toContain('not in the built-in catalog');
+      expect(out).toContain('--type customize');
+    });
+
+    it('exits 1 with guidance when the deviceId is unknown', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'describe', 'UNKNOWN-ID']);
+      expect(res.exitCode).toBe(1);
+      const err = res.stderr.join('\n');
+      expect(err).toContain('No device with id "UNKNOWN-ID"');
+      expect(err).toContain('switchbot devices list');
+    });
+
+    it('--json mode outputs {device, controlType, catalog}', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'describe', 'BLE-001', '--json']);
+      const parsed = JSON.parse(res.stdout.join('\n'));
+      expect(parsed).toHaveProperty('device');
+      expect(parsed).toHaveProperty('controlType', 'Bot');
+      expect(parsed).toHaveProperty('catalog');
+      expect(parsed.catalog.type).toBe('Bot');
+      expect(parsed).not.toHaveProperty('category');
+    });
+
+    it('--json for IR remote surfaces controlType from the device', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'describe', 'IR-001', '--json']);
+      const parsed = JSON.parse(res.stdout.join('\n'));
+      expect(parsed).toHaveProperty('controlType', 'TV');
+      expect(parsed).not.toHaveProperty('category');
+    });
+
+    it('propagates API errors via handleError (exit 1)', async () => {
+      apiMock.__instance.get.mockRejectedValue(new Error('boom'));
+      const res = await runCli(registerDevicesCommand, ['devices', 'describe', 'BLE-001']);
+      expect(res.exitCode).toBe(1);
+      expect(res.stderr.join('\n')).toContain('boom');
+    });
+
+    it('fails when <deviceId> is missing (commander error)', async () => {
+      const res = await runCli(registerDevicesCommand, ['devices', 'describe']);
+      expect(res.stderr.join('\n').toLowerCase()).toContain('missing required');
+    });
+  });
+});
