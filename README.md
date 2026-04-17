@@ -1,28 +1,98 @@
-# switchbot-openapi-cli
+# @switchbot/openapi-cli
+
+[![npm version](https://img.shields.io/npm/v/@switchbot/openapi-cli.svg)](https://www.npmjs.com/package/@switchbot/openapi-cli)
+[![npm downloads](https://img.shields.io/npm/dm/@switchbot/openapi-cli.svg)](https://www.npmjs.com/package/@switchbot/openapi-cli)
+[![license](https://img.shields.io/npm/l/@switchbot/openapi-cli.svg)](./LICENSE)
+[![node](https://img.shields.io/node/v/@switchbot/openapi-cli.svg)](https://nodejs.org)
+[![CI](https://github.com/chenliuyun/switchbot-openapi-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/chenliuyun/switchbot-openapi-cli/actions/workflows/ci.yml)
 
 Command-line interface for the [SwitchBot API v1.1](https://github.com/OpenWonderLabs/SwitchBotAPI).
-List devices, query status, send control commands, run scenes, and manage webhooks from your terminal or shell scripts.
+List devices, query live status, send control commands, run scenes, and manage webhooks — all from your terminal or shell scripts.
+
+- **npm package:** [`@switchbot/openapi-cli`](https://www.npmjs.com/package/@switchbot/openapi-cli)
+- **Source code:** [github.com/chenliuyun/switchbot-openapi-cli](https://github.com/chenliuyun/switchbot-openapi-cli)
+- **Issues / feature requests:** [GitHub Issues](https://github.com/chenliuyun/switchbot-openapi-cli/issues)
+
+---
+
+## Table of contents
+
+- [Features](#features)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [Credentials](#credentials)
+- [Global options](#global-options)
+- [Commands](#commands)
+  - [`config`](#config--credential-management)
+  - [`devices`](#devices--list-status-control)
+  - [`scenes`](#scenes--run-manual-scenes)
+  - [`webhook`](#webhook--receive-device-events-over-http)
+  - [`completion`](#completion--shell-tab-completion)
+- [Output modes](#output-modes)
+- [Exit codes & error codes](#exit-codes--error-codes)
+- [Environment variables](#environment-variables)
+- [Scripting examples](#scripting-examples)
+- [Development](#development)
+- [Contributing](#contributing)
+- [License](#license)
+- [References](#references)
+
+---
+
+## Features
+
+- 🔌 **Complete API coverage** — every `/v1.1` endpoint (devices, scenes, webhooks)
+- 📚 **Built-in catalog** — offline reference for every device type's supported commands, parameter formats, and status fields (no API call needed)
+- 🎨 **Dual output modes** — colorized tables by default; `--json` passthrough for `jq` and scripting
+- 🔐 **Secure credentials** — HMAC-SHA256 signed requests; config file written with `0600`; env-var override for CI
+- 🔍 **Dry-run mode** — preview every mutating request before it hits the API
+- 🧪 **Fully tested** — 282 Vitest tests, mocked axios, zero network in CI
+- ⚡ **Shell completion** — Bash / Zsh / Fish / PowerShell
 
 ## Requirements
 
-- Node.js ≥ 18
-- A SwitchBot account with Developer Options enabled (see [Credentials](#credentials))
+- **Node.js ≥ 18**
+- A SwitchBot account with **Developer Options** enabled (see [Credentials](#credentials))
 
 ## Installation
 
+### From npm (recommended)
+
 ```bash
-git clone <repo-url>
+npm install -g @switchbot/openapi-cli
+```
+
+This adds the `switchbot` binary to your `$PATH`.
+
+### From source
+
+```bash
+git clone https://github.com/chenliuyun/switchbot-openapi-cli.git
 cd switchbot-openapi-cli
 npm install
 npm run build
-# Optional: make it globally available as `switchbot`
-npm link
+npm link      # optional — expose `switchbot` globally
 ```
 
-During development you can run directly from sources without building:
+Verify:
 
 ```bash
-npm run dev -- devices list
+switchbot --version
+switchbot --help
+```
+
+## Quick start
+
+```bash
+# 1. Save your credentials (one-time)
+switchbot config set-token <token> <secret>
+
+# 2. List every device on your account
+switchbot devices list
+
+# 3. Control a device
+switchbot devices command <deviceId> turnOn
 ```
 
 ## Credentials
@@ -49,15 +119,15 @@ switchbot config show
 
 ## Global options
 
-| Option              | Description                                                        |
-| ------------------- | ------------------------------------------------------------------ |
-| `--json`            | Print the raw JSON response instead of a formatted table           |
-| `-v`, `--verbose`   | Log HTTP request/response details to stderr                        |
-| `--dry-run`         | Print mutating requests (POST/PUT/DELETE) without sending them     |
-| `--timeout <ms>`    | HTTP request timeout in milliseconds (default: `30000`)            |
-| `--config <path>`   | Override credential file location (default: `~/.switchbot/config.json`) |
-| `-V`, `--version`   | Print the CLI version                                              |
-| `-h`, `--help`      | Show help for any command or subcommand                            |
+| Option              | Description                                                              |
+| ------------------- | ------------------------------------------------------------------------ |
+| `--json`            | Print the raw JSON response instead of a formatted table                 |
+| `-v`, `--verbose`   | Log HTTP request/response details to stderr                              |
+| `--dry-run`         | Print mutating requests (POST/PUT/DELETE) without sending them           |
+| `--timeout <ms>`    | HTTP request timeout in milliseconds (default: `30000`)                  |
+| `--config <path>`   | Override credential file location (default: `~/.switchbot/config.json`)  |
+| `-V`, `--version`   | Print the CLI version                                                    |
+| `-h`, `--help`      | Show help for any command or subcommand                                  |
 
 Every subcommand supports `--help`, and most include a parameter-format reference and examples.
 
@@ -198,12 +268,12 @@ Supported shells: `bash`, `zsh`, `fish`, `powershell` (`pwsh` is accepted as an 
 switchbot devices list --json | jq '.deviceList[] | {id: .deviceId, name: .deviceName}'
 ```
 
-## Exit codes
+## Exit codes & error codes
 
-| Code | Meaning                                                                             |
-| ---- | ----------------------------------------------------------------------------------- |
-| `0`  | Success (including `--dry-run` intercept)                                           |
-| `1`  | Runtime error — API error, network failure, missing credentials                     |
+| Code | Meaning                                                                                                                   |
+| ---- | ------------------------------------------------------------------------------------------------------------------------- |
+| `0`  | Success (including `--dry-run` intercept)                                                                                 |
+| `1`  | Runtime error — API error, network failure, missing credentials                                                           |
 | `2`  | Usage error — bad flag, missing/invalid argument, unknown subcommand, unknown device type, invalid URL, conflicting flags |
 
 Typical errors bubble up in the form `Error: <message>` on stderr. The SwitchBot-specific error codes that get mapped to readable English messages:
@@ -242,11 +312,15 @@ switchbot scenes list --json | jq -r '.[] | "\(.sceneId) \(.sceneName)"'
 ## Development
 
 ```bash
-npm run dev -- <args>      # Run from TypeScript sources via tsx
-npm run build              # Compile to dist/
-npm test                   # Run the Vitest suite (282 tests)
-npm run test:watch         # Watch mode
-npm run test:coverage      # Coverage report (v8, HTML + text)
+git clone https://github.com/chenliuyun/switchbot-openapi-cli.git
+cd switchbot-openapi-cli
+npm install
+
+npm run dev -- <args>       # Run from TypeScript sources via tsx
+npm run build               # Compile to dist/
+npm test                    # Run the Vitest suite (282 tests)
+npm run test:watch          # Watch mode
+npm run test:coverage       # Coverage report (v8, HTML + text)
 ```
 
 ### Project layout
@@ -270,6 +344,30 @@ src/
     └── output.ts         # printTable / printKeyValue / printJson / handleError
 tests/                    # Vitest suite (282 tests, mocked axios, no network)
 ```
+
+### Release flow
+
+Releases are cut on tag push and published to npm by GitHub Actions:
+
+```bash
+npm version patch        # bump version + create git tag
+git push --follow-tags
+```
+
+Then on GitHub → **Releases → Draft a new release → select tag → Publish**. The `publish.yml` workflow runs tests, verifies the tag matches `package.json`, and publishes `@switchbot/openapi-cli` to npm with [provenance](https://docs.npmjs.com/generating-provenance-statements).
+
+## Contributing
+
+Bug reports, feature requests, and PRs are welcome.
+
+1. Fork the repo and create a topic branch.
+2. Keep changes small and focused; add or update Vitest cases for any behavior change.
+3. Run `npm test` and `npm run build` locally — both must pass.
+4. Open a pull request against `main`. CI runs on Node 18/20/22; all three must stay green.
+
+## License
+
+[MIT](./LICENSE) © chenliuyun
 
 ## References
 
