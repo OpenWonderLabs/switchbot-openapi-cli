@@ -15,6 +15,20 @@ List devices, query live status, send control commands, run scenes, and manage w
 
 ---
 
+## Who is this for?
+
+Three entry points, same binary — pick the one that matches how you use it:
+
+| Audience  | Where to start                                                | What you get                                                                                      |
+|-----------|---------------------------------------------------------------|---------------------------------------------------------------------------------------------------|
+| **Human** | this README ([Quick start](#quick-start))                     | Colored tables, helpful hints on errors, shell completion, `switchbot doctor` self-check.         |
+| **Script**| [Output modes](#output-modes), [Scripting examples](#scripting-examples) | `--json`, `--format=tsv/yaml/id`, `--fields`, stable exit codes, `history replay`, audit log.     |
+| **Agent** | [`docs/agent-guide.md`](./docs/agent-guide.md)                | `switchbot mcp serve` (stdio MCP server), `schema export`, `plan run`, destructive-command guard. |
+
+Under the hood every surface shares the same catalog, cache, and HMAC client — switching between them costs nothing.
+
+---
+
 ## Table of contents
 
 - [Features](#features)

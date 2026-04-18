@@ -13,13 +13,14 @@ import { registerEventsCommand } from './commands/events.js';
 import { registerDoctorCommand } from './commands/doctor.js';
 import { registerSchemaCommand } from './commands/schema.js';
 import { registerHistoryCommand } from './commands/history.js';
+import { registerPlanCommand } from './commands/plan.js';
 
 const program = new Command();
 
 program
   .name('switchbot')
   .description('Command-line tool for SwitchBot API v1.1')
-  .version('1.0.0')
+  .version('2.0.0')
   .option('--json', 'Output raw JSON response (disables tables; useful for pipes/scripts)')
   .option('-v, --verbose', 'Log HTTP request/response details to stderr')
   .option('--dry-run', 'Print mutating requests without sending them (GETs still execute)')
@@ -49,6 +50,7 @@ registerEventsCommand(program);
 registerDoctorCommand(program);
 registerSchemaCommand(program);
 registerHistoryCommand(program);
+registerPlanCommand(program);
 
 program.addHelpText('after', `
 Credentials:
