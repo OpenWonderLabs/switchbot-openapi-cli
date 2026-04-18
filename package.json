@@ -1,6 +1,6 @@
 {
   "name": "@switchbot/openapi-cli",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "description": "Command-line interface for SwitchBot API v1.1",
   "keywords": [
     "switchbot",
