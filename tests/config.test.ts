@@ -10,6 +10,7 @@ const fsMock = vi.hoisted(() => ({
   readFileSync: vi.fn(),
   writeFileSync: vi.fn(),
   mkdirSync: vi.fn(),
+  readdirSync: vi.fn(() => [] as string[]),
 }));
 const osMock = vi.hoisted(() => ({
   homedir: vi.fn(() => '/fake/home'),
@@ -18,7 +19,7 @@ const osMock = vi.hoisted(() => ({
 vi.mock('node:fs', () => ({ default: fsMock, ...fsMock }));
 vi.mock('node:os', () => ({ default: osMock, ...osMock }));
 
-import { loadConfig, saveConfig, showConfig } from '../src/config.js';
+import { loadConfig, saveConfig, showConfig, listProfiles } from '../src/config.js';
 
 describe('config', () => {
   beforeEach(() => {
@@ -28,6 +29,8 @@ describe('config', () => {
     fsMock.readFileSync.mockReset();
     fsMock.writeFileSync.mockReset();
     fsMock.mkdirSync.mockReset();
+    fsMock.readdirSync.mockReset();
+    fsMock.readdirSync.mockReturnValue([]);
   });
 
   describe('loadConfig', () => {
@@ -99,7 +102,7 @@ describe('config', () => {
 
       expect(() => loadConfig()).toThrow('__exit');
       expect(exitSpy).toHaveBeenCalledWith(1);
-      expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('Invalid config.json format'));
+      expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('Invalid config format'));
     });
 
     it('exits(1) when JSON parses but secret is missing', () => {
@@ -111,7 +114,7 @@ describe('config', () => {
       fsMock.readFileSync.mockReturnValue(JSON.stringify({ token: 'only-token' }));
 
       expect(() => loadConfig()).toThrow('__exit');
-      expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('Invalid config.json format'));
+      expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('Invalid config format'));
     });
   });
 
@@ -239,6 +242,76 @@ describe('config', () => {
 
       const output = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
       expect(output).toContain(path.resolve('/custom/cfg.json'));
+    });
+  });
+
+  describe('--profile <name>', () => {
+    const originalArgv = process.argv;
+    afterEach(() => {
+      process.argv = originalArgv;
+    });
+
+    it('loadConfig reads ~/.switchbot/profiles/<name>.json', () => {
+      process.argv = ['node', 'cli', '--profile', 'work'];
+      fsMock.existsSync.mockReturnValue(true);
+      fsMock.readFileSync.mockReturnValue(JSON.stringify({ token: 'work-t', secret: 'work-s' }));
+
+      const cfg = loadConfig();
+
+      expect(cfg).toEqual({ token: 'work-t', secret: 'work-s' });
+      const readPath = fsMock.readFileSync.mock.calls[0][0] as string;
+      expect(readPath).toBe(path.join(FAKE_HOME, '.switchbot', 'profiles', 'work.json'));
+    });
+
+    it('saveConfig writes the profile file and creates profiles/ directory', () => {
+      process.argv = ['node', 'cli', '--profile', 'home'];
+      fsMock.existsSync.mockReturnValue(false);
+
+      saveConfig('t', 's');
+
+      expect(fsMock.mkdirSync).toHaveBeenCalledWith(
+        path.join(FAKE_HOME, '.switchbot', 'profiles'),
+        { recursive: true },
+      );
+      const writePath = fsMock.writeFileSync.mock.calls[0][0] as string;
+      expect(writePath).toBe(path.join(FAKE_HOME, '.switchbot', 'profiles', 'home.json'));
+    });
+
+    it('loadConfig emits a profile-specific hint when the file is missing', () => {
+      process.argv = ['node', 'cli', '--profile', 'work'];
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.spyOn(process, 'exit').mockImplementation(() => {
+        throw new Error('__exit');
+      });
+      fsMock.existsSync.mockReturnValue(false);
+
+      expect(() => loadConfig()).toThrow('__exit');
+      const msg = errSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+      expect(msg).toContain('profile "work"');
+      expect(msg).toContain('--profile work');
+    });
+
+    it('--config beats --profile when both are passed', () => {
+      process.argv = ['node', 'cli', '--config', '/override.json', '--profile', 'work'];
+      fsMock.existsSync.mockReturnValue(true);
+      fsMock.readFileSync.mockReturnValue(JSON.stringify({ token: 't', secret: 's' }));
+
+      loadConfig();
+      const readPath = fsMock.readFileSync.mock.calls[0][0] as string;
+      expect(path.resolve(readPath)).toBe(path.resolve('/override.json'));
+    });
+  });
+
+  describe('listProfiles', () => {
+    it('returns [] when the profiles directory does not exist', () => {
+      fsMock.existsSync.mockReturnValue(false);
+      expect(listProfiles()).toEqual([]);
+    });
+
+    it('returns each .json file without extension, sorted', () => {
+      fsMock.existsSync.mockReturnValue(true);
+      fsMock.readdirSync.mockReturnValue(['work.json', 'home.json', 'README', 'lab.json']);
+      expect(listProfiles()).toEqual(['home', 'lab', 'work']);
     });
   });
 });

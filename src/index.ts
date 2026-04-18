@@ -28,6 +28,7 @@ program
   .option('--cache <mode>', 'Cache mode: "off" | "auto" (default: list 1h, status off) | duration like 5m, 1h, 30s (enables both stores)')
   .option('--no-cache', 'Disable cache reads (equivalent to --cache off)')
   .option('--config <path>', 'Override credential file location (default: ~/.switchbot/config.json)')
+  .option('--profile <name>', 'Use a named profile: ~/.switchbot/profiles/<name>.json')
   .showHelpAfterError('(run with --help to see usage)')
   .showSuggestionAfterError();
 

@@ -35,6 +35,11 @@ export function getConfigPath(): string | undefined {
   return getFlagValue('--config');
 }
 
+/** Named profile → ~/.switchbot/profiles/<name>.json. */
+export function getProfile(): string | undefined {
+  return getFlagValue('--profile');
+}
+
 /**
  * Max 429 retries before surfacing the error. Default 3. `--no-retry`
  * disables retries entirely; `--retry-on-429 <n>` overrides the count.
