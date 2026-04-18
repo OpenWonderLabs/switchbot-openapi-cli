@@ -12,6 +12,7 @@ import {
   DeviceNotFoundError,
   type Device,
 } from '../lib/devices.js';
+import { registerBatchCommand } from './batch.js';
 
 export function registerDevicesCommand(program: Command): void {
   const devices = program
@@ -436,6 +437,9 @@ Examples:
         handleError(error);
       }
     });
+
+  // switchbot devices batch <command> ...
+  registerBatchCommand(devices);
 }
 
 function renderCatalogEntry(entry: DeviceCatalogEntry): void {
