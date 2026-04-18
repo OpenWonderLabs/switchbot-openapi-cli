@@ -34,3 +34,32 @@ export function getTimeout(): number {
 export function getConfigPath(): string | undefined {
   return getFlagValue('--config');
 }
+
+/**
+ * Max 429 retries before surfacing the error. Default 3. `--no-retry`
+ * disables retries entirely; `--retry-on-429 <n>` overrides the count.
+ */
+export function getRetryOn429(): number {
+  if (process.argv.includes('--no-retry')) return 0;
+  const v = getFlagValue('--retry-on-429');
+  if (v === undefined) return 3;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0) return 3;
+  return Math.floor(n);
+}
+
+/** Backoff strategy for 429 retries. Default 'exponential'. */
+export function getBackoffStrategy(): 'linear' | 'exponential' {
+  const v = getFlagValue('--backoff');
+  if (v === 'linear') return 'linear';
+  return 'exponential';
+}
+
+/**
+ * Whether local quota counting is disabled. Quota counting is best-effort
+ * (see src/utils/quota.ts) — this lets scripts opt out entirely when even
+ * best-effort file I/O is unwelcome.
+ */
+export function isQuotaDisabled(): boolean {
+  return process.argv.includes('--no-quota');
+}

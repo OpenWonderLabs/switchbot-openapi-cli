@@ -1,8 +1,21 @@
-import axios, { type AxiosInstance, type InternalAxiosRequestConfig } from 'axios';
+import axios, {
+  type AxiosInstance,
+  type InternalAxiosRequestConfig,
+  type AxiosResponse,
+} from 'axios';
 import chalk from 'chalk';
 import { buildAuthHeaders } from '../auth.js';
 import { loadConfig } from '../config.js';
-import { isVerbose, isDryRun, getTimeout } from '../utils/flags.js';
+import {
+  isVerbose,
+  isDryRun,
+  getTimeout,
+  getRetryOn429,
+  getBackoffStrategy,
+  isQuotaDisabled,
+} from '../utils/flags.js';
+import { nextRetryDelayMs, sleep } from '../utils/retry.js';
+import { recordRequest } from '../utils/quota.js';
 
 const API_ERROR_MESSAGES: Record<number, string> = {
   151: 'Device type does not support this command',
@@ -21,10 +34,15 @@ export class DryRunSignal extends Error {
   }
 }
 
+type RetryableConfig = InternalAxiosRequestConfig & { __retryCount?: number };
+
 export function createClient(): AxiosInstance {
   const { token, secret } = loadConfig();
   const verbose = isVerbose();
   const dryRun = isDryRun();
+  const maxRetries = getRetryOn429();
+  const backoff = getBackoffStrategy();
+  const quotaEnabled = !isQuotaDisabled();
 
   const client = axios.create({
     baseURL: 'https://api.switch-bot.com',
@@ -59,9 +77,14 @@ export function createClient(): AxiosInstance {
 
   // Handle API-level errors (HTTP 200 but statusCode !== 100)
   client.interceptors.response.use(
-    (response) => {
+    (response: AxiosResponse) => {
       if (verbose) {
         process.stderr.write(chalk.grey(`[verbose] ${response.status} ${response.statusText}\n`));
+      }
+      if (quotaEnabled && response.config) {
+        const method = (response.config.method ?? 'get').toUpperCase();
+        const url = `${response.config.baseURL ?? ''}${response.config.url ?? ''}`;
+        recordRequest(method, url);
       }
       const data = response.data as { statusCode?: number; message?: string };
       if (data.statusCode !== undefined && data.statusCode !== 100) {
@@ -79,19 +102,62 @@ export function createClient(): AxiosInstance {
         if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
           throw new ApiError(
             `Request timed out after ${getTimeout()}ms (override with --timeout <ms>)`,
-            0
+            0,
+            { retryable: false }
           );
         }
         const status = error.response?.status;
+        const config = error.config as RetryableConfig | undefined;
+
+        // 429 → transparent retry with Retry-After / exponential backoff.
+        // Skipped when: no config (shouldn't happen for real axios errors),
+        // retries disabled, or we've already used our budget.
+        if (status === 429 && config && maxRetries > 0) {
+          const attempt = config.__retryCount ?? 0;
+          if (attempt < maxRetries) {
+            config.__retryCount = attempt + 1;
+            const delay = nextRetryDelayMs(
+              attempt,
+              backoff,
+              error.response?.headers?.['retry-after']
+            );
+            if (verbose) {
+              process.stderr.write(
+                chalk.grey(
+                  `[verbose] 429 received — retry ${attempt + 1}/${maxRetries} in ${delay}ms\n`
+                )
+              );
+            }
+            return sleep(delay).then(() => client.request(config));
+          }
+        }
+
+        // Record exhausted/non-retryable HTTP responses too — they count
+        // against the daily quota.
+        if (quotaEnabled && error.response && config) {
+          const method = (config.method ?? 'get').toUpperCase();
+          const url = `${config.baseURL ?? ''}${config.url ?? ''}`;
+          recordRequest(method, url);
+        }
+
         if (status === 401) {
-          throw new ApiError('Authentication failed: invalid token or daily 10,000-request quota exceeded', 401);
+          throw new ApiError(
+            'Authentication failed: invalid token or daily 10,000-request quota exceeded',
+            401,
+            { retryable: false, hint: 'Run `switchbot config set-token <token> <secret>` to re-enter credentials, or `switchbot quota status` to check today\'s local count.' }
+          );
         }
         if (status === 429) {
-          throw new ApiError('Request rate too high: daily 10,000-request quota exceeded', 429);
+          throw new ApiError(
+            'Request rate too high: daily 10,000-request quota exceeded (retries exhausted)',
+            429,
+            { retryable: true, hint: 'Use `switchbot quota status` to see today\'s usage; raise `--retry-on-429 <n>` for more retries.' }
+          );
         }
         throw new ApiError(
           `HTTP ${status ?? '?'}: ${error.message}`,
-          status ?? 0
+          status ?? 0,
+          { retryable: status !== undefined && status >= 500 }
         );
       }
       throw error;
@@ -101,12 +167,22 @@ export function createClient(): AxiosInstance {
   return client;
 }
 
+export interface ApiErrorMeta {
+  retryable?: boolean;
+  hint?: string;
+}
+
 export class ApiError extends Error {
+  public readonly retryable: boolean;
+  public readonly hint?: string;
   constructor(
     message: string,
-    public readonly code: number
+    public readonly code: number,
+    meta: ApiErrorMeta = {}
   ) {
     super(message);
     this.name = 'ApiError';
+    this.retryable = meta.retryable ?? false;
+    this.hint = meta.hint;
   }
 }

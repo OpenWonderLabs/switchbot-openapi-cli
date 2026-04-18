@@ -6,6 +6,7 @@ import { registerScenesCommand } from './commands/scenes.js';
 import { registerWebhookCommand } from './commands/webhook.js';
 import { registerCompletionCommand } from './commands/completion.js';
 import { registerMcpCommand } from './commands/mcp.js';
+import { registerQuotaCommand } from './commands/quota.js';
 
 const program = new Command();
 
@@ -17,6 +18,10 @@ program
   .option('-v, --verbose', 'Log HTTP request/response details to stderr')
   .option('--dry-run', 'Print mutating requests without sending them (GETs still execute)')
   .option('--timeout <ms>', 'HTTP request timeout in milliseconds (default: 30000)')
+  .option('--retry-on-429 <n>', 'Max 429 retries before surfacing the error (default: 3)')
+  .option('--backoff <strategy>', 'Backoff strategy for retries: "linear" or "exponential" (default)')
+  .option('--no-retry', 'Disable 429 retries entirely (equivalent to --retry-on-429 0)')
+  .option('--no-quota', 'Disable the local ~/.switchbot/quota.json counter for this run')
   .option('--config <path>', 'Override credential file location (default: ~/.switchbot/config.json)')
   .showHelpAfterError('(run with --help to see usage)')
   .showSuggestionAfterError();
@@ -27,6 +32,7 @@ registerScenesCommand(program);
 registerWebhookCommand(program);
 registerCompletionCommand(program);
 registerMcpCommand(program);
+registerQuotaCommand(program);
 
 program.addHelpText('after', `
 Credentials:
