@@ -15,6 +15,7 @@ import {
 } from '../lib/devices.js';
 import { registerBatchCommand } from './batch.js';
 import { registerWatchCommand } from './watch.js';
+import { registerExplainCommand } from './explain.js';
 import { isDryRun } from '../utils/flags.js';
 
 export function registerDevicesCommand(program: Command): void {
@@ -483,6 +484,9 @@ Examples:
 
   // switchbot devices watch <id...>
   registerWatchCommand(devices);
+
+  // switchbot devices explain <id>
+  registerExplainCommand(devices);
 }
 
 function renderCatalogEntry(entry: DeviceCatalogEntry): void {

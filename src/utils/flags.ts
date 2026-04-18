@@ -41,6 +41,22 @@ export function getProfile(): string | undefined {
 }
 
 /**
+ * Audit log path. `--audit-log <path>` enables JSONL append on every mutating
+ * command; default path is ~/.switchbot/audit.log when `--audit-log` is given
+ * without a value. Returns null when the flag is absent.
+ */
+export function getAuditLog(): string | null {
+  const idx = process.argv.indexOf('--audit-log');
+  if (idx === -1) return null;
+  const next = process.argv[idx + 1];
+  if (!next || next.startsWith('-')) {
+    // bare --audit-log → default location
+    return `${process.env.HOME ?? process.env.USERPROFILE ?? '.'}/.switchbot/audit.log`;
+  }
+  return next;
+}
+
+/**
  * Max 429 retries before surfacing the error. Default 3. `--no-retry`
  * disables retries entirely; `--retry-on-429 <n>` overrides the count.
  */

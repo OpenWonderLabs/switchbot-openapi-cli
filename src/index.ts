@@ -10,6 +10,9 @@ import { registerQuotaCommand } from './commands/quota.js';
 import { registerCatalogCommand } from './commands/catalog.js';
 import { registerCacheCommand } from './commands/cache.js';
 import { registerEventsCommand } from './commands/events.js';
+import { registerDoctorCommand } from './commands/doctor.js';
+import { registerSchemaCommand } from './commands/schema.js';
+import { registerHistoryCommand } from './commands/history.js';
 
 const program = new Command();
 
@@ -29,6 +32,7 @@ program
   .option('--no-cache', 'Disable cache reads (equivalent to --cache off)')
   .option('--config <path>', 'Override credential file location (default: ~/.switchbot/config.json)')
   .option('--profile <name>', 'Use a named profile: ~/.switchbot/profiles/<name>.json')
+  .option('--audit-log [path]', 'Append every mutating command to JSONL audit log (default ~/.switchbot/audit.log)')
   .showHelpAfterError('(run with --help to see usage)')
   .showSuggestionAfterError();
 
@@ -42,6 +46,9 @@ registerQuotaCommand(program);
 registerCatalogCommand(program);
 registerCacheCommand(program);
 registerEventsCommand(program);
+registerDoctorCommand(program);
+registerSchemaCommand(program);
+registerHistoryCommand(program);
 
 program.addHelpText('after', `
 Credentials:

@@ -16,6 +16,8 @@ import {
   setCachedStatus,
 } from '../devices/cache.js';
 import { getCacheMode } from '../utils/flags.js';
+import { writeAudit } from '../utils/audit.js';
+import { isDryRun } from '../utils/flags.js';
 
 export interface Device {
   deviceId: string;
@@ -159,11 +161,35 @@ export async function executeCommand(
     parameter: parameter ?? 'default',
     commandType,
   };
-  const res = await c.post<{ body: unknown }>(
-    `/v1.1/devices/${deviceId}/commands`,
-    body
-  );
-  return res.data.body;
+  const baseAudit = {
+    t: new Date().toISOString(),
+    kind: 'command' as const,
+    deviceId,
+    command: cmd,
+    parameter,
+    commandType,
+    dryRun: isDryRun(),
+  };
+  try {
+    const res = await c.post<{ body: unknown }>(
+      `/v1.1/devices/${deviceId}/commands`,
+      body
+    );
+    writeAudit({ ...baseAudit, result: 'ok' });
+    return res.data.body;
+  } catch (err) {
+    // Dry-run intercepts throw DryRunSignal — still log the intent.
+    if (err instanceof Error && err.name === 'DryRunSignal') {
+      writeAudit({ ...baseAudit, result: 'ok' });
+    } else {
+      writeAudit({
+        ...baseAudit,
+        result: 'error',
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    throw err;
+  }
 }
 
 /**

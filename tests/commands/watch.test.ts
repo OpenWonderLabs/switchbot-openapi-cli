@@ -52,6 +52,8 @@ const flagsMock = vi.hoisted(() => ({
   isVerbose: vi.fn(() => false),
   getTimeout: vi.fn(() => 30000),
   getConfigPath: vi.fn(() => undefined),
+  getProfile: vi.fn(() => undefined),
+  getAuditLog: vi.fn(() => null),
   getCacheMode: vi.fn(() => ({ listTtlMs: 0, statusTtlMs: 0 })),
   parseDurationToMs: (v: string): number | null => {
     const m = /^(\d+)(ms|s|m|h)?$/.exec(v.trim().toLowerCase());
