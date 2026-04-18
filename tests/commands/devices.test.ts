@@ -102,12 +102,27 @@ const sampleBody = {
 };
 
 describe('devices command', () => {
+  let tmpHome: string;
   beforeEach(() => {
+    // Redirect the cache dir to an ephemeral tmp path so the new 1h default
+    // list-cache TTL doesn't short-circuit the mocked HTTP client using a
+    // real ~/.switchbot/devices.json that might exist on the dev machine.
+    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sbcli-devtest-'));
+    vi.spyOn(os, 'homedir').mockReturnValue(tmpHome);
     apiMock.__instance.get.mockReset();
     apiMock.__instance.post.mockReset();
     apiMock.createClient.mockReset();
     apiMock.createClient.mockImplementation(() => apiMock.__instance);
     apiMock.__instance.post.mockResolvedValue({ data: { body: {} } });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    try {
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
   });
 
   // =====================================================================

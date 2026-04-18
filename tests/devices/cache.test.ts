@@ -8,6 +8,13 @@ import {
   getCachedDevice,
   updateCacheFromDeviceList,
   clearCache,
+  listCacheAgeMs,
+  isListCacheFresh,
+  loadStatusCache,
+  getCachedStatus,
+  setCachedStatus,
+  clearStatusCache,
+  describeCache,
 } from '../../src/devices/cache.js';
 
 // Redirect the cache to a test-only temp directory by overriding both
@@ -127,5 +134,140 @@ describe('device cache', () => {
     expect(fs.existsSync(expected)).toBe(true);
     // Default path should NOT have been created.
     expect(fs.existsSync(path.join(tmpDir, '.switchbot', 'devices.json'))).toBe(false);
+  });
+});
+
+describe('list cache TTL', () => {
+  it('listCacheAgeMs returns null when no cache file exists', () => {
+    expect(listCacheAgeMs()).toBeNull();
+  });
+
+  it('listCacheAgeMs returns a non-negative age just after write', () => {
+    updateCacheFromDeviceList(sampleBody);
+    const age = listCacheAgeMs();
+    expect(age).not.toBeNull();
+    expect(age!).toBeGreaterThanOrEqual(0);
+    expect(age!).toBeLessThan(5_000);
+  });
+
+  it('listCacheAgeMs handles corrupt lastUpdated as null', () => {
+    const dir = path.join(tmpDir, '.switchbot');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'devices.json'),
+      JSON.stringify({ lastUpdated: 'not-a-date', devices: {} }),
+    );
+    expect(listCacheAgeMs()).toBeNull();
+  });
+
+  it('isListCacheFresh: ttl=0 means never fresh', () => {
+    updateCacheFromDeviceList(sampleBody);
+    expect(isListCacheFresh(0)).toBe(false);
+  });
+
+  it('isListCacheFresh: fresh when age < ttl', () => {
+    updateCacheFromDeviceList(sampleBody);
+    expect(isListCacheFresh(60 * 60 * 1000)).toBe(true);
+  });
+
+  it('isListCacheFresh: stale when age >= ttl', () => {
+    updateCacheFromDeviceList(sampleBody);
+    // Rewrite the stored lastUpdated to something old.
+    const file = path.join(tmpDir, '.switchbot', 'devices.json');
+    const raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    raw.lastUpdated = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    fs.writeFileSync(file, JSON.stringify(raw));
+    expect(isListCacheFresh(60 * 60 * 1000)).toBe(false);
+  });
+});
+
+describe('status cache', () => {
+  it('loadStatusCache returns empty entries when no file exists', () => {
+    expect(loadStatusCache()).toEqual({ entries: {} });
+  });
+
+  it('getCachedStatus returns null when ttl is 0 (cache disabled)', () => {
+    setCachedStatus('BOT1', { power: 'on' });
+    expect(getCachedStatus('BOT1', 0)).toBeNull();
+  });
+
+  it('setCachedStatus + getCachedStatus round-trip with live TTL', () => {
+    setCachedStatus('BOT1', { power: 'on', battery: 82 });
+    const got = getCachedStatus('BOT1', 60_000);
+    expect(got).toEqual({ power: 'on', battery: 82 });
+  });
+
+  it('getCachedStatus returns null for unknown deviceId', () => {
+    setCachedStatus('BOT1', { power: 'on' });
+    expect(getCachedStatus('BOT2', 60_000)).toBeNull();
+  });
+
+  it('getCachedStatus returns null when entry is older than ttl', () => {
+    setCachedStatus('BOT1', { power: 'on' }, new Date(Date.now() - 10 * 60_000));
+    expect(getCachedStatus('BOT1', 60_000)).toBeNull();
+  });
+
+  it('setCachedStatus overwrites the prior body for the same deviceId', () => {
+    setCachedStatus('BOT1', { power: 'on' });
+    setCachedStatus('BOT1', { power: 'off', battery: 20 });
+    expect(getCachedStatus('BOT1', 60_000)).toEqual({ power: 'off', battery: 20 });
+  });
+
+  it('setCachedStatus preserves entries for other devices', () => {
+    setCachedStatus('BOT1', { power: 'on' });
+    setCachedStatus('BOT2', { power: 'off' });
+    expect(getCachedStatus('BOT1', 60_000)).toEqual({ power: 'on' });
+    expect(getCachedStatus('BOT2', 60_000)).toEqual({ power: 'off' });
+  });
+
+  it('clearStatusCache removes the file but keeps the device list cache', () => {
+    updateCacheFromDeviceList(sampleBody);
+    setCachedStatus('BOT1', { power: 'on' });
+    const statusFile = path.join(tmpDir, '.switchbot', 'status.json');
+    const listFile = path.join(tmpDir, '.switchbot', 'devices.json');
+    expect(fs.existsSync(statusFile)).toBe(true);
+    clearStatusCache();
+    expect(fs.existsSync(statusFile)).toBe(false);
+    expect(fs.existsSync(listFile)).toBe(true);
+  });
+
+  it('clearStatusCache is a no-op when no file exists', () => {
+    expect(() => clearStatusCache()).not.toThrow();
+  });
+
+  it('loadStatusCache returns empty for malformed JSON', () => {
+    const dir = path.join(tmpDir, '.switchbot');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'status.json'), '{not json');
+    expect(loadStatusCache()).toEqual({ entries: {} });
+  });
+});
+
+describe('describeCache', () => {
+  it('reports both caches as missing on a fresh machine', () => {
+    const s = describeCache();
+    expect(s.list.exists).toBe(false);
+    expect(s.list.deviceCount).toBeUndefined();
+    expect(s.status.exists).toBe(false);
+    expect(s.status.entryCount).toBe(0);
+  });
+
+  it('reports populated list cache age and device count', () => {
+    updateCacheFromDeviceList(sampleBody);
+    const s = describeCache();
+    expect(s.list.exists).toBe(true);
+    expect(s.list.deviceCount).toBeGreaterThanOrEqual(3);
+    expect(typeof s.list.ageMs).toBe('number');
+    expect(s.list.lastUpdated).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it('reports oldest/newest status timestamps when populated', () => {
+    setCachedStatus('BOT1', { power: 'on' }, new Date('2026-04-01T00:00:00Z'));
+    setCachedStatus('BOT2', { power: 'off' }, new Date('2026-04-17T12:00:00Z'));
+    const s = describeCache();
+    expect(s.status.exists).toBe(true);
+    expect(s.status.entryCount).toBe(2);
+    expect(s.status.oldestFetchedAt).toBe('2026-04-01T00:00:00.000Z');
+    expect(s.status.newestFetchedAt).toBe('2026-04-17T12:00:00.000Z');
   });
 });

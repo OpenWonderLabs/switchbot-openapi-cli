@@ -36,6 +36,16 @@ vi.mock('../../src/devices/cache.js', () => ({
   updateCacheFromDeviceList: cacheMock.updateCacheFromDeviceList,
   loadCache: vi.fn(() => null),
   clearCache: vi.fn(),
+  isListCacheFresh: vi.fn(() => false),
+  listCacheAgeMs: vi.fn(() => null),
+  getCachedStatus: vi.fn(() => null),
+  setCachedStatus: vi.fn(),
+  clearStatusCache: vi.fn(),
+  loadStatusCache: vi.fn(() => ({ entries: {} })),
+  describeCache: vi.fn(() => ({
+    list: { path: '', exists: false },
+    status: { path: '', exists: false, entryCount: 0 },
+  })),
 }));
 
 // Flags: dryRun toggleable per test.
@@ -45,6 +55,7 @@ const flagsMock = vi.hoisted(() => ({
   isVerbose: vi.fn(() => false),
   getTimeout: vi.fn(() => 30000),
   getConfigPath: vi.fn(() => undefined),
+  getCacheMode: vi.fn(() => ({ listTtlMs: 0, statusTtlMs: 0 })),
 }));
 vi.mock('../../src/utils/flags.js', () => flagsMock);
 

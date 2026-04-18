@@ -8,6 +8,7 @@ import { registerCompletionCommand } from './commands/completion.js';
 import { registerMcpCommand } from './commands/mcp.js';
 import { registerQuotaCommand } from './commands/quota.js';
 import { registerCatalogCommand } from './commands/catalog.js';
+import { registerCacheCommand } from './commands/cache.js';
 
 const program = new Command();
 
@@ -23,6 +24,8 @@ program
   .option('--backoff <strategy>', 'Backoff strategy for retries: "linear" or "exponential" (default)')
   .option('--no-retry', 'Disable 429 retries entirely (equivalent to --retry-on-429 0)')
   .option('--no-quota', 'Disable the local ~/.switchbot/quota.json counter for this run')
+  .option('--cache <mode>', 'Cache mode: "off" | "auto" (default: list 1h, status off) | duration like 5m, 1h, 30s (enables both stores)')
+  .option('--no-cache', 'Disable cache reads (equivalent to --cache off)')
   .option('--config <path>', 'Override credential file location (default: ~/.switchbot/config.json)')
   .showHelpAfterError('(run with --help to see usage)')
   .showSuggestionAfterError();
@@ -35,6 +38,7 @@ registerCompletionCommand(program);
 registerMcpCommand(program);
 registerQuotaCommand(program);
 registerCatalogCommand(program);
+registerCacheCommand(program);
 
 program.addHelpText('after', `
 Credentials:

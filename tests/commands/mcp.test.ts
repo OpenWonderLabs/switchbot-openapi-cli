@@ -42,6 +42,16 @@ vi.mock('../../src/devices/cache.js', () => ({
   updateCacheFromDeviceList: cacheMock.updateCacheFromDeviceList,
   loadCache: vi.fn(() => null),
   clearCache: vi.fn(),
+  isListCacheFresh: vi.fn(() => false),
+  listCacheAgeMs: vi.fn(() => null),
+  getCachedStatus: vi.fn(() => null),
+  setCachedStatus: vi.fn(),
+  clearStatusCache: vi.fn(),
+  loadStatusCache: vi.fn(() => ({ entries: {} })),
+  describeCache: vi.fn(() => ({
+    list: { path: '', exists: false },
+    status: { path: '', exists: false, entryCount: 0 },
+  })),
 }));
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';

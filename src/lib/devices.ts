@@ -7,7 +7,15 @@ import {
   type DeviceCatalogEntry,
   type CommandSpec,
 } from '../devices/catalog.js';
-import { getCachedDevice, updateCacheFromDeviceList } from '../devices/cache.js';
+import {
+  getCachedDevice,
+  updateCacheFromDeviceList,
+  loadCache,
+  isListCacheFresh,
+  getCachedStatus,
+  setCachedStatus,
+} from '../devices/cache.js';
+import { getCacheMode } from '../utils/flags.js';
 
 export interface Device {
   deviceId: string;
@@ -75,6 +83,38 @@ export class CommandValidationError extends Error {
 
 /** Fetch the full device + IR remote inventory and refresh the local cache. */
 export async function fetchDeviceList(client?: AxiosInstance): Promise<DeviceListBody> {
+  // TTL-gated read: when the on-disk cache is younger than the configured
+  // list TTL, skip the API call and synthesize a DeviceListBody from the
+  // metadata cache. Only deviceId/deviceName/type/category survive the
+  // round-trip — other fields (familyName, roomID, hubDeviceId, etc.) are
+  // not cached. Callers that need those fields should pass --no-cache.
+  const mode = getCacheMode();
+  if (mode.listTtlMs > 0 && isListCacheFresh(mode.listTtlMs)) {
+    const cached = loadCache();
+    if (cached) {
+      const deviceList: Device[] = [];
+      const infraredRemoteList: InfraredDevice[] = [];
+      for (const [deviceId, entry] of Object.entries(cached.devices)) {
+        if (entry.category === 'physical') {
+          deviceList.push({
+            deviceId,
+            deviceName: entry.name,
+            deviceType: entry.type,
+            enableCloudService: false,
+            hubDeviceId: '',
+          });
+        } else {
+          infraredRemoteList.push({
+            deviceId,
+            deviceName: entry.name,
+            remoteType: entry.type,
+            hubDeviceId: '',
+          });
+        }
+      }
+      return { deviceList, infraredRemoteList };
+    }
+  }
   const c = client ?? createClient();
   const res = await c.get<{ body: DeviceListBody }>('/v1.1/devices');
   updateCacheFromDeviceList(res.data.body);
@@ -86,10 +126,18 @@ export async function fetchDeviceStatus(
   deviceId: string,
   client?: AxiosInstance
 ): Promise<Record<string, unknown>> {
+  const mode = getCacheMode();
+  if (mode.statusTtlMs > 0) {
+    const cached = getCachedStatus(deviceId, mode.statusTtlMs);
+    if (cached) return cached;
+  }
   const c = client ?? createClient();
   const res = await c.get<{ body: Record<string, unknown> }>(
     `/v1.1/devices/${deviceId}/status`
   );
+  if (mode.statusTtlMs > 0) {
+    setCachedStatus(deviceId, res.data.body);
+  }
   return res.data.body;
 }
 

@@ -63,3 +63,53 @@ export function getBackoffStrategy(): 'linear' | 'exponential' {
 export function isQuotaDisabled(): boolean {
   return process.argv.includes('--no-quota');
 }
+
+/**
+ * Cache TTL controls. Values:
+ *   - `--no-cache`                 → disable cache for all reads
+ *   - `--cache off`                → same as `--no-cache`
+ *   - `--cache auto` (default)     → list cache on (1h), status cache off
+ *   - `--cache 5m` | `--cache 1h`  → enable both stores with the given TTL
+ *   - numeric millisecond values are also accepted
+ */
+export interface CacheMode {
+  /** TTL for the device-list cache, in ms. 0/undefined = off. */
+  listTtlMs: number;
+  /** TTL for the device-status cache, in ms. 0/undefined = off. */
+  statusTtlMs: number;
+}
+
+const DEFAULT_LIST_TTL_MS = 60 * 60 * 1000;
+
+function parseDurationToMs(v: string): number | null {
+  const m = /^(\d+)(ms|s|m|h)?$/.exec(v.trim().toLowerCase());
+  if (!m) return null;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n) || n < 0) return null;
+  const unit = m[2] ?? 'ms';
+  switch (unit) {
+    case 'ms': return n;
+    case 's': return n * 1000;
+    case 'm': return n * 60 * 1000;
+    case 'h': return n * 60 * 60 * 1000;
+    default: return null;
+  }
+}
+
+export function getCacheMode(): CacheMode {
+  if (process.argv.includes('--no-cache')) {
+    return { listTtlMs: 0, statusTtlMs: 0 };
+  }
+  const v = getFlagValue('--cache');
+  if (!v || v === 'auto') {
+    return { listTtlMs: DEFAULT_LIST_TTL_MS, statusTtlMs: 0 };
+  }
+  if (v === 'off') {
+    return { listTtlMs: 0, statusTtlMs: 0 };
+  }
+  const ms = parseDurationToMs(v);
+  if (ms === null || ms === 0) {
+    return { listTtlMs: DEFAULT_LIST_TTL_MS, statusTtlMs: 0 };
+  }
+  return { listTtlMs: ms, statusTtlMs: ms };
+}
