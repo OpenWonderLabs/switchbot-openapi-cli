@@ -1,11 +1,6 @@
 import { Command } from 'commander';
-import { createClient } from '../api/client.js';
 import { printTable, printJson, isJsonMode, handleError } from '../utils/output.js';
-
-interface Scene {
-  sceneId: string;
-  sceneName: string;
-}
+import { fetchScenes, executeScene } from '../lib/scenes.js';
 
 export function registerScenesCommand(program: Command): void {
   const scenes = program
@@ -25,15 +20,13 @@ Examples:
 `)
     .action(async () => {
       try {
-        const client = createClient();
-        const res = await client.get<{ body: Scene[] }>('/v1.1/scenes');
+        const scenes = await fetchScenes();
 
         if (isJsonMode()) {
-          printJson(res.data.body);
+          printJson(scenes);
           return;
         }
 
-        const scenes = res.data.body;
         if (scenes.length === 0) {
           console.log('No scenes found');
           return;
@@ -59,8 +52,7 @@ Example:
 `)
     .action(async (sceneId: string) => {
       try {
-        const client = createClient();
-        await client.post(`/v1.1/scenes/${sceneId}/execute`);
+        await executeScene(sceneId);
         console.log(`✓ Scene executed: ${sceneId}`);
       } catch (error) {
         handleError(error);

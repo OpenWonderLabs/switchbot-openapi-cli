@@ -5,6 +5,7 @@ import { registerDevicesCommand } from './commands/devices.js';
 import { registerScenesCommand } from './commands/scenes.js';
 import { registerWebhookCommand } from './commands/webhook.js';
 import { registerCompletionCommand } from './commands/completion.js';
+import { registerMcpCommand } from './commands/mcp.js';
 
 const program = new Command();
 
@@ -25,6 +26,7 @@ registerDevicesCommand(program);
 registerScenesCommand(program);
 registerWebhookCommand(program);
 registerCompletionCommand(program);
+registerMcpCommand(program);
 
 program.addHelpText('after', `
 Credentials:

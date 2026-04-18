@@ -1,35 +1,17 @@
 import { Command } from 'commander';
-import { createClient } from '../api/client.js';
 import { printTable, printKeyValue, printJson, isJsonMode, handleError } from '../utils/output.js';
-import { DEVICE_CATALOG, findCatalogEntry, DeviceCatalogEntry, suggestedActions } from '../devices/catalog.js';
-import { getCachedDevice, updateCacheFromDeviceList } from '../devices/cache.js';
-
-interface Device {
-  deviceId: string;
-  deviceName: string;
-  deviceType?: string;
-  enableCloudService: boolean;
-  hubDeviceId: string;
-  // Extra fields returned when the request carries the src=OpenClaw header:
-  roomID?: string;
-  roomName?: string | null;
-  familyName?: string;
-  controlType?: string;
-}
-
-interface InfraredDevice {
-  deviceId: string;
-  deviceName: string;
-  remoteType: string;
-  hubDeviceId: string;
-  // Extra field returned when the request carries the src=OpenClaw header:
-  controlType?: string;
-}
-
-interface DeviceListBody {
-  deviceList: Device[];
-  infraredRemoteList: InfraredDevice[];
-}
+import { DEVICE_CATALOG, findCatalogEntry, DeviceCatalogEntry } from '../devices/catalog.js';
+import { getCachedDevice } from '../devices/cache.js';
+import {
+  fetchDeviceList,
+  fetchDeviceStatus,
+  executeCommand,
+  describeDevice,
+  validateCommand,
+  buildHubLocationMap,
+  DeviceNotFoundError,
+  type Device,
+} from '../lib/devices.js';
 
 export function registerDevicesCommand(program: Command): void {
   const devices = program
@@ -85,14 +67,11 @@ Examples:
 `)
     .action(async () => {
       try {
-        const client = createClient();
-        const res = await client.get<{ body: DeviceListBody }>('/v1.1/devices');
-        const { deviceList, infraredRemoteList } = res.data.body;
-
-        updateCacheFromDeviceList(res.data.body);
+        const body = await fetchDeviceList();
+        const { deviceList, infraredRemoteList } = body;
 
         if (isJsonMode()) {
-          printJson(res.data.body);
+          printJson(body);
           return;
         }
 
@@ -167,17 +146,14 @@ Examples:
 `)
     .action(async (deviceId: string) => {
       try {
-        const client = createClient();
-        const res = await client.get<{ body: Record<string, unknown> }>(
-          `/v1.1/devices/${deviceId}/status`
-        );
+        const body = await fetchDeviceStatus(deviceId);
 
         if (isJsonMode()) {
-          printJson(res.data.body);
+          printJson(body);
           return;
         }
 
-        printKeyValue(res.data.body);
+        printKeyValue(body);
       } catch (error) {
         handleError(error);
       }
@@ -231,11 +207,26 @@ Examples:
   $ switchbot devices command ABC123 "MyButton" --type customize
 `)
     .action(async (deviceId: string, cmd: string, parameter: string | undefined, options: { type: string }) => {
-      validateCommandAgainstCache(deviceId, cmd, parameter, options.type);
+      const validation = validateCommand(deviceId, cmd, parameter, options.type);
+      if (!validation.ok) {
+        const err = validation.error;
+        console.error(`Error: ${err.message}`);
+        if (err.hint) console.error(err.hint);
+        if (err.kind === 'unknown-command') {
+          const cached = getCachedDevice(deviceId);
+          if (cached) {
+            console.error(
+              `Run 'switchbot devices commands ${JSON.stringify(cached.type)}' for parameter formats and descriptions.`
+            );
+            console.error(
+              `(If the catalog is out of date, run 'switchbot devices list' to refresh the local cache, or pass --type customize for custom IR buttons.)`
+            );
+          }
+        }
+        process.exit(2);
+      }
 
       try {
-        const client = createClient();
-
         // parameter may be a JSON object string (e.g. S10 startClean) or a plain string
         let parsedParam: unknown = parameter ?? 'default';
         if (parameter) {
@@ -246,25 +237,21 @@ Examples:
           }
         }
 
-        const body = {
-          command: cmd,
-          parameter: parsedParam,
-          commandType: options.type,
-        };
-
-        const res = await client.post<{ body: unknown }>(
-          `/v1.1/devices/${deviceId}/commands`,
-          body
+        const body = await executeCommand(
+          deviceId,
+          cmd,
+          parsedParam,
+          options.type as 'command' | 'customize'
         );
 
         if (isJsonMode()) {
-          printJson(res.data.body);
+          printJson(body);
           return;
         }
 
         console.log(`✓ Command sent: ${cmd}`);
-        if (res.data.body && typeof res.data.body === 'object' && Object.keys(res.data.body).length > 0) {
-          printKeyValue(res.data.body as Record<string, unknown>);
+        if (body && typeof body === 'object' && Object.keys(body).length > 0) {
+          printKeyValue(body as Record<string, unknown>);
         }
       } catch (error) {
         handleError(error);
@@ -374,67 +361,23 @@ Examples:
 `)
     .action(async (deviceId: string, options: { live?: boolean }) => {
       try {
-        const client = createClient();
-        const res = await client.get<{ body: DeviceListBody }>('/v1.1/devices');
-        const { deviceList, infraredRemoteList } = res.data.body;
-
-        updateCacheFromDeviceList(res.data.body);
-
-        const physical = deviceList.find((d) => d.deviceId === deviceId);
-        const ir = infraredRemoteList.find((d) => d.deviceId === deviceId);
-
-        if (!physical && !ir) {
-          console.error(`No device with id "${deviceId}" found on this account.`);
-          console.error(`Try 'switchbot devices list' to see the full list.`);
-          process.exit(1);
-        }
-
-        const typeName = physical ? (physical.deviceType ?? '') : ir!.remoteType;
-        const match = typeName ? findCatalogEntry(typeName) : null;
-        const catalogEntry = !match || Array.isArray(match) ? null : match;
-
-        // Optionally fetch live status for physical devices. IR remotes have no
-        // status channel, so --live silently does nothing for them.
-        let liveStatus: Record<string, unknown> | undefined;
-        if (options.live && physical) {
-          try {
-            const statusRes = await client.get<{ body: Record<string, unknown> }>(
-              `/v1.1/devices/${deviceId}/status`
-            );
-            liveStatus = statusRes.data.body;
-          } catch (err) {
-            // Don't fail the whole describe when status fails; note it instead.
-            liveStatus = { error: err instanceof Error ? err.message : String(err) };
-          }
-        }
-
-        const source: 'catalog' | 'live' | 'catalog+live' = catalogEntry
-          ? (liveStatus ? 'catalog+live' : 'catalog')
-          : (liveStatus ? 'live' : 'catalog');
+        const result = await describeDevice(deviceId, options);
+        const { device, isPhysical, typeName, controlType, catalog, capabilities, source, suggestedActions: picks } = result;
 
         if (isJsonMode()) {
-          const capabilities = catalogEntry
-            ? {
-                role: catalogEntry.role ?? null,
-                readOnly: catalogEntry.readOnly ?? false,
-                commands: catalogEntry.commands,
-                statusFields: catalogEntry.statusFields ?? [],
-                ...(liveStatus !== undefined ? { liveStatus } : {}),
-              }
-            : (liveStatus !== undefined ? { liveStatus } : null);
-
           printJson({
-            device: physical ?? ir,
-            controlType: (physical?.controlType ?? ir?.controlType) ?? null,
-            catalog: catalogEntry,
+            device,
+            controlType,
+            catalog,
             capabilities,
             source,
-            suggestedActions: catalogEntry ? suggestedActions(catalogEntry) : [],
+            suggestedActions: picks,
           });
           return;
         }
 
-        if (physical) {
+        if (isPhysical) {
+          const physical = device as Device;
           printKeyValue({
             deviceId: physical.deviceId,
             deviceName: physical.deviceName,
@@ -446,8 +389,9 @@ Examples:
             hub: !physical.hubDeviceId || physical.hubDeviceId === '000000000000' ? '—' : physical.hubDeviceId,
             cloudService: physical.enableCloudService,
           });
-        } else if (ir) {
-          const inherited = buildHubLocationMap(deviceList).get(ir.hubDeviceId);
+        } else {
+          const ir = device as { deviceId: string; deviceName: string; remoteType: string; controlType?: string; hubDeviceId: string };
+          const inherited = result.inheritedLocation;
           printKeyValue({
             deviceId: ir.deviceId,
             deviceName: ir.deviceName,
@@ -460,12 +404,11 @@ Examples:
           });
         }
 
+        const liveStatus =
+          capabilities && 'liveStatus' in capabilities ? capabilities.liveStatus : undefined;
+
         console.log('');
-        if (!catalogEntry) {
-          // When the deviceType isn't in the catalog, distinguish physical vs
-          // IR: physical devices should use 'devices status'; IR remotes
-          // expose only user-defined custom buttons.
-          const isPhysical = Boolean(physical);
+        if (!catalog) {
           console.log(`(Type "${typeName}" is not in the built-in catalog — no command reference available.)`);
           if (isPhysical) {
             console.log(`Try 'switchbot devices status ${deviceId}' to see what this device reports.`);
@@ -478,77 +421,21 @@ Examples:
           }
           return;
         }
-        renderCatalogEntry(catalogEntry);
+        renderCatalogEntry(catalog);
 
         if (liveStatus) {
           console.log('\nLive status:');
           printKeyValue(liveStatus);
         }
       } catch (error) {
+        if (error instanceof DeviceNotFoundError) {
+          console.error(error.message);
+          console.error(`Try 'switchbot devices list' to see the full list.`);
+          process.exit(1);
+        }
         handleError(error);
       }
     });
-}
-
-function buildHubLocationMap(
-  deviceList: Device[]
-): Map<string, { family?: string; room?: string; roomID?: string }> {
-  const map = new Map<string, { family?: string; room?: string; roomID?: string }>();
-  for (const d of deviceList) {
-    if (!d.deviceId) continue;
-    map.set(d.deviceId, {
-      family: d.familyName ?? undefined,
-      room: d.roomName ?? undefined,
-      roomID: d.roomID ?? undefined,
-    });
-  }
-  return map;
-}
-
-function validateCommandAgainstCache(
-  deviceId: string,
-  cmd: string,
-  parameter: string | undefined,
-  commandType: string
-): void {
-  // Custom IR buttons have arbitrary names — skip validation.
-  if (commandType === 'customize') return;
-
-  const cached = getCachedDevice(deviceId);
-  if (!cached) return;
-
-  const match = findCatalogEntry(cached.type);
-  if (!match || Array.isArray(match)) return;
-  const entry = match;
-
-  const builtinCommands = entry.commands.filter((c) => c.commandType !== 'customize');
-  if (builtinCommands.length === 0) return;
-
-  const spec = builtinCommands.find((c) => c.command === cmd);
-  if (!spec) {
-    const unique = [...new Set(builtinCommands.map((c) => c.command))];
-    console.error(
-      `Error: "${cmd}" is not a supported command for ${cached.name} (${cached.type}).`
-    );
-    console.error(`Supported commands: ${unique.join(', ')}`);
-    console.error(
-      `Run 'switchbot devices commands ${JSON.stringify(cached.type)}' for parameter formats and descriptions.`
-    );
-    console.error(
-      `(If the catalog is out of date, run 'switchbot devices list' to refresh the local cache, or pass --type customize for custom IR buttons.)`
-    );
-    process.exit(2);
-  }
-
-  const noParamExpected = spec.parameter === '—';
-  const userProvidedParam = parameter !== undefined && parameter !== 'default';
-  if (noParamExpected && userProvidedParam) {
-    console.error(
-      `Error: "${cmd}" takes no parameter, but one was provided: "${parameter}".`
-    );
-    console.error(`Try: switchbot devices command ${deviceId} ${cmd}`);
-    process.exit(2);
-  }
 }
 
 function renderCatalogEntry(entry: DeviceCatalogEntry): void {
