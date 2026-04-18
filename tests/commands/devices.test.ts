@@ -1151,21 +1151,41 @@ describe('devices command', () => {
       expect(out).toContain('Living Room');
     });
 
-    it('shows metadata + warning when the deviceType is not in the catalog', async () => {
+    it('shows metadata + status hint when the physical deviceType is not in the catalog', async () => {
       const body = {
         deviceList: [{
-          deviceId: 'HUB-X',
-          deviceName: 'Gateway',
-          deviceType: 'Hub Mini2',
+          deviceId: 'FB-X',
+          deviceName: 'Fingerbot',
+          deviceType: 'Fingerbot Plus',
           hubDeviceId: '',
           enableCloudService: true,
         }],
         infraredRemoteList: [],
       };
       apiMock.__instance.get.mockResolvedValue({ data: { body } });
-      const res = await runCli(registerDevicesCommand, ['devices', 'describe', 'HUB-X']);
+      const res = await runCli(registerDevicesCommand, ['devices', 'describe', 'FB-X']);
       const out = res.stdout.join('\n');
-      expect(out).toContain('Hub Mini2');
+      expect(out).toContain('Fingerbot Plus');
+      expect(out).toContain('not in the built-in catalog');
+      // Physical unknown → recommend 'devices status', not --type customize.
+      expect(out).toContain('switchbot devices status FB-X');
+      expect(out).not.toContain('--type customize');
+    });
+
+    it('shows metadata + customize hint when an IR remoteType is not in the catalog', async () => {
+      const body = {
+        deviceList: [],
+        infraredRemoteList: [{
+          deviceId: 'IR-ODD',
+          deviceName: 'Game Console',
+          remoteType: 'UnknownRemote',
+          hubDeviceId: 'HUB-1',
+        }],
+      };
+      apiMock.__instance.get.mockResolvedValue({ data: { body } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'describe', 'IR-ODD']);
+      const out = res.stdout.join('\n');
+      expect(out).toContain('UnknownRemote');
       expect(out).toContain('not in the built-in catalog');
       expect(out).toContain('--type customize');
     });
@@ -1196,6 +1216,148 @@ describe('devices command', () => {
       const parsed = JSON.parse(res.stdout.join('\n'));
       expect(parsed).toHaveProperty('controlType', 'TV');
       expect(parsed).not.toHaveProperty('category');
+    });
+
+    it('--json includes capabilities, source=catalog, and suggestedActions', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, [
+        'devices',
+        'describe',
+        'BLE-001',
+        '--json',
+      ]);
+      const parsed = JSON.parse(res.stdout.join('\n'));
+      expect(parsed.source).toBe('catalog');
+      expect(parsed.capabilities).toBeDefined();
+      expect(parsed.capabilities.role).toBe('other');
+      expect(parsed.capabilities.readOnly).toBe(false);
+      expect(Array.isArray(parsed.capabilities.commands)).toBe(true);
+      expect(parsed.capabilities.statusFields).toContain('battery');
+      expect(Array.isArray(parsed.suggestedActions)).toBe(true);
+      // turnOn is the first idempotent pick for a Bot
+      expect(parsed.suggestedActions[0].command).toBe('turnOn');
+    });
+
+    it('--json for a Smart Lock surfaces destructive flag on unlock', async () => {
+      const lockBody = {
+        deviceList: [{
+          deviceId: 'LOCK-1',
+          deviceName: 'Front Door',
+          deviceType: 'Smart Lock',
+          hubDeviceId: 'HUB-1',
+          enableCloudService: true,
+        }],
+        infraredRemoteList: [],
+      };
+      apiMock.__instance.get.mockResolvedValue({ data: { body: lockBody } });
+      const res = await runCli(registerDevicesCommand, [
+        'devices',
+        'describe',
+        'LOCK-1',
+        '--json',
+      ]);
+      const parsed = JSON.parse(res.stdout.join('\n'));
+      const unlock = parsed.capabilities.commands.find(
+        (c: { command: string }) => c.command === 'unlock'
+      );
+      expect(unlock).toBeDefined();
+      expect(unlock.destructive).toBe(true);
+      expect(unlock.idempotent).toBe(true);
+      // suggestedActions must NOT include the destructive unlock
+      expect(
+        parsed.suggestedActions.find((a: { command: string }) => a.command === 'unlock')
+      ).toBeUndefined();
+    });
+
+    it('human output marks destructive commands in the command table', async () => {
+      const lockBody = {
+        deviceList: [{
+          deviceId: 'LOCK-1',
+          deviceName: 'Front Door',
+          deviceType: 'Smart Lock',
+          hubDeviceId: 'HUB-1',
+          enableCloudService: true,
+        }],
+        infraredRemoteList: [],
+      };
+      apiMock.__instance.get.mockResolvedValue({ data: { body: lockBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'describe', 'LOCK-1']);
+      const out = res.stdout.join('\n');
+      expect(out).toContain('Role:');
+      expect(out).toContain('security');
+      // The unlock row should carry the destructive badge
+      const unlockLine = out.split('\n').find((l) => l.includes('unlock'));
+      expect(unlockLine).toContain('!destructive');
+      expect(out).toContain('hard-to-reverse');
+    });
+
+    it('human output shows ReadOnly for sensor devices', async () => {
+      const meterBody = {
+        deviceList: [{
+          deviceId: 'METER-1',
+          deviceName: 'Bedroom Meter',
+          deviceType: 'Meter',
+          hubDeviceId: 'HUB-1',
+          enableCloudService: true,
+        }],
+        infraredRemoteList: [],
+      };
+      apiMock.__instance.get.mockResolvedValue({ data: { body: meterBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'describe', 'METER-1']);
+      const out = res.stdout.join('\n');
+      expect(out).toContain('ReadOnly: yes');
+      expect(out).toContain('status-only device');
+    });
+
+    it('--live fetches /status and merges it under capabilities.liveStatus', async () => {
+      apiMock.__instance.get
+        .mockResolvedValueOnce({ data: { body: sampleBody } })
+        .mockResolvedValueOnce({ data: { body: { power: 'on', battery: 87 } } });
+      const res = await runCli(registerDevicesCommand, [
+        'devices',
+        'describe',
+        'BLE-001',
+        '--live',
+        '--json',
+      ]);
+      expect(apiMock.__instance.get).toHaveBeenCalledTimes(2);
+      expect(apiMock.__instance.get).toHaveBeenNthCalledWith(1, '/v1.1/devices');
+      expect(apiMock.__instance.get).toHaveBeenNthCalledWith(2, '/v1.1/devices/BLE-001/status');
+      const parsed = JSON.parse(res.stdout.join('\n'));
+      expect(parsed.source).toBe('catalog+live');
+      expect(parsed.capabilities.liveStatus).toEqual({ power: 'on', battery: 87 });
+    });
+
+    it('--live on an IR remote does NOT make a second API call (IR has no status)', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, [
+        'devices',
+        'describe',
+        'IR-001',
+        '--live',
+        '--json',
+      ]);
+      expect(apiMock.__instance.get).toHaveBeenCalledTimes(1);
+      const parsed = JSON.parse(res.stdout.join('\n'));
+      expect(parsed.source).toBe('catalog');
+      expect(parsed.capabilities.liveStatus).toBeUndefined();
+    });
+
+    it('--live survives a /status failure (records the error)', async () => {
+      apiMock.__instance.get
+        .mockResolvedValueOnce({ data: { body: sampleBody } })
+        .mockRejectedValueOnce(new Error('device offline'));
+      const res = await runCli(registerDevicesCommand, [
+        'devices',
+        'describe',
+        'BLE-001',
+        '--live',
+        '--json',
+      ]);
+      expect(res.exitCode).toBeNull(); // not a fatal exit
+      const parsed = JSON.parse(res.stdout.join('\n'));
+      expect(parsed.source).toBe('catalog+live');
+      expect(parsed.capabilities.liveStatus).toHaveProperty('error', 'device offline');
     });
 
     it('propagates API errors via handleError (exit 1)', async () => {

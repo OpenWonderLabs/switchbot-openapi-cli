@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { createClient } from '../api/client.js';
 import { printTable, printKeyValue, printJson, isJsonMode, handleError } from '../utils/output.js';
-import { DEVICE_CATALOG, findCatalogEntry, DeviceCatalogEntry } from '../devices/catalog.js';
+import { DEVICE_CATALOG, findCatalogEntry, DeviceCatalogEntry, suggestedActions } from '../devices/catalog.js';
 import { getCachedDevice, updateCacheFromDeviceList } from '../devices/cache.js';
 
 interface Device {
@@ -343,18 +343,36 @@ Examples:
     .command('describe')
     .description('Describe a device by ID: metadata + supported commands + status fields (1 API call)')
     .argument('<deviceId>', 'Target device ID from "devices list"')
+    .option('--live', 'Also fetch live status values and merge them into capabilities (costs 1 extra API call)')
     .addHelpText('after', `
-Makes a single GET /v1.1/devices call to look up the device's type, then
-prints its metadata alongside the matching catalog entry (supported
-commands + parameter formats + status field names).
+Makes a GET /v1.1/devices call to look up the device's type, then prints its
+metadata alongside the matching catalog entry (supported commands + parameter
+formats + status field names). With --live, makes a second call to fetch the
+current status values and merges them into the output.
 
-Does NOT fetch live status values. Use 'switchbot devices status <id>' for that.
+JSON output shape (--json):
+  {
+    device: <raw API fields>,
+    controlType: <string|null>,
+    catalog: <catalog entry, or null>,
+    capabilities: {
+      role: <functional role>,
+      readOnly: <boolean>,
+      commands: [{command, parameter, description, idempotent?, destructive?, exampleParams?}],
+      statusFields: [<name>],
+      liveStatus: <status payload when --live was passed>
+    },
+    source: "catalog" | "live" | "catalog+live",
+    suggestedActions: [{command, parameter?, description}]
+  }
 
 Examples:
   $ switchbot devices describe ABC123DEF456
+  $ switchbot devices describe ABC123DEF456 --live
   $ switchbot devices describe ABC123DEF456 --json
+  $ switchbot devices describe <lockId> --json | jq '.capabilities.commands[] | select(.destructive)'
 `)
-    .action(async (deviceId: string) => {
+    .action(async (deviceId: string, options: { live?: boolean }) => {
       try {
         const client = createClient();
         const res = await client.get<{ body: DeviceListBody }>('/v1.1/devices');
@@ -375,11 +393,43 @@ Examples:
         const match = typeName ? findCatalogEntry(typeName) : null;
         const catalogEntry = !match || Array.isArray(match) ? null : match;
 
+        // Optionally fetch live status for physical devices. IR remotes have no
+        // status channel, so --live silently does nothing for them.
+        let liveStatus: Record<string, unknown> | undefined;
+        if (options.live && physical) {
+          try {
+            const statusRes = await client.get<{ body: Record<string, unknown> }>(
+              `/v1.1/devices/${deviceId}/status`
+            );
+            liveStatus = statusRes.data.body;
+          } catch (err) {
+            // Don't fail the whole describe when status fails; note it instead.
+            liveStatus = { error: err instanceof Error ? err.message : String(err) };
+          }
+        }
+
+        const source: 'catalog' | 'live' | 'catalog+live' = catalogEntry
+          ? (liveStatus ? 'catalog+live' : 'catalog')
+          : (liveStatus ? 'live' : 'catalog');
+
         if (isJsonMode()) {
+          const capabilities = catalogEntry
+            ? {
+                role: catalogEntry.role ?? null,
+                readOnly: catalogEntry.readOnly ?? false,
+                commands: catalogEntry.commands,
+                statusFields: catalogEntry.statusFields ?? [],
+                ...(liveStatus !== undefined ? { liveStatus } : {}),
+              }
+            : (liveStatus !== undefined ? { liveStatus } : null);
+
           printJson({
             device: physical ?? ir,
             controlType: (physical?.controlType ?? ir?.controlType) ?? null,
             catalog: catalogEntry,
+            capabilities,
+            source,
+            suggestedActions: catalogEntry ? suggestedActions(catalogEntry) : [],
           });
           return;
         }
@@ -412,11 +462,28 @@ Examples:
 
         console.log('');
         if (!catalogEntry) {
+          // When the deviceType isn't in the catalog, distinguish physical vs
+          // IR: physical devices should use 'devices status'; IR remotes
+          // expose only user-defined custom buttons.
+          const isPhysical = Boolean(physical);
           console.log(`(Type "${typeName}" is not in the built-in catalog — no command reference available.)`);
-          console.log(`Send custom IR buttons with: switchbot devices command ${deviceId} "<buttonName>" --type customize`);
+          if (isPhysical) {
+            console.log(`Try 'switchbot devices status ${deviceId}' to see what this device reports.`);
+          } else {
+            console.log(`Send custom IR buttons with: switchbot devices command ${deviceId} "<buttonName>" --type customize`);
+          }
+          if (liveStatus) {
+            console.log('\nLive status:');
+            printKeyValue(liveStatus);
+          }
           return;
         }
         renderCatalogEntry(catalogEntry);
+
+        if (liveStatus) {
+          console.log('\nLive status:');
+          printKeyValue(liveStatus);
+        }
       } catch (error) {
         handleError(error);
       }
@@ -487,6 +554,8 @@ function validateCommandAgainstCache(
 function renderCatalogEntry(entry: DeviceCatalogEntry): void {
   console.log(`Type:     ${entry.type}`);
   console.log(`Category: ${entry.category === 'ir' ? 'IR remote' : 'Physical device'}`);
+  if (entry.role) console.log(`Role:     ${entry.role}`);
+  if (entry.readOnly) console.log(`ReadOnly: yes (status-only device, no control commands)`);
   if (entry.aliases && entry.aliases.length > 0) {
     console.log(`Aliases:  ${entry.aliases.join(', ')}`);
   }
@@ -495,12 +564,18 @@ function renderCatalogEntry(entry: DeviceCatalogEntry): void {
     console.log('\nCommands: (none — status-only device)');
   } else {
     console.log('\nCommands:');
-    const rows = entry.commands.map((c) => [
-      c.commandType === 'customize' ? `${c.command}  [customize]` : c.command,
-      c.parameter,
-      c.description,
-    ]);
+    const rows = entry.commands.map((c) => {
+      const flags: string[] = [];
+      if (c.commandType === 'customize') flags.push('customize');
+      if (c.destructive) flags.push('!destructive');
+      const label = flags.length > 0 ? `${c.command}  [${flags.join(', ')}]` : c.command;
+      return [label, c.parameter, c.description];
+    });
     printTable(['command', 'parameter', 'description'], rows);
+    const hasDestructive = entry.commands.some((c) => c.destructive);
+    if (hasDestructive) {
+      console.log('\n[!destructive] commands have hard-to-reverse real-world effects — confirm before issuing.');
+    }
   }
 
   if (entry.statusFields && entry.statusFields.length > 0) {
