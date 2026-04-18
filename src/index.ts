@@ -5,18 +5,38 @@ import { registerDevicesCommand } from './commands/devices.js';
 import { registerScenesCommand } from './commands/scenes.js';
 import { registerWebhookCommand } from './commands/webhook.js';
 import { registerCompletionCommand } from './commands/completion.js';
+import { registerMcpCommand } from './commands/mcp.js';
+import { registerQuotaCommand } from './commands/quota.js';
+import { registerCatalogCommand } from './commands/catalog.js';
+import { registerCacheCommand } from './commands/cache.js';
+import { registerEventsCommand } from './commands/events.js';
+import { registerDoctorCommand } from './commands/doctor.js';
+import { registerSchemaCommand } from './commands/schema.js';
+import { registerHistoryCommand } from './commands/history.js';
+import { registerPlanCommand } from './commands/plan.js';
+import { registerCapabilitiesCommand } from './commands/capabilities.js';
 
 const program = new Command();
 
 program
   .name('switchbot')
   .description('Command-line tool for SwitchBot API v1.1')
-  .version('1.0.0')
+  .version('2.1.0')
   .option('--json', 'Output raw JSON response (disables tables; useful for pipes/scripts)')
+  .option('--format <type>', 'Output format: table (default), json, jsonl, tsv, yaml, id')
+  .option('--fields <csv>', 'Comma-separated list of columns to include (e.g. --fields=id,name,type)')
   .option('-v, --verbose', 'Log HTTP request/response details to stderr')
   .option('--dry-run', 'Print mutating requests without sending them (GETs still execute)')
   .option('--timeout <ms>', 'HTTP request timeout in milliseconds (default: 30000)')
+  .option('--retry-on-429 <n>', 'Max 429 retries before surfacing the error (default: 3)')
+  .option('--backoff <strategy>', 'Backoff strategy for retries: "linear" or "exponential" (default)')
+  .option('--no-retry', 'Disable 429 retries entirely (equivalent to --retry-on-429 0)')
+  .option('--no-quota', 'Disable the local ~/.switchbot/quota.json counter for this run')
+  .option('--cache <mode>', 'Cache mode: "off" | "auto" (default: list 1h, status off) | duration like 5m, 1h, 30s (enables both stores)')
+  .option('--no-cache', 'Disable cache reads (equivalent to --cache off)')
   .option('--config <path>', 'Override credential file location (default: ~/.switchbot/config.json)')
+  .option('--profile <name>', 'Use a named profile: ~/.switchbot/profiles/<name>.json')
+  .option('--audit-log [path]', 'Append every mutating command to JSONL audit log (default ~/.switchbot/audit.log)')
   .showHelpAfterError('(run with --help to see usage)')
   .showSuggestionAfterError();
 
@@ -25,6 +45,16 @@ registerDevicesCommand(program);
 registerScenesCommand(program);
 registerWebhookCommand(program);
 registerCompletionCommand(program);
+registerMcpCommand(program);
+registerQuotaCommand(program);
+registerCatalogCommand(program);
+registerCacheCommand(program);
+registerEventsCommand(program);
+registerDoctorCommand(program);
+registerSchemaCommand(program);
+registerHistoryCommand(program);
+registerPlanCommand(program);
+registerCapabilitiesCommand(program);
 
 program.addHelpText('after', `
 Credentials:

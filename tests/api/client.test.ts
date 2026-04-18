@@ -18,6 +18,7 @@ const axiosMock = vi.hoisted(() => {
       request: { use: vi.fn() },
       response: { use: vi.fn() },
     },
+    request: vi.fn(),
   };
   return {
     default: {
@@ -45,6 +46,22 @@ vi.mock('../../src/auth.js', () => ({
     nonce: 'fake-nonce',
     'Content-Type': 'application/json',
   })),
+}));
+
+// Quota recording is best-effort file I/O — mock it out so tests don't
+// touch the real home directory and so we can assert on recorded calls.
+const quotaMock = vi.hoisted(() => ({
+  recordRequest: vi.fn(),
+}));
+vi.mock('../../src/utils/quota.js', () => ({
+  recordRequest: quotaMock.recordRequest,
+  // The client doesn't import these, but export shims keep the module
+  // surface stable if other tests import it transitively.
+  loadQuota: vi.fn(),
+  resetQuota: vi.fn(),
+  todayUsage: vi.fn(),
+  normaliseEndpoint: vi.fn(),
+  DAILY_QUOTA: 10_000,
 }));
 
 import { createClient, ApiError, DryRunSignal } from '../../src/api/client.js';
@@ -304,7 +321,7 @@ describe('createClient — configurable globals', () => {
       } as never)
     ).toThrow(DryRunSignal);
 
-    const out = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+    const out = writeSpy.mock.calls.map((c) => String(c[0])).join('\n');
     expect(out).toContain('[dry-run]');
     expect(out).toContain('POST');
     expect(out).toContain('/v1.1/devices/ABC/commands');
@@ -347,5 +364,179 @@ describe('createClient — configurable globals', () => {
       expect((err as ApiError).message).toContain('timed out');
       expect((err as ApiError).message).toContain('2500');
     }
+  });
+});
+
+describe('createClient — 429 retry', () => {
+  const originalArgv = process.argv;
+
+  beforeEach(() => {
+    captured.request = null;
+    captured.success = null;
+    captured.failure = null;
+    axiosMock.__instance.interceptors.request.use.mockReset();
+    axiosMock.__instance.interceptors.response.use.mockReset();
+    axiosMock.__instance.request.mockReset();
+    axiosMock.default.create.mockClear();
+    axiosMock.default.isAxiosError.mockReset();
+    axiosMock.default.isAxiosError.mockReturnValue(true);
+    quotaMock.recordRequest.mockClear();
+
+    axiosMock.__instance.interceptors.request.use.mockImplementation((fn: RequestFn) => {
+      captured.request = fn;
+    });
+    axiosMock.__instance.interceptors.response.use.mockImplementation(
+      (ok: ResponseOkFn, err: ResponseErrFn) => {
+        captured.success = ok;
+        captured.failure = err;
+      }
+    );
+    vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+    // Fast-forward setTimeout inside the retry delay.
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    process.argv = originalArgv;
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('retries a 429 response and resolves with the retried response', async () => {
+    process.argv = ['node', 'cli', 'devices', 'list'];
+    createClient();
+
+    const retriedResponse = { data: { statusCode: 100, body: { ok: true } } };
+    axiosMock.__instance.request.mockResolvedValue(retriedResponse);
+
+    const config = {
+      method: 'get',
+      baseURL: 'https://api.switch-bot.com',
+      url: '/v1.1/devices',
+    };
+    const error = {
+      response: { status: 429, headers: {} },
+      config,
+      message: 'rate limited',
+    };
+
+    const pending = captured.failure!(error);
+    // The retry scheduler sleeps 1000ms on first attempt (exponential base).
+    await vi.advanceTimersByTimeAsync(1_000);
+    const result = await pending;
+    expect(result).toBe(retriedResponse);
+    expect(axiosMock.__instance.request).toHaveBeenCalledTimes(1);
+    expect(axiosMock.__instance.request).toHaveBeenCalledWith(
+      expect.objectContaining({ url: '/v1.1/devices' })
+    );
+  });
+
+  it('respects the server Retry-After header over the default backoff', async () => {
+    process.argv = ['node', 'cli', 'devices', 'list'];
+    createClient();
+
+    axiosMock.__instance.request.mockResolvedValue({ data: { statusCode: 100, body: {} } });
+
+    const config = {
+      method: 'get',
+      baseURL: 'https://api.switch-bot.com',
+      url: '/v1.1/devices',
+    };
+    const error = {
+      response: { status: 429, headers: { 'retry-after': '7' } },
+      config,
+      message: 'rate limited',
+    };
+
+    const pending = captured.failure!(error);
+    // Retry-After=7 → should need >6000ms (not 1000ms).
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(axiosMock.__instance.request).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(6_000);
+    await pending;
+    expect(axiosMock.__instance.request).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives up after --retry-on-429 attempts and throws a retryable ApiError', () => {
+    process.argv = ['node', 'cli', 'devices', 'list', '--retry-on-429', '2'];
+    createClient();
+
+    // Simulate the request having already been retried up to the cap —
+    // interceptor should skip the retry branch and throw the exhaustion
+    // error directly. This avoids re-entrant mocking.
+    const config = {
+      method: 'get',
+      baseURL: 'https://api.switch-bot.com',
+      url: '/v1.1/devices',
+      __retryCount: 2,
+    };
+
+    try {
+      captured.failure!({
+        response: { status: 429, headers: {} },
+        config,
+        message: 'rate limited',
+      });
+      expect.fail('should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      expect((err as ApiError).code).toBe(429);
+      expect((err as ApiError).retryable).toBe(true);
+      expect((err as ApiError).hint).toContain('quota status');
+    }
+    expect(axiosMock.__instance.request).not.toHaveBeenCalled();
+  });
+
+  it('--no-retry disables retries entirely', () => {
+    process.argv = ['node', 'cli', 'devices', 'list', '--no-retry'];
+    createClient();
+
+    const config = { method: 'get', baseURL: 'https://api.switch-bot.com', url: '/v1.1/devices' };
+    try {
+      captured.failure!({
+        response: { status: 429, headers: {} },
+        config,
+        message: 'rate limited',
+      });
+      expect.fail('should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      expect((err as ApiError).code).toBe(429);
+    }
+    expect(axiosMock.__instance.request).not.toHaveBeenCalled();
+  });
+
+  it('records a quota entry on a successful response', () => {
+    process.argv = ['node', 'cli', 'devices', 'list'];
+    createClient();
+    const response = {
+      data: { statusCode: 100, body: {} },
+      config: {
+        method: 'get',
+        baseURL: 'https://api.switch-bot.com',
+        url: '/v1.1/devices',
+      },
+    };
+    captured.success!(response);
+    expect(quotaMock.recordRequest).toHaveBeenCalledWith(
+      'GET',
+      'https://api.switch-bot.com/v1.1/devices'
+    );
+  });
+
+  it('--no-quota skips quota recording', () => {
+    process.argv = ['node', 'cli', 'devices', 'list', '--no-quota'];
+    createClient();
+    const response = {
+      data: { statusCode: 100, body: {} },
+      config: {
+        method: 'get',
+        baseURL: 'https://api.switch-bot.com',
+        url: '/v1.1/devices',
+      },
+    };
+    captured.success!(response);
+    expect(quotaMock.recordRequest).not.toHaveBeenCalled();
   });
 });

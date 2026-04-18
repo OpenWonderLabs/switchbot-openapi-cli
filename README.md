@@ -15,6 +15,20 @@ List devices, query live status, send control commands, run scenes, and manage w
 
 ---
 
+## Who is this for?
+
+Three entry points, same binary — pick the one that matches how you use it:
+
+| Audience  | Where to start                                                | What you get                                                                                      |
+|-----------|---------------------------------------------------------------|---------------------------------------------------------------------------------------------------|
+| **Human** | this README ([Quick start](#quick-start))                     | Colored tables, helpful hints on errors, shell completion, `switchbot doctor` self-check.         |
+| **Script**| [Output modes](#output-modes), [Scripting examples](#scripting-examples) | `--json`, `--format=tsv/yaml/id`, `--fields`, stable exit codes, `history replay`, audit log.     |
+| **Agent** | [`docs/agent-guide.md`](./docs/agent-guide.md)                | `switchbot mcp serve` (stdio MCP server), `schema export`, `plan run`, destructive-command guard. |
+
+Under the hood every surface shares the same catalog, cache, and HMAC client — switching between them costs nothing.
+
+---
+
 ## Table of contents
 
 - [Features](#features)
@@ -28,8 +42,13 @@ List devices, query live status, send control commands, run scenes, and manage w
   - [`devices`](#devices--list-status-control)
   - [`scenes`](#scenes--run-manual-scenes)
   - [`webhook`](#webhook--receive-device-events-over-http)
+  - [`batch`](#batch--run-multiple-commands)
+  - [`watch`](#watch--poll-device-status)
+  - [`mcp`](#mcp--model-context-protocol-server)
+  - [`cache`](#cache--inspect-and-clear-local-cache)
   - [`completion`](#completion--shell-tab-completion)
 - [Output modes](#output-modes)
+- [Cache](#cache-1)
 - [Exit codes & error codes](#exit-codes--error-codes)
 - [Environment variables](#environment-variables)
 - [Scripting examples](#scripting-examples)
@@ -47,7 +66,7 @@ List devices, query live status, send control commands, run scenes, and manage w
 - 🎨 **Dual output modes** — colorized tables by default; `--json` passthrough for `jq` and scripting
 - 🔐 **Secure credentials** — HMAC-SHA256 signed requests; config file written with `0600`; env-var override for CI
 - 🔍 **Dry-run mode** — preview every mutating request before it hits the API
-- 🧪 **Fully tested** — 282 Vitest tests, mocked axios, zero network in CI
+- 🧪 **Fully tested** — 592 Vitest tests, mocked axios, zero network in CI
 - ⚡ **Shell completion** — Bash / Zsh / Fish / PowerShell
 
 ## Requirements
@@ -119,15 +138,27 @@ switchbot config show
 
 ## Global options
 
-| Option              | Description                                                              |
-| ------------------- | ------------------------------------------------------------------------ |
-| `--json`            | Print the raw JSON response instead of a formatted table                 |
-| `-v`, `--verbose`   | Log HTTP request/response details to stderr                              |
-| `--dry-run`         | Print mutating requests (POST/PUT/DELETE) without sending them           |
-| `--timeout <ms>`    | HTTP request timeout in milliseconds (default: `30000`)                  |
-| `--config <path>`   | Override credential file location (default: `~/.switchbot/config.json`)  |
-| `-V`, `--version`   | Print the CLI version                                                    |
-| `-h`, `--help`      | Show help for any command or subcommand                                  |
+| Option                      | Description                                                              |
+| --------------------------- | ------------------------------------------------------------------------ |
+| `--json`                    | Print the raw JSON response instead of a formatted table                 |
+| `--format <fmt>`            | Output format: `tsv`, `yaml`, `jsonl`, `json`, `id`                     |
+| `--fields <cols>`           | Comma-separated column names to include (e.g. `deviceId,type`)          |
+| `-v`, `--verbose`           | Log HTTP request/response details to stderr                              |
+| `--dry-run`                 | Print mutating requests (POST/PUT/DELETE) without sending them           |
+| `--timeout <ms>`            | HTTP request timeout in milliseconds (default: `30000`)                  |
+| `--config <path>`           | Override credential file location (default: `~/.switchbot/config.json`) |
+| `--profile <name>`          | Use a named credential profile (`~/.switchbot/profiles/<name>.json`)    |
+| `--cache <dur>`             | Set list and status cache TTL, e.g. `5m`, `1h`, `off`, `auto` (default) |
+| `--cache-list <dur>`        | Set list-cache TTL independently (overrides `--cache`)                   |
+| `--cache-status <dur>`      | Set status-cache TTL independently (default off; overrides `--cache`)   |
+| `--no-cache`                | Disable all cache reads for this invocation                              |
+| `--retry-on-429 <n>`        | Max 429 retry attempts (default: `3`)                                    |
+| `--no-retry`                | Disable automatic 429 retries                                            |
+| `--backoff <strategy>`      | Retry backoff: `exponential` (default) or `linear`                      |
+| `--no-quota`                | Disable local request-quota tracking                                     |
+| `--audit-log [path]`        | Append mutating commands to a JSONL audit log (default path: `~/.switchbot/audit.log`) |
+| `-V`, `--version`           | Print the CLI version                                                    |
+| `-h`, `--help`              | Show help for any command or subcommand                                  |
 
 Every subcommand supports `--help`, and most include a parameter-format reference and examples.
 
@@ -161,9 +192,15 @@ switchbot config show                          # Print current source + masked s
 
 ```bash
 # List all physical devices and IR remote devices
-# Columns: deviceId, deviceName, type, controlType, family, roomID, room, hub, cloud
+# Default columns (4): deviceId, deviceName, type, category
+# Pass --wide for the full 10-column operator view
 switchbot devices list
+switchbot devices list --wide
 switchbot devices list --json | jq '.deviceList[].deviceId'
+
+# IR remotes: type = remoteType (e.g. "TV"), category = "ir"
+# Physical: category = "physical"
+switchbot devices list --format=tsv --fields=deviceId,type,category
 
 # Filter by family / room (family & room info requires the 'src: OpenClaw'
 # header, which this CLI sends on every request)
@@ -259,14 +296,114 @@ switchbot completion powershell >> $PROFILE
 
 Supported shells: `bash`, `zsh`, `fish`, `powershell` (`pwsh` is accepted as an alias).
 
-## Output modes
-
-- **Default** — ANSI-colored tables for `list`/`status`, key-value tables for details.
-- **`--json`** — raw JSON passthrough, ideal for `jq` and scripting.
+### `batch` — run multiple commands
 
 ```bash
-switchbot devices list --json | jq '.deviceList[] | {id: .deviceId, name: .deviceName}'
+# Run a sequence of commands from a JSON/YAML file
+switchbot batch run commands.json
+switchbot batch run commands.yaml --dry-run
+
+# Validate a plan file without executing it
+switchbot batch validate commands.json
 ```
+
+A batch file is a JSON array of `{ deviceId, command, parameter?, commandType? }` objects.
+
+### `watch` — poll device status
+
+```bash
+# Poll a device's status every 30 s until Ctrl-C
+switchbot watch <deviceId>
+switchbot watch <deviceId> --interval 10s --json
+```
+
+Output is a stream of JSON status objects (with `--json`) or a refreshed table.
+
+### `mcp` — Model Context Protocol server
+
+```bash
+# Start the stdio MCP server (connect via Claude, Cursor, etc.)
+switchbot mcp serve
+```
+
+Exposes 7 MCP tools: `list_devices`, `describe_device`, `get_device_status`, `send_command`, `list_scenes`, `run_scene`, `search_catalog`.
+See [`docs/agent-guide.md`](./docs/agent-guide.md) for the full tool reference and safety rules (destructive-command guard).
+
+### `cache` — inspect and clear local cache
+
+```bash
+# Show cache status (paths, age, entry counts)
+switchbot cache show
+
+# Clear everything
+switchbot cache clear
+
+# Clear only the device-list cache or only the status cache
+switchbot cache clear --key list
+switchbot cache clear --key status
+```
+
+
+
+- **Default** — ANSI-colored tables for `list`/`status`, key-value tables for details.
+- **`--json`** — raw API payload passthrough. Output is the exact JSON the SwitchBot API returned, ideal for `jq` and scripting. Errors are also JSON on stderr: `{ "error": { "code", "kind", "message", "hint?" } }`.
+- **`--format=json`** — projected row view. Same JSON structure but built from the CLI's column model (`--fields` applies). Use this when you only want specific fields.
+- **`--format=tsv|yaml|jsonl|id`** — tabular text formats; `--fields` filters columns.
+
+```bash
+# Raw API payload (--json)
+switchbot devices list --json | jq '.deviceList[] | {id: .deviceId, name: .deviceName}'
+
+# Projected rows with field filter (--format)
+switchbot devices list --format tsv --fields deviceId,deviceName,type,cloud
+switchbot devices list --format id      # one deviceId per line
+switchbot devices status <id> --format yaml
+```
+
+## Cache
+
+The CLI maintains two local disk caches under `~/.switchbot/`:
+
+| File | Contents | Default TTL |
+| ---- | -------- | ----------- |
+| `devices.json` | Device metadata (id, name, type, category, hub, room…) | 1 hour |
+| `status.json`  | Per-device status bodies | off (0) |
+
+The device-list cache powers offline validation (command name checks, destructive-command guard) and the MCP server's `send_command` tool. It is refreshed automatically on every `devices list` call.
+
+### Cache control flags
+
+```bash
+# Turn off all cache reads for one invocation
+switchbot devices list --no-cache
+
+# Set both list and status TTL to 5 minutes
+switchbot devices status <id> --cache 5m
+
+# Set TTLs independently
+switchbot devices status <id> --cache-list 2h --cache-status 30s
+
+# Disable only the list cache (keep status cache at its current TTL)
+switchbot devices list --cache-list 0
+```
+
+### Cache management commands
+
+```bash
+# Show paths, age, and entry counts
+switchbot cache show
+
+# Clear all cached data
+switchbot cache clear
+
+# Scope the clear to one store
+switchbot cache clear --key list
+switchbot cache clear --key status
+```
+
+### Status-cache GC
+
+`status.json` entries are automatically evicted after 24 hours (or 10× the configured status TTL, whichever is longer), so the file cannot grow without bound even when the status cache is left enabled long-term.
 
 ## Exit codes & error codes
 
@@ -318,7 +455,7 @@ npm install
 
 npm run dev -- <args>       # Run from TypeScript sources via tsx
 npm run build               # Compile to dist/
-npm test                    # Run the Vitest suite (282 tests)
+npm test                    # Run the Vitest suite (592 tests)
 npm run test:watch          # Watch mode
 npm run test:coverage       # Coverage report (v8, HTML + text)
 ```
@@ -332,17 +469,36 @@ src/
 ├── config.ts             # Credential load/save; env > file priority; --config override
 ├── api/client.ts         # axios instance + request/response interceptors;
 │                         # --verbose / --dry-run / --timeout wiring
-├── devices/catalog.ts    # Static catalog powering `devices types`/`devices commands`
+├── devices/
+│   ├── catalog.ts        # Static device catalog (commands, params, status fields)
+│   └── cache.ts          # Disk + in-memory cache for device list and status
+├── lib/
+│   └── devices.ts        # Shared logic: listDevices, describeDevice, isDestructiveCommand
 ├── commands/
 │   ├── config.ts
 │   ├── devices.ts
 │   ├── scenes.ts
 │   ├── webhook.ts
+│   ├── batch.ts          # `switchbot batch run/validate`
+│   ├── watch.ts          # `switchbot watch <deviceId>`
+│   ├── mcp.ts            # `switchbot mcp serve` (MCP stdio server)
+│   ├── cache.ts          # `switchbot cache show/clear`
+│   ├── history.ts        # `switchbot history [replay]`
+│   ├── events.ts         # `switchbot events`
+│   ├── quota.ts          # `switchbot quota`
+│   ├── explain.ts        # `switchbot explain <deviceId>`
+│   ├── plan.ts           # `switchbot plan run <file>`
+│   ├── doctor.ts         # `switchbot doctor`
+│   ├── schema.ts         # `switchbot schema export`
+│   ├── catalog.ts        # `switchbot catalog search`
 │   └── completion.ts     # `switchbot completion bash|zsh|fish|powershell`
 └── utils/
-    ├── flags.ts          # Global flag readers (isVerbose / isDryRun / getTimeout / getConfigPath)
-    └── output.ts         # printTable / printKeyValue / printJson / handleError
-tests/                    # Vitest suite (282 tests, mocked axios, no network)
+    ├── flags.ts          # Global flag readers (isVerbose / isDryRun / getCacheMode / …)
+    ├── output.ts         # printTable / printKeyValue / printJson / handleError / buildErrorPayload
+    ├── format.ts         # renderRows / filterFields / output-format dispatch
+    ├── audit.ts          # JSONL audit log writer
+    └── quota.ts          # Local daily-quota counter
+tests/                    # Vitest suite (592 tests, mocked axios, no network)
 ```
 
 ### Release flow

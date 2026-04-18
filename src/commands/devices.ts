@@ -1,35 +1,24 @@
 import { Command } from 'commander';
-import { createClient } from '../api/client.js';
-import { printTable, printKeyValue, printJson, isJsonMode, handleError } from '../utils/output.js';
-import { DEVICE_CATALOG, findCatalogEntry, DeviceCatalogEntry } from '../devices/catalog.js';
-import { getCachedDevice, updateCacheFromDeviceList } from '../devices/cache.js';
-
-interface Device {
-  deviceId: string;
-  deviceName: string;
-  deviceType?: string;
-  enableCloudService: boolean;
-  hubDeviceId: string;
-  // Extra fields returned when the request carries the src=OpenClaw header:
-  roomID?: string;
-  roomName?: string | null;
-  familyName?: string;
-  controlType?: string;
-}
-
-interface InfraredDevice {
-  deviceId: string;
-  deviceName: string;
-  remoteType: string;
-  hubDeviceId: string;
-  // Extra field returned when the request carries the src=OpenClaw header:
-  controlType?: string;
-}
-
-interface DeviceListBody {
-  deviceList: Device[];
-  infraredRemoteList: InfraredDevice[];
-}
+import { printTable, printKeyValue, printJson, isJsonMode, handleError, UsageError } from '../utils/output.js';
+import { resolveFormat, resolveFields, renderRows } from '../utils/format.js';
+import { findCatalogEntry, getEffectiveCatalog, DeviceCatalogEntry } from '../devices/catalog.js';
+import { getCachedDevice } from '../devices/cache.js';
+import {
+  fetchDeviceList,
+  fetchDeviceStatus,
+  executeCommand,
+  describeDevice,
+  validateCommand,
+  isDestructiveCommand,
+  getDestructiveReason,
+  buildHubLocationMap,
+  DeviceNotFoundError,
+  type Device,
+} from '../lib/devices.js';
+import { registerBatchCommand } from './batch.js';
+import { registerWatchCommand } from './watch.js';
+import { registerExplainCommand } from './explain.js';
+import { isDryRun } from '../utils/flags.js';
 
 export function registerDevicesCommand(program: Command): void {
   const devices = program
@@ -61,9 +50,12 @@ Run any subcommand with --help for its own flags and examples.
     .command('list')
     .description('List all physical devices and IR remote devices on the account')
     .addHelpText('after', `
-Output columns: deviceId, deviceName, type, controlType, family, roomID, room, hub, cloud
+Default columns: deviceId, deviceName, type, category
+Pass --wide for the full operator view: + controlType, family, roomID, room, hub, cloud
+--fields accepts any subset of all column names (exit 2 on unknown names).
 
-  type         - physical deviceType (e.g. "Bot", "Curtain") or "[IR] <remoteType>"
+  type         - physical deviceType (e.g. "Bot", "Curtain") or IR remoteType (e.g. "TV")
+  category     - "physical" or "ir"
   controlType  - functional classification from the API (e.g. "Bot", "Switch",
                  "TV") — may differ from 'type' and groups devices by behavior
   family       - home/family name (IR remotes inherit this from their bound Hub)
@@ -80,23 +72,29 @@ the table; --json returns the raw API body unchanged.)
 
 Examples:
   $ switchbot devices list
+  $ switchbot devices list --wide
+  $ switchbot devices list --format tsv --fields deviceId,deviceName,type,category
   $ switchbot devices list --json | jq '.deviceList[] | select(.familyName == "家里")'
   $ switchbot devices list --json | jq '[.deviceList[], .infraredRemoteList[]] | group_by(.familyName)'
 `)
-    .action(async () => {
+    .option('--wide', 'Show all columns (controlType, family, roomID, room, hub, cloud)')
+    .action(async (options: { wide?: boolean }) => {
       try {
-        const client = createClient();
-        const res = await client.get<{ body: DeviceListBody }>('/v1.1/devices');
-        const { deviceList, infraredRemoteList } = res.data.body;
+        const body = await fetchDeviceList();
+        const { deviceList, infraredRemoteList } = body;
+        const fmt = resolveFormat();
 
-        updateCacheFromDeviceList(res.data.body);
-
-        if (isJsonMode()) {
-          printJson(res.data.body);
+        if (fmt === 'json' && process.argv.includes('--json')) {
+          printJson(body);
           return;
         }
 
         const hubLocation = buildHubLocationMap(deviceList);
+
+        const narrowHeaders = ['deviceId', 'deviceName', 'type', 'category'];
+        const wideHeaders = ['deviceId', 'deviceName', 'type', 'category', 'controlType', 'family', 'roomID', 'room', 'hub', 'cloud'];
+        const userFields = resolveFields();
+        const headers = userFields ? wideHeaders : (options.wide ? wideHeaders : narrowHeaders);
         const rows: (string | boolean | null)[][] = [];
 
         for (const d of deviceList) {
@@ -104,6 +102,7 @@ Examples:
             d.deviceId,
             d.deviceName,
             d.deviceType || '—',
+            'physical',
             d.controlType || '—',
             d.familyName || '—',
             d.roomID || '—',
@@ -118,7 +117,8 @@ Examples:
           rows.push([
             d.deviceId,
             d.deviceName,
-            `[IR] ${d.remoteType}`,
+            d.remoteType,
+            'ir',
             d.controlType || '—',
             inherited?.family || '—',
             inherited?.roomID || '—',
@@ -128,14 +128,16 @@ Examples:
           ]);
         }
 
-        if (rows.length === 0) {
+        if (rows.length === 0 && fmt === 'table') {
           console.log('No devices found');
           return;
         }
 
-        printTable(['deviceId', 'deviceName', 'type', 'controlType', 'family', 'roomID', 'room', 'hub', 'cloud'], rows);
-        console.log(`\nTotal: ${deviceList.length} physical device(s), ${infraredRemoteList.length} IR remote device(s)`);
-        console.log(`Tip: 'switchbot devices describe <deviceId>' shows a device's supported commands.`);
+        renderRows(wideHeaders, rows, fmt, userFields ?? (options.wide ? undefined : narrowHeaders));
+        if (fmt === 'table') {
+          console.log(`\nTotal: ${deviceList.length} physical device(s), ${infraredRemoteList.length} IR remote device(s)`);
+          console.log(`Tip: 'switchbot devices describe <deviceId>' shows a device's supported commands.`);
+        }
       } catch (error) {
         handleError(error);
       }
@@ -147,37 +149,39 @@ Examples:
     .description('Query the real-time status of a specific device')
     .argument('<deviceId>', 'Device ID from "devices list" (physical devices only; IR remotes have no status)')
     .addHelpText('after', `
-Returned fields vary by device type — e.g. Bot returns power/battery, Meter
-returns temperature/humidity/battery, Curtain returns slidePosition/moving,
-Color Bulb returns brightness/color/colorTemperature, etc.
+Status fields vary by device type. To discover them without a live call:
 
-To see exactly which status fields a given type returns BEFORE calling the
-API, use the offline catalog:
+  switchbot devices commands <type>    (prints the "Status fields" section)
 
-  switchbot devices commands <type>       (prints the "Status fields" section)
-
-IR remote devices cannot be queried — the SwitchBot API returns no status
-channel for them. Use 'devices list' to confirm a deviceId is a physical
-device (not in the 'infraredRemoteList').
+For --fields: run the command once with --format yaml (no --fields) to see
+all field names returned by your specific device, then narrow with --fields.
 
 Examples:
   $ switchbot devices status ABC123DEF456
   $ switchbot devices status ABC123DEF456 --json
+  $ switchbot devices status ABC123DEF456 --format yaml
+  $ switchbot devices status ABC123DEF456 --format tsv --fields power,battery
   $ switchbot devices status ABC123DEF456 --json | jq '.battery'
 `)
     .action(async (deviceId: string) => {
       try {
-        const client = createClient();
-        const res = await client.get<{ body: Record<string, unknown> }>(
-          `/v1.1/devices/${deviceId}/status`
-        );
+        const body = await fetchDeviceStatus(deviceId);
+        const fmt = resolveFormat();
 
-        if (isJsonMode()) {
-          printJson(res.data.body);
+        if (fmt === 'json' && process.argv.includes('--json')) {
+          printJson(body);
           return;
         }
 
-        printKeyValue(res.data.body);
+        if (fmt !== 'table') {
+          const allHeaders = Object.keys(body);
+          const allRows = [Object.values(body) as unknown[]];
+          const fields = resolveFields();
+          renderRows(allHeaders, allRows, fmt, fields);
+          return;
+        }
+
+        printKeyValue(body);
       } catch (error) {
         handleError(error);
       }
@@ -191,6 +195,7 @@ Examples:
     .argument('<cmd>', 'Command name, e.g. turnOn, turnOff, setColor, setBrightness, setAll, startClean')
     .argument('[parameter]', 'Command parameter. Omit for commands like turnOn/turnOff (defaults to "default"). Format depends on the command (see below).')
     .option('--type <commandType>', 'Command type: "command" for built-in commands (default), "customize" for user-defined IR buttons', 'command')
+    .option('--yes', 'Confirm a destructive command (Smart Lock unlock, Garage open, …). --dry-run is always allowed without --yes.')
     .addHelpText('after', `
 ────────────────────────────────────────────────────────────────────────
 For the full list of commands a specific device supports — and their
@@ -223,19 +228,79 @@ Common errors:
   161  device offline (BLE devices need a Hub bridge)
   171  hub offline
 
+Safety:
+  Destructive commands (Smart Lock unlock, Garage Door Opener turnOn/turnOff,
+  Keypad createKey/deleteKey, …) are blocked by default. Pass --yes to confirm,
+  or --dry-run to preview without sending.
+
 Examples:
   $ switchbot devices command ABC123 turnOn
   $ switchbot devices command ABC123 setColor "255:0:0"
   $ switchbot devices command ABC123 setAll "26,1,3,on"
   $ switchbot devices command ABC123 startClean '{"action":"sweep","param":{"fanLevel":2,"times":1}}'
   $ switchbot devices command ABC123 "MyButton" --type customize
+  $ switchbot devices command <lockId> unlock --yes
 `)
-    .action(async (deviceId: string, cmd: string, parameter: string | undefined, options: { type: string }) => {
-      validateCommandAgainstCache(deviceId, cmd, parameter, options.type);
+    .action(async (deviceId: string, cmd: string, parameter: string | undefined, options: { type: string; yes?: boolean }) => {
+      const validation = validateCommand(deviceId, cmd, parameter, options.type);
+      if (!validation.ok) {
+        const err = validation.error;
+        if (isJsonMode()) {
+          const obj: Record<string, unknown> = { code: 2, kind: 'usage', message: err.message };
+          if (err.hint) obj.hint = err.hint;
+          obj.context = { validationKind: err.kind };
+          console.error(JSON.stringify({ error: obj }));
+        } else {
+          console.error(`Error: ${err.message}`);
+          if (err.hint) console.error(err.hint);
+          if (err.kind === 'unknown-command') {
+            const cached = getCachedDevice(deviceId);
+            if (cached) {
+              console.error(
+                `Run 'switchbot devices commands ${JSON.stringify(cached.type)}' for parameter formats and descriptions.`
+              );
+              console.error(
+                `(If the catalog is out of date, run 'switchbot devices list' to refresh the local cache, or pass --type customize for custom IR buttons.)`
+              );
+            }
+          }
+        }
+        process.exit(2);
+      }
+
+      const cachedForGuard = getCachedDevice(deviceId);
+      if (
+        !options.yes &&
+        !isDryRun() &&
+        isDestructiveCommand(cachedForGuard?.type, cmd, options.type)
+      ) {
+        const typeLabel = cachedForGuard?.type ?? 'unknown';
+        const reason = getDestructiveReason(cachedForGuard?.type, cmd, options.type);
+        if (isJsonMode()) {
+          console.error(JSON.stringify({
+            error: {
+              code: 2,
+              kind: 'guard',
+              message: `"${cmd}" on ${typeLabel} is destructive and requires --yes.`,
+              hint: reason
+                ? `Re-run with --yes to confirm. Reason: ${reason}`
+                : 'Re-run with --yes to confirm, or --dry-run to preview without sending.',
+              context: { command: cmd, deviceType: typeLabel, deviceId, ...(reason ? { destructiveReason: reason } : {}) },
+            },
+          }));
+        } else {
+          console.error(
+            `Refusing to run destructive command "${cmd}" on ${typeLabel} without --yes.`
+          );
+          if (reason) console.error(`Reason: ${reason}`);
+          console.error(
+            `Re-run with --yes to confirm, or --dry-run to preview without sending.`
+          );
+        }
+        process.exit(2);
+      }
 
       try {
-        const client = createClient();
-
         // parameter may be a JSON object string (e.g. S10 startClean) or a plain string
         let parsedParam: unknown = parameter ?? 'default';
         if (parameter) {
@@ -246,25 +311,21 @@ Examples:
           }
         }
 
-        const body = {
-          command: cmd,
-          parameter: parsedParam,
-          commandType: options.type,
-        };
-
-        const res = await client.post<{ body: unknown }>(
-          `/v1.1/devices/${deviceId}/commands`,
-          body
+        const body = await executeCommand(
+          deviceId,
+          cmd,
+          parsedParam,
+          options.type as 'command' | 'customize'
         );
 
         if (isJsonMode()) {
-          printJson(res.data.body);
+          printJson(body);
           return;
         }
 
         console.log(`✓ Command sent: ${cmd}`);
-        if (res.data.body && typeof res.data.body === 'object' && Object.keys(res.data.body).length > 0) {
-          printKeyValue(res.data.body as Record<string, unknown>);
+        if (body && typeof body === 'object' && Object.keys(body).length > 0) {
+          printKeyValue(body as Record<string, unknown>);
         }
       } catch (error) {
         handleError(error);
@@ -284,18 +345,27 @@ Examples:
   $ switchbot devices types --json
 `)
     .action(() => {
-      if (isJsonMode()) {
-        printJson(DEVICE_CATALOG);
-        return;
+      try {
+        const catalog = getEffectiveCatalog();
+        const fmt = resolveFormat();
+        if (fmt === 'json') {
+          printJson(catalog);
+          return;
+        }
+        const headers = ['type', 'category', 'commands', 'aliases'];
+        const rows = catalog.map((e) => [
+          e.type,
+          e.category,
+          String(e.commands.length),
+          (e.aliases ?? []).join(', ') || '—',
+        ]);
+        renderRows(headers, rows, fmt, resolveFields());
+        if (fmt === 'table') {
+          console.log(`\nTotal: ${catalog.length} device type(s)`);
+        }
+      } catch (error) {
+        handleError(error);
       }
-      const rows = DEVICE_CATALOG.map((e) => [
-        e.type,
-        e.category,
-        String(e.commands.length),
-        (e.aliases ?? []).join(', ') || '—',
-      ]);
-      printTable(['type', 'category', 'commands', 'aliases'], rows);
-      console.log(`\nTotal: ${DEVICE_CATALOG.length} device type(s)`);
     });
 
   // switchbot devices commands <type>
@@ -320,22 +390,25 @@ Examples:
 `)
     .action((typeParts: string[]) => {
       const type = typeParts.join(' ');
-      const match = findCatalogEntry(type);
-      if (!match) {
-        console.error(`No device type matches "${type}".`);
-        console.error(`Try 'switchbot devices types' to see the full list.`);
-        process.exit(2);
+      try {
+        const match = findCatalogEntry(type);
+        if (!match) {
+          throw new UsageError(
+            `No device type matches "${type}". Try 'switchbot devices types' to see the full list.`
+          );
+        }
+        if (Array.isArray(match)) {
+          const types = match.map((m) => m.type).join(', ');
+          throw new UsageError(`"${type}" matches multiple types: ${types}. Be more specific.`);
+        }
+        if (isJsonMode()) {
+          printJson(match);
+          return;
+        }
+        renderCatalogEntry(match);
+      } catch (error) {
+        handleError(error);
       }
-      if (Array.isArray(match)) {
-        console.error(`"${type}" matches multiple types. Be more specific:`);
-        for (const m of match) console.error(`  • ${m.type}`);
-        process.exit(2);
-      }
-      if (isJsonMode()) {
-        printJson(match);
-        return;
-      }
-      renderCatalogEntry(match);
     });
 
   // switchbot devices describe <deviceId>
@@ -343,48 +416,54 @@ Examples:
     .command('describe')
     .description('Describe a device by ID: metadata + supported commands + status fields (1 API call)')
     .argument('<deviceId>', 'Target device ID from "devices list"')
+    .option('--live', 'Also fetch live status values and merge them into capabilities (costs 1 extra API call)')
     .addHelpText('after', `
-Makes a single GET /v1.1/devices call to look up the device's type, then
-prints its metadata alongside the matching catalog entry (supported
-commands + parameter formats + status field names).
+Makes a GET /v1.1/devices call to look up the device's type, then prints its
+metadata alongside the matching catalog entry (supported commands + parameter
+formats + status field names). With --live, makes a second call to fetch the
+current status values and merges them into the output.
 
-Does NOT fetch live status values. Use 'switchbot devices status <id>' for that.
+JSON output shape (--json):
+  {
+    device: <raw API fields>,
+    controlType: <string|null>,
+    catalog: <catalog entry, or null>,
+    capabilities: {
+      role: <functional role>,
+      readOnly: <boolean>,
+      commands: [{command, parameter, description, idempotent?, destructive?, exampleParams?}],
+      statusFields: [<name>],
+      liveStatus: <status payload when --live was passed>
+    },
+    source: "catalog" | "live" | "catalog+live" | "none",
+    suggestedActions: [{command, parameter?, description}]
+  }
 
 Examples:
   $ switchbot devices describe ABC123DEF456
+  $ switchbot devices describe ABC123DEF456 --live
   $ switchbot devices describe ABC123DEF456 --json
+  $ switchbot devices describe <lockId> --json | jq '.capabilities.commands[] | select(.destructive)'
 `)
-    .action(async (deviceId: string) => {
+    .action(async (deviceId: string, options: { live?: boolean }) => {
       try {
-        const client = createClient();
-        const res = await client.get<{ body: DeviceListBody }>('/v1.1/devices');
-        const { deviceList, infraredRemoteList } = res.data.body;
-
-        updateCacheFromDeviceList(res.data.body);
-
-        const physical = deviceList.find((d) => d.deviceId === deviceId);
-        const ir = infraredRemoteList.find((d) => d.deviceId === deviceId);
-
-        if (!physical && !ir) {
-          console.error(`No device with id "${deviceId}" found on this account.`);
-          console.error(`Try 'switchbot devices list' to see the full list.`);
-          process.exit(1);
-        }
-
-        const typeName = physical ? (physical.deviceType ?? '') : ir!.remoteType;
-        const match = typeName ? findCatalogEntry(typeName) : null;
-        const catalogEntry = !match || Array.isArray(match) ? null : match;
+        const result = await describeDevice(deviceId, options);
+        const { device, isPhysical, typeName, controlType, catalog, capabilities, source, suggestedActions: picks } = result;
 
         if (isJsonMode()) {
           printJson({
-            device: physical ?? ir,
-            controlType: (physical?.controlType ?? ir?.controlType) ?? null,
-            catalog: catalogEntry,
+            device,
+            controlType,
+            catalog,
+            capabilities,
+            source,
+            suggestedActions: picks,
           });
           return;
         }
 
-        if (physical) {
+        if (isPhysical) {
+          const physical = device as Device;
           printKeyValue({
             deviceId: physical.deviceId,
             deviceName: physical.deviceName,
@@ -396,8 +475,9 @@ Examples:
             hub: !physical.hubDeviceId || physical.hubDeviceId === '000000000000' ? '—' : physical.hubDeviceId,
             cloudService: physical.enableCloudService,
           });
-        } else if (ir) {
-          const inherited = buildHubLocationMap(deviceList).get(ir.hubDeviceId);
+        } else {
+          const ir = device as { deviceId: string; deviceName: string; remoteType: string; controlType?: string; hubDeviceId: string };
+          const inherited = result.inheritedLocation;
           printKeyValue({
             deviceId: ir.deviceId,
             deviceName: ir.deviceName,
@@ -410,83 +490,54 @@ Examples:
           });
         }
 
+        const liveStatus =
+          capabilities && 'liveStatus' in capabilities ? capabilities.liveStatus : undefined;
+
         console.log('');
-        if (!catalogEntry) {
+        if (!catalog) {
           console.log(`(Type "${typeName}" is not in the built-in catalog — no command reference available.)`);
-          console.log(`Send custom IR buttons with: switchbot devices command ${deviceId} "<buttonName>" --type customize`);
+          if (isPhysical) {
+            console.log(`Try 'switchbot devices status ${deviceId}' to see what this device reports.`);
+          } else {
+            console.log(`Send custom IR buttons with: switchbot devices command ${deviceId} "<buttonName>" --type customize`);
+          }
+          if (liveStatus) {
+            console.log('\nLive status:');
+            printKeyValue(liveStatus);
+          }
           return;
         }
-        renderCatalogEntry(catalogEntry);
+        renderCatalogEntry(catalog);
+
+        if (liveStatus) {
+          console.log('\nLive status:');
+          printKeyValue(liveStatus);
+        }
       } catch (error) {
+        if (error instanceof DeviceNotFoundError) {
+          console.error(error.message);
+          console.error(`Try 'switchbot devices list' to see the full list.`);
+          process.exit(1);
+        }
         handleError(error);
       }
     });
-}
 
-function buildHubLocationMap(
-  deviceList: Device[]
-): Map<string, { family?: string; room?: string; roomID?: string }> {
-  const map = new Map<string, { family?: string; room?: string; roomID?: string }>();
-  for (const d of deviceList) {
-    if (!d.deviceId) continue;
-    map.set(d.deviceId, {
-      family: d.familyName ?? undefined,
-      room: d.roomName ?? undefined,
-      roomID: d.roomID ?? undefined,
-    });
-  }
-  return map;
-}
+  // switchbot devices batch <command> ...
+  registerBatchCommand(devices);
 
-function validateCommandAgainstCache(
-  deviceId: string,
-  cmd: string,
-  parameter: string | undefined,
-  commandType: string
-): void {
-  // Custom IR buttons have arbitrary names — skip validation.
-  if (commandType === 'customize') return;
+  // switchbot devices watch <id...>
+  registerWatchCommand(devices);
 
-  const cached = getCachedDevice(deviceId);
-  if (!cached) return;
-
-  const match = findCatalogEntry(cached.type);
-  if (!match || Array.isArray(match)) return;
-  const entry = match;
-
-  const builtinCommands = entry.commands.filter((c) => c.commandType !== 'customize');
-  if (builtinCommands.length === 0) return;
-
-  const spec = builtinCommands.find((c) => c.command === cmd);
-  if (!spec) {
-    const unique = [...new Set(builtinCommands.map((c) => c.command))];
-    console.error(
-      `Error: "${cmd}" is not a supported command for ${cached.name} (${cached.type}).`
-    );
-    console.error(`Supported commands: ${unique.join(', ')}`);
-    console.error(
-      `Run 'switchbot devices commands ${JSON.stringify(cached.type)}' for parameter formats and descriptions.`
-    );
-    console.error(
-      `(If the catalog is out of date, run 'switchbot devices list' to refresh the local cache, or pass --type customize for custom IR buttons.)`
-    );
-    process.exit(2);
-  }
-
-  const noParamExpected = spec.parameter === '—';
-  const userProvidedParam = parameter !== undefined && parameter !== 'default';
-  if (noParamExpected && userProvidedParam) {
-    console.error(
-      `Error: "${cmd}" takes no parameter, but one was provided: "${parameter}".`
-    );
-    console.error(`Try: switchbot devices command ${deviceId} ${cmd}`);
-    process.exit(2);
-  }
+  // switchbot devices explain <id>
+  registerExplainCommand(devices);
 }
 
 function renderCatalogEntry(entry: DeviceCatalogEntry): void {
   console.log(`Type:     ${entry.type}`);
   console.log(`Category: ${entry.category === 'ir' ? 'IR remote' : 'Physical device'}`);
+  if (entry.role) console.log(`Role:     ${entry.role}`);
+  if (entry.readOnly) console.log(`ReadOnly: yes (status-only device, no control commands)`);
   if (entry.aliases && entry.aliases.length > 0) {
     console.log(`Aliases:  ${entry.aliases.join(', ')}`);
   }
@@ -495,12 +546,18 @@ function renderCatalogEntry(entry: DeviceCatalogEntry): void {
     console.log('\nCommands: (none — status-only device)');
   } else {
     console.log('\nCommands:');
-    const rows = entry.commands.map((c) => [
-      c.commandType === 'customize' ? `${c.command}  [customize]` : c.command,
-      c.parameter,
-      c.description,
-    ]);
+    const rows = entry.commands.map((c) => {
+      const flags: string[] = [];
+      if (c.commandType === 'customize') flags.push('customize');
+      if (c.destructive) flags.push('!destructive');
+      const label = flags.length > 0 ? `${c.command}  [${flags.join(', ')}]` : c.command;
+      return [label, c.parameter, c.description];
+    });
     printTable(['command', 'parameter', 'description'], rows);
+    const hasDestructive = entry.commands.some((c) => c.destructive);
+    if (hasDestructive) {
+      console.log('\n[!destructive] commands have hard-to-reverse real-world effects — confirm before issuing.');
+    }
   }
 
   if (entry.statusFields && entry.statusFields.length > 0) {
