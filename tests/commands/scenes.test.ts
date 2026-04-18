@@ -76,6 +76,36 @@ describe('scenes command', () => {
       expect(res.exitCode).toBe(1);
       expect(res.stderr.join('\n')).toContain('server down');
     });
+
+    it('--format=tsv outputs tab-separated scene data', async () => {
+      apiMock.__instance.get.mockResolvedValue({
+        data: {
+          body: [
+            { sceneId: 'S1', sceneName: 'Good Morning' },
+            { sceneId: 'S2', sceneName: 'Movie Time' },
+          ],
+        },
+      });
+      const res = await runCli(registerScenesCommand, ['scenes', 'list', '--format', 'tsv']);
+      const lines = res.stdout.join('\n').split('\n');
+      expect(lines[0]).toBe('sceneId\tsceneName');
+      expect(lines[1]).toBe('S1\tGood Morning');
+      expect(lines[2]).toBe('S2\tMovie Time');
+    });
+
+    it('--format=id outputs one sceneId per line', async () => {
+      apiMock.__instance.get.mockResolvedValue({
+        data: {
+          body: [
+            { sceneId: 'S1', sceneName: 'Good Morning' },
+            { sceneId: 'S2', sceneName: 'Movie Time' },
+          ],
+        },
+      });
+      const res = await runCli(registerScenesCommand, ['scenes', 'list', '--format', 'id']);
+      const lines = res.stdout.join('\n').split('\n').filter(Boolean);
+      expect(lines).toEqual(['S1', 'S2']);
+    });
   });
 
   describe('execute', () => {

@@ -1,0 +1,468 @@
+import { Command } from 'commander';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { z } from 'zod';
+import { handleError, isJsonMode } from '../utils/output.js';
+import {
+  fetchDeviceList,
+  fetchDeviceStatus,
+  executeCommand,
+  describeDevice,
+  validateCommand,
+  isDestructiveCommand,
+  getDestructiveReason,
+  searchCatalog,
+  DeviceNotFoundError,
+  toMcpDescribeShape,
+  toMcpDeviceListShape,
+  toMcpIrDeviceShape,
+} from '../lib/devices.js';
+import { fetchScenes, executeScene } from '../lib/scenes.js';
+import { findCatalogEntry } from '../devices/catalog.js';
+import { getCachedDevice } from '../devices/cache.js';
+
+/**
+ * Factory — build an McpServer with the six SwitchBot tools registered.
+ * Exported so tests and alternative transports can reuse it.
+ */
+
+type McpErrorKind = 'api' | 'runtime' | 'usage' | 'guard';
+
+function mcpError(
+  kind: McpErrorKind,
+  code: number,
+  message: string,
+  options?: { hint?: string; retryable?: boolean; context?: Record<string, unknown> },
+) {
+  const obj: Record<string, unknown> = { code, kind, message };
+  if (options?.hint) obj.hint = options.hint;
+  if (options?.retryable) obj.retryable = true;
+  if (options?.context) obj.context = options.context;
+  return {
+    isError: true as const,
+    content: [{ type: 'text' as const, text: JSON.stringify({ error: obj }, null, 2) }],
+  };
+}
+
+export function createSwitchBotMcpServer(): McpServer {
+  const server = new McpServer(
+    {
+      name: 'switchbot',
+      version: '1.4.0',
+    },
+    {
+      capabilities: { tools: {} },
+      instructions:
+        `SwitchBot is an IoT smart home brand by Wonderlabs, Inc. This MCP server controls physical devices \
+(Bot, Curtain, Smart Lock, Color Bulb, Meter, Plug, Robot Vacuum, etc.) and IR remotes \
+(TV, AC, Set Top Box, etc.) via the SwitchBot Cloud API v1.1.
+
+Device categories:
+- physical: Wi-Fi/BLE devices; BLE-only ones require a Hub (check enableCloudService)
+- ir: IR remotes learned by a Hub; no status channel, commands only
+
+Key constraints:
+- API quota: 10,000 requests/day per account — use cache, avoid polling
+- Destructive commands (unlock, garage open, keypad createKey/deleteKey) require confirm:true
+- Devices without enableCloudService cannot receive commands via API
+
+Recommended bootstrap sequence:
+1. list_devices → get deviceIds and categories
+2. search_catalog or describe_device → confirm supported commands offline/online
+3. send_command (with confirm:true for destructive commands)
+
+API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
+    }
+  );
+
+  // ---- list_devices ---------------------------------------------------------
+  server.registerTool(
+    'list_devices',
+    {
+      title: 'List all devices on the account',
+      description:
+        'Fetch the inventory of physical devices and IR remotes on this SwitchBot account. Refreshes the local cache.',
+      inputSchema: {},
+      outputSchema: {
+        deviceList: z.array(z.object({
+          deviceId: z.string(),
+          deviceName: z.string(),
+          deviceType: z.string().optional(),
+          enableCloudService: z.boolean(),
+          hubDeviceId: z.string(),
+          roomID: z.string().optional(),
+          roomName: z.string().nullable().optional(),
+          familyName: z.string().optional(),
+          controlType: z.string().optional(),
+        }).passthrough()).describe('Physical SwitchBot devices'),
+        infraredRemoteList: z.array(z.object({
+          deviceId: z.string(),
+          deviceName: z.string(),
+          remoteType: z.string(),
+          hubDeviceId: z.string(),
+          controlType: z.string().optional(),
+        }).passthrough()).describe('IR remote devices'),
+      },
+    },
+    async () => {
+      const body = await fetchDeviceList();
+      return {
+        content: [{ type: 'text', text: JSON.stringify(body, null, 2) }],
+        structuredContent: {
+          deviceList: body.deviceList.map(toMcpDeviceListShape),
+          infraredRemoteList: body.infraredRemoteList.map(toMcpIrDeviceShape),
+        },
+      };
+    }
+  );
+
+  // ---- get_device_status ----------------------------------------------------
+  server.registerTool(
+    'get_device_status',
+    {
+      title: 'Get live status for a device',
+      description:
+        'Query the real-time status payload for a physical device. IR remotes have no status channel and will error.',
+      inputSchema: {
+        deviceId: z.string().describe('Device ID from list_devices'),
+      },
+      outputSchema: {
+        status: z.object({
+          deviceId: z.string().optional(),
+          deviceType: z.string().optional(),
+          hubDeviceId: z.string().optional(),
+          connectionStatus: z.string().optional(),
+        }).passthrough().describe('Live device status (deviceId + deviceType + device-specific fields)'),
+      },
+    },
+    async ({ deviceId }) => {
+      const body = await fetchDeviceStatus(deviceId);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(body, null, 2) }],
+        structuredContent: { status: body as { deviceId?: string; deviceType?: string; [key: string]: unknown } },
+      };
+    }
+  );
+
+  // ---- send_command ---------------------------------------------------------
+  server.registerTool(
+    'send_command',
+    {
+      title: 'Send a control command to a device',
+      description:
+        'Send a control command (turnOn, setColor, startClean, unlock, ...) to a device. Destructive commands (unlock, garage open, keypad createKey) require confirm:true; otherwise they are rejected.',
+      inputSchema: {
+        deviceId: z.string().describe('Device ID from list_devices'),
+        command: z.string().describe('Command name, case-sensitive (e.g. turnOn, setColor, unlock)'),
+        parameter: z
+          .union([z.string(), z.number(), z.boolean(), z.record(z.string(), z.unknown()), z.array(z.unknown())])
+          .optional()
+          .describe('Command parameter. Omit for no-arg commands.'),
+        commandType: z
+          .enum(['command', 'customize'])
+          .optional()
+          .default('command')
+          .describe('"command" for built-in commands; "customize" for user-defined IR buttons'),
+        confirm: z
+          .boolean()
+          .optional()
+          .default(false)
+          .describe('Required true for destructive commands (unlock, garage open, createKey, ...)'),
+      },
+      outputSchema: {
+        ok: z.literal(true),
+        command: z.string(),
+        deviceId: z.string(),
+        result: z.unknown().describe('API response body from SwitchBot'),
+      },
+    },
+    async ({ deviceId, command, parameter, commandType, confirm }) => {
+      const effectiveType = commandType ?? 'command';
+
+      // Resolve the device's catalog type via cache or a fresh lookup so we
+      // can evaluate destructive/validation without an extra round-trip if
+      // the cache is warm.
+      let typeName = getCachedDevice(deviceId)?.type;
+      if (!typeName) {
+        const body = await fetchDeviceList();
+        const physical = body.deviceList.find((d) => d.deviceId === deviceId);
+        const ir = body.infraredRemoteList.find((d) => d.deviceId === deviceId);
+        if (!physical && !ir) {
+          return mcpError('runtime', 152, `Device not found: ${deviceId}`, {
+            hint: "Check the deviceId with 'switchbot devices list' (IDs are case-sensitive).",
+          });
+        }
+        typeName = physical ? physical.deviceType : ir!.remoteType;
+      }
+
+      if (isDestructiveCommand(typeName, command, effectiveType) && !confirm) {
+        const reason = getDestructiveReason(typeName, command, effectiveType);
+        const entry = typeName ? findCatalogEntry(typeName) : null;
+        const spec =
+          entry && !Array.isArray(entry)
+            ? entry.commands.find((c) => c.command === command)
+            : undefined;
+        const hint = reason
+          ? `Re-issue with confirm:true after confirming with the user. Reason: ${reason}`
+          : 'Re-issue the call with confirm:true to proceed.';
+        return mcpError(
+          'guard', 3,
+          `Command "${command}" on device type "${typeName}" is destructive and requires confirm:true.`,
+          {
+            hint,
+            context: {
+              command,
+              deviceType: typeName,
+              description: spec?.description ?? null,
+              ...(reason ? { destructiveReason: reason } : {}),
+            },
+          },
+        );
+      }
+
+      // stringifiedParam is what validateCommand expects to decide
+      // "no-parameter" conflicts — mirror the CLI behavior.
+      const stringifiedParam =
+        parameter === undefined ? undefined : typeof parameter === 'string' ? parameter : JSON.stringify(parameter);
+      const validation = validateCommand(deviceId, command, stringifiedParam, effectiveType);
+      if (!validation.ok) {
+        return mcpError(
+          'usage', 2,
+          validation.error.message,
+          { hint: validation.error.hint, context: { validationKind: validation.error.kind } },
+        );
+      }
+
+      const result = await executeCommand(deviceId, command, parameter, effectiveType);
+      const structured = { ok: true as const, command, deviceId, result };
+      return {
+        content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+        structuredContent: structured,
+      };
+    }
+  );
+
+  // ---- run_scene ------------------------------------------------------------
+  server.registerTool(
+    'run_scene',
+    {
+      title: 'Execute a manual scene',
+      description: 'Execute a manual SwitchBot scene by its sceneId (from list_scenes).',
+      inputSchema: {
+        sceneId: z.string().describe('Scene ID from list_scenes'),
+      },
+      outputSchema: {
+        ok: z.literal(true),
+        sceneId: z.string(),
+      },
+    },
+    async ({ sceneId }) => {
+      await executeScene(sceneId);
+      const structured = { ok: true as const, sceneId };
+      return {
+        content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+        structuredContent: structured,
+      };
+    }
+  );
+
+  // ---- list_scenes (companion to run_scene) ---------------------------------
+  server.registerTool(
+    'list_scenes',
+    {
+      title: 'List all manual scenes',
+      description: 'Fetch all manual scenes configured in the SwitchBot app.',
+      inputSchema: {},
+      outputSchema: {
+        scenes: z.array(z.object({ sceneId: z.string(), sceneName: z.string() })),
+      },
+    },
+    async () => {
+      const scenes = await fetchScenes();
+      return {
+        content: [{ type: 'text', text: JSON.stringify(scenes, null, 2) }],
+        structuredContent: { scenes },
+      };
+    }
+  );
+
+  // ---- search_catalog -------------------------------------------------------
+  server.registerTool(
+    'search_catalog',
+    {
+      title: 'Search the offline device catalog',
+      description:
+        'Search the built-in device catalog by type name or alias. Returns matching entries with their commands, roles, destructive flags, and status fields. No API call.',
+      inputSchema: {
+        query: z.string().describe('Search query (matches type and aliases, case-insensitive). Use empty string to list all.'),
+        limit: z.number().int().min(1).max(100).optional().default(20).describe('Max entries returned (default 20)'),
+      },
+      outputSchema: {
+        results: z.array(z.object({
+          type: z.string(),
+          category: z.enum(['physical', 'ir']),
+          commands: z.array(z.object({
+            command: z.string(),
+            parameter: z.string(),
+            description: z.string(),
+            commandType: z.enum(['command', 'customize']).optional(),
+            idempotent: z.boolean().optional(),
+            destructive: z.boolean().optional(),
+          }).passthrough()),
+          aliases: z.array(z.string()).optional(),
+          statusFields: z.array(z.string()).optional(),
+          role: z.string().optional(),
+          readOnly: z.boolean().optional(),
+        }).passthrough()).describe('Matching catalog entries'),
+        total: z.number().int().describe('Number of entries returned'),
+      },
+    },
+    async ({ query, limit }) => {
+      const hits = searchCatalog(query, limit);
+      const structured = { results: hits as unknown as Array<Record<string, unknown>>, total: hits.length };
+      return {
+        content: [{ type: 'text', text: JSON.stringify(hits, null, 2) }],
+        structuredContent: structured,
+      };
+    }
+  );
+
+  // ---- describe_device ------------------------------------------------------
+  server.registerTool(
+    'describe_device',
+    {
+      title: 'Describe a specific device',
+      description:
+        'Resolve a deviceId to its metadata + catalog entry + suggested safe actions. Pass live:true to also fetch real-time status values.',
+      inputSchema: {
+        deviceId: z.string().describe('Device ID from list_devices'),
+        live: z.boolean().optional().default(false).describe('Also fetch live /status values (costs 1 extra API call)'),
+      },
+      outputSchema: {
+        device: z.object({
+          device: z.object({ deviceId: z.string(), deviceName: z.string() }).passthrough(),
+          isPhysical: z.boolean(),
+          typeName: z.string(),
+          controlType: z.string().nullable(),
+          source: z.enum(['catalog', 'live', 'catalog+live', 'none']),
+          capabilities: z.unknown().nullable(),
+          suggestedActions: z.array(z.object({
+            command: z.string(),
+            parameter: z.string().optional(),
+            description: z.string(),
+          })).optional(),
+          inheritedLocation: z.object({
+            family: z.string().optional(),
+            room: z.string().optional(),
+          }).optional(),
+        }).passthrough().describe('Device metadata, catalog entry, capabilities, and optional live status'),
+      },
+    },
+    async ({ deviceId, live }) => {
+      try {
+        const result = await describeDevice(deviceId, { live });
+        return {
+          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+          structuredContent: { device: toMcpDescribeShape(result) },
+        };
+      } catch (err) {
+        if (err instanceof DeviceNotFoundError) {
+          return mcpError('runtime', 152, err.message, {
+            hint: "Check the deviceId with 'switchbot devices list' (IDs are case-sensitive).",
+            context: { deviceId },
+          });
+        }
+        throw err;
+      }
+    }
+  );
+
+  return server;
+}
+
+export function registerMcpCommand(program: Command): void {
+  const mcp = program
+    .command('mcp')
+    .description('Run as a Model Context Protocol server so AI agents can call SwitchBot tools')
+    .addHelpText('after', `
+The MCP server exposes seven tools over stdio:
+  - list_devices          fetch all physical + IR devices
+  - get_device_status     live status for a physical device
+  - send_command          control a device (destructive commands need confirm:true)
+  - list_scenes           list all manual scenes
+  - run_scene             execute a manual scene
+  - search_catalog        offline catalog search by type/alias
+  - describe_device       metadata + commands + (optionally) live status for one device
+
+Example Claude Desktop config (~/Library/Application Support/Claude/claude_desktop_config.json):
+
+  {
+    "mcpServers": {
+      "switchbot": {
+        "command": "switchbot",
+        "args": ["mcp", "serve"],
+        "env": {
+          "SWITCHBOT_TOKEN": "...",
+          "SWITCHBOT_SECRET": "..."
+        }
+      }
+    }
+  }
+
+Inspect locally:
+  $ npx @modelcontextprotocol/inspector switchbot mcp serve
+`);
+
+  mcp
+    .command('serve')
+    .description('Start the MCP server on stdio (default) or HTTP (--port)')
+    .option('--port <n>', 'Listen on HTTP instead of stdio (Streamable HTTP transport)')
+    .action(async (options: { port?: string }) => {
+      try {
+        if (options.port) {
+          const port = Number(options.port);
+          if (!Number.isFinite(port) || port < 1 || port > 65535) {
+            const msg = `Invalid --port "${options.port}". Must be 1-65535.`;
+            if (isJsonMode()) {
+              console.error(JSON.stringify({ error: { code: 2, kind: 'usage', message: msg } }));
+            } else {
+              console.error(msg);
+            }
+            process.exit(2);
+          }
+          const { createServer } = await import('node:http');
+          const httpServer = createServer(async (req, res) => {
+            // Stateless mode: fresh transport+server per request (SDK requirement).
+            const reqTransport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+            const reqServer = createSwitchBotMcpServer();
+            // Register cleanup before any async work so it fires on both normal
+            // close and error-path close (after the 500 response ends).
+            res.on('close', () => {
+              reqTransport.close();
+              reqServer.close();
+            });
+            try {
+              await reqServer.connect(reqTransport);
+              await reqTransport.handleRequest(req, res);
+            } catch (err) {
+              if (!res.headersSent) {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32603, message: 'Internal server error' }, id: null }));
+              }
+            }
+          });
+          httpServer.listen(port, () => {
+            console.error(`SwitchBot MCP server listening on http://localhost:${port}/mcp`);
+          });
+          return;
+        }
+
+        const server = createSwitchBotMcpServer();
+        const transport = new StdioServerTransport();
+        await server.connect(transport);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+}
