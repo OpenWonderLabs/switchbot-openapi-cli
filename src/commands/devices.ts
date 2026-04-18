@@ -8,11 +8,13 @@ import {
   executeCommand,
   describeDevice,
   validateCommand,
+  isDestructiveCommand,
   buildHubLocationMap,
   DeviceNotFoundError,
   type Device,
 } from '../lib/devices.js';
 import { registerBatchCommand } from './batch.js';
+import { isDryRun } from '../utils/flags.js';
 
 export function registerDevicesCommand(program: Command): void {
   const devices = program
@@ -168,6 +170,7 @@ Examples:
     .argument('<cmd>', 'Command name, e.g. turnOn, turnOff, setColor, setBrightness, setAll, startClean')
     .argument('[parameter]', 'Command parameter. Omit for commands like turnOn/turnOff (defaults to "default"). Format depends on the command (see below).')
     .option('--type <commandType>', 'Command type: "command" for built-in commands (default), "customize" for user-defined IR buttons', 'command')
+    .option('--yes', 'Confirm a destructive command (Smart Lock unlock, Garage open, …). --dry-run is always allowed without --yes.')
     .addHelpText('after', `
 ────────────────────────────────────────────────────────────────────────
 For the full list of commands a specific device supports — and their
@@ -200,14 +203,20 @@ Common errors:
   161  device offline (BLE devices need a Hub bridge)
   171  hub offline
 
+Safety:
+  Destructive commands (Smart Lock unlock, Garage Door Opener turnOn/turnOff,
+  Keypad createKey/deleteKey, …) are blocked by default. Pass --yes to confirm,
+  or --dry-run to preview without sending.
+
 Examples:
   $ switchbot devices command ABC123 turnOn
   $ switchbot devices command ABC123 setColor "255:0:0"
   $ switchbot devices command ABC123 setAll "26,1,3,on"
   $ switchbot devices command ABC123 startClean '{"action":"sweep","param":{"fanLevel":2,"times":1}}'
   $ switchbot devices command ABC123 "MyButton" --type customize
+  $ switchbot devices command <lockId> unlock --yes
 `)
-    .action(async (deviceId: string, cmd: string, parameter: string | undefined, options: { type: string }) => {
+    .action(async (deviceId: string, cmd: string, parameter: string | undefined, options: { type: string; yes?: boolean }) => {
       const validation = validateCommand(deviceId, cmd, parameter, options.type);
       if (!validation.ok) {
         const err = validation.error;
@@ -223,6 +232,35 @@ Examples:
               `(If the catalog is out of date, run 'switchbot devices list' to refresh the local cache, or pass --type customize for custom IR buttons.)`
             );
           }
+        }
+        process.exit(2);
+      }
+
+      const cachedForGuard = getCachedDevice(deviceId);
+      if (
+        !options.yes &&
+        !isDryRun() &&
+        isDestructiveCommand(cachedForGuard?.type, cmd, options.type)
+      ) {
+        const typeLabel = cachedForGuard?.type ?? 'unknown';
+        if (isJsonMode()) {
+          printJson({
+            error: {
+              code: 'destructive_requires_confirm',
+              message: `"${cmd}" on ${typeLabel} is destructive and requires --yes.`,
+              hint: `Re-run with --yes to confirm, or --dry-run to preview without sending.`,
+              deviceId,
+              command: cmd,
+              deviceType: typeLabel,
+            },
+          });
+        } else {
+          console.error(
+            `Refusing to run destructive command "${cmd}" on ${typeLabel} without --yes.`
+          );
+          console.error(
+            `Re-run with --yes to confirm, or --dry-run to preview without sending.`
+          );
         }
         process.exit(2);
       }

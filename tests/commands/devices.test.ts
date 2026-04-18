@@ -10,29 +10,28 @@ const clientInstance = vi.hoisted(() => ({
 
 const apiMock = vi.hoisted(() => {
   const instance = { get: vi.fn(), post: vi.fn() };
+  class DryRunSignal extends Error {
+    constructor(public readonly method: string, public readonly url: string) {
+      super('dry-run');
+      this.name = 'DryRunSignal';
+    }
+  }
   return {
     createClient: vi.fn(() => instance),
     __instance: instance,
+    DryRunSignal,
   };
 });
 
 vi.mock('../../src/api/client.js', () => ({
   createClient: apiMock.createClient,
   ApiError: class ApiError extends Error {
-    constructor(
-      message: string,
-      public readonly code: number
-    ) {
+    constructor(message: string, public readonly code: number) {
       super(message);
       this.name = 'ApiError';
     }
   },
-  DryRunSignal: class DryRunSignal extends Error {
-    constructor(public readonly method: string, public readonly url: string) {
-      super('dry-run');
-      this.name = 'DryRunSignal';
-    }
-  },
+  DryRunSignal: apiMock.DryRunSignal,
 }));
 
 import { registerDevicesCommand } from '../../src/commands/devices.js';
@@ -1485,6 +1484,104 @@ describe('devices command', () => {
         '/v1.1/devices/UNKNOWN-ID/commands',
         { command: 'anyCommand', parameter: 'default', commandType: 'command' }
       );
+    });
+  });
+
+  // =====================================================================
+  // command — destructive-command guard
+  // =====================================================================
+  describe('command — destructive guard', () => {
+    let tmpDir: string;
+    const LOCK_ID = 'LOCK-1';
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sbcli-destructive-'));
+      vi.spyOn(os, 'homedir').mockReturnValue(tmpDir);
+      updateCacheFromDeviceList({
+        deviceList: [
+          { deviceId: LOCK_ID, deviceName: 'Front Door', deviceType: 'Smart Lock' },
+          { deviceId: 'BULB-1', deviceName: 'Lamp', deviceType: 'Color Bulb' },
+        ],
+        infraredRemoteList: [],
+      });
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it('blocks Smart Lock unlock without --yes (exit 2, no POST)', async () => {
+      const res = await runCli(registerDevicesCommand, [
+        'devices', 'command', LOCK_ID, 'unlock',
+      ]);
+      expect(res.exitCode).toBe(2);
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
+      expect(res.stderr.join('\n')).toMatch(/destructive command "unlock"/);
+      expect(res.stderr.join('\n')).toMatch(/--yes/);
+    });
+
+    it('allows Smart Lock unlock when --yes is passed', async () => {
+      apiMock.__instance.post.mockResolvedValue({
+        data: { statusCode: 100, body: {} },
+      });
+      const res = await runCli(registerDevicesCommand, [
+        'devices', 'command', LOCK_ID, 'unlock', '--yes',
+      ]);
+      expect(res.exitCode).toBeNull();
+      expect(apiMock.__instance.post).toHaveBeenCalledWith(
+        `/v1.1/devices/${LOCK_ID}/commands`,
+        { command: 'unlock', parameter: 'default', commandType: 'command' }
+      );
+    });
+
+    it('allows --dry-run without --yes (guard yields to dry-run preview)', async () => {
+      apiMock.__instance.post.mockImplementation(async () => {
+        throw new apiMock.DryRunSignal('POST', `/v1.1/devices/${LOCK_ID}/commands`);
+      });
+      const res = await runCli(registerDevicesCommand, [
+        '--dry-run', 'devices', 'command', LOCK_ID, 'unlock',
+      ]);
+      // The guard must NOT block with exit 2 — dry-run is always allowed. The
+      // stderr must not carry the destructive-block message either.
+      expect(res.exitCode).not.toBe(2);
+      expect(res.stderr.join('\n')).not.toMatch(/destructive command "unlock"/);
+    });
+
+    it('does not guard non-destructive commands (turnOn on a Bulb)', async () => {
+      apiMock.__instance.post.mockResolvedValue({
+        data: { statusCode: 100, body: {} },
+      });
+      const res = await runCli(registerDevicesCommand, [
+        'devices', 'command', 'BULB-1', 'turnOn',
+      ]);
+      expect(res.exitCode).toBeNull();
+      expect(apiMock.__instance.post).toHaveBeenCalledTimes(1);
+    });
+
+    it('emits JSON error shape when --json is set and command is blocked', async () => {
+      const res = await runCli(registerDevicesCommand, [
+        '--json', 'devices', 'command', LOCK_ID, 'unlock',
+      ]);
+      expect(res.exitCode).toBe(2);
+      const parsed = JSON.parse(res.stdout.join('\n'));
+      expect(parsed.error.code).toBe('destructive_requires_confirm');
+      expect(parsed.error.deviceId).toBe(LOCK_ID);
+      expect(parsed.error.command).toBe('unlock');
+      expect(parsed.error.deviceType).toBe('Smart Lock');
+    });
+
+    it('does not guard --type customize (user-defined IR buttons)', async () => {
+      apiMock.__instance.post.mockResolvedValue({
+        data: { statusCode: 100, body: {} },
+      });
+      // Even if the button name happens to collide with a destructive command,
+      // customize IR buttons are opaque to the catalog and always allowed.
+      const res = await runCli(registerDevicesCommand, [
+        'devices', 'command', LOCK_ID, 'unlock', '--type', 'customize',
+      ]);
+      expect(res.exitCode).toBeNull();
+      expect(apiMock.__instance.post).toHaveBeenCalledTimes(1);
     });
   });
 });
