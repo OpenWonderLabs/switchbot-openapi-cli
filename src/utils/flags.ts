@@ -96,6 +96,8 @@ function parseDurationToMs(v: string): number | null {
   }
 }
 
+export { parseDurationToMs };
+
 export function getCacheMode(): CacheMode {
   if (process.argv.includes('--no-cache')) {
     return { listTtlMs: 0, statusTtlMs: 0 };

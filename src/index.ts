@@ -9,6 +9,7 @@ import { registerMcpCommand } from './commands/mcp.js';
 import { registerQuotaCommand } from './commands/quota.js';
 import { registerCatalogCommand } from './commands/catalog.js';
 import { registerCacheCommand } from './commands/cache.js';
+import { registerEventsCommand } from './commands/events.js';
 
 const program = new Command();
 
@@ -39,6 +40,7 @@ registerMcpCommand(program);
 registerQuotaCommand(program);
 registerCatalogCommand(program);
 registerCacheCommand(program);
+registerEventsCommand(program);
 
 program.addHelpText('after', `
 Credentials:
