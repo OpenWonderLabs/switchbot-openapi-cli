@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { printTable, printJson, isJsonMode } from '../utils/output.js';
+import { resolveFormat, resolveFields, renderRows } from '../utils/format.js';
 import {
   DEVICE_CATALOG,
   findCatalogEntry,
@@ -134,14 +135,20 @@ Examples:
         printJson(entries);
         return;
       }
+      const fmt = resolveFormat();
+      const headers = ['type', 'category', 'commands', 'aliases'];
       const rows = entries.map((e) => [
         e.type,
         e.category,
         String(e.commands.length),
         (e.aliases ?? []).join(', ') || '—',
       ]);
-      printTable(['type', 'category', 'commands', 'aliases'], rows);
-      console.log(`\nTotal: ${entries.length} device type(s)  (source: ${source})`);
+      if (fmt !== 'table') {
+        renderRows(headers, rows, fmt, resolveFields());
+      } else {
+        renderRows(headers, rows, 'table', resolveFields());
+        console.log(`\nTotal: ${entries.length} device type(s)  (source: ${source})`);
+      }
     });
 
   catalog

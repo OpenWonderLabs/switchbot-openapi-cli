@@ -58,6 +58,8 @@ const flagsMock = vi.hoisted(() => ({
   getProfile: vi.fn(() => undefined),
   getAuditLog: vi.fn(() => null),
   getCacheMode: vi.fn(() => ({ listTtlMs: 0, statusTtlMs: 0 })),
+  getFormat: vi.fn(() => undefined),
+  getFields: vi.fn(() => undefined),
 }));
 vi.mock('../../src/utils/flags.js', () => flagsMock);
 

@@ -20,8 +20,10 @@ const program = new Command();
 program
   .name('switchbot')
   .description('Command-line tool for SwitchBot API v1.1')
-  .version('2.0.0')
+  .version('2.1.0')
   .option('--json', 'Output raw JSON response (disables tables; useful for pipes/scripts)')
+  .option('--format <type>', 'Output format: table (default), json, jsonl, tsv, yaml, id')
+  .option('--fields <csv>', 'Comma-separated list of columns to include (e.g. --fields=id,name,type)')
   .option('-v, --verbose', 'Log HTTP request/response details to stderr')
   .option('--dry-run', 'Print mutating requests without sending them (GETs still execute)')
   .option('--timeout <ms>', 'HTTP request timeout in milliseconds (default: 30000)')

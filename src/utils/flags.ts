@@ -119,6 +119,18 @@ function parseDurationToMs(v: string): number | null {
 
 export { parseDurationToMs };
 
+/** The --format flag value, or undefined when absent. */
+export function getFormat(): string | undefined {
+  return getFlagValue('--format');
+}
+
+/** Comma-separated --fields value, split into an array. */
+export function getFields(): string[] | undefined {
+  const v = getFlagValue('--fields');
+  if (!v) return undefined;
+  return v.split(',').map((f) => f.trim()).filter(Boolean);
+}
+
 export function getCacheMode(): CacheMode {
   if (process.argv.includes('--no-cache')) {
     return { listTtlMs: 0, statusTtlMs: 0 };

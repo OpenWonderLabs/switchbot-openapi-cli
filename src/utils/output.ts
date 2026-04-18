@@ -2,8 +2,10 @@ import Table from 'cli-table3';
 import chalk from 'chalk';
 import { ApiError, DryRunSignal } from '../api/client.js';
 
+import { getFormat } from './flags.js';
+
 export function isJsonMode(): boolean {
-  return process.argv.includes('--json');
+  return process.argv.includes('--json') || getFormat() === 'json';
 }
 
 export function printJson(data: unknown): void {

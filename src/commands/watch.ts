@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { printJson, isJsonMode, handleError } from '../utils/output.js';
 import { fetchDeviceStatus } from '../lib/devices.js';
 import { getCachedDevice } from '../devices/cache.js';
-import { parseDurationToMs } from '../utils/flags.js';
+import { parseDurationToMs, getFields } from '../utils/flags.js';
 
 const DEFAULT_INTERVAL_MS = 30_000;
 const MIN_INTERVAL_MS = 1_000;
@@ -76,7 +76,6 @@ export function registerWatchCommand(devices: Command): void {
       '30s',
     )
     .option('--max <n>', 'Stop after N ticks (default: run until Ctrl-C)')
-    .option('--fields <csv>', 'Only track a subset of status fields (default: all)')
     .option('--include-unchanged', 'Emit a tick even when no field changed')
     .addHelpText(
       'after',
@@ -100,7 +99,6 @@ Examples:
         options: {
           interval: string;
           max?: string;
-          fields?: string;
           includeUnchanged?: boolean;
         },
       ) => {
@@ -123,9 +121,7 @@ Examples:
           maxTicks = Math.floor(n);
         }
 
-        const fields: string[] | null = options.fields
-          ? options.fields.split(',').map((s) => s.trim()).filter(Boolean)
-          : null;
+        const fields: string[] | null = getFields() ?? null;
 
         const ac = new AbortController();
         const onSig = () => ac.abort();

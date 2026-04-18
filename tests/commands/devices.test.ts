@@ -343,6 +343,69 @@ describe('devices command', () => {
     });
   });
 
+  describe('list --format', () => {
+    it('--format=tsv outputs tab-separated data', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list', '--format', 'tsv']);
+      const lines = res.stdout.join('\n').split('\n');
+      expect(lines[0]).toContain('deviceId\t');
+      expect(lines[0]).toContain('deviceName');
+      expect(lines[1]).toContain('ABC123\t');
+      expect(lines[1]).toContain('Living Lamp');
+    });
+
+    it('--format=tsv --fields=deviceId,type shows only those columns', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list', '--format', 'tsv', '--fields', 'deviceId,type']);
+      const lines = res.stdout.join('\n').split('\n');
+      expect(lines[0]).toBe('deviceId\ttype');
+      expect(lines[1]).toContain('ABC123');
+      expect(lines[1]).not.toContain('Living Lamp');
+    });
+
+    it('--format=id outputs one deviceId per line', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list', '--format', 'id']);
+      const lines = res.stdout.join('\n').split('\n').filter(Boolean);
+      expect(lines).toContain('ABC123');
+      expect(lines).toContain('BLE-001');
+      expect(lines.every((l) => !l.includes('\t'))).toBe(true);
+    });
+
+    it('--format=jsonl outputs one JSON object per line', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list', '--format', 'jsonl']);
+      const lines = res.stdout.join('\n').split('\n').filter(Boolean);
+      const first = JSON.parse(lines[0]);
+      expect(first.deviceId).toBe('ABC123');
+      expect(first.deviceName).toBe('Living Lamp');
+    });
+
+    it('--format=yaml outputs YAML documents', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list', '--format', 'yaml']);
+      const out = res.stdout.join('\n');
+      expect(out).toContain('---');
+      expect(out).toContain('deviceId: "ABC123"');
+      expect(out).toContain('deviceName: "Living Lamp"');
+    });
+
+    it('--format=table still shows the footer summary', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list', '--format', 'table']);
+      const out = res.stdout.join('\n');
+      expect(out).toContain('3 physical device');
+      expect(out).toContain('1 IR remote');
+    });
+
+    it('--format=tsv suppresses the footer summary', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list', '--format', 'tsv']);
+      const out = res.stdout.join('\n');
+      expect(out).not.toContain('physical device');
+    });
+  });
+
   // =====================================================================
   // status
   // =====================================================================
@@ -1028,6 +1091,20 @@ describe('devices command', () => {
       expect(out).toContain('"type"');
       expect(out).toContain('"category"');
       expect(out).toContain('"Bot"');
+    });
+
+    it('--format=tsv outputs tab-separated catalog rows', async () => {
+      const res = await runCli(registerDevicesCommand, ['devices', 'types', '--format', 'tsv']);
+      const lines = res.stdout.join('\n').split('\n');
+      expect(lines[0]).toBe('type\tcategory\tcommands\taliases');
+      expect(lines.find((l) => l.startsWith('Bot\t'))).toBeDefined();
+    });
+
+    it('--format=id outputs one type per line', async () => {
+      const res = await runCli(registerDevicesCommand, ['devices', 'types', '--format', 'id']);
+      const lines = res.stdout.join('\n').split('\n').filter(Boolean);
+      expect(lines).toContain('Bot');
+      expect(lines).toContain('Curtain');
     });
   });
 

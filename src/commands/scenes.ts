@@ -1,5 +1,6 @@
 import { Command } from 'commander';
-import { printTable, printJson, isJsonMode, handleError } from '../utils/output.js';
+import { printJson, handleError } from '../utils/output.js';
+import { resolveFormat, resolveFields, renderRows } from '../utils/format.js';
 import { fetchScenes, executeScene } from '../lib/scenes.js';
 
 export function registerScenesCommand(program: Command): void {
@@ -21,8 +22,9 @@ Examples:
     .action(async () => {
       try {
         const scenes = await fetchScenes();
+        const fmt = resolveFormat();
 
-        if (isJsonMode()) {
+        if (fmt === 'json') {
           printJson(scenes);
           return;
         }
@@ -32,9 +34,11 @@ Examples:
           return;
         }
 
-        printTable(
+        renderRows(
           ['sceneId', 'sceneName'],
-          scenes.map((s) => [s.sceneId, s.sceneName])
+          scenes.map((s) => [s.sceneId, s.sceneName]),
+          fmt,
+          resolveFields(),
         );
       } catch (error) {
         handleError(error);

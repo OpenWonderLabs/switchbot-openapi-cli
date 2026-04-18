@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { printTable, printKeyValue, printJson, isJsonMode, handleError } from '../utils/output.js';
+import { resolveFormat, resolveFields, renderRows } from '../utils/format.js';
 import { findCatalogEntry, getEffectiveCatalog, DeviceCatalogEntry } from '../devices/catalog.js';
 import { getCachedDevice } from '../devices/cache.js';
 import {
@@ -74,13 +75,15 @@ Examples:
       try {
         const body = await fetchDeviceList();
         const { deviceList, infraredRemoteList } = body;
+        const fmt = resolveFormat();
 
-        if (isJsonMode()) {
+        if (fmt === 'json' && process.argv.includes('--json')) {
           printJson(body);
           return;
         }
 
         const hubLocation = buildHubLocationMap(deviceList);
+        const headers = ['deviceId', 'deviceName', 'type', 'controlType', 'family', 'roomID', 'room', 'hub', 'cloud'];
         const rows: (string | boolean | null)[][] = [];
 
         for (const d of deviceList) {
@@ -117,9 +120,11 @@ Examples:
           return;
         }
 
-        printTable(['deviceId', 'deviceName', 'type', 'controlType', 'family', 'roomID', 'room', 'hub', 'cloud'], rows);
-        console.log(`\nTotal: ${deviceList.length} physical device(s), ${infraredRemoteList.length} IR remote device(s)`);
-        console.log(`Tip: 'switchbot devices describe <deviceId>' shows a device's supported commands.`);
+        renderRows(headers, rows, fmt, resolveFields());
+        if (fmt === 'table') {
+          console.log(`\nTotal: ${deviceList.length} physical device(s), ${infraredRemoteList.length} IR remote device(s)`);
+          console.log(`Tip: 'switchbot devices describe <deviceId>' shows a device's supported commands.`);
+        }
       } catch (error) {
         handleError(error);
       }
@@ -313,18 +318,22 @@ Examples:
 `)
     .action(() => {
       const catalog = getEffectiveCatalog();
-      if (isJsonMode()) {
+      const fmt = resolveFormat();
+      if (fmt === 'json') {
         printJson(catalog);
         return;
       }
+      const headers = ['type', 'category', 'commands', 'aliases'];
       const rows = catalog.map((e) => [
         e.type,
         e.category,
         String(e.commands.length),
         (e.aliases ?? []).join(', ') || '—',
       ]);
-      printTable(['type', 'category', 'commands', 'aliases'], rows);
-      console.log(`\nTotal: ${catalog.length} device type(s)`);
+      renderRows(headers, rows, fmt, resolveFields());
+      if (fmt === 'table') {
+        console.log(`\nTotal: ${catalog.length} device type(s)`);
+      }
     });
 
   // switchbot devices commands <type>

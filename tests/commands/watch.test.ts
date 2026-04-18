@@ -55,6 +55,8 @@ const flagsMock = vi.hoisted(() => ({
   getProfile: vi.fn(() => undefined),
   getAuditLog: vi.fn(() => null),
   getCacheMode: vi.fn(() => ({ listTtlMs: 0, statusTtlMs: 0 })),
+  getFormat: vi.fn(() => undefined),
+  getFields: vi.fn(() => undefined),
   parseDurationToMs: (v: string): number | null => {
     const m = /^(\d+)(ms|s|m|h)?$/.exec(v.trim().toLowerCase());
     if (!m) return null;
@@ -185,6 +187,7 @@ describe('devices watch', () => {
     cacheMock.map.set('BOT1', { type: 'Bot', name: 'K', category: 'physical' });
     apiMock.__instance.get
       .mockResolvedValueOnce({ data: { statusCode: 100, body: { power: 'on', battery: 90, temp: 22 } } });
+    flagsMock.getFields.mockReturnValueOnce(['power', 'battery']);
 
     const res = await runCli(registerDevicesCommand, [
       '--json', 'devices', 'watch', 'BOT1', '--interval', '5s', '--max', '1', '--fields', 'power,battery',

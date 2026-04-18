@@ -21,6 +21,8 @@ export async function runCli(
   const program = new Command();
   program.exitOverride();
   program.option('--json', 'Output results in JSON format');
+  program.option('--format <type>', 'Output format');
+  program.option('--fields <csv>', 'Column filter');
   program.configureOutput({
     writeOut: (str) => stdout.push(stripTrailingNewline(str)),
     writeErr: (str) => stderr.push(stripTrailingNewline(str)),
