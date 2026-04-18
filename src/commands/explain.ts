@@ -3,7 +3,6 @@ import { printJson, isJsonMode, handleError } from '../utils/output.js';
 import {
   describeDevice,
   fetchDeviceList,
-  DeviceNotFoundError,
   type Device,
   type InfraredDevice,
 } from '../lib/devices.js';
@@ -113,14 +112,6 @@ Examples:
         }
         printHuman(result);
       } catch (err) {
-        if (err instanceof DeviceNotFoundError) {
-          if (isJsonMode()) {
-            printJson({ error: { code: 'device_not_found', message: err.message, deviceId } });
-          } else {
-            console.error(err.message);
-          }
-          process.exit(1);
-        }
         handleError(err);
       }
     });

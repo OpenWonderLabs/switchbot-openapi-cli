@@ -72,7 +72,12 @@ Files are written with mode 0600. Profiles live under ~/.switchbot/profiles/<nam
 
       if (options.fromEnvFile) {
         if (!fs.existsSync(options.fromEnvFile)) {
-          console.error(`--from-env-file: file not found: ${options.fromEnvFile}`);
+          const msg = `--from-env-file: file not found: ${options.fromEnvFile}`;
+          if (isJsonMode()) {
+            console.error(JSON.stringify({ error: { code: 2, kind: 'usage', message: msg } }));
+          } else {
+            console.error(msg);
+          }
           process.exit(2);
         }
         const parsed = parseEnvFile(options.fromEnvFile);
@@ -82,21 +87,36 @@ Files are written with mode 0600. Profiles live under ~/.switchbot/profiles/<nam
 
       if (options.fromOp) {
         if (!options.opSecret) {
-          console.error('--from-op requires --op-secret <ref> for the secret reference.');
+          const msg = '--from-op requires --op-secret <ref> for the secret reference.';
+          if (isJsonMode()) {
+            console.error(JSON.stringify({ error: { code: 2, kind: 'usage', message: msg } }));
+          } else {
+            console.error(msg);
+          }
           process.exit(2);
         }
         try {
           token = readFromOp(options.fromOp);
           secret = readFromOp(options.opSecret);
         } catch (err) {
-          console.error(`1Password CLI read failed: ${err instanceof Error ? err.message : String(err)}`);
-          console.error('Ensure the "op" CLI is installed and authenticated (op signin).');
+          const msg = `1Password CLI read failed: ${err instanceof Error ? err.message : String(err)}`;
+          if (isJsonMode()) {
+            console.error(JSON.stringify({ error: { code: 1, kind: 'runtime', message: msg, hint: 'Ensure the "op" CLI is installed and authenticated (op signin).' } }));
+          } else {
+            console.error(msg);
+            console.error('Ensure the "op" CLI is installed and authenticated (op signin).');
+          }
           process.exit(1);
         }
       }
 
       if (!token || !secret) {
-        console.error('Missing token/secret. Provide positional arguments or use --from-env-file / --from-op.');
+        const msg = 'Missing token/secret. Provide positional arguments or use --from-env-file / --from-op.';
+        if (isJsonMode()) {
+          console.error(JSON.stringify({ error: { code: 2, kind: 'usage', message: msg } }));
+        } else {
+          console.error(msg);
+        }
         process.exit(2);
       }
 

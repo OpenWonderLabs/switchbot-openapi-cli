@@ -5,6 +5,8 @@ import {
   printTable,
   printKeyValue,
   handleError,
+  buildErrorPayload,
+  UsageError,
 } from '../../src/utils/output.js';
 
 describe('isJsonMode', () => {
@@ -204,5 +206,135 @@ describe('handleError', () => {
     const joined = errSpy.mock.calls.map((c) => String(c[0])).join('\n');
     expect(joined).toContain('Error (code 999): x');
     expect(joined).not.toContain('Hint:');
+  });
+
+  it('prefers ApiError.hint over errorHint fallback in human-readable output', async () => {
+    const { ApiError } = await import('../../src/api/client.js');
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(process, 'exit').mockImplementation(() => {
+      throw new Error('__exit');
+    });
+
+    // code 190 has an errorHint; error.hint on the instance should win
+    expect(() => handleError(new ApiError('bad cmd', 190, { hint: 'use describe instead' }))).toThrow('__exit');
+    const joined = errSpy.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(joined).toContain('use describe instead');
+    expect(joined).not.toContain('switchbot devices list');
+  });
+
+  describe('--json mode', () => {
+    let originalArgv: string[];
+    beforeEach(() => {
+      originalArgv = process.argv;
+      process.argv = ['node', 'cli', '--json', 'devices', 'status', 'X'];
+    });
+    afterEach(() => {
+      process.argv = originalArgv;
+    });
+
+    it('outputs structured JSON error to stderr for ApiError', async () => {
+      const { ApiError } = await import('../../src/api/client.js');
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.spyOn(process, 'exit').mockImplementation(() => {
+        throw new Error('__exit');
+      });
+
+      expect(() => handleError(new ApiError('bad device', 190))).toThrow('__exit');
+      const raw = errSpy.mock.calls[0][0];
+      const parsed = JSON.parse(raw);
+      expect(parsed.error.code).toBe(190);
+      expect(parsed.error.message).toBe('bad device');
+      expect(parsed.error.hint).toMatch(/devices/);
+    });
+
+    it('marks 429 errors as retryable when ApiError.retryable is true', async () => {
+      const { ApiError } = await import('../../src/api/client.js');
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.spyOn(process, 'exit').mockImplementation(() => {
+        throw new Error('__exit');
+      });
+
+      // Simulate what client.ts creates: retryable: true set explicitly.
+      expect(() => handleError(new ApiError('rate limited', 429, { retryable: true, hint: 'check quota' }))).toThrow('__exit');
+      const parsed = JSON.parse(errSpy.mock.calls[0][0]);
+      expect(parsed.error.retryable).toBe(true);
+      expect(parsed.error.hint).toBe('check quota');
+    });
+
+    it('prefers ApiError.hint over errorHint fallback when both exist', async () => {
+      const { ApiError } = await import('../../src/api/client.js');
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.spyOn(process, 'exit').mockImplementation(() => {
+        throw new Error('__exit');
+      });
+
+      // code 429 has an errorHint, but the explicit hint should win.
+      expect(() => handleError(new ApiError('over limit', 429, { retryable: true, hint: 'custom hint from client' }))).toThrow('__exit');
+      const parsed = JSON.parse(errSpy.mock.calls[0][0]);
+      expect(parsed.error.hint).toBe('custom hint from client');
+    });
+
+    it('does NOT set retryable when ApiError.retryable is false', async () => {
+      const { ApiError } = await import('../../src/api/client.js');
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.spyOn(process, 'exit').mockImplementation(() => {
+        throw new Error('__exit');
+      });
+
+      expect(() => handleError(new ApiError('auth failed', 401, { retryable: false }))).toThrow('__exit');
+      const parsed = JSON.parse(errSpy.mock.calls[0][0]);
+      expect(parsed.error.retryable).toBeUndefined();
+    });
+
+    it('outputs structured JSON error for generic Error', () => {
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.spyOn(process, 'exit').mockImplementation(() => {
+        throw new Error('__exit');
+      });
+
+      expect(() => handleError(new Error('kaboom'))).toThrow('__exit');
+      const parsed = JSON.parse(errSpy.mock.calls[0][0]);
+      expect(parsed.error.code).toBe(1);
+      expect(parsed.error.message).toBe('kaboom');
+    });
+  });
+});
+
+describe('buildErrorPayload', () => {
+  it('UsageError → code 2, kind usage', () => {
+    const p = buildErrorPayload(new UsageError('bad flag'));
+    expect(p).toEqual({ code: 2, kind: 'usage', message: 'bad flag' });
+  });
+
+  it('generic Error → code 1, kind runtime', () => {
+    const p = buildErrorPayload(new Error('oops'));
+    expect(p.code).toBe(1);
+    expect(p.kind).toBe('runtime');
+    expect(p.message).toBe('oops');
+    expect(p.hint).toBeUndefined();
+    expect(p.retryable).toBeUndefined();
+  });
+
+  it('unknown non-Error → code 1, kind runtime, fallback message', () => {
+    const p = buildErrorPayload('just a string');
+    expect(p.code).toBe(1);
+    expect(p.kind).toBe('runtime');
+    expect(p.message).toBe('An unknown error occurred');
+  });
+
+  it('ApiError → code from error, kind api, hint from error', async () => {
+    const { ApiError } = await import('../../src/api/client.js');
+    const p = buildErrorPayload(new ApiError('quota', 429, { retryable: true, hint: 'try later' }));
+    expect(p.code).toBe(429);
+    expect(p.kind).toBe('api');
+    expect(p.message).toBe('quota');
+    expect(p.hint).toBe('try later');
+    expect(p.retryable).toBe(true);
+  });
+
+  it('ApiError with known code gets hint from errorHint table when no explicit hint', async () => {
+    const { ApiError } = await import('../../src/api/client.js');
+    const p = buildErrorPayload(new ApiError('not found', 152));
+    expect(p.hint).toContain('deviceId');
   });
 });

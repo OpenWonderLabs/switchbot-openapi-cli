@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { printJson, isJsonMode } from '../utils/output.js';
+import { printJson, isJsonMode, handleError, UsageError } from '../utils/output.js';
 import {
   clearCache,
   clearStatusCache,
@@ -90,24 +90,27 @@ Examples:
     .description('Delete cache files')
     .option('--key <which>', 'Which cache to clear: "list" | "status" | "all" (default)', 'all')
     .action((options: { key: string }) => {
-      const key = options.key;
-      if (!['list', 'status', 'all'].includes(key)) {
-        console.error(`Unknown --key "${key}". Expected: list, status, all.`);
-        process.exit(2);
+      try {
+        const key = options.key;
+        if (!['list', 'status', 'all'].includes(key)) {
+          throw new UsageError(`Unknown --key "${key}". Expected: list, status, all.`);
+        }
+        const cleared: string[] = [];
+        if (key === 'list' || key === 'all') {
+          clearCache();
+          cleared.push('list');
+        }
+        if (key === 'status' || key === 'all') {
+          clearStatusCache();
+          cleared.push('status');
+        }
+        if (isJsonMode()) {
+          printJson({ cleared });
+          return;
+        }
+        console.log(`Cleared: ${cleared.join(', ')}`);
+      } catch (error) {
+        handleError(error);
       }
-      const cleared: string[] = [];
-      if (key === 'list' || key === 'all') {
-        clearCache();
-        cleared.push('list');
-      }
-      if (key === 'status' || key === 'all') {
-        clearStatusCache();
-        cleared.push('status');
-      }
-      if (isJsonMode()) {
-        printJson({ cleared });
-        return;
-      }
-      console.log(`Cleared: ${cleared.join(', ')}`);
     });
 }

@@ -36,7 +36,7 @@ vi.mock('../../src/api/client.js', () => ({
 
 import { registerDevicesCommand } from '../../src/commands/devices.js';
 import { runCli } from '../helpers/cli.js';
-import { updateCacheFromDeviceList } from '../../src/devices/cache.js';
+import { updateCacheFromDeviceList, resetListCache } from '../../src/devices/cache.js';
 
 // ---- Helpers -----------------------------------------------------------
 const DID = 'DEV-ID';
@@ -108,6 +108,7 @@ describe('devices command', () => {
     // real ~/.switchbot/devices.json that might exist on the dev machine.
     tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sbcli-devtest-'));
     vi.spyOn(os, 'homedir').mockReturnValue(tmpHome);
+    resetListCache();
     apiMock.__instance.get.mockReset();
     apiMock.__instance.post.mockReset();
     apiMock.createClient.mockReset();
@@ -117,6 +118,7 @@ describe('devices command', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    resetListCache();
     try {
       fs.rmSync(tmpHome, { recursive: true, force: true });
     } catch {
@@ -135,15 +137,17 @@ describe('devices command', () => {
       expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/devices');
       expect(out).toContain('ABC123');
       expect(out).toContain('Living Lamp');
-      expect(out).toContain('[IR] TV');
-      expect(out).toContain('—');
+      // IR type shown without [IR] prefix; category column shows 'ir'
+      expect(out).toContain('TV');
+      expect(out).toContain('ir');
+      expect(out).not.toContain('[IR]');
       expect(out).toContain('3 physical device');
       expect(out).toContain('1 IR remote');
     });
 
-    it('shows family and room columns for physical devices', async () => {
+    it('shows family and room columns with --wide', async () => {
       apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
-      const res = await runCli(registerDevicesCommand, ['devices', 'list']);
+      const res = await runCli(registerDevicesCommand, ['devices', 'list', '--wide']);
       const out = res.stdout.join('\n');
       expect(out).toContain('family');
       expect(out).toContain('room');
@@ -151,9 +155,9 @@ describe('devices command', () => {
       expect(out).toContain('Living Room');
     });
 
-    it('renders controlType column for physical and IR devices', async () => {
+    it('renders controlType column for physical and IR devices with --wide', async () => {
       apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
-      const res = await runCli(registerDevicesCommand, ['devices', 'list']);
+      const res = await runCli(registerDevicesCommand, ['devices', 'list', '--wide']);
       const out = res.stdout.join('\n');
       expect(out).toContain('controlType');
       // physical row: 'Light' from controlType
@@ -164,7 +168,7 @@ describe('devices command', () => {
       expect(tvRow).toContain('TV');
     });
 
-    it('renders missing controlType as em-dash', async () => {
+    it('renders missing controlType as em-dash with --wide', async () => {
       apiMock.__instance.get.mockResolvedValue({
         data: {
           body: {
@@ -181,12 +185,12 @@ describe('devices command', () => {
           },
         },
       });
-      const res = await runCli(registerDevicesCommand, ['devices', 'list']);
+      const res = await runCli(registerDevicesCommand, ['devices', 'list', '--wide']);
       const row = res.stdout.join('\n').split('\n').find((l) => l.includes('NO-CTYPE'));
       expect(row).toContain('—');
     });
 
-    it('renders empty-string controlType and missing deviceType as em-dash', async () => {
+    it('renders empty-string controlType and missing deviceType as em-dash with --wide', async () => {
       apiMock.__instance.get.mockResolvedValue({
         data: {
           body: {
@@ -206,24 +210,24 @@ describe('devices command', () => {
           },
         },
       });
-      const res = await runCli(registerDevicesCommand, ['devices', 'list']);
+      const res = await runCli(registerDevicesCommand, ['devices', 'list', '--wide']);
       const row = res.stdout.join('\n').split('\n').find((l) => l.includes('AI-DEV'));
       expect(row).toBeDefined();
       expect(row).not.toContain('undefined');
-      // type column (position 3) and controlType column (position 4) should both render as em-dash
+      // type column (position 3) and controlType column (position 5) should both render as em-dash
       expect(row!.match(/—/g)?.length).toBeGreaterThanOrEqual(2);
     });
 
-    it('renders roomID column for physical devices', async () => {
+    it('renders roomID column for physical devices with --wide', async () => {
       apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
-      const res = await runCli(registerDevicesCommand, ['devices', 'list']);
+      const res = await runCli(registerDevicesCommand, ['devices', 'list', '--wide']);
       const out = res.stdout.join('\n');
       expect(out).toContain('roomID');
       const lampRow = out.split('\n').find((l) => l.includes('ABC123'));
       expect(lampRow).toContain('R-LIVING');
     });
 
-    it('renders null roomName as em-dash', async () => {
+    it('renders null roomName as em-dash with --wide', async () => {
       apiMock.__instance.get.mockResolvedValue({
         data: {
           body: {
@@ -242,11 +246,11 @@ describe('devices command', () => {
           },
         },
       });
-      const res = await runCli(registerDevicesCommand, ['devices', 'list']);
+      const res = await runCli(registerDevicesCommand, ['devices', 'list', '--wide']);
       expect(res.stdout.join('\n')).toContain('—');
     });
 
-    it('renders empty-string hubDeviceId as em-dash', async () => {
+    it('renders empty-string hubDeviceId as em-dash with --wide', async () => {
       apiMock.__instance.get.mockResolvedValue({
         data: {
           body: {
@@ -265,7 +269,7 @@ describe('devices command', () => {
           },
         },
       });
-      const res = await runCli(registerDevicesCommand, ['devices', 'list']);
+      const res = await runCli(registerDevicesCommand, ['devices', 'list', '--wide']);
       const out = res.stdout.join('\n');
       expect(out).toContain('EMPTY-HUB');
       expect(out).toContain('—');
@@ -328,7 +332,7 @@ describe('devices command', () => {
           },
         },
       });
-      const res = await runCli(registerDevicesCommand, ['devices', 'list']);
+      const res = await runCli(registerDevicesCommand, ['devices', 'list', '--wide']);
       const out = res.stdout.join('\n');
       // Row for IR-TV should show HomeA / R-HUB-ROOM / Living Room inherited from HUB-MAIN
       const irTvRow = out.split('\n').find((l) => l.includes('IR-TV'));
@@ -386,8 +390,8 @@ describe('devices command', () => {
       const res = await runCli(registerDevicesCommand, ['devices', 'list', '--format', 'yaml']);
       const out = res.stdout.join('\n');
       expect(out).toContain('---');
-      expect(out).toContain('deviceId: "ABC123"');
-      expect(out).toContain('deviceName: "Living Lamp"');
+      expect(out).toContain('deviceId: ABC123');
+      expect(out).toContain('deviceName: Living Lamp');
     });
 
     it('--format=table still shows the footer summary', async () => {
@@ -436,6 +440,95 @@ describe('devices command', () => {
       const res = await runCli(registerDevicesCommand, ['devices', 'status', 'BLE']);
       expect(res.exitCode).toBe(1);
       expect(res.stderr.join('\n')).toContain('device offline');
+    });
+
+    it('supports --format=tsv', async () => {
+      apiMock.__instance.get.mockResolvedValue({
+        data: { body: { power: 'on', battery: 87, temperature: 22 } },
+      });
+      const res = await runCli(registerDevicesCommand, [
+        'devices', 'status', 'ABC', '--format', 'tsv',
+      ]);
+      const out = res.stdout.join('\n');
+      expect(out).toContain('power\tbattery\ttemperature');
+      expect(out).toContain('on\t87\t22');
+    });
+
+    it('exits 2 for --format id (status has no deviceId column)', async () => {
+      apiMock.__instance.get.mockResolvedValue({
+        data: { body: { power: 'on', battery: 87 } },
+      });
+      const res = await runCli(registerDevicesCommand, [
+        'devices', 'status', 'DEV123', '--format', 'id',
+      ]);
+      expect(res.exitCode).toBe(2);
+    });
+
+    it('supports --format json (array of objects)', async () => {
+      apiMock.__instance.get.mockResolvedValue({
+        data: { body: { power: 'off', battery: 50 } },
+      });
+      const res = await runCli(registerDevicesCommand, [
+        'devices', 'status', 'ABC', '--format', 'json',
+      ]);
+      const parsed = JSON.parse(res.stdout.join('\n'));
+      expect(Array.isArray(parsed)).toBe(true);
+      expect(parsed[0]).toEqual({ power: 'off', battery: 50 });
+    });
+
+    it('serializes nested objects to JSON strings in tsv output', async () => {
+      apiMock.__instance.get.mockResolvedValue({
+        data: {
+          body: {
+            power: 'on',
+            calibration: { min: 0, max: 100 },
+            tags: ['living', 'main'],
+            battery: 90,
+          },
+        },
+      });
+      const res = await runCli(registerDevicesCommand, [
+        'devices', 'status', 'DEV1', '--format', 'tsv',
+      ]);
+      const lines = res.stdout.join('\n').split('\n');
+      // Headers
+      expect(lines[0]).toContain('calibration');
+      expect(lines[0]).toContain('tags');
+      // Values: nested object and array are JSON-stringified
+      expect(lines[1]).toContain('{"min":0,"max":100}');
+      expect(lines[1]).toContain('["living","main"]');
+    });
+
+    it('preserves nested objects as real values in --format json', async () => {
+      apiMock.__instance.get.mockResolvedValue({
+        data: {
+          body: {
+            power: 'on',
+            motion: { x: 1, y: 2 },
+            modes: ['eco', 'turbo'],
+          },
+        },
+      });
+      const res = await runCli(registerDevicesCommand, [
+        'devices', 'status', 'DEV2', '--format', 'json',
+      ]);
+      const parsed = JSON.parse(res.stdout.join('\n'));
+      expect(parsed[0].power).toBe('on');
+      // Nested object/array fields come through as real JS values.
+      expect(parsed[0].motion).toEqual({ x: 1, y: 2 });
+      expect(parsed[0].modes).toEqual(['eco', 'turbo']);
+    });
+
+    it('null status fields appear as empty string in tsv', async () => {
+      apiMock.__instance.get.mockResolvedValue({
+        data: { body: { power: 'on', battery: null } },
+      });
+      const res = await runCli(registerDevicesCommand, [
+        'devices', 'status', 'DEV3', '--format', 'tsv',
+      ]);
+      const lines = res.stdout.join('\n').split('\n');
+      // null maps to empty string in cellToString
+      expect(lines[1]).toBe('on\t');
     });
   });
 
@@ -1100,11 +1193,9 @@ describe('devices command', () => {
       expect(lines.find((l) => l.startsWith('Bot\t'))).toBeDefined();
     });
 
-    it('--format=id outputs one type per line', async () => {
+    it('--format=id exits 2 (types has no deviceId column)', async () => {
       const res = await runCli(registerDevicesCommand, ['devices', 'types', '--format', 'id']);
-      const lines = res.stdout.join('\n').split('\n').filter(Boolean);
-      expect(lines).toContain('Bot');
-      expect(lines).toContain('Curtain');
+      expect(res.exitCode).toBe(2);
     });
   });
 
@@ -1451,6 +1542,30 @@ describe('devices command', () => {
       expect(parsed.capabilities.liveStatus).toHaveProperty('error', 'device offline');
     });
 
+    it('returns source=none when device type is unknown and --live not set', async () => {
+      const unknownTypeBody = {
+        deviceList: [{
+          deviceId: 'UNKNOWN-1',
+          deviceName: 'Future Device',
+          deviceType: 'UnknownDeviceType2025',
+          hubDeviceId: 'HUB-1',
+          enableCloudService: true,
+        }],
+        infraredRemoteList: [],
+      };
+      apiMock.__instance.get.mockResolvedValueOnce({ data: { body: unknownTypeBody } });
+      const res = await runCli(registerDevicesCommand, [
+        'devices',
+        'describe',
+        'UNKNOWN-1',
+        '--json',
+      ]);
+      expect(res.exitCode).toBeNull();
+      const parsed = JSON.parse(res.stdout.join('\n'));
+      expect(parsed.source).toBe('none');
+      expect(parsed.capabilities).toBeNull();
+    });
+
     it('propagates API errors via handleError (exit 1)', async () => {
       apiMock.__instance.get.mockRejectedValue(new Error('boom'));
       const res = await runCli(registerDevicesCommand, ['devices', 'describe', 'BLE-001']);
@@ -1641,11 +1756,12 @@ describe('devices command', () => {
         '--json', 'devices', 'command', LOCK_ID, 'unlock',
       ]);
       expect(res.exitCode).toBe(2);
-      const parsed = JSON.parse(res.stdout.join('\n'));
-      expect(parsed.error.code).toBe('destructive_requires_confirm');
-      expect(parsed.error.deviceId).toBe(LOCK_ID);
-      expect(parsed.error.command).toBe('unlock');
-      expect(parsed.error.deviceType).toBe('Smart Lock');
+      const parsed = JSON.parse(res.stderr.join('\n'));
+      expect(parsed.error.kind).toBe('guard');
+      expect(parsed.error.code).toBe(2);
+      expect(parsed.error.context.deviceId).toBe(LOCK_ID);
+      expect(parsed.error.context.command).toBe('unlock');
+      expect(parsed.error.context.deviceType).toBe('Smart Lock');
     });
 
     it('does not guard --type customize (user-defined IR buttons)', async () => {

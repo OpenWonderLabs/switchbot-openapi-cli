@@ -59,7 +59,7 @@ export interface DescribeResult {
   controlType: string | null;
   catalog: DeviceCatalogEntry | null;
   capabilities: DescribeCapabilities | { liveStatus: Record<string, unknown> } | null;
-  source: 'catalog' | 'live' | 'catalog+live';
+  source: 'catalog' | 'live' | 'catalog+live' | 'none';
   suggestedActions: ReturnType<typeof suggestedActions>;
   /** For IR remotes: the family/room inherited from their bound Hub. Undefined for physical devices. */
   inheritedLocation?: { family?: string; room?: string; roomID?: string };
@@ -87,9 +87,7 @@ export class CommandValidationError extends Error {
 export async function fetchDeviceList(client?: AxiosInstance): Promise<DeviceListBody> {
   // TTL-gated read: when the on-disk cache is younger than the configured
   // list TTL, skip the API call and synthesize a DeviceListBody from the
-  // metadata cache. Only deviceId/deviceName/type/category survive the
-  // round-trip — other fields (familyName, roomID, hubDeviceId, etc.) are
-  // not cached. Callers that need those fields should pass --no-cache.
+  // metadata cache.
   const mode = getCacheMode();
   if (mode.listTtlMs > 0 && isListCacheFresh(mode.listTtlMs)) {
     const cached = loadCache();
@@ -102,15 +100,20 @@ export async function fetchDeviceList(client?: AxiosInstance): Promise<DeviceLis
             deviceId,
             deviceName: entry.name,
             deviceType: entry.type,
-            enableCloudService: false,
-            hubDeviceId: '',
+            enableCloudService: entry.enableCloudService ?? true,
+            hubDeviceId: entry.hubDeviceId ?? '',
+            roomID: entry.roomID,
+            roomName: entry.roomName,
+            familyName: entry.familyName,
+            controlType: entry.controlType,
           });
         } else {
           infraredRemoteList.push({
             deviceId,
             deviceName: entry.name,
             remoteType: entry.type,
-            hubDeviceId: '',
+            hubDeviceId: entry.hubDeviceId ?? '',
+            controlType: entry.controlType,
           });
         }
       }
@@ -264,6 +267,20 @@ export function isDestructiveCommand(
   return Boolean(spec?.destructive);
 }
 
+/** Return the destructiveReason for a command, or null if not destructive / not found. */
+export function getDestructiveReason(
+  deviceType: string | undefined,
+  cmd: string,
+  commandType: string
+): string | null {
+  if (commandType === 'customize') return null;
+  if (!deviceType) return null;
+  const match = findCatalogEntry(deviceType);
+  if (!match || Array.isArray(match)) return null;
+  const spec = match.commands.find((c) => c.command === cmd);
+  return spec?.destructiveReason ?? null;
+}
+
 /**
  * Describe a device by id: metadata + catalog entry (if known) +
  * optional live status. Throws `DeviceNotFoundError` when the id is unknown.
@@ -294,13 +311,13 @@ export async function describeDevice(
     }
   }
 
-  const source: 'catalog' | 'live' | 'catalog+live' = catalogEntry
+  const source: 'catalog' | 'live' | 'catalog+live' | 'none' = catalogEntry
     ? liveStatus
       ? 'catalog+live'
       : 'catalog'
     : liveStatus
       ? 'live'
-      : 'catalog';
+      : 'none';
 
   const capabilities: DescribeResult['capabilities'] = catalogEntry
     ? {
@@ -362,4 +379,81 @@ export function searchCatalog(query: string, limit = 20): DeviceCatalogEntry[] {
     }
   }
   return hits;
+}
+
+/** Shape expected by the MCP describe_device outputSchema. */
+export interface McpDescribeShape {
+  device: {
+    deviceId: string;
+    deviceName: string;
+    deviceType?: string;
+    enableCloudService?: boolean;
+    hubDeviceId?: string;
+    roomID?: string;
+    roomName?: string | null;
+    familyName?: string;
+    controlType?: string;
+    remoteType?: string;
+  };
+  isPhysical: boolean;
+  typeName: string;
+  controlType: string | null;
+  source: 'catalog' | 'live' | 'catalog+live' | 'none';
+  capabilities: unknown;
+  suggestedActions: Array<{ command: string; parameter?: string; description: string }>;
+  inheritedLocation?: { family?: string; room?: string };
+}
+
+/** Convert a DescribeResult to the shape validated by the MCP outputSchema. */
+export function toMcpDescribeShape(r: DescribeResult): McpDescribeShape {
+  const d = r.device as Device & Partial<InfraredDevice>;
+  return {
+    device: {
+      deviceId: d.deviceId,
+      deviceName: d.deviceName,
+      ...(d.deviceType !== undefined ? { deviceType: d.deviceType } : {}),
+      ...('enableCloudService' in d ? { enableCloudService: d.enableCloudService } : {}),
+      ...(d.hubDeviceId !== undefined ? { hubDeviceId: d.hubDeviceId } : {}),
+      ...(d.roomID !== undefined ? { roomID: d.roomID } : {}),
+      ...(d.roomName !== undefined ? { roomName: d.roomName } : {}),
+      ...(d.familyName !== undefined ? { familyName: d.familyName } : {}),
+      ...(d.controlType !== undefined ? { controlType: d.controlType } : {}),
+      ...('remoteType' in d && d.remoteType !== undefined ? { remoteType: d.remoteType } : {}),
+    },
+    isPhysical: r.isPhysical,
+    typeName: r.typeName,
+    controlType: r.controlType,
+    source: r.source,
+    capabilities: r.capabilities,
+    suggestedActions: r.suggestedActions,
+    ...(r.inheritedLocation !== undefined
+      ? { inheritedLocation: { family: r.inheritedLocation.family, room: r.inheritedLocation.room } }
+      : {}),
+  };
+}
+
+/** Shapes the device list body for the MCP list_devices outputSchema. */
+export function toMcpDeviceListShape(d: Device): Record<string, unknown> {
+  return {
+    deviceId: d.deviceId,
+    deviceName: d.deviceName,
+    deviceType: d.deviceType,
+    enableCloudService: d.enableCloudService,
+    hubDeviceId: d.hubDeviceId,
+    roomID: d.roomID,
+    roomName: d.roomName,
+    familyName: d.familyName,
+    controlType: d.controlType,
+  };
+}
+
+/** Shapes an infrared remote for the MCP list_devices outputSchema. */
+export function toMcpIrDeviceShape(d: InfraredDevice): Record<string, unknown> {
+  return {
+    deviceId: d.deviceId,
+    deviceName: d.deviceName,
+    remoteType: d.remoteType,
+    hubDeviceId: d.hubDeviceId,
+    controlType: d.controlType,
+  };
 }

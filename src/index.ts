@@ -14,6 +14,7 @@ import { registerDoctorCommand } from './commands/doctor.js';
 import { registerSchemaCommand } from './commands/schema.js';
 import { registerHistoryCommand } from './commands/history.js';
 import { registerPlanCommand } from './commands/plan.js';
+import { registerCapabilitiesCommand } from './commands/capabilities.js';
 
 const program = new Command();
 
@@ -53,6 +54,7 @@ registerDoctorCommand(program);
 registerSchemaCommand(program);
 registerHistoryCommand(program);
 registerPlanCommand(program);
+registerCapabilitiesCommand(program);
 
 program.addHelpText('after', `
 Credentials:

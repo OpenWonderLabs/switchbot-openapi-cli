@@ -3,10 +3,19 @@ import path from 'node:path';
 import os from 'node:os';
 import { getConfigPath } from '../utils/flags.js';
 
+/** GC cutoff for status entries: evict anything older than this. */
+const DEFAULT_STATUS_GC_TTL_MS = 24 * 60 * 60 * 1000; // 24 h
+
 export interface CachedDevice {
   type: string;
   name: string;
   category: 'physical' | 'ir';
+  hubDeviceId?: string;
+  enableCloudService?: boolean;
+  roomID?: string;
+  roomName?: string | null;
+  familyName?: string;
+  controlType?: string;
 }
 
 export interface DeviceCache {
@@ -19,11 +28,19 @@ export interface DeviceListBodyShape {
     deviceId: string;
     deviceName: string;
     deviceType?: string;
+    hubDeviceId?: string;
+    enableCloudService?: boolean;
+    roomID?: string;
+    roomName?: string | null;
+    familyName?: string;
+    controlType?: string;
   }>;
   infraredRemoteList: Array<{
     deviceId: string;
     deviceName: string;
     remoteType: string;
+    hubDeviceId?: string;
+    controlType?: string;
   }>;
 }
 
@@ -35,17 +52,32 @@ function cacheFilePath(): string {
   return path.join(dir, 'devices.json');
 }
 
+// In-memory hot-cache: undefined = not yet loaded, null = loaded but empty.
+let _listCache: DeviceCache | null | undefined = undefined;
+
+/** Force the next loadCache() call to re-read from disk. Used in tests. */
+export function resetListCache(): void {
+  _listCache = undefined;
+}
+
 export function loadCache(): DeviceCache | null {
+  if (_listCache !== undefined) return _listCache;
   const file = cacheFilePath();
-  if (!fs.existsSync(file)) return null;
+  if (!fs.existsSync(file)) {
+    _listCache = null;
+    return null;
+  }
   try {
     const raw = fs.readFileSync(file, 'utf-8');
     const cache = JSON.parse(raw) as DeviceCache;
     if (!cache || typeof cache.devices !== 'object' || cache.devices === null) {
+      _listCache = null;
       return null;
     }
+    _listCache = cache;
     return cache;
   } catch {
+    _listCache = null;
     return null;
   }
 }
@@ -65,6 +97,12 @@ export function updateCacheFromDeviceList(body: DeviceListBodyShape): void {
       type: d.deviceType,
       name: d.deviceName,
       category: 'physical',
+      hubDeviceId: d.hubDeviceId,
+      enableCloudService: d.enableCloudService,
+      roomID: d.roomID,
+      roomName: d.roomName,
+      familyName: d.familyName,
+      controlType: d.controlType,
     };
   }
   for (const d of body.infraredRemoteList) {
@@ -73,6 +111,8 @@ export function updateCacheFromDeviceList(body: DeviceListBodyShape): void {
       type: d.remoteType,
       name: d.deviceName,
       category: 'ir',
+      hubDeviceId: d.hubDeviceId,
+      controlType: d.controlType,
     };
   }
 
@@ -86,6 +126,7 @@ export function updateCacheFromDeviceList(body: DeviceListBodyShape): void {
     const dir = path.dirname(file);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(file, JSON.stringify(cache, null, 2), { mode: 0o600 });
+    _listCache = cache;
   } catch {
     // Cache write failures must not break the command that triggered them.
   }
@@ -94,6 +135,7 @@ export function updateCacheFromDeviceList(body: DeviceListBodyShape): void {
 export function clearCache(): void {
   const file = cacheFilePath();
   if (fs.existsSync(file)) fs.unlinkSync(file);
+  _listCache = null;
 }
 
 // ---- Device list freshness -------------------------------------------------
@@ -183,6 +225,16 @@ export function getCachedStatus(
   return entry.body;
 }
 
+/** Evict status entries older than max(ttlMs × 10, 24 h) to bound file growth. */
+function evictExpiredStatusEntries(cache: StatusCache, ttlMs: number, now = Date.now()): void {
+  const cutoff = now - Math.max(ttlMs * 10, 24 * 60 * 60 * 1000);
+  for (const id of Object.keys(cache.entries)) {
+    const entry = cache.entries[id];
+    const ts = Date.parse(entry.fetchedAt);
+    if (!Number.isFinite(ts) || ts < cutoff) delete cache.entries[id];
+  }
+}
+
 export function setCachedStatus(
   deviceId: string,
   body: Record<string, unknown>,
@@ -193,6 +245,7 @@ export function setCachedStatus(
     fetchedAt: now.toISOString(),
     body,
   };
+  evictExpiredStatusEntries(cache, DEFAULT_STATUS_GC_TTL_MS, now.getTime());
   saveStatusCache(cache);
 }
 

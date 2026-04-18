@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import http from 'node:http';
-import { printJson, isJsonMode } from '../utils/output.js';
+import { printJson, isJsonMode, handleError, UsageError } from '../utils/output.js';
 
 const DEFAULT_PORT = 3000;
 const DEFAULT_PATH = '/';
@@ -33,10 +33,27 @@ function matchFilter(
 
 function parseFilter(flag: string | undefined): { deviceId?: string; type?: string } | null {
   if (!flag) return null;
+  const allowed = new Set(['deviceId', 'type']);
   const out: { deviceId?: string; type?: string } = {};
   for (const pair of flag.split(',')) {
-    const [k, v] = pair.split('=').map((s) => s.trim());
-    if (!k || !v) continue;
+    const eq = pair.indexOf('=');
+    if (eq === -1 || eq === 0) {
+      throw new UsageError(
+        `Invalid --filter pair "${pair.trim()}". Expected "key=value". Supported keys: deviceId, type.`
+      );
+    }
+    const k = pair.slice(0, eq).trim();
+    const v = pair.slice(eq + 1).trim();
+    if (!v) {
+      throw new UsageError(
+        `Empty value for --filter key "${k}". Expected "key=value". Supported keys: deviceId, type.`
+      );
+    }
+    if (!allowed.has(k)) {
+      throw new UsageError(
+        `Unknown --filter key "${k}". Supported keys: deviceId, type.`
+      );
+    }
     if (k === 'deviceId') out.deviceId = v;
     else if (k === 'type') out.type = v;
   }
@@ -140,52 +157,54 @@ Examples:
 `,
     )
     .action(async (options: { port: string; path: string; filter?: string; max?: string }) => {
-      const port = Number(options.port);
-      if (!Number.isInteger(port) || port <= 0 || port > 65535) {
-        console.error(`Invalid --port "${options.port}". Must be 1..65535.`);
-        process.exit(2);
-      }
-      const maxMatched: number | null = options.max !== undefined ? Number(options.max) : null;
-      if (maxMatched !== null && (!Number.isFinite(maxMatched) || maxMatched < 1)) {
-        console.error(`Invalid --max "${options.max}". Must be a positive integer.`);
-        process.exit(2);
-      }
-      const filter = parseFilter(options.filter);
-
-      let matchedCount = 0;
-      const ac = new AbortController();
-      await new Promise<void>((resolve, reject) => {
-        let server: http.Server | null = null;
-        try {
-          server = startReceiver(port, options.path, filter, (ev) => {
-            if (!ev.matched) return;
-            matchedCount++;
-            if (isJsonMode()) {
-              printJson(ev);
-            } else {
-              const when = new Date(ev.t).toLocaleTimeString();
-              console.log(`[${when}] ${ev.remote} ${ev.path} ${JSON.stringify(ev.body)}`);
-            }
-            if (maxMatched !== null && matchedCount >= maxMatched) {
-              ac.abort();
-            }
-          });
-          server.on('error', (err) => reject(err));
-        } catch (err) {
-          reject(err);
-          return;
+      try {
+        const port = Number(options.port);
+        if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+          throw new UsageError(`Invalid --port "${options.port}". Must be 1..65535.`);
         }
+        const maxMatched: number | null = options.max !== undefined ? Number(options.max) : null;
+        if (maxMatched !== null && (!Number.isFinite(maxMatched) || maxMatched < 1)) {
+          throw new UsageError(`Invalid --max "${options.max}". Must be a positive integer.`);
+        }
+        const filter = parseFilter(options.filter);
 
-        const startMsg = `Listening on http://127.0.0.1:${port}${options.path} (Ctrl-C to stop)`;
-        if (!isJsonMode()) console.error(startMsg);
+        let matchedCount = 0;
+        const ac = new AbortController();
+        await new Promise<void>((resolve, reject) => {
+          let server: http.Server | null = null;
+          try {
+            server = startReceiver(port, options.path, filter, (ev) => {
+              if (!ev.matched) return;
+              matchedCount++;
+              if (isJsonMode()) {
+                printJson(ev);
+              } else {
+                const when = new Date(ev.t).toLocaleTimeString();
+                console.log(`[${when}] ${ev.remote} ${ev.path} ${JSON.stringify(ev.body)}`);
+              }
+              if (maxMatched !== null && matchedCount >= maxMatched) {
+                ac.abort();
+              }
+            });
+            server.on('error', (err) => reject(err));
+          } catch (err) {
+            reject(err);
+            return;
+          }
 
-        const cleanup = () => {
-          server?.close();
-          resolve();
-        };
-        process.once('SIGINT', cleanup);
-        process.once('SIGTERM', cleanup);
-        ac.signal.addEventListener('abort', cleanup, { once: true });
-      });
+          const startMsg = `Listening on http://127.0.0.1:${port}${options.path} (Ctrl-C to stop)`;
+          if (!isJsonMode()) console.error(startMsg);
+
+          const cleanup = () => {
+            server?.close();
+            resolve();
+          };
+          process.once('SIGINT', cleanup);
+          process.once('SIGTERM', cleanup);
+          ac.signal.addEventListener('abort', cleanup, { once: true });
+        });
+      } catch (error) {
+        handleError(error);
+      }
     });
 }

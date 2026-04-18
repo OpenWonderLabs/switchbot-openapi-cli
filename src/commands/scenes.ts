@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { printJson, handleError } from '../utils/output.js';
+import { printJson, isJsonMode, handleError } from '../utils/output.js';
 import { resolveFormat, resolveFields, renderRows } from '../utils/format.js';
 import { fetchScenes, executeScene } from '../lib/scenes.js';
 
@@ -14,9 +14,12 @@ export function registerScenesCommand(program: Command): void {
     .description('List all manual scenes (scenes created in the SwitchBot app)')
     .addHelpText('after', `
 Output columns: sceneId, sceneName
+--fields accepts any subset of these names (exit 2 on unknown names).
 
 Examples:
   $ switchbot scenes list
+  $ switchbot scenes list --format tsv --fields sceneId,sceneName
+  $ switchbot scenes list --format id
   $ switchbot scenes list --json
 `)
     .action(async () => {
@@ -24,13 +27,8 @@ Examples:
         const scenes = await fetchScenes();
         const fmt = resolveFormat();
 
-        if (fmt === 'json') {
+        if (fmt === 'json' && process.argv.includes('--json')) {
           printJson(scenes);
-          return;
-        }
-
-        if (scenes.length === 0) {
-          console.log('No scenes found');
           return;
         }
 
@@ -40,6 +38,9 @@ Examples:
           fmt,
           resolveFields(),
         );
+        if (fmt === 'table' && scenes.length === 0) {
+          console.log('No scenes found');
+        }
       } catch (error) {
         handleError(error);
       }
@@ -57,7 +58,11 @@ Example:
     .action(async (sceneId: string) => {
       try {
         await executeScene(sceneId);
-        console.log(`✓ Scene executed: ${sceneId}`);
+        if (isJsonMode()) {
+          printJson({ ok: true, sceneId });
+        } else {
+          console.log(`✓ Scene executed: ${sceneId}`);
+        }
       } catch (error) {
         handleError(error);
       }

@@ -1,5 +1,6 @@
-import { printTable, printJson, isJsonMode } from './output.js';
+import { printTable, printJson, isJsonMode, UsageError } from './output.js';
 import { getFormat, getFields } from './flags.js';
+import { dump as yamlDump } from 'js-yaml';
 
 export type OutputFormat = 'table' | 'json' | 'jsonl' | 'tsv' | 'yaml' | 'id';
 
@@ -13,9 +14,15 @@ export function parseFormat(flag: string | undefined): OutputFormat {
     case 'tsv': return 'tsv';
     case 'yaml': return 'yaml';
     case 'id': return 'id';
-    default:
-      console.error(`Unknown --format "${flag}". Expected: table, json, jsonl, tsv, yaml, id.`);
+    default: {
+      const msg = `Unknown --format "${flag}". Expected: table, json, jsonl, tsv, yaml, id.`;
+      if (isJsonMode()) {
+        console.error(JSON.stringify({ error: { code: 2, kind: 'usage', message: msg } }));
+      } else {
+        console.error(msg);
+      }
       process.exit(2);
+    }
   }
 }
 
@@ -34,10 +41,14 @@ export function filterFields(
   fields: string[] | undefined,
 ): { headers: string[]; rows: unknown[][] } {
   if (!fields || fields.length === 0) return { headers, rows };
-  const indices = fields
-    .map((f) => headers.indexOf(f))
-    .filter((i) => i !== -1);
-  if (indices.length === 0) return { headers, rows };
+  const unknown = fields.filter((f) => !headers.includes(f));
+  if (unknown.length > 0) {
+    throw new UsageError(
+      `Unknown field(s): ${unknown.map((f) => `"${f}"`).join(', ')}. ` +
+        `Allowed: ${headers.map((f) => `"${f}"`).join(', ')}.`,
+    );
+  }
+  const indices = fields.map((f) => headers.indexOf(f));
   return {
     headers: indices.map((i) => headers[i]),
     rows: rows.map((row) => indices.map((i) => row[i])),
@@ -47,6 +58,7 @@ export function filterFields(
 function cellToString(cell: unknown): string {
   if (cell === null || cell === undefined) return '';
   if (typeof cell === 'boolean') return cell ? 'true' : 'false';
+  if (typeof cell === 'object') return JSON.stringify(cell);
   return String(cell);
 }
 
@@ -94,24 +106,20 @@ export function renderRows(
       for (const row of r) {
         const obj = rowToObject(h, row);
         console.log('---');
-        for (const [k, v] of Object.entries(obj)) {
-          if (v === null || v === undefined) {
-            console.log(`${k}: ~`);
-          } else if (typeof v === 'boolean') {
-            console.log(`${k}: ${v}`);
-          } else if (typeof v === 'number') {
-            console.log(`${k}: ${v}`);
-          } else {
-            console.log(`${k}: "${String(v).replace(/"/g, '\\"')}"`);
-          }
-        }
+        console.log(yamlDump(obj, { lineWidth: -1 }).trimEnd());
       }
       break;
 
     case 'id': {
       const idIdx = h.indexOf('deviceId') !== -1 ? h.indexOf('deviceId')
         : h.indexOf('sceneId') !== -1 ? h.indexOf('sceneId')
-        : 0;
+        : -1;
+      if (idIdx === -1) {
+        throw new UsageError(
+          `--format=id requires a "deviceId" or "sceneId" column. ` +
+            `This command outputs: ${h.map((c) => `"${c}"`).join(', ')}.`,
+        );
+      }
       for (const row of r) {
         console.log(cellToString(row[idIdx]));
       }

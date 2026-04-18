@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { printTable, printJson, isJsonMode } from '../utils/output.js';
+import { printTable, printJson, isJsonMode, handleError, UsageError } from '../utils/output.js';
 import { resolveFormat, resolveFields, renderRows } from '../utils/format.js';
 import {
   DEVICE_CATALOG,
@@ -78,76 +78,75 @@ Examples:
     .argument('[type...]', 'Optional device type/alias (case-insensitive, partial match)')
     .option('--source <source>', 'Which catalog to show: built-in | overlay | effective (default)', 'effective')
     .action((typeParts: string[], options: { source: string }) => {
-      const source = options.source;
-      if (!['built-in', 'overlay', 'effective'].includes(source)) {
-        console.error(`Unknown --source "${source}". Expected: built-in, overlay, effective.`);
-        process.exit(2);
-      }
+      try {
+        const source = options.source;
+        if (!['built-in', 'overlay', 'effective'].includes(source)) {
+          throw new UsageError(`Unknown --source "${source}". Expected: built-in, overlay, effective.`);
+        }
 
-      let entries: DeviceCatalogEntry[];
-      if (source === 'built-in') {
-        entries = DEVICE_CATALOG;
-      } else if (source === 'overlay') {
-        const overlay = loadCatalogOverlay();
-        if (overlay.error) {
-          console.error(`Overlay file is invalid: ${overlay.error}`);
-          process.exit(1);
+        let entries: DeviceCatalogEntry[];
+        if (source === 'built-in') {
+          entries = DEVICE_CATALOG;
+        } else if (source === 'overlay') {
+          const overlay = loadCatalogOverlay();
+          if (overlay.error) {
+            throw new Error(`Overlay file is invalid: ${overlay.error}`);
+          }
+          // Only entries that are full catalog entries (have category + commands)
+          // or that explicitly remove a built-in are rendered here. Partial
+          // overrides are hidden because they're not self-contained entries;
+          // use `catalog diff` to inspect them.
+          entries = overlay.entries.filter(
+            (e): e is DeviceCatalogEntry =>
+              e.category !== undefined && e.commands !== undefined && !e.remove
+          );
+        } else {
+          entries = getEffectiveCatalog();
         }
-        // Only entries that are full catalog entries (have category + commands)
-        // or that explicitly remove a built-in are rendered here. Partial
-        // overrides are hidden because they're not self-contained entries;
-        // use `catalog diff` to inspect them.
-        entries = overlay.entries.filter(
-          (e): e is DeviceCatalogEntry =>
-            e.category !== undefined && e.commands !== undefined && !e.remove
-        );
-      } else {
-        entries = getEffectiveCatalog();
-      }
 
-      const typeQuery = typeParts.join(' ').trim();
-      if (typeQuery) {
-        const match = findCatalogEntry(typeQuery);
-        if (!match) {
-          console.error(`No device type matches "${typeQuery}".`);
-          process.exit(2);
-        }
-        if (Array.isArray(match)) {
-          console.error(`"${typeQuery}" matches multiple types. Be more specific:`);
-          for (const m of match) console.error(`  • ${m.type}`);
-          process.exit(2);
-        }
-        // Restrict the match to the requested source if needed.
-        const picked = entries.find((e) => e.type === match.type);
-        if (!picked) {
-          console.error(`"${match.type}" exists in the effective catalog but not in source "${source}".`);
-          process.exit(2);
-        }
-        if (isJsonMode()) {
-          printJson(picked);
+        const typeQuery = typeParts.join(' ').trim();
+        if (typeQuery) {
+          const match = findCatalogEntry(typeQuery);
+          if (!match) {
+            throw new UsageError(`No device type matches "${typeQuery}".`);
+          }
+          if (Array.isArray(match)) {
+            const types = match.map((m) => m.type).join(', ');
+            throw new UsageError(`"${typeQuery}" matches multiple types: ${types}. Be more specific.`);
+          }
+          // Restrict the match to the requested source if needed.
+          const picked = entries.find((e) => e.type === match.type);
+          if (!picked) {
+            throw new UsageError(`"${match.type}" exists in the effective catalog but not in source "${source}".`);
+          }
+          if (isJsonMode()) {
+            printJson(picked);
+            return;
+          }
+          renderEntry(picked);
           return;
         }
-        renderEntry(picked);
-        return;
-      }
 
-      if (isJsonMode()) {
-        printJson(entries);
-        return;
-      }
-      const fmt = resolveFormat();
-      const headers = ['type', 'category', 'commands', 'aliases'];
-      const rows = entries.map((e) => [
-        e.type,
-        e.category,
-        String(e.commands.length),
-        (e.aliases ?? []).join(', ') || '—',
-      ]);
-      if (fmt !== 'table') {
-        renderRows(headers, rows, fmt, resolveFields());
-      } else {
-        renderRows(headers, rows, 'table', resolveFields());
-        console.log(`\nTotal: ${entries.length} device type(s)  (source: ${source})`);
+        if (isJsonMode()) {
+          printJson(entries);
+          return;
+        }
+        const fmt = resolveFormat();
+        const headers = ['type', 'category', 'commands', 'aliases'];
+        const rows = entries.map((e) => [
+          e.type,
+          e.category,
+          String(e.commands.length),
+          (e.aliases ?? []).join(', ') || '—',
+        ]);
+        if (fmt !== 'table') {
+          renderRows(headers, rows, fmt, resolveFields());
+        } else {
+          renderRows(headers, rows, 'table', resolveFields());
+          console.log(`\nTotal: ${entries.length} device type(s)  (source: ${source})`);
+        }
+      } catch (error) {
+        handleError(error);
       }
     });
 

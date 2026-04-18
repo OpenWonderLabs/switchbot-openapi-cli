@@ -45,16 +45,58 @@ export function printKeyValue(data: Record<string, unknown>): void {
   console.log(table.toString());
 }
 
+export class UsageError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'UsageError';
+  }
+}
+
+export interface ErrorPayload {
+  code: number;
+  kind: 'usage' | 'api' | 'runtime';
+  message: string;
+  hint?: string;
+  retryable?: boolean;
+}
+
+export function buildErrorPayload(error: unknown): ErrorPayload {
+  if (error instanceof UsageError) {
+    return { code: 2, kind: 'usage', message: error.message };
+  }
+  const code = error instanceof ApiError ? error.code : 1;
+  const kind: ErrorPayload['kind'] = error instanceof ApiError ? 'api' : 'runtime';
+  const message = error instanceof Error ? error.message : 'An unknown error occurred';
+  const hint = error instanceof ApiError ? (error.hint ?? errorHint(error.code)) : null;
+  const retryable = error instanceof ApiError ? error.retryable : false;
+  const payload: ErrorPayload = { code, kind, message };
+  if (hint) payload.hint = hint;
+  if (retryable) payload.retryable = true;
+  return payload;
+}
+
 export function handleError(error: unknown): never {
   if (error instanceof DryRunSignal) {
     process.exit(0);
   }
+
+  const payload = buildErrorPayload(error);
+
+  if (isJsonMode()) {
+    console.error(JSON.stringify({ error: payload }));
+    process.exit(payload.code === 2 ? 2 : 1);
+  }
+
+  if (payload.kind === 'usage') {
+    console.error(payload.message);
+    process.exit(2);
+  }
+
   if (error instanceof ApiError) {
-    console.error(chalk.red(`Error (code ${error.code}): ${error.message}`));
-    const hint = errorHint(error.code);
-    if (hint) console.error(chalk.grey(`Hint: ${hint}`));
+    console.error(chalk.red(`Error (code ${error.code}): ${payload.message}`));
+    if (payload.hint) console.error(chalk.grey(`Hint: ${payload.hint}`));
   } else if (error instanceof Error) {
-    console.error(chalk.red(`Error: ${error.message}`));
+    console.error(chalk.red(`Error: ${payload.message}`));
   } else {
     console.error(chalk.red('An unknown error occurred'));
   }

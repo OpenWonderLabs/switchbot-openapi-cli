@@ -7,6 +7,7 @@ import { registerCacheCommand } from '../../src/commands/cache.js';
 import {
   updateCacheFromDeviceList,
   setCachedStatus,
+  resetListCache,
 } from '../../src/devices/cache.js';
 import { runCli } from '../helpers/cli.js';
 
@@ -15,10 +16,12 @@ let tmpHome: string;
 beforeEach(() => {
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sbcli-cachecmd-'));
   vi.spyOn(os, 'homedir').mockReturnValue(tmpHome);
+  resetListCache();
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
+  resetListCache();
   try {
     fs.rmSync(tmpHome, { recursive: true, force: true });
   } catch {
@@ -59,13 +62,14 @@ describe('cache show', () => {
   });
 
   it('reports status cache entry count + oldest/newest', async () => {
-    setCachedStatus('BOT1', { power: 'on' }, new Date('2026-04-01T00:00:00Z'));
+    // Both timestamps must be within 24 h of the newer `now` so GC doesn't evict the older entry.
+    setCachedStatus('BOT1', { power: 'on' }, new Date('2026-04-17T10:00:00Z'));
     setCachedStatus('BOT2', { power: 'off' }, new Date('2026-04-17T12:00:00Z'));
     const result = await runCli(registerCacheCommand, ['cache', 'show']);
     expect(result.exitCode).toBeNull();
     const out = result.stdout.join('\n');
     expect(out).toMatch(/Entries:\s+2/);
-    expect(out).toMatch(/Oldest:\s+2026-04-01T00:00:00\.000Z/);
+    expect(out).toMatch(/Oldest:\s+2026-04-17T10:00:00\.000Z/);
     expect(out).toMatch(/Newest:\s+2026-04-17T12:00:00\.000Z/);
   });
 

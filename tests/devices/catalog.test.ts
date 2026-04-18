@@ -40,6 +40,26 @@ describe('devices/catalog', () => {
       const unique = new Set(types);
       expect(types.length).toBe(unique.size);
     });
+
+    it('every entry has a description string', () => {
+      for (const entry of DEVICE_CATALOG) {
+        expect(entry.description, `${entry.type} is missing description`).toBeTypeOf('string');
+        expect((entry.description as string).length, `${entry.type} description is empty`).toBeGreaterThan(0);
+      }
+    });
+
+    it('every destructive command has a destructiveReason', () => {
+      for (const entry of DEVICE_CATALOG) {
+        for (const cmd of entry.commands) {
+          if (cmd.destructive) {
+            expect(
+              cmd.destructiveReason,
+              `${entry.type}.${cmd.command} is destructive but missing destructiveReason`
+            ).toBeTypeOf('string');
+          }
+        }
+      }
+    });
   });
 
   describe('command annotations', () => {

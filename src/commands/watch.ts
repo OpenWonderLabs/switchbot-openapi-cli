@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { printJson, isJsonMode, handleError } from '../utils/output.js';
+import { printJson, isJsonMode, handleError, UsageError } from '../utils/output.js';
 import { fetchDeviceStatus } from '../lib/devices.js';
 import { getCachedDevice } from '../devices/cache.js';
 import { parseDurationToMs, getFields } from '../utils/flags.js';
@@ -102,33 +102,32 @@ Examples:
           includeUnchanged?: boolean;
         },
       ) => {
-        const parsed = parseDurationToMs(options.interval);
-        if (parsed === null || parsed < MIN_INTERVAL_MS) {
-          console.error(
-            `Invalid --interval "${options.interval}". Minimum is ${MIN_INTERVAL_MS / 1000}s.`,
-          );
-          process.exit(2);
-        }
-        const intervalMs = parsed;
-
-        let maxTicks: number | null = null;
-        if (options.max !== undefined) {
-          const n = Number(options.max);
-          if (!Number.isFinite(n) || n < 1) {
-            console.error(`Invalid --max "${options.max}". Must be a positive integer.`);
-            process.exit(2);
-          }
-          maxTicks = Math.floor(n);
-        }
-
-        const fields: string[] | null = getFields() ?? null;
-
-        const ac = new AbortController();
-        const onSig = () => ac.abort();
-        process.on('SIGINT', onSig);
-        process.on('SIGTERM', onSig);
-
         try {
+          const parsed = parseDurationToMs(options.interval);
+          if (parsed === null || parsed < MIN_INTERVAL_MS) {
+            throw new UsageError(
+              `Invalid --interval "${options.interval}". Minimum is ${MIN_INTERVAL_MS / 1000}s.`,
+            );
+          }
+          const intervalMs = parsed;
+
+          let maxTicks: number | null = null;
+          if (options.max !== undefined) {
+            const n = Number(options.max);
+            if (!Number.isFinite(n) || n < 1) {
+              throw new UsageError(`Invalid --max "${options.max}". Must be a positive integer.`);
+            }
+            maxTicks = Math.floor(n);
+          }
+
+          const fields: string[] | null = getFields() ?? null;
+
+          const ac = new AbortController();
+          const onSig = () => ac.abort();
+          process.on('SIGINT', onSig);
+          process.on('SIGTERM', onSig);
+
+          try {
           const prev = new Map<string, Record<string, unknown>>();
           let tick = 0;
           while (!ac.signal.aborted) {
@@ -180,11 +179,14 @@ Examples:
             if (maxTicks !== null && tick >= maxTicks) break;
             await sleep(intervalMs, ac.signal);
           }
-        } catch (err) {
-          handleError(err);
-        } finally {
-          process.off('SIGINT', onSig);
-          process.off('SIGTERM', onSig);
+          } catch (err) {
+            handleError(err);
+          } finally {
+            process.off('SIGINT', onSig);
+            process.off('SIGTERM', onSig);
+          }
+        } catch (error) {
+          handleError(error);
         }
       },
     );

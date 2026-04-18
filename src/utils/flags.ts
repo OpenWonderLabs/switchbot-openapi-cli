@@ -135,6 +135,20 @@ export function getCacheMode(): CacheMode {
   if (process.argv.includes('--no-cache')) {
     return { listTtlMs: 0, statusTtlMs: 0 };
   }
+
+  // Individual TTL overrides take precedence over the combined --cache flag.
+  const listFlag = getFlagValue('--cache-list');
+  const statusFlag = getFlagValue('--cache-status');
+  if (listFlag !== undefined || statusFlag !== undefined) {
+    const listTtlMs = listFlag !== undefined
+      ? (parseDurationToMs(listFlag) ?? DEFAULT_LIST_TTL_MS)
+      : DEFAULT_LIST_TTL_MS;
+    const statusTtlMs = statusFlag !== undefined
+      ? (parseDurationToMs(statusFlag) ?? 0)
+      : 0;
+    return { listTtlMs, statusTtlMs };
+  }
+
   const v = getFlagValue('--cache');
   if (!v || v === 'auto') {
     return { listTtlMs: DEFAULT_LIST_TTL_MS, statusTtlMs: 0 };

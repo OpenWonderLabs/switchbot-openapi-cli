@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { printTable, printKeyValue, printJson, isJsonMode, handleError } from '../utils/output.js';
+import { printTable, printKeyValue, printJson, isJsonMode, handleError, UsageError } from '../utils/output.js';
 import { resolveFormat, resolveFields, renderRows } from '../utils/format.js';
 import { findCatalogEntry, getEffectiveCatalog, DeviceCatalogEntry } from '../devices/catalog.js';
 import { getCachedDevice } from '../devices/cache.js';
@@ -10,6 +10,7 @@ import {
   describeDevice,
   validateCommand,
   isDestructiveCommand,
+  getDestructiveReason,
   buildHubLocationMap,
   DeviceNotFoundError,
   type Device,
@@ -49,9 +50,12 @@ Run any subcommand with --help for its own flags and examples.
     .command('list')
     .description('List all physical devices and IR remote devices on the account')
     .addHelpText('after', `
-Output columns: deviceId, deviceName, type, controlType, family, roomID, room, hub, cloud
+Default columns: deviceId, deviceName, type, category
+Pass --wide for the full operator view: + controlType, family, roomID, room, hub, cloud
+--fields accepts any subset of all column names (exit 2 on unknown names).
 
-  type         - physical deviceType (e.g. "Bot", "Curtain") or "[IR] <remoteType>"
+  type         - physical deviceType (e.g. "Bot", "Curtain") or IR remoteType (e.g. "TV")
+  category     - "physical" or "ir"
   controlType  - functional classification from the API (e.g. "Bot", "Switch",
                  "TV") — may differ from 'type' and groups devices by behavior
   family       - home/family name (IR remotes inherit this from their bound Hub)
@@ -68,10 +72,13 @@ the table; --json returns the raw API body unchanged.)
 
 Examples:
   $ switchbot devices list
+  $ switchbot devices list --wide
+  $ switchbot devices list --format tsv --fields deviceId,deviceName,type,category
   $ switchbot devices list --json | jq '.deviceList[] | select(.familyName == "家里")'
   $ switchbot devices list --json | jq '[.deviceList[], .infraredRemoteList[]] | group_by(.familyName)'
 `)
-    .action(async () => {
+    .option('--wide', 'Show all columns (controlType, family, roomID, room, hub, cloud)')
+    .action(async (options: { wide?: boolean }) => {
       try {
         const body = await fetchDeviceList();
         const { deviceList, infraredRemoteList } = body;
@@ -83,7 +90,11 @@ Examples:
         }
 
         const hubLocation = buildHubLocationMap(deviceList);
-        const headers = ['deviceId', 'deviceName', 'type', 'controlType', 'family', 'roomID', 'room', 'hub', 'cloud'];
+
+        const narrowHeaders = ['deviceId', 'deviceName', 'type', 'category'];
+        const wideHeaders = ['deviceId', 'deviceName', 'type', 'category', 'controlType', 'family', 'roomID', 'room', 'hub', 'cloud'];
+        const userFields = resolveFields();
+        const headers = userFields ? wideHeaders : (options.wide ? wideHeaders : narrowHeaders);
         const rows: (string | boolean | null)[][] = [];
 
         for (const d of deviceList) {
@@ -91,6 +102,7 @@ Examples:
             d.deviceId,
             d.deviceName,
             d.deviceType || '—',
+            'physical',
             d.controlType || '—',
             d.familyName || '—',
             d.roomID || '—',
@@ -105,7 +117,8 @@ Examples:
           rows.push([
             d.deviceId,
             d.deviceName,
-            `[IR] ${d.remoteType}`,
+            d.remoteType,
+            'ir',
             d.controlType || '—',
             inherited?.family || '—',
             inherited?.roomID || '—',
@@ -115,12 +128,12 @@ Examples:
           ]);
         }
 
-        if (rows.length === 0) {
+        if (rows.length === 0 && fmt === 'table') {
           console.log('No devices found');
           return;
         }
 
-        renderRows(headers, rows, fmt, resolveFields());
+        renderRows(wideHeaders, rows, fmt, userFields ?? (options.wide ? undefined : narrowHeaders));
         if (fmt === 'table') {
           console.log(`\nTotal: ${deviceList.length} physical device(s), ${infraredRemoteList.length} IR remote device(s)`);
           console.log(`Tip: 'switchbot devices describe <deviceId>' shows a device's supported commands.`);
@@ -136,30 +149,35 @@ Examples:
     .description('Query the real-time status of a specific device')
     .argument('<deviceId>', 'Device ID from "devices list" (physical devices only; IR remotes have no status)')
     .addHelpText('after', `
-Returned fields vary by device type — e.g. Bot returns power/battery, Meter
-returns temperature/humidity/battery, Curtain returns slidePosition/moving,
-Color Bulb returns brightness/color/colorTemperature, etc.
+Status fields vary by device type. To discover them without a live call:
 
-To see exactly which status fields a given type returns BEFORE calling the
-API, use the offline catalog:
+  switchbot devices commands <type>    (prints the "Status fields" section)
 
-  switchbot devices commands <type>       (prints the "Status fields" section)
-
-IR remote devices cannot be queried — the SwitchBot API returns no status
-channel for them. Use 'devices list' to confirm a deviceId is a physical
-device (not in the 'infraredRemoteList').
+For --fields: run the command once with --format yaml (no --fields) to see
+all field names returned by your specific device, then narrow with --fields.
 
 Examples:
   $ switchbot devices status ABC123DEF456
   $ switchbot devices status ABC123DEF456 --json
+  $ switchbot devices status ABC123DEF456 --format yaml
+  $ switchbot devices status ABC123DEF456 --format tsv --fields power,battery
   $ switchbot devices status ABC123DEF456 --json | jq '.battery'
 `)
     .action(async (deviceId: string) => {
       try {
         const body = await fetchDeviceStatus(deviceId);
+        const fmt = resolveFormat();
 
-        if (isJsonMode()) {
+        if (fmt === 'json' && process.argv.includes('--json')) {
           printJson(body);
+          return;
+        }
+
+        if (fmt !== 'table') {
+          const allHeaders = Object.keys(body);
+          const allRows = [Object.values(body) as unknown[]];
+          const fields = resolveFields();
+          renderRows(allHeaders, allRows, fmt, fields);
           return;
         }
 
@@ -227,17 +245,24 @@ Examples:
       const validation = validateCommand(deviceId, cmd, parameter, options.type);
       if (!validation.ok) {
         const err = validation.error;
-        console.error(`Error: ${err.message}`);
-        if (err.hint) console.error(err.hint);
-        if (err.kind === 'unknown-command') {
-          const cached = getCachedDevice(deviceId);
-          if (cached) {
-            console.error(
-              `Run 'switchbot devices commands ${JSON.stringify(cached.type)}' for parameter formats and descriptions.`
-            );
-            console.error(
-              `(If the catalog is out of date, run 'switchbot devices list' to refresh the local cache, or pass --type customize for custom IR buttons.)`
-            );
+        if (isJsonMode()) {
+          const obj: Record<string, unknown> = { code: 2, kind: 'usage', message: err.message };
+          if (err.hint) obj.hint = err.hint;
+          obj.context = { validationKind: err.kind };
+          console.error(JSON.stringify({ error: obj }));
+        } else {
+          console.error(`Error: ${err.message}`);
+          if (err.hint) console.error(err.hint);
+          if (err.kind === 'unknown-command') {
+            const cached = getCachedDevice(deviceId);
+            if (cached) {
+              console.error(
+                `Run 'switchbot devices commands ${JSON.stringify(cached.type)}' for parameter formats and descriptions.`
+              );
+              console.error(
+                `(If the catalog is out of date, run 'switchbot devices list' to refresh the local cache, or pass --type customize for custom IR buttons.)`
+              );
+            }
           }
         }
         process.exit(2);
@@ -250,21 +275,24 @@ Examples:
         isDestructiveCommand(cachedForGuard?.type, cmd, options.type)
       ) {
         const typeLabel = cachedForGuard?.type ?? 'unknown';
+        const reason = getDestructiveReason(cachedForGuard?.type, cmd, options.type);
         if (isJsonMode()) {
-          printJson({
+          console.error(JSON.stringify({
             error: {
-              code: 'destructive_requires_confirm',
+              code: 2,
+              kind: 'guard',
               message: `"${cmd}" on ${typeLabel} is destructive and requires --yes.`,
-              hint: `Re-run with --yes to confirm, or --dry-run to preview without sending.`,
-              deviceId,
-              command: cmd,
-              deviceType: typeLabel,
+              hint: reason
+                ? `Re-run with --yes to confirm. Reason: ${reason}`
+                : 'Re-run with --yes to confirm, or --dry-run to preview without sending.',
+              context: { command: cmd, deviceType: typeLabel, deviceId, ...(reason ? { destructiveReason: reason } : {}) },
             },
-          });
+          }));
         } else {
           console.error(
             `Refusing to run destructive command "${cmd}" on ${typeLabel} without --yes.`
           );
+          if (reason) console.error(`Reason: ${reason}`);
           console.error(
             `Re-run with --yes to confirm, or --dry-run to preview without sending.`
           );
@@ -317,22 +345,26 @@ Examples:
   $ switchbot devices types --json
 `)
     .action(() => {
-      const catalog = getEffectiveCatalog();
-      const fmt = resolveFormat();
-      if (fmt === 'json') {
-        printJson(catalog);
-        return;
-      }
-      const headers = ['type', 'category', 'commands', 'aliases'];
-      const rows = catalog.map((e) => [
-        e.type,
-        e.category,
-        String(e.commands.length),
-        (e.aliases ?? []).join(', ') || '—',
-      ]);
-      renderRows(headers, rows, fmt, resolveFields());
-      if (fmt === 'table') {
-        console.log(`\nTotal: ${catalog.length} device type(s)`);
+      try {
+        const catalog = getEffectiveCatalog();
+        const fmt = resolveFormat();
+        if (fmt === 'json') {
+          printJson(catalog);
+          return;
+        }
+        const headers = ['type', 'category', 'commands', 'aliases'];
+        const rows = catalog.map((e) => [
+          e.type,
+          e.category,
+          String(e.commands.length),
+          (e.aliases ?? []).join(', ') || '—',
+        ]);
+        renderRows(headers, rows, fmt, resolveFields());
+        if (fmt === 'table') {
+          console.log(`\nTotal: ${catalog.length} device type(s)`);
+        }
+      } catch (error) {
+        handleError(error);
       }
     });
 
@@ -358,22 +390,25 @@ Examples:
 `)
     .action((typeParts: string[]) => {
       const type = typeParts.join(' ');
-      const match = findCatalogEntry(type);
-      if (!match) {
-        console.error(`No device type matches "${type}".`);
-        console.error(`Try 'switchbot devices types' to see the full list.`);
-        process.exit(2);
+      try {
+        const match = findCatalogEntry(type);
+        if (!match) {
+          throw new UsageError(
+            `No device type matches "${type}". Try 'switchbot devices types' to see the full list.`
+          );
+        }
+        if (Array.isArray(match)) {
+          const types = match.map((m) => m.type).join(', ');
+          throw new UsageError(`"${type}" matches multiple types: ${types}. Be more specific.`);
+        }
+        if (isJsonMode()) {
+          printJson(match);
+          return;
+        }
+        renderCatalogEntry(match);
+      } catch (error) {
+        handleError(error);
       }
-      if (Array.isArray(match)) {
-        console.error(`"${type}" matches multiple types. Be more specific:`);
-        for (const m of match) console.error(`  • ${m.type}`);
-        process.exit(2);
-      }
-      if (isJsonMode()) {
-        printJson(match);
-        return;
-      }
-      renderCatalogEntry(match);
     });
 
   // switchbot devices describe <deviceId>
@@ -400,7 +435,7 @@ JSON output shape (--json):
       statusFields: [<name>],
       liveStatus: <status payload when --live was passed>
     },
-    source: "catalog" | "live" | "catalog+live",
+    source: "catalog" | "live" | "catalog+live" | "none",
     suggestedActions: [{command, parameter?, description}]
   }
 

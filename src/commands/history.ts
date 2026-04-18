@@ -74,12 +74,22 @@ Examples:
       const entries = readAudit(file);
       const idx = Number(indexArg);
       if (!Number.isInteger(idx) || idx < 1 || idx > entries.length) {
-        console.error(`Invalid index ${indexArg}. Log has ${entries.length} entries.`);
+        const msg = `Invalid index ${indexArg}. Log has ${entries.length} entries.`;
+        if (isJsonMode()) {
+          console.error(JSON.stringify({ error: { code: 2, kind: 'usage', message: msg } }));
+        } else {
+          console.error(msg);
+        }
         process.exit(2);
       }
       const entry: AuditEntry = entries[idx - 1];
       if (entry.kind !== 'command') {
-        console.error(`Entry ${idx} is not a command (kind=${entry.kind}).`);
+        const msg = `Entry ${idx} is not a command (kind=${entry.kind}).`;
+        if (isJsonMode()) {
+          console.error(JSON.stringify({ error: { code: 2, kind: 'usage', message: msg } }));
+        } else {
+          console.error(msg);
+        }
         process.exit(2);
       }
       try {

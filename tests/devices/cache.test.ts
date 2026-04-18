@@ -15,6 +15,7 @@ import {
   setCachedStatus,
   clearStatusCache,
   describeCache,
+  resetListCache,
 } from '../../src/devices/cache.js';
 
 // Redirect the cache to a test-only temp directory by overriding both
@@ -25,10 +26,12 @@ beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sbcli-cache-'));
   vi.spyOn(os, 'homedir').mockReturnValue(tmpDir);
   process.argv = ['node', 'switchbot'];
+  resetListCache();
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
+  resetListCache();
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -177,6 +180,8 @@ describe('list cache TTL', () => {
     const raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
     raw.lastUpdated = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
     fs.writeFileSync(file, JSON.stringify(raw));
+    // Flush the hot-cache so the next call re-reads the modified file.
+    resetListCache();
     expect(isListCacheFresh(60 * 60 * 1000)).toBe(false);
   });
 });
@@ -262,12 +267,13 @@ describe('describeCache', () => {
   });
 
   it('reports oldest/newest status timestamps when populated', () => {
-    setCachedStatus('BOT1', { power: 'on' }, new Date('2026-04-01T00:00:00Z'));
+    // Both timestamps must be within 24 h of each other so GC doesn't evict the older entry.
+    setCachedStatus('BOT1', { power: 'on' }, new Date('2026-04-17T10:00:00Z'));
     setCachedStatus('BOT2', { power: 'off' }, new Date('2026-04-17T12:00:00Z'));
     const s = describeCache();
     expect(s.status.exists).toBe(true);
     expect(s.status.entryCount).toBe(2);
-    expect(s.status.oldestFetchedAt).toBe('2026-04-01T00:00:00.000Z');
+    expect(s.status.oldestFetchedAt).toBe('2026-04-17T10:00:00.000Z');
     expect(s.status.newestFetchedAt).toBe('2026-04-17T12:00:00.000Z');
   });
 });

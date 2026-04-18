@@ -65,9 +65,9 @@ export function createClient(): AxiosInstance {
     }
 
     if (dryRun && method !== 'GET') {
-      console.log(chalk.yellow(`[dry-run] Would ${method} ${url}`));
+      process.stderr.write(chalk.yellow(`[dry-run] Would ${method} ${url}\n`));
       if (config.data !== undefined) {
-        console.log(chalk.yellow(`[dry-run] body: ${JSON.stringify(config.data)}`));
+        process.stderr.write(chalk.yellow(`[dry-run] body: ${JSON.stringify(config.data)}\n`));
       }
       throw new DryRunSignal(method, url);
     }

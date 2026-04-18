@@ -117,7 +117,22 @@ cat plan.json | switchbot --json plan run -         # machine-readable outcome
 
 ## Surface 3: Direct JSON invocation
 
-The CLI's `--json` flag covers every command. Pipe output through `jq` or parse it directly:
+### `--json` vs `--format=json` — pick the right one
+
+| Flag | Output | When to use |
+|------|--------|-------------|
+| `--json` | **Raw API payload** — exact JSON the SwitchBot API returned | `jq` pipelines, scripts that need the full response body |
+| `--format=json` | **Projected row view** — CLI column model, `--fields` applies | When you only need specific fields; consistent shape across all commands |
+
+`--json` and `--format=json` differ only in output shape — they share the same HTTP client and auth.
+
+Errors follow the same envelope on both paths (stderr):
+
+```json
+{ "error": { "code": 152, "kind": "api", "message": "...", "hint": "...", "retryable": false } }
+```
+
+Error `kind` values: `api` (SwitchBot API error), `runtime` (network/auth failure), `usage` (bad flag or unknown field), `guard` (destructive command blocked without `confirm:true`).
 
 ```bash
 switchbot --json devices list | jq '.deviceList[] | select(.deviceType=="Bot") | .deviceId'
@@ -126,7 +141,24 @@ switchbot --json --dry-run devices command <id> turnOff
 switchbot --json scenes execute <sceneId>
 ```
 
-Errors are also JSON when `--json` is set — stderr carries `{ "error": { "code", "message", "hint", "retryable" } }`.
+### `--fields` — strict column filter
+
+`--fields` projects output to a named subset of columns. Field names are the exact column headers a command outputs (listed in `--help`). Unknown names exit 2 immediately with the list of allowed names — there is no silent fallback.
+
+```bash
+# Allowed fields for each command are in its --help text:
+switchbot devices list --help          # "Output columns: deviceId, deviceName, ..."
+switchbot scenes list --help           # "Output columns: sceneId, sceneName"
+
+# For `devices status`, fields are device-specific — discover them first:
+switchbot devices status <id> --format yaml   # shows all field names for this device
+switchbot devices status <id> --format tsv --fields power,battery
+
+# --format=id only works on commands with a deviceId or sceneId column:
+switchbot devices list --format id     # ✓ — deviceId column present
+switchbot scenes list --format id      # ✓ — sceneId column present
+switchbot devices status <id> --format id  # ✗ — exits 2 (no ID column in status output)
+```
 
 ---
 
@@ -186,10 +218,10 @@ Pair with `switchbot devices watch --interval=30s --on-change-only` for continuo
 
 Agent contexts are expensive; the CLI is designed to be frugal.
 
-- `switchbot devices list --format=tsv --fields=id,name,type,online` — typical output ≤ 500 chars for a 20-device account (vs ~5 KB for the default JSON).
+- `switchbot devices list --format=tsv --fields=deviceId,deviceName,type,cloud` — typical output ≤ 500 chars for a 20-device account (vs ~5 KB for the default JSON).
 - `switchbot devices status --format=yaml` — compact key/value, no array noise.
 - `switchbot schema export --type <t>` — bring only the relevant part of the catalog into context.
-- `switchbot describe <id>` returns **both** the static catalog entry and the live status in one call — prefer it over separate `status` + `commands <type>` calls.
+- `switchbot devices describe <id> --live` returns **both** the static catalog entry and live status in one call — prefer it over separate `status` + `commands <type>` calls.
 - Use `--cache=5m` when polling the same device repeatedly in a session; it caches live status locally so you don't burn the daily quota.
 
 If you're seeing token pressure, `switchbot doctor --json | jq .checks` will also show you how big the bundled catalog is, whether cache is active, and whether credentials round-trip cleanly.

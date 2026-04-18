@@ -321,7 +321,7 @@ describe('createClient — configurable globals', () => {
       } as never)
     ).toThrow(DryRunSignal);
 
-    const out = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+    const out = writeSpy.mock.calls.map((c) => String(c[0])).join('\n');
     expect(out).toContain('[dry-run]');
     expect(out).toContain('POST');
     expect(out).toContain('/v1.1/devices/ABC/commands');

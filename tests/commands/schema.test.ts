@@ -43,4 +43,39 @@ describe('schema export', () => {
     const unlock = lock.commands.find((c: { command: string }) => c.command === 'unlock');
     if (unlock) expect(unlock.destructive).toBe(true);
   });
+
+  it('--role filters to the matching functional group', async () => {
+    const res = await runCli(registerSchemaCommand, ['schema', 'export', '--role', 'lighting']);
+    const parsed = JSON.parse(res.stdout.join(''));
+    expect(parsed.types.length).toBeGreaterThan(0);
+    for (const t of parsed.types) {
+      expect(t.role).toBe('lighting');
+    }
+    expect(parsed.types.find((t: { type: string }) => t.type === 'Smart Lock')).toBeUndefined();
+  });
+
+  it('--role and --category can be combined', async () => {
+    const res = await runCli(registerSchemaCommand, ['schema', 'export', '--role', 'security', '--category', 'physical']);
+    const parsed = JSON.parse(res.stdout.join(''));
+    expect(parsed.types.length).toBeGreaterThan(0);
+    for (const t of parsed.types) {
+      expect(t.role).toBe('security');
+      expect(t.category).toBe('physical');
+    }
+  });
+
+  it('--role returns empty types[] for an unknown role', async () => {
+    const res = await runCli(registerSchemaCommand, ['schema', 'export', '--role', 'nonexistent']);
+    const parsed = JSON.parse(res.stdout.join(''));
+    expect(parsed.types).toEqual([]);
+  });
+
+  it('schema export includes description on every type', async () => {
+    const res = await runCli(registerSchemaCommand, ['schema', 'export']);
+    const parsed = JSON.parse(res.stdout.join(''));
+    for (const t of parsed.types) {
+      expect(t.description, `${t.type} missing description in export`).toBeTypeOf('string');
+      expect((t.description as string).length, `${t.type} description is empty`).toBeGreaterThan(0);
+    }
+  });
 });

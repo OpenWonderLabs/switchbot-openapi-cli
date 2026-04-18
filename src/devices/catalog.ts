@@ -23,6 +23,8 @@ export interface CommandSpec {
   commandType?: 'command' | 'customize';
   idempotent?: boolean;
   destructive?: boolean;
+  /** One sentence explaining *why* this command is destructive — used in guard errors so agents/users can decide whether to confirm. */
+  destructiveReason?: string;
   exampleParams?: string[];
 }
 
@@ -43,6 +45,7 @@ export type DeviceRole =
 export interface DeviceCatalogEntry {
   type: string;
   category: 'physical' | 'ir';
+  description?: string;
   aliases?: string[];
   commands: CommandSpec[];
   statusFields?: string[];
@@ -71,6 +74,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Bot',
     category: 'physical',
+    description: 'Mechanical arm robot that physically presses a button or toggles a switch on demand.',
     role: 'other',
     commands: [
       ...onOff,
@@ -81,6 +85,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Curtain',
     category: 'physical',
+    description: 'Motorized curtain track runner that opens/closes curtains by slide position (0=open, 100=closed).',
     role: 'curtain',
     aliases: ['Curtain3', 'Curtain 3'],
     commands: [
@@ -94,11 +99,12 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Smart Lock',
     category: 'physical',
+    description: 'Bluetooth/Wi-Fi electronic deadbolt that locks and unlocks a door via cloud API.',
     role: 'security',
     aliases: ['Smart Lock Pro'],
     commands: [
       { command: 'lock', parameter: '—', description: 'Lock the door', idempotent: true },
-      { command: 'unlock', parameter: '—', description: 'Unlock the door', idempotent: true, destructive: true },
+      { command: 'unlock', parameter: '—', description: 'Unlock the door', idempotent: true, destructive: true, destructiveReason: 'Physically unlocks the door — anyone nearby can open it.' },
       { command: 'deadbolt', parameter: '—', description: 'Pro only: engage deadbolt', idempotent: true },
     ],
     statusFields: ['battery', 'version', 'lockState', 'doorState', 'calibrate'],
@@ -106,20 +112,22 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Smart Lock Lite',
     category: 'physical',
+    description: 'Compact electronic deadbolt with lock and unlock control; no deadbolt mode.',
     role: 'security',
     commands: [
       { command: 'lock', parameter: '—', description: 'Lock the door', idempotent: true },
-      { command: 'unlock', parameter: '—', description: 'Unlock the door', idempotent: true, destructive: true },
+      { command: 'unlock', parameter: '—', description: 'Unlock the door', idempotent: true, destructive: true, destructiveReason: 'Physically unlocks the door — anyone nearby can open it.' },
     ],
     statusFields: ['battery', 'version', 'lockState', 'doorState', 'calibrate'],
   },
   {
     type: 'Smart Lock Ultra',
     category: 'physical',
+    description: 'Premium electronic deadbolt with full lock, unlock, and deadbolt control.',
     role: 'security',
     commands: [
       { command: 'lock', parameter: '—', description: 'Lock the door', idempotent: true },
-      { command: 'unlock', parameter: '—', description: 'Unlock the door', idempotent: true, destructive: true },
+      { command: 'unlock', parameter: '—', description: 'Unlock the door', idempotent: true, destructive: true, destructiveReason: 'Physically unlocks the door — anyone nearby can open it.' },
       { command: 'deadbolt', parameter: '—', description: 'Engage deadbolt', idempotent: true },
     ],
     statusFields: ['battery', 'version', 'lockState', 'doorState', 'calibrate'],
@@ -127,6 +135,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Plug',
     category: 'physical',
+    description: 'Smart wall outlet plug with on/off/toggle control and basic power status.',
     role: 'power',
     commands: onOffToggle,
     statusFields: ['power', 'version'],
@@ -134,6 +143,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Plug Mini (US)',
     category: 'physical',
+    description: 'Compact smart plug with voltage, current, and daily energy consumption reporting.',
     role: 'power',
     aliases: ['Plug Mini (JP)'],
     commands: onOffToggle,
@@ -142,6 +152,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Relay Switch 1',
     category: 'physical',
+    description: 'In-wall relay switch with configurable modes (toggle/edge/detached/momentary) and power metering.',
     role: 'power',
     aliases: ['Relay Switch 1PM'],
     commands: [
@@ -153,6 +164,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Relay Switch 2PM',
     category: 'physical',
+    description: 'Dual-channel relay switch with per-channel on/off/toggle and optional roller-shade mode.',
     role: 'power',
     commands: [
       { command: 'turnOn', parameter: '1 | 2 (channel)', description: 'Turn on channel 1 or 2', idempotent: true, exampleParams: ['1', '2'] },
@@ -166,6 +178,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Humidifier',
     category: 'physical',
+    description: 'Ultrasonic humidifier with auto and preset humidity level control.',
     role: 'climate',
     commands: [
       ...onOff,
@@ -176,6 +189,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Humidifier2',
     category: 'physical',
+    description: 'Evaporative humidifier with multiple speed/auto/sleep/humidity modes and child lock.',
     role: 'climate',
     aliases: ['Evaporative Humidifier'],
     commands: [
@@ -188,6 +202,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Air Purifier VOC',
     category: 'physical',
+    description: 'HEPA air purifier with VOC or PM2.5 sensing, multiple fan modes, and child lock.',
     role: 'climate',
     aliases: ['Air Purifier PM2.5', 'Air Purifier Table VOC', 'Air Purifier Table PM2.5'],
     commands: [
@@ -200,6 +215,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Color Bulb',
     category: 'physical',
+    description: 'Wi-Fi smart bulb with tunable brightness, RGB color, and color temperature.',
     role: 'lighting',
     commands: [...onOffToggle, ...lightControls],
     statusFields: ['power', 'brightness', 'color', 'colorTemperature', 'version'],
@@ -207,6 +223,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Strip Light',
     category: 'physical',
+    description: 'Addressable LED strip with on/off, brightness, RGB color, and color temperature control.',
     role: 'lighting',
     aliases: ['Strip Light 3'],
     commands: [...onOffToggle, ...lightControls],
@@ -215,6 +232,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Ceiling Light',
     category: 'physical',
+    description: 'Smart ceiling fixture with brightness and color-temperature adjustment (no RGB).',
     role: 'lighting',
     aliases: ['Ceiling Light Pro'],
     commands: [
@@ -227,6 +245,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Smart Radiator Thermostat',
     category: 'physical',
+    description: 'Motorized thermostatic valve for radiators with schedule, manual, eco, and comfort modes.',
     role: 'climate',
     commands: [
       ...onOff,
@@ -238,6 +257,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Robot Vacuum Cleaner S1',
     category: 'physical',
+    description: 'Entry-level robot vacuum with start/stop/dock and four suction power levels.',
     role: 'cleaning',
     aliases: ['Robot Vacuum Cleaner S1 Plus', 'K10+'],
     commands: [
@@ -251,6 +271,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'K10+ Pro Combo',
     category: 'physical',
+    description: 'Compact robot vacuum and mop combo with sweep/mop sessions, fan level, and water level.',
     role: 'cleaning',
     aliases: ['K20+ Pro'],
     commands: [
@@ -265,6 +286,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Floor Cleaning Robot S10',
     category: 'physical',
+    description: 'Advanced floor cleaning robot with sweep/mop modes, self-wash dock, and humidifier refill.',
     role: 'cleaning',
     aliases: ['Robot Vacuum Cleaner S10', 'Robot Vacuum Cleaner S20'],
     commands: [
@@ -281,6 +303,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Battery Circulator Fan',
     category: 'physical',
+    description: 'Rechargeable table/floor fan with wind modes, speed control, night-light, and auto-off timer.',
     role: 'fan',
     aliases: ['Circulator Fan'],
     commands: [
@@ -295,6 +318,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Blind Tilt',
     category: 'physical',
+    description: 'Motorized tilt rod for horizontal blinds; controls slat angle (0=closed, 100=open).',
     role: 'curtain',
     commands: [
       ...onOff,
@@ -308,6 +332,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Roller Shade',
     category: 'physical',
+    description: 'Motorized roller blind that moves to a set position (0=open, 100=closed).',
     role: 'curtain',
     commands: [
       ...onOff,
@@ -318,16 +343,18 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Garage Door Opener',
     category: 'physical',
+    description: 'Cloud-connected garage door controller; turnOn opens and turnOff closes the door.',
     role: 'security',
     commands: [
-      { command: 'turnOn', parameter: '—', description: 'Open the garage door', idempotent: true, destructive: true },
-      { command: 'turnOff', parameter: '—', description: 'Close the garage door', idempotent: true, destructive: true },
+      { command: 'turnOn', parameter: '—', description: 'Open the garage door', idempotent: true, destructive: true, destructiveReason: 'Opens the garage door — anyone nearby can enter the space.' },
+      { command: 'turnOff', parameter: '—', description: 'Close the garage door', idempotent: true, destructive: true, destructiveReason: 'Closes the garage door — verify no person or obstacle is in the way.' },
     ],
     statusFields: ['switchStatus', 'version', 'online'],
   },
   {
     type: 'Video Doorbell',
     category: 'physical',
+    description: 'Wi-Fi video doorbell with motion detection enable/disable control.',
     role: 'security',
     commands: [
       { command: 'enableMotionDetection', parameter: '—', description: 'Enable motion detection', idempotent: true },
@@ -338,17 +365,19 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Keypad',
     category: 'physical',
+    description: 'PIN-pad access controller that creates and deletes door passcodes for a Smart Lock.',
     role: 'security',
     aliases: ['Keypad Touch'],
     commands: [
-      { command: 'createKey', parameter: '\'{"name":"...","type":"permanent|timeLimit|disposable|urgent","password":"6-12 digits","startTime":<s>,"endTime":<s>}\'', description: 'Create a passcode (async; result via webhook)', idempotent: false, destructive: true },
-      { command: 'deleteKey', parameter: '\'{"id":<passcode_id>}\'', description: 'Delete a passcode (async; result via webhook)', idempotent: true, destructive: true },
+      { command: 'createKey', parameter: '\'{"name":"...","type":"permanent|timeLimit|disposable|urgent","password":"6-12 digits","startTime":<s>,"endTime":<s>}\'', description: 'Create a passcode (async; result via webhook)', idempotent: false, destructive: true, destructiveReason: 'Provisions a new access credential — anyone with this passcode can unlock the door.' },
+      { command: 'deleteKey', parameter: '\'{"id":<passcode_id>}\'', description: 'Delete a passcode (async; result via webhook)', idempotent: true, destructive: true, destructiveReason: 'Permanently removes a passcode — the holder immediately loses door access.' },
     ],
     statusFields: ['version'],
   },
   {
     type: 'Candle Warmer Lamp',
     category: 'physical',
+    description: 'Decorative candle-warmer lamp with adjustable brightness and color temperature.',
     role: 'lighting',
     commands: [
       ...onOffToggle,
@@ -361,6 +390,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Meter',
     category: 'physical',
+    description: 'Battery-powered temperature and humidity sensor; read-only, no control commands.',
     role: 'sensor',
     readOnly: true,
     aliases: ['Meter Plus', 'MeterPro', 'MeterPro(CO2)', 'WoIOSensor', 'Hub 2'],
@@ -370,6 +400,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Motion Sensor',
     category: 'physical',
+    description: 'PIR motion detector that reports movement and ambient brightness; read-only.',
     role: 'sensor',
     readOnly: true,
     commands: [],
@@ -378,6 +409,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Contact Sensor',
     category: 'physical',
+    description: 'Door or window open/close sensor that also reports movement and brightness; read-only.',
     role: 'sensor',
     readOnly: true,
     commands: [],
@@ -386,6 +418,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Water Leak Detector',
     category: 'physical',
+    description: 'Water sensor that reports leak status; read-only, no control commands.',
     role: 'sensor',
     readOnly: true,
     commands: [],
@@ -395,6 +428,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Hub Mini',
     category: 'physical',
+    description: 'IR hub that bridges BLE devices to the cloud and learns IR remotes; no direct control commands.',
     role: 'hub',
     readOnly: true,
     aliases: ['Hub Mini2'],
@@ -404,6 +438,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Hub 3',
     category: 'physical',
+    description: 'Wi-Fi hub with built-in temperature, humidity, and light sensors; manages local BLE devices.',
     role: 'hub',
     readOnly: true,
     commands: [],
@@ -412,6 +447,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'AI Hub',
     category: 'physical',
+    description: 'Advanced hub with AI-based automations; bridges BLE devices to the cloud; read-only status.',
     role: 'hub',
     readOnly: true,
     commands: [],
@@ -420,6 +456,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Home Climate Panel',
     category: 'physical',
+    description: 'Wall-mounted display showing temperature and humidity; sensor-only, no control.',
     role: 'climate',
     readOnly: true,
     commands: [],
@@ -428,6 +465,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Wallet Finder Card',
     category: 'physical',
+    description: 'Slim Bluetooth tracker card for locating wallets; reports battery status only.',
     role: 'sensor',
     readOnly: true,
     commands: [],
@@ -436,6 +474,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Outdoor Spotlight Cam',
     category: 'physical',
+    description: 'Battery-powered outdoor security camera with spotlight; status-only via cloud API.',
     role: 'security',
     readOnly: true,
     commands: [],
@@ -446,6 +485,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Air Conditioner',
     category: 'ir',
+    description: 'IR-controlled air conditioner with on/off and full HVAC parameter control (mode, fan, temp).',
     role: 'climate',
     commands: [
       ...onOff,
@@ -455,6 +495,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'TV',
     category: 'ir',
+    description: 'IR-controlled television or streaming device with channel, volume, and power commands.',
     role: 'media',
     aliases: ['IPTV', 'Streamer', 'Set Top Box'],
     commands: [
@@ -469,6 +510,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'DVD',
     category: 'ir',
+    description: 'IR-controlled disc player or speaker with playback, track navigation, and volume commands.',
     role: 'media',
     aliases: ['Speaker'],
     commands: [
@@ -488,6 +530,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Fan',
     category: 'ir',
+    description: 'IR-controlled fan with on/off, swing, timer, and speed preset commands.',
     role: 'fan',
     commands: [
       ...onOff,
@@ -501,6 +544,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Light',
     category: 'ir',
+    description: 'IR-controlled light fixture with on/off and relative brightness adjustment commands.',
     role: 'lighting',
     commands: [
       ...onOff,
@@ -511,6 +555,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Others',
     category: 'ir',
+    description: 'Catch-all for custom IR remotes with user-defined button names learned by a Hub.',
     role: 'other',
     commands: [
       { command: '<buttonName>', parameter: '—', description: 'User-defined custom IR button (requires --type customize)', commandType: 'customize' },

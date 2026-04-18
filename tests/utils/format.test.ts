@@ -73,10 +73,8 @@ describe('filterFields', () => {
     expect(result.rows).toEqual([['A1', 'Bot'], ['A2', 'Smart Lock']]);
   });
 
-  it('ignores unknown field names', () => {
-    const result = filterFields(headers, rows, ['id', 'nonexistent']);
-    expect(result.headers).toEqual(['id']);
-    expect(result.rows).toEqual([['A1'], ['A2']]);
+  it('exits 2 on unknown field names', () => {
+    expect(() => filterFields(headers, rows, ['id', 'nonexistent'])).toThrow('Unknown field(s): "nonexistent"');
   });
 
   it('preserves requested field order', () => {
@@ -141,9 +139,9 @@ describe('renderRows', () => {
     renderRows(headers, rows, 'yaml');
     const combined = logOutput.join('\n');
     expect(combined).toContain('---');
-    expect(combined).toContain('deviceId: "DEV1"');
-    expect(combined).toContain('name: "Light"');
-    expect(combined).toContain('type: "Smart Lock"');
+    expect(combined).toContain('deviceId: DEV1');
+    expect(combined).toContain('name: Light');
+    expect(combined).toContain('type: Smart Lock');
   });
 
   it('id: outputs the first column (deviceId) by default', () => {
@@ -156,6 +154,10 @@ describe('renderRows', () => {
     expect(logOutput).toEqual(['S1', 'S2']);
   });
 
+  it('id: exits 2 when no deviceId or sceneId column exists', () => {
+    expect(() => renderRows(['power', 'battery'], [['on', 87]], 'id')).toThrow('--format=id requires');
+  });
+
   it('handles null/undefined/boolean cells in tsv', () => {
     renderRows(['a', 'b', 'c'], [[null, undefined, true]], 'tsv');
     expect(logOutput[1]).toBe('\t\ttrue');
@@ -164,8 +166,8 @@ describe('renderRows', () => {
   it('handles null cells in yaml', () => {
     renderRows(['a', 'b'], [[null, 'ok']], 'yaml');
     const combined = logOutput.join('\n');
-    expect(combined).toContain('a: ~');
-    expect(combined).toContain('b: "ok"');
+    expect(combined).toContain('a: null');
+    expect(combined).toContain('b: ok');
   });
 });
 

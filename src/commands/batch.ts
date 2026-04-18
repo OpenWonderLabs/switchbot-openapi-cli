@@ -177,11 +177,19 @@ Examples:
           });
         } catch (error) {
           if (error instanceof FilterSyntaxError) {
-            console.error(`Error: ${error.message}`);
+            if (isJsonMode()) {
+              console.error(JSON.stringify({ error: { code: 2, kind: 'usage', message: error.message } }));
+            } else {
+              console.error(`Error: ${error.message}`);
+            }
             process.exit(2);
           }
           if (error instanceof Error && error.message.startsWith('No target devices')) {
-            console.error(`Error: ${error.message}`);
+            if (isJsonMode()) {
+              console.error(JSON.stringify({ error: { code: 2, kind: 'usage', message: error.message } }));
+            } else {
+              console.error(`Error: ${error.message}`);
+            }
             process.exit(2);
           }
           handleError(error);
@@ -215,22 +223,17 @@ Examples:
         }
 
         if (blockedForDestructive.length > 0 && !options.yes) {
-          const out: BatchResult = {
-            succeeded: [],
-            failed: blockedForDestructive.map((b) => ({
-              deviceId: b.deviceId,
-              error: b.reason,
-            })),
-            summary: {
-              total: resolved.ids.length,
-              ok: 0,
-              failed: blockedForDestructive.length,
-              skipped: resolved.ids.length - blockedForDestructive.length,
-              durationMs: 0,
-            },
-          };
           if (isJsonMode()) {
-            printJson(out);
+            const deviceIds = blockedForDestructive.map((b) => b.deviceId);
+            console.error(JSON.stringify({
+              error: {
+                code: 2,
+                kind: 'guard',
+                message: `Destructive command "${cmd}" requires --yes to run on ${blockedForDestructive.length} device(s).`,
+                hint: 'Re-issue the call with --yes to proceed.',
+                context: { command: cmd, deviceIds },
+              },
+            }));
           } else {
             console.error(
               `Refusing to run destructive command "${cmd}" on ${blockedForDestructive.length} device(s) without --yes:`

@@ -112,9 +112,13 @@ describe('mcp server', () => {
     expect(res.isError).toBe(true);
     const text = (res.content as Array<{ type: string; text: string }>)[0].text;
     const parsed = JSON.parse(text);
-    expect(parsed.error).toBe('destructive_requires_confirm');
-    expect(parsed.command).toBe('unlock');
-    expect(parsed.deviceType).toBe('Smart Lock');
+    expect(parsed.error.kind).toBe('guard');
+    expect(parsed.error.code).toBe(3);
+    expect(parsed.error.context.command).toBe('unlock');
+    expect(parsed.error.context.deviceType).toBe('Smart Lock');
+    // destructiveReason should be present so agents can explain it to users
+    expect(parsed.error.context.destructiveReason).toBeTypeOf('string');
+    expect(parsed.error.hint).toContain('Reason:');
     // Should not have called the API at all.
     expect(apiMock.__instance.post).not.toHaveBeenCalled();
   });
@@ -149,8 +153,9 @@ describe('mcp server', () => {
 
     expect(res.isError).toBe(true);
     const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
-    expect(parsed.error).toBe('validation_failed');
-    expect(parsed.kind).toBe('unknown-command');
+    expect(parsed.error.kind).toBe('usage');
+    expect(parsed.error.code).toBe(2);
+    expect(parsed.error.context.validationKind).toBe('unknown-command');
     expect(apiMock.__instance.post).not.toHaveBeenCalled();
   });
 
