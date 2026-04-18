@@ -7,6 +7,7 @@ import { registerWebhookCommand } from './commands/webhook.js';
 import { registerCompletionCommand } from './commands/completion.js';
 import { registerMcpCommand } from './commands/mcp.js';
 import { registerQuotaCommand } from './commands/quota.js';
+import { registerCatalogCommand } from './commands/catalog.js';
 
 const program = new Command();
 
@@ -33,6 +34,7 @@ registerWebhookCommand(program);
 registerCompletionCommand(program);
 registerMcpCommand(program);
 registerQuotaCommand(program);
+registerCatalogCommand(program);
 
 program.addHelpText('after', `
 Credentials:

@@ -1,9 +1,9 @@
 import type { AxiosInstance } from 'axios';
 import { createClient } from '../api/client.js';
 import {
-  DEVICE_CATALOG,
   findCatalogEntry,
   suggestedActions,
+  getEffectiveCatalog,
   type DeviceCatalogEntry,
   type CommandSpec,
 } from '../devices/catalog.js';
@@ -275,11 +275,12 @@ export function buildHubLocationMap(
  * Intended for MCP's `search_catalog` tool — not for dispatching commands.
  */
 export function searchCatalog(query: string, limit = 20): DeviceCatalogEntry[] {
+  const catalog = getEffectiveCatalog();
   const q = query.trim().toLowerCase();
-  if (!q) return DEVICE_CATALOG.slice(0, limit);
+  if (!q) return catalog.slice(0, limit);
 
   const hits: DeviceCatalogEntry[] = [];
-  for (const entry of DEVICE_CATALOG) {
+  for (const entry of catalog) {
     const haystack = [entry.type, ...(entry.aliases ?? [])].map((s) => s.toLowerCase());
     if (haystack.some((h) => h.includes(q))) {
       hits.push(entry);

@@ -524,13 +524,14 @@ export function findCatalogEntry(query: string): DeviceCatalogEntry | DeviceCata
   if (!q) return null;
 
   const names = (e: DeviceCatalogEntry) => [e.type, ...(e.aliases ?? [])];
+  const catalog = getEffectiveCatalog();
 
-  const exact = DEVICE_CATALOG.find((e) =>
+  const exact = catalog.find((e) =>
     names(e).some((n) => n.toLowerCase() === q)
   );
   if (exact) return exact;
 
-  const matches = DEVICE_CATALOG.filter((e) =>
+  const matches = catalog.filter((e) =>
     names(e).some((n) => n.toLowerCase().includes(q))
   );
   if (matches.length === 0) return null;
@@ -565,3 +566,120 @@ export function suggestedActions(entry: DeviceCatalogEntry): Array<{
     description: c.description,
   }));
 }
+
+// ---- Overlay loader ----------------------------------------------------
+//
+// Users can drop a `~/.switchbot/catalog.json` file to override or extend
+// the built-in catalog without waiting on a CLI release. The overlay is a
+// list of DeviceCatalogEntry objects; each entry matches on `type`:
+//   - Entry with `type` matching a built-in replaces that built-in entry.
+//   - Entry with a new `type` is appended.
+//   - Entry with `{ type: "X", remove: true }` deletes the built-in.
+//
+// The overlay is loaded once per process and cached. Malformed JSON or
+// files that don't match the expected shape are ignored (with a warning
+// to stderr in verbose mode).
+
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+
+export interface CatalogOverlayEntry extends Partial<DeviceCatalogEntry> {
+  type: string;
+  remove?: boolean;
+}
+
+export interface OverlayLoadResult {
+  path: string;
+  exists: boolean;
+  entries: CatalogOverlayEntry[];
+  error?: string;
+}
+
+function overlayFilePath(): string {
+  return path.join(os.homedir(), '.switchbot', 'catalog.json');
+}
+
+export function getCatalogOverlayPath(): string {
+  return overlayFilePath();
+}
+
+/** Read the overlay file. Never throws — returns `error` on bad files. */
+export function loadCatalogOverlay(): OverlayLoadResult {
+  const file = overlayFilePath();
+  if (!fs.existsSync(file)) {
+    return { path: file, exists: false, entries: [] };
+  }
+  try {
+    const raw = fs.readFileSync(file, 'utf-8');
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return {
+        path: file,
+        exists: true,
+        entries: [],
+        error: 'overlay must be a JSON array of device catalog entries',
+      };
+    }
+    const entries: CatalogOverlayEntry[] = [];
+    for (const item of parsed) {
+      if (!item || typeof item !== 'object' || typeof item.type !== 'string') {
+        return {
+          path: file,
+          exists: true,
+          entries: [],
+          error: 'every overlay entry must be an object with a string `type`',
+        };
+      }
+      entries.push(item as CatalogOverlayEntry);
+    }
+    return { path: file, exists: true, entries };
+  } catch (err) {
+    return {
+      path: file,
+      exists: true,
+      entries: [],
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+let overlayCache: OverlayLoadResult | null = null;
+
+function overlayOnce(): OverlayLoadResult {
+  if (overlayCache === null) overlayCache = loadCatalogOverlay();
+  return overlayCache;
+}
+
+/** Clear the overlay cache (test helper; also useful for `catalog refresh`). */
+export function resetCatalogOverlayCache(): void {
+  overlayCache = null;
+}
+
+/** Merge built-in catalog with the on-disk overlay. */
+export function getEffectiveCatalog(): DeviceCatalogEntry[] {
+  const overlay = overlayOnce();
+  if (!overlay.entries.length) return DEVICE_CATALOG;
+
+  const byType = new Map<string, DeviceCatalogEntry>();
+  for (const e of DEVICE_CATALOG) byType.set(e.type, e);
+
+  for (const entry of overlay.entries) {
+    if (entry.remove) {
+      byType.delete(entry.type);
+      continue;
+    }
+    const existing = byType.get(entry.type);
+    if (existing) {
+      byType.set(entry.type, { ...existing, ...entry } as DeviceCatalogEntry);
+    } else if (entry.category && entry.commands) {
+      // New entry — require the fields the renderer needs. Missing fields
+      // would make the new entry crash later, so skip silently rather than
+      // ship half-valid data to the user.
+      byType.set(entry.type, entry as DeviceCatalogEntry);
+    }
+  }
+
+  return Array.from(byType.values());
+}
+

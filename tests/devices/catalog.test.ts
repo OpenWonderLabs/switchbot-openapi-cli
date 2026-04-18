@@ -1,4 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 import {
   DEVICE_CATALOG,
   findCatalogEntry,
@@ -182,5 +185,156 @@ describe('devices/catalog', () => {
       expect(Array.isArray(match)).toBe(false);
       expect((match as { type: string }).type).toBe('Strip Light');
     });
+  });
+});
+
+describe('catalog overlay', () => {
+  let tmpRoot: string;
+
+  beforeEach(() => {
+    tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'switchbot-catalog-'));
+    vi.spyOn(os, 'homedir').mockReturnValue(tmpRoot);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    try {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  });
+
+  async function writeOverlay(entries: unknown): Promise<void> {
+    const dir = path.join(tmpRoot, '.switchbot');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'catalog.json'), JSON.stringify(entries));
+  }
+
+  async function freshImport() {
+    vi.resetModules();
+    return await import('../../src/devices/catalog.js');
+  }
+
+  it('returns empty entries when overlay file is missing', async () => {
+    const { loadCatalogOverlay } = await freshImport();
+    const result = loadCatalogOverlay();
+    expect(result.exists).toBe(false);
+    expect(result.entries).toEqual([]);
+    expect(result.error).toBeUndefined();
+  });
+
+  it('loads a valid overlay array', async () => {
+    await writeOverlay([{ type: 'Bot', role: 'other' }]);
+    const { loadCatalogOverlay } = await freshImport();
+    const result = loadCatalogOverlay();
+    expect(result.exists).toBe(true);
+    expect(result.entries).toEqual([{ type: 'Bot', role: 'other' }]);
+    expect(result.error).toBeUndefined();
+  });
+
+  it('reports an error when overlay is not a JSON array', async () => {
+    await writeOverlay({ not: 'an array' });
+    const { loadCatalogOverlay } = await freshImport();
+    const result = loadCatalogOverlay();
+    expect(result.exists).toBe(true);
+    expect(result.entries).toEqual([]);
+    expect(result.error).toMatch(/array/i);
+  });
+
+  it('reports an error when an overlay entry is missing string `type`', async () => {
+    await writeOverlay([{ role: 'other' }]);
+    const { loadCatalogOverlay } = await freshImport();
+    const result = loadCatalogOverlay();
+    expect(result.error).toMatch(/type/i);
+    expect(result.entries).toEqual([]);
+  });
+
+  it('reports a parse error for malformed JSON without throwing', async () => {
+    const dir = path.join(tmpRoot, '.switchbot');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'catalog.json'), '{not valid json');
+    const { loadCatalogOverlay } = await freshImport();
+    const result = loadCatalogOverlay();
+    expect(result.exists).toBe(true);
+    expect(result.entries).toEqual([]);
+    expect(result.error).toBeTruthy();
+  });
+
+  it('overlay replaces fields on a matching built-in type (partial merge)', async () => {
+    await writeOverlay([{ type: 'Bot', role: 'lighting' }]);
+    const { getEffectiveCatalog } = await freshImport();
+    const eff = getEffectiveCatalog();
+    const bot = eff.find((e) => e.type === 'Bot');
+    expect(bot?.role).toBe('lighting');
+    // Other fields (commands, statusFields) still come from the built-in entry.
+    expect(bot?.commands.length).toBeGreaterThan(0);
+    expect(bot?.category).toBe('physical');
+  });
+
+  it('overlay appends a new type when category+commands are supplied', async () => {
+    await writeOverlay([
+      {
+        type: 'Imaginary Gadget',
+        category: 'physical',
+        role: 'other',
+        commands: [{ command: 'ping', parameter: '—', description: 'Ping it' }],
+      },
+    ]);
+    const { getEffectiveCatalog } = await freshImport();
+    const eff = getEffectiveCatalog();
+    expect(eff.find((e) => e.type === 'Imaginary Gadget')).toBeDefined();
+  });
+
+  it('overlay silently ignores new entries missing category or commands', async () => {
+    await writeOverlay([{ type: 'Half Baked', role: 'other' }]);
+    const { getEffectiveCatalog } = await freshImport();
+    const eff = getEffectiveCatalog();
+    expect(eff.find((e) => e.type === 'Half Baked')).toBeUndefined();
+  });
+
+  it('overlay removes a built-in type when remove: true', async () => {
+    await writeOverlay([{ type: 'Bot', remove: true }]);
+    const { getEffectiveCatalog } = await freshImport();
+    const eff = getEffectiveCatalog();
+    expect(eff.find((e) => e.type === 'Bot')).toBeUndefined();
+    // Other built-in types remain.
+    expect(eff.find((e) => e.type === 'Curtain')).toBeDefined();
+  });
+
+  it('findCatalogEntry respects overlay (alias lookup on overlay-added type)', async () => {
+    await writeOverlay([
+      {
+        type: 'Imaginary Gadget',
+        category: 'physical',
+        role: 'other',
+        aliases: ['ImagGadget'],
+        commands: [{ command: 'ping', parameter: '—', description: 'Ping' }],
+      },
+    ]);
+    const { findCatalogEntry: find } = await freshImport();
+    const match = find('ImagGadget');
+    expect(Array.isArray(match)).toBe(false);
+    expect((match as { type: string }).type).toBe('Imaginary Gadget');
+  });
+
+  it('resetCatalogOverlayCache re-reads the overlay file on next call', async () => {
+    await writeOverlay([{ type: 'Bot', role: 'lighting' }]);
+    const { getEffectiveCatalog, resetCatalogOverlayCache } = await freshImport();
+    expect(getEffectiveCatalog().find((e) => e.type === 'Bot')?.role).toBe('lighting');
+
+    // Swap overlay contents on disk.
+    await writeOverlay([{ type: 'Bot', role: 'sensor' }]);
+    // Without refresh, cached snapshot is returned.
+    expect(getEffectiveCatalog().find((e) => e.type === 'Bot')?.role).toBe('lighting');
+    resetCatalogOverlayCache();
+    expect(getEffectiveCatalog().find((e) => e.type === 'Bot')?.role).toBe('sensor');
+  });
+
+  it('DEVICE_CATALOG remains untouched by the overlay (no mutation)', async () => {
+    await writeOverlay([{ type: 'Bot', remove: true }]);
+    const { getEffectiveCatalog, DEVICE_CATALOG: builtin } = await freshImport();
+    getEffectiveCatalog(); // force overlay application
+    expect(builtin.find((e) => e.type === 'Bot')).toBeDefined();
   });
 });

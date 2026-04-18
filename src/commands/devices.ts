@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { printTable, printKeyValue, printJson, isJsonMode, handleError } from '../utils/output.js';
-import { DEVICE_CATALOG, findCatalogEntry, DeviceCatalogEntry } from '../devices/catalog.js';
+import { findCatalogEntry, getEffectiveCatalog, DeviceCatalogEntry } from '../devices/catalog.js';
 import { getCachedDevice } from '../devices/cache.js';
 import {
   fetchDeviceList,
@@ -272,18 +272,19 @@ Examples:
   $ switchbot devices types --json
 `)
     .action(() => {
+      const catalog = getEffectiveCatalog();
       if (isJsonMode()) {
-        printJson(DEVICE_CATALOG);
+        printJson(catalog);
         return;
       }
-      const rows = DEVICE_CATALOG.map((e) => [
+      const rows = catalog.map((e) => [
         e.type,
         e.category,
         String(e.commands.length),
         (e.aliases ?? []).join(', ') || '—',
       ]);
       printTable(['type', 'category', 'commands', 'aliases'], rows);
-      console.log(`\nTotal: ${DEVICE_CATALOG.length} device type(s)`);
+      console.log(`\nTotal: ${catalog.length} device type(s)`);
     });
 
   // switchbot devices commands <type>
