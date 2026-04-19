@@ -1,6 +1,7 @@
 export interface MqttCredential {
   brokerUrl: string;
   clientId: string;
+  /** Always contains a single status topic. Multiplexing is not supported. */
   topics: string[];
   tls: {
     caBase64: string;

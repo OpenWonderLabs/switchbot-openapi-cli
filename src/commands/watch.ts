@@ -1,12 +1,13 @@
 import { Command } from 'commander';
 import { printJson, isJsonMode, handleError, UsageError } from '../utils/output.js';
 import { fetchDeviceStatus } from '../lib/devices.js';
-import { getCachedDevice } from '../devices/cache.js';
-import { parseDurationToMs, getFields } from '../utils/flags.js';
+import { getCachedDevice, loadStatusCache, setCachedStatus } from '../devices/cache.js';
+import { parseDurationToMs, getFields, isVerbose } from '../utils/flags.js';
 import { createClient } from '../api/client.js';
 import { loadConfig } from '../config.js';
 import { MqttTlsClient } from '../mqtt/client.js';
 import { getCredential } from '../mqtt/credential.js';
+import { extractShadowEvent } from '../mqtt/shadow.js';
 
 const DEFAULT_INTERVAL_MS = 30_000;
 const MIN_INTERVAL_MS = 1_000;
@@ -236,28 +237,28 @@ async function watchViaMqtt(
     const deviceIdSet = new Set(deviceIds);
     let tick = 0;
 
-    mqttClient.on('message', ((topic: string, payload: Buffer) => {
+    mqttClient.on('message', ((_topic: string, payload: Buffer) => {
       try {
         const message = JSON.parse(payload.toString('utf-8'));
-        const m = message as Record<string, unknown>;
-        const state = m.state as Record<string, unknown> | undefined;
-        if (!state) return;
+        const event = extractShadowEvent(message);
+        if (!event) return;
+        if (!deviceIdSet.has(event.deviceId)) return;
 
-        const deviceId = (m.clientId as string) || (state.deviceId as string);
-        if (!deviceId || !deviceIdSet.has(deviceId)) return;
+        const existing = loadStatusCache().entries[event.deviceId]?.body ?? {};
+        setCachedStatus(event.deviceId, { ...existing, ...event.payload });
 
         tick++;
         const t = new Date().toISOString();
-        const cached = getCachedDevice(deviceId);
-        const changed = diff(prev.get(deviceId), state, fields);
-        prev.set(deviceId, state);
+        const cached = getCachedDevice(event.deviceId);
+        const changed = diff(prev.get(event.deviceId), event.payload, fields);
+        prev.set(event.deviceId, event.payload);
 
         if (Object.keys(changed).length === 0) return;
 
         const ev: TickEvent = {
           t,
           tick,
-          deviceId,
+          deviceId: event.deviceId,
           type: cached?.type,
           changed,
         };
@@ -271,7 +272,9 @@ async function watchViaMqtt(
           ac.abort();
         }
       } catch (err) {
-        // Silently skip unparseable messages
+        if (isVerbose()) {
+          console.error(`[mqtt] skipped malformed message: ${err instanceof Error ? err.message : String(err)}`);
+        }
       }
     }) as (...args: unknown[]) => void);
 

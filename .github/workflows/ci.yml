@@ -21,6 +21,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      - run: npm run typecheck
       - name: CLI --version matches package.json
         run: |
           PKG=$(node -p "require('./package.json').version")

@@ -60,12 +60,14 @@ export function loadConfig(): SwitchBotConfig {
     const raw = fs.readFileSync(file, 'utf-8');
     const cfg = JSON.parse(raw) as SwitchBotConfig;
     if (!cfg.token || !cfg.secret) {
-      console.error('Invalid config format. Please re-run: switchbot config set-token');
+      console.error(`Invalid config format in ${file}. Please re-run: switchbot config set-token`);
       process.exit(1);
     }
     return cfg;
-  } catch {
-    console.error('Failed to read config file. Please re-run: switchbot config set-token');
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    console.error(`Failed to read config file ${file}: ${errorMsg}`);
+    console.error('Please re-run: switchbot config set-token');
     process.exit(1);
   }
 }
@@ -103,8 +105,9 @@ export function showConfig(): void {
     console.log(`Credential source: ${file}`);
     console.log(`token : ${cfg.token}`);
     console.log(`secret: ${maskSecret(cfg.secret)}`);
-  } catch {
-    console.error('Failed to read config file');
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    console.error(`Failed to read config file ${file}: ${errorMsg}`);
   }
 }
 

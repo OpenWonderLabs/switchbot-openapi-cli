@@ -1,6 +1,6 @@
 {
   "name": "@switchbot/openapi-cli",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Command-line interface for SwitchBot API v1.1",
   "keywords": [
     "switchbot",
@@ -24,6 +24,12 @@
   "bin": {
     "switchbot": "dist/index.js"
   },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
   "files": [
     "dist",
     "README.md",
@@ -37,6 +43,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "typecheck": "tsc --noEmit",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
     "test": "vitest run",

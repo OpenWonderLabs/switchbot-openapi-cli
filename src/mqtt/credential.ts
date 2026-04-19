@@ -6,10 +6,11 @@ import axios from 'axios';
 import { ApiError } from '../api/client.js';
 import { MqttError } from './errors.js';
 import type { MqttCredential } from './types.js';
+import { getProfile } from '../utils/flags.js';
 
 const CREDENTIAL_ENDPOINT = 'https://api.switchbot.net/v1.1/iot/credential';
-const CREDENTIAL_CACHE_PATH = path.join(os.homedir(), '.switchbot', 'mqtt-credential.json');
 const TTL_MS = 3600000; // 1 hour
+const EARLY_EXPIRY_MS = 600_000; // 10 minutes — refresh before the credential expires
 
 // The SwitchBot /iot/credential endpoint uses a different signing convention
 // from the public OpenAPI: the nonce is the literal string "OpenClaw", the
@@ -18,8 +19,14 @@ const TTL_MS = 3600000; // 1 hour
 // endpoint responds with statusCode 190 "param is invalid".
 const CREDENTIAL_NONCE = 'OpenClaw';
 
+function credentialCachePath(): string {
+  const profile = getProfile();
+  const filename = profile ? `mqtt-credential.${profile}.json` : 'mqtt-credential.json';
+  return path.join(os.homedir(), '.switchbot', filename);
+}
+
 async function ensureCachedir(): Promise<void> {
-  const dir = path.dirname(CREDENTIAL_CACHE_PATH);
+  const dir = path.dirname(credentialCachePath());
   await fs.mkdir(dir, { recursive: true });
 }
 
@@ -140,11 +147,17 @@ export async function fetchCredential(token: string, secret: string): Promise<Mq
 
   const mqtt = response.data.body?.channels?.mqtt;
   if (!mqtt || !mqtt.brokerUrl || !mqtt.clientId || !mqtt.topics?.status || !mqtt.tls) {
-    throw new Error('Credential fetch failed: malformed response (missing channels.mqtt fields)');
+    throw new Error(
+      'Credential fetch failed: malformed response (missing channels.mqtt fields). ' +
+      'Run with --verbose to see the raw response; verify your SwitchBot account MQTT access.',
+    );
   }
   const { caBase64, certBase64, keyBase64 } = mqtt.tls;
   if (!caBase64 || !certBase64 || !keyBase64) {
-    throw new Error('Credential fetch failed: malformed response (missing TLS material)');
+    throw new Error(
+      'Credential fetch failed: malformed response (missing TLS material). ' +
+      'Run with --verbose to see the raw response; verify your SwitchBot account MQTT access.',
+    );
   }
 
   return {
@@ -159,9 +172,10 @@ export async function fetchCredential(token: string, secret: string): Promise<Mq
 
 export async function loadCachedCredential(): Promise<MqttCredential | null> {
   try {
-    const data = await fs.readFile(CREDENTIAL_CACHE_PATH, 'utf-8');
+    const data = await fs.readFile(credentialCachePath(), 'utf-8');
     const cred = JSON.parse(data) as MqttCredential;
-    if (cred.expiresAt > Date.now()) {
+    const timeUntilExpiry = cred.expiresAt - Date.now();
+    if (timeUntilExpiry > EARLY_EXPIRY_MS) {
       return cred;
     }
   } catch {
@@ -172,10 +186,11 @@ export async function loadCachedCredential(): Promise<MqttCredential | null> {
 
 export async function saveCachedCredential(cred: MqttCredential): Promise<void> {
   await ensureCachedir();
-  const tmp = `${CREDENTIAL_CACHE_PATH}.tmp`;
+  const cachePath = credentialCachePath();
+  const tmp = `${cachePath}.tmp`;
   try {
     await fs.writeFile(tmp, JSON.stringify(cred, null, 2));
-    await fs.rename(tmp, CREDENTIAL_CACHE_PATH);
+    await fs.rename(tmp, cachePath);
   } catch (err) {
     try { await fs.unlink(tmp); } catch { /* ignore */ }
     throw err;

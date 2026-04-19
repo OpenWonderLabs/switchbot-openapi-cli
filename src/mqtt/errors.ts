@@ -1,6 +1,7 @@
 export type MqttErrorSubKind =
   | 'mqtt-tls-failed'
   | 'mqtt-connect-timeout'
+  | 'mqtt-network-unreachable'
   | 'mqtt-disconnected';
 
 export interface MqttErrorMeta {
@@ -25,6 +26,16 @@ export function classifyMqttConnectError(err: unknown): MqttErrorSubKind {
   if (!(err instanceof Error)) return 'mqtt-connect-timeout';
   const msg = err.message.toLowerCase();
   const code = (err as NodeJS.ErrnoException).code;
+
+  if (
+    code === 'ECONNREFUSED' ||
+    code === 'EHOSTUNREACH' ||
+    code === 'ENETUNREACH' ||
+    code === 'EADDRNOTAVAIL'
+  ) {
+    return 'mqtt-network-unreachable';
+  }
+
   if (
     code === 'CERT_HAS_EXPIRED' ||
     code === 'DEPTH_ZERO_SELF_SIGNED_CERT' ||
@@ -36,5 +47,6 @@ export function classifyMqttConnectError(err: unknown): MqttErrorSubKind {
   ) {
     return 'mqtt-tls-failed';
   }
+
   return 'mqtt-connect-timeout';
 }

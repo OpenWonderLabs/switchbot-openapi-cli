@@ -2,10 +2,12 @@ import { Command } from 'commander';
 import http from 'node:http';
 import { printJson, isJsonMode, handleError, UsageError } from '../utils/output.js';
 import { parseEventStreamFilter, matchShadowEventFilter } from '../utils/filter.js';
+import { isVerbose } from '../utils/flags.js';
 import { loadConfig } from '../config.js';
 import { MqttTlsClient } from '../mqtt/client.js';
 import { getCredential } from '../mqtt/credential.js';
-import type { DeviceShadowEvent } from '../mqtt/types.js';
+import { extractShadowEvent as _extractShadowEvent } from '../mqtt/shadow.js';
+import { loadStatusCache, setCachedStatus } from '../devices/cache.js';
 
 const DEFAULT_PORT = 3000;
 const DEFAULT_PATH = '/';
@@ -255,90 +257,77 @@ Examples:
         const ac = new AbortController();
         let matchedCount = 0;
 
-        await new Promise<void>((resolve, reject) => {
-          (async () => {
+        const onSig = () => ac.abort();
+        process.on('SIGINT', onSig);
+        process.on('SIGTERM', onSig);
+
+        try {
+          const credential = await getCredential(config.token, config.secret, !options.cache);
+          const mqttClient = new MqttTlsClient();
+          mqttClient.setAbortSignal(ac.signal);
+
+          await mqttClient.connect(credential);
+
+          if (!isJsonMode()) {
+            const brokerHost = new URL(credential.brokerUrl).hostname || credential.brokerUrl;
+            console.error(`[mqtt] connected to ${brokerHost}`);
+            console.error(`[mqtt] subscribed to ${credential.topics.length} topics`);
+          }
+
+          if (options.probe) {
+            await mqttClient.end();
+            return;
+          }
+
+          mqttClient.on('message', ((_topic: string, payload: Buffer) => {
             try {
-              const credential = await getCredential(config.token, config.secret, !options.cache);
-              const mqttClient = new MqttTlsClient();
-              mqttClient.setAbortSignal(ac.signal);
+              const message = JSON.parse(payload.toString('utf-8'));
+              const event = _extractShadowEvent(message);
+              if (!event) return;
+              if (!matchShadowEventFilter(event, filter)) return;
 
-              await mqttClient.connect(credential);
+              const existing = loadStatusCache().entries[event.deviceId]?.body ?? {};
+              setCachedStatus(event.deviceId, { ...existing, ...event.payload });
 
-              if (!isJsonMode()) {
-                const brokerHost = new URL(credential.brokerUrl).hostname || credential.brokerUrl;
-                console.error(`[mqtt] connected to ${brokerHost}`);
-                console.error(`[mqtt] subscribed to ${credential.topics.length} topics`);
+              matchedCount++;
+              if (isJsonMode()) {
+                printJson(event);
+              } else {
+                const when = new Date(event.ts).toLocaleTimeString();
+                const payloadStr = JSON.stringify(event.payload);
+                console.error(`[mqtt] ${when}  ${event.deviceId} (${event.deviceType})  ${payloadStr}`);
               }
 
-              if (options.probe) {
-                await mqttClient.end();
-                return resolve();
-              }
-
-              mqttClient.on('message', ((topic: string, payload: Buffer) => {
-                try {
-                  const message = JSON.parse(payload.toString('utf-8'));
-                  const event = extractShadowEvent(message);
-                  if (!event) return;
-                  if (!matchShadowEventFilter(event, filter)) return;
-
-                  matchedCount++;
-                  if (isJsonMode()) {
-                    printJson(event);
-                  } else {
-                    const when = new Date(event.ts).toLocaleTimeString();
-                    const payloadStr = JSON.stringify(event.payload);
-                    console.error(`[mqtt] ${when}  ${event.deviceId} (${event.deviceType})  ${payloadStr}`);
-                  }
-
-                  if (maxMatched !== null && matchedCount >= maxMatched) {
-                    ac.abort();
-                  }
-                } catch {
-                  // Silently skip unparseable events
-                }
-              }) as (...args: unknown[]) => void);
-
-              mqttClient.onRuntimeError((err) => {
-                reject(err);
+              if (maxMatched !== null && matchedCount >= maxMatched) {
                 ac.abort();
-              });
-
-              await mqttClient.subscribeAll(credential.topics);
-
-              const cleanup = () => {
-                mqttClient.end().then(resolve).catch(reject);
-              };
-              process.once('SIGINT', cleanup);
-              process.once('SIGTERM', cleanup);
-              ac.signal.addEventListener('abort', cleanup, { once: true });
+              }
             } catch (err) {
-              reject(err);
+              if (isVerbose()) {
+                console.error(`[mqtt] skipped malformed message: ${err instanceof Error ? err.message : String(err)}`);
+              }
             }
-          })();
-        });
+          }) as (...args: unknown[]) => void);
+
+          await mqttClient.subscribeAll(credential.topics);
+
+          await new Promise<void>((resolve, reject) => {
+            mqttClient.onRuntimeError((err) => {
+              reject(err);
+              ac.abort();
+            });
+            ac.signal.addEventListener('abort', () => {
+              mqttClient.end().then(resolve).catch(reject);
+            }, { once: true });
+          });
+        } finally {
+          process.off('SIGINT', onSig);
+          process.off('SIGTERM', onSig);
+        }
       } catch (error) {
         handleError(error);
       }
     });
 }
 
-export function extractShadowEvent(message: unknown): DeviceShadowEvent | null {
-  if (!message || typeof message !== 'object') return null;
-  const m = message as Record<string, unknown>;
-
-  const state = m.state as Record<string, unknown> | undefined;
-  if (!state) return null;
-
-  const deviceId = (m.clientId as string) || (state.deviceId as string);
-  const deviceType = (state.deviceType as string) || 'Unknown';
-
-  if (!deviceId) return null;
-
-  return {
-    ts: new Date().toISOString(),
-    deviceId,
-    deviceType,
-    payload: state,
-  };
-}
+// Re-exported for backward compatibility (tests import from here).
+export { _extractShadowEvent as extractShadowEvent };

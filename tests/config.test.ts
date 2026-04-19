@@ -184,7 +184,7 @@ describe('config', () => {
       });
 
       expect(() => showConfig()).not.toThrow();
-      expect(errSpy).toHaveBeenCalledWith('Failed to read config file');
+      expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('Failed to read config file'));
     });
 
     it('masks short secrets as **** (length <= 4)', () => {
