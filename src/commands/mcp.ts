@@ -53,7 +53,7 @@ export function createSwitchBotMcpServer(options?: { eventManager?: EventSubscri
   const server = new McpServer(
     {
       name: 'switchbot',
-      version: '1.4.0',
+      version: '2.0.0',
     },
     {
       capabilities: { tools: {} },
@@ -442,7 +442,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
       const quota = todayUsage();
 
       const overview = {
-        version: '1.7.0',
+        version: '2.0.0',
         schemaVersion: '1.1',
         devices: deviceList.deviceList.map(toMcpDeviceListShape),
         infraredRemotes: deviceList.infraredRemoteList.map(toMcpIrDeviceShape),
@@ -593,7 +593,7 @@ Inspect locally:
               res.writeHead(200, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({
                 ok: true,
-                version: '1.7.0',
+                version: '2.0.0',
                 pid: process.pid,
                 uptimeSec: Math.floor(process.uptime()),
               }));
@@ -606,7 +606,7 @@ Inspect locally:
               res.writeHead(status, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({
                 ready,
-                version: '1.7.0',
+                version: '2.0.0',
                 mqtt: eventManager ? eventManager.getState() : 'idle',
               }));
               return;
