@@ -32,15 +32,12 @@ export class SwitchBotMqttClient {
 
     try {
       const { tls, brokerUrl, clientId } = this.credential;
-      const ca = Buffer.from(tls.caBase64, 'base64');
-      const cert = Buffer.from(tls.certBase64, 'base64');
-      const key = Buffer.from(tls.keyBase64, 'base64');
-
+      // tls.ca/cert/keyBase64 are PEM strings despite the misleading field name
       const options: IClientOptions = {
         clientId,
-        ca,
-        cert,
-        key,
+        ca: tls.caBase64,
+        cert: tls.certBase64,
+        key: tls.keyBase64,
         rejectUnauthorized: true,
         clean: true,
         reconnectPeriod: 0,
