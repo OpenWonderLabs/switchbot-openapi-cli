@@ -125,6 +125,7 @@ export function registerBatchCommand(devices: Command): void {
     .option('--yes', 'Allow destructive commands (Smart Lock unlock, garage open, ...)')
     .option('--type <commandType>', '"command" (default) or "customize" for user-defined IR buttons', 'command')
     .option('--stdin', 'Read deviceIds from stdin, one per line (same as trailing "-")')
+    .option('--idempotency-key-prefix <prefix>', 'Prefix for idempotency keys (key per device: <prefix>-<deviceId>)')
     .addHelpText('after', `
 Targets are resolved in this priority order:
   1. --ids when present       (explicit deviceIds)
@@ -166,6 +167,7 @@ Examples:
           yes?: boolean;
           type: string;
           stdin?: boolean;
+          idempotencyKeyPrefix?: string;
         },
         commandObj: Command
       ) => {
@@ -266,7 +268,12 @@ Examples:
 
         const outcomes = await runPool(resolved.ids, concurrency, async (id) => {
           try {
-            const result = await executeCommand(id, cmd, parsedParam, effectiveType, getClient());
+            const idempotencyKey = options.idempotencyKeyPrefix
+              ? `${options.idempotencyKeyPrefix}-${id}`
+              : undefined;
+            const result = await executeCommand(id, cmd, parsedParam, effectiveType, getClient(), {
+              idempotencyKey,
+            });
             if (!isJsonMode()) {
               console.log(`✓ ${id}: ${cmd}`);
             }
