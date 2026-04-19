@@ -5,7 +5,7 @@ import { registerCapabilitiesCommand } from '../../src/commands/capabilities.js'
 /** Build a representative program that mirrors the real CLI structure. */
 function makeProgram(): Command {
   const p = new Command();
-  p.name('switchbot').version('2.1.0');
+  p.name('switchbot').version('0.0.0-test');
   p.option('--json', 'Output raw JSON response');
   p.option('--format <type>', 'Output format');
   p.option('--fields <csv>', 'Column filter');
