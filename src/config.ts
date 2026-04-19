@@ -72,6 +72,39 @@ export function loadConfig(): SwitchBotConfig {
   }
 }
 
+/**
+ * Explicit-profile config loader — unlike `loadConfig`, does NOT read
+ * `process.argv`, so it's safe for server contexts (MCP HTTP transport)
+ * where each request carries its own profile hint. Throws instead of
+ * calling `process.exit` so the caller can respond to the request.
+ */
+export function loadConfigForProfile(profile?: string): SwitchBotConfig {
+  const envToken = process.env.SWITCHBOT_TOKEN;
+  const envSecret = process.env.SWITCHBOT_SECRET;
+  if (!profile && envToken && envSecret) {
+    return { token: envToken, secret: envSecret };
+  }
+
+  const file = profile
+    ? profileFilePath(profile)
+    : path.join(os.homedir(), '.switchbot', 'config.json');
+
+  if (!fs.existsSync(file)) {
+    throw new Error(
+      profile
+        ? `No credentials configured for profile "${profile}" (expected file: ${file})`
+        : `No credentials configured (expected file: ${file})`,
+    );
+  }
+
+  const raw = fs.readFileSync(file, 'utf-8');
+  const cfg = JSON.parse(raw) as SwitchBotConfig;
+  if (!cfg.token || !cfg.secret) {
+    throw new Error(`Invalid config format in ${file}`);
+  }
+  return cfg;
+}
+
 export function saveConfig(token: string, secret: string): void {
   const file = configFilePath();
   const dir = path.dirname(file);

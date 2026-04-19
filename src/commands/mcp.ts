@@ -29,6 +29,7 @@ import { EventSubscriptionManager } from '../mcp/events-subscription.js';
 import { resolveTargetIds, runBatchCommand } from './batch.js';
 import { runPlan, validatePlan } from './plan.js';
 import { createClient } from '../api/client.js';
+import { loadConfigForProfile, type SwitchBotConfig } from '../config.js';
 import { todayUsage } from '../utils/quota.js';
 
 /**
@@ -54,7 +55,20 @@ function mcpError(
   };
 }
 
-export function createSwitchBotMcpServer(): McpServer {
+export interface McpServerOptions {
+  /**
+   * Resolve SwitchBot credentials for this server instance. Called lazily
+   * on every tool/resource invocation so HTTP transport can build one
+   * server per request and pass a resolver that reads per-request headers.
+   * Defaults to `loadConfigForProfile()` (no profile — falls back to env
+   * or ~/.switchbot/config.json).
+   */
+  configResolver?: () => SwitchBotConfig;
+}
+
+export function createSwitchBotMcpServer(options: McpServerOptions = {}): McpServer {
+  const configResolver = options.configResolver ?? (() => loadConfigForProfile());
+  const getClient = () => createClient(configResolver());
   const server = new McpServer(
     {
       name: 'switchbot',
@@ -115,7 +129,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
       },
     },
     async () => {
-      const body = await fetchDeviceList();
+      const body = await fetchDeviceList(getClient());
       return {
         content: [{ type: 'text', text: JSON.stringify(body, null, 2) }],
         structuredContent: {
@@ -146,7 +160,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
       },
     },
     async ({ deviceId }) => {
-      const body = await fetchDeviceStatus(deviceId);
+      const body = await fetchDeviceStatus(deviceId, getClient());
       return {
         content: [{ type: 'text', text: JSON.stringify(body, null, 2) }],
         structuredContent: { status: body as { deviceId?: string; deviceType?: string; [key: string]: unknown } },
@@ -194,7 +208,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
       // the cache is warm.
       let typeName = getCachedDevice(deviceId)?.type;
       if (!typeName) {
-        const body = await fetchDeviceList();
+        const body = await fetchDeviceList(getClient());
         const physical = body.deviceList.find((d) => d.deviceId === deviceId);
         const ir = body.infraredRemoteList.find((d) => d.deviceId === deviceId);
         if (!physical && !ir) {
@@ -243,7 +257,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         );
       }
 
-      const result = await executeCommand(deviceId, command, parameter, effectiveType);
+      const result = await executeCommand(deviceId, command, parameter, effectiveType, getClient());
       const structured = { ok: true as const, command, deviceId, result };
       return {
         content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
@@ -267,7 +281,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
       },
     },
     async ({ sceneId }) => {
-      await executeScene(sceneId);
+      await executeScene(sceneId, getClient());
       const structured = { ok: true as const, sceneId };
       return {
         content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
@@ -288,7 +302,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
       },
     },
     async () => {
-      const scenes = await fetchScenes();
+      const scenes = await fetchScenes(getClient());
       return {
         content: [{ type: 'text', text: JSON.stringify(scenes, null, 2) }],
         structuredContent: { scenes },
@@ -370,7 +384,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
     },
     async ({ deviceId, live }) => {
       try {
-        const result = await describeDevice(deviceId, { live });
+        const result = await describeDevice(deviceId, { live }, getClient());
         return {
           content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
           structuredContent: { device: toMcpDescribeShape(result) },
@@ -508,7 +522,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
           filter,
           ids: ids?.join(','),
           readStdin: false,
-        });
+        }, getClient);
         if (resolved.ids.length === 0) {
           const empty = { succeeded: [], failed: [], summary: { total: 0, ok: 0, failed: 0, skipped: 0, durationMs: 0 } };
           return {
@@ -524,6 +538,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
           commandType,
           concurrency,
           yes,
+          getClient,
         });
         if ('blocked' in result) {
           return mcpError(
@@ -610,7 +625,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
       const err = assertWebhookUrl(url);
       if (err) return mcpError('usage', 2, err);
       try {
-        const client = createClient();
+        const client = getClient();
         await client.post('/v1.1/webhook/setupWebhook', { action: 'setupWebhook', url, deviceList: 'ALL' });
         const structured = { ok: true as const, url };
         return { content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }], structuredContent: structured };
@@ -632,7 +647,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
     },
     async ({ url }) => {
       try {
-        const client = createClient();
+        const client = getClient();
         if (url) {
           const res = await client.post<{ body: unknown[] }>(
             '/v1.1/webhook/queryWebhook',
@@ -673,7 +688,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
       const err = assertWebhookUrl(url);
       if (err) return mcpError('usage', 2, err);
       try {
-        const client = createClient();
+        const client = getClient();
         const config: { url: string; enable?: boolean } = { url };
         if (enable !== undefined) config.enable = enable;
         await client.post('/v1.1/webhook/updateWebhook', { action: 'updateWebhook', config });
@@ -699,7 +714,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
       const err = assertWebhookUrl(url);
       if (err) return mcpError('usage', 2, err);
       try {
-        const client = createClient();
+        const client = getClient();
         await client.post('/v1.1/webhook/deleteWebhook', { action: 'deleteWebhook', url });
         const structured = { ok: true as const, url };
         return { content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }], structuredContent: structured };
@@ -780,6 +795,12 @@ Example Claude Desktop config (~/Library/Application Support/Claude/claude_deskt
 
 Inspect locally:
   $ npx @modelcontextprotocol/inspector switchbot mcp serve
+
+HTTP transport (multi-tenant):
+  $ switchbot mcp serve --port 3030
+  Pass x-switchbot-profile: <name> header (or ?profile=<name> query string)
+  to route a request to ~/.switchbot/profiles/<name>.json. Stdio sessions
+  always use the profile from --profile / default config.
 `);
 
   mcp
@@ -803,7 +824,20 @@ Inspect locally:
           const httpServer = createServer(async (req, res) => {
             // Stateless mode: fresh transport+server per request (SDK requirement).
             const reqTransport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-            const reqServer = createSwitchBotMcpServer();
+            // Per-request profile: read x-switchbot-profile header (or
+            // ?profile= query string) so multi-tenant MCP hosts can route
+            // different users to different credentials.
+            const headerProfile = req.headers['x-switchbot-profile'];
+            const profileHeader = Array.isArray(headerProfile) ? headerProfile[0] : headerProfile;
+            let profileQuery: string | undefined;
+            try {
+              const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
+              profileQuery = url.searchParams.get('profile') ?? undefined;
+            } catch { /* ignore */ }
+            const profile = profileHeader || profileQuery;
+            const reqServer = createSwitchBotMcpServer({
+              configResolver: () => loadConfigForProfile(profile),
+            });
             // Register cleanup before any async work so it fires on both normal
             // close and error-path close (after the 500 response ends).
             res.on('close', () => {

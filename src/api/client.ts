@@ -5,7 +5,7 @@ import axios, {
 } from 'axios';
 import chalk from 'chalk';
 import { buildAuthHeaders } from '../auth.js';
-import { loadConfig } from '../config.js';
+import { loadConfig, type SwitchBotConfig } from '../config.js';
 import {
   isVerbose,
   isDryRun,
@@ -36,8 +36,12 @@ export class DryRunSignal extends Error {
 
 type RetryableConfig = InternalAxiosRequestConfig & { __retryCount?: number };
 
-export function createClient(): AxiosInstance {
-  const { token, secret } = loadConfig();
+export function createClient(overrides?: Partial<SwitchBotConfig>): AxiosInstance {
+  const base = overrides?.token && overrides?.secret
+    ? { token: overrides.token, secret: overrides.secret }
+    : loadConfig();
+  const token = base.token;
+  const secret = base.secret;
   const verbose = isVerbose();
   const dryRun = isDryRun();
   const maxRetries = getRetryOn429();
