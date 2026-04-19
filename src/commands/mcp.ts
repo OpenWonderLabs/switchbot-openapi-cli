@@ -436,7 +436,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         mqtt: z.object({
           state: z.string(),
           subscribers: z.number(),
-        }).optional().describe('MQTT connection state (HTTP mode only)'),
+        }).optional().describe('MQTT connection state (present when MQTT env vars are configured)'),
       },
     },
     async () => {
