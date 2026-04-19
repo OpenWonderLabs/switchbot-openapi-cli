@@ -1,6 +1,11 @@
 import { Command } from 'commander';
 import http from 'node:http';
 import { printJson, isJsonMode, handleError, UsageError } from '../utils/output.js';
+import { parseEventStreamFilter, matchEventStreamFilter } from '../utils/filter.js';
+import { loadConfig } from '../config.js';
+import { MqttTlsClient } from '../mqtt/client.js';
+import { getCredential } from '../mqtt/credential.js';
+import type { DeviceShadowEvent } from '../mqtt/types.js';
 
 const DEFAULT_PORT = 3000;
 const DEFAULT_PATH = '/';
@@ -207,4 +212,128 @@ Examples:
         handleError(error);
       }
     });
+
+  events
+    .command('stream')
+    .description('Subscribe to MQTT shadow updates for real-time device state changes')
+    .option('--filter <expr>', 'Filter events, e.g. "deviceId=ABC123" or "type=Motion\ Sensor"')
+    .option('--max <n>', 'Stop after N matching events (default: run until Ctrl-C)')
+    .option('--probe', 'Verify broker connectivity and exit (does not stream events)')
+    .option('--no-cache', 'Fetch fresh credentials instead of using cached credential')
+    .addHelpText(
+      'after',
+      `
+'events stream' connects to SwitchBot's MQTT broker over TLS and subscribes to device shadow updates.
+This feature depends on the SwitchBot IoT MQTT service, which is not part of the official OpenAPI.
+If SwitchBot's policy changes, this service may become unavailable; fall back to 'devices status' polling.
+
+Credentials are cached in ~/.switchbot/mqtt-credential.json with a 1-hour TTL.
+
+Output (JSONL, one event per line):
+  { "ts": "<ISO>", "deviceId": "<id>", "deviceType": "<type>", "payload": {...} }
+
+Filter grammar: comma-separated "key=value" pairs. Supported keys:
+  deviceId=<id>    match by device ID
+  type=<type>      match by device type (e.g. "Motion Sensor", "Contact Sensor")
+
+Examples:
+  $ switchbot events stream
+  $ switchbot events stream --filter type="Motion Sensor"
+  $ switchbot events stream --filter deviceId=ABC123 --max 10
+  $ switchbot events stream --probe   # connectivity check, no streaming
+`,
+    )
+    .action(async (options: { filter?: string; max?: string; probe?: boolean; cache?: boolean }) => {
+      try {
+        const config = loadConfig();
+        const maxMatched: number | null = options.max !== undefined ? Number(options.max) : null;
+        if (maxMatched !== null && (!Number.isFinite(maxMatched) || maxMatched < 1)) {
+          throw new UsageError(`Invalid --max "${options.max}". Must be a positive integer.`);
+        }
+        const filter = parseEventStreamFilter(options.filter);
+
+        const ac = new AbortController();
+        let matchedCount = 0;
+
+        await new Promise<void>((resolve, reject) => {
+          (async () => {
+            try {
+              const credential = await getCredential(config.token, config.secret, !options.cache);
+              const mqttClient = new MqttTlsClient();
+              mqttClient.setAbortSignal(ac.signal);
+
+              await mqttClient.connect(credential);
+
+              if (!isJsonMode()) {
+                const brokerHost = new URL(credential.brokerUrl).hostname || credential.brokerUrl;
+                console.error(`[mqtt] connected to ${brokerHost}`);
+                console.error(`[mqtt] subscribed to ${credential.topics.length} topics`);
+              }
+
+              if (options.probe) {
+                await mqttClient.end();
+                return resolve();
+              }
+
+              mqttClient.on('message', ((topic: string, payload: Buffer) => {
+                try {
+                  const message = JSON.parse(payload.toString('utf-8'));
+                  const event = extractShadowEvent(message);
+                  if (!event) return;
+                  if (!matchEventStreamFilter(event.payload, filter)) return;
+
+                  matchedCount++;
+                  if (isJsonMode()) {
+                    printJson(event);
+                  } else {
+                    const when = new Date(event.ts).toLocaleTimeString();
+                    const payloadStr = JSON.stringify(event.payload);
+                    console.error(`[mqtt] ${when}  ${event.deviceId} (${event.deviceType})  ${payloadStr}`);
+                  }
+
+                  if (maxMatched !== null && matchedCount >= maxMatched) {
+                    ac.abort();
+                  }
+                } catch (err) {
+                  // Silently skip unparseable events
+                }
+              }) as (...args: unknown[]) => void);
+
+              await mqttClient.subscribeAll(credential.topics);
+
+              const cleanup = () => {
+                mqttClient.end().then(resolve).catch(reject);
+              };
+              process.once('SIGINT', cleanup);
+              process.once('SIGTERM', cleanup);
+              ac.signal.addEventListener('abort', cleanup, { once: true });
+            } catch (err) {
+              reject(err);
+            }
+          })();
+        });
+      } catch (error) {
+        handleError(error);
+      }
+    });
+}
+
+function extractShadowEvent(message: unknown): DeviceShadowEvent | null {
+  if (!message || typeof message !== 'object') return null;
+  const m = message as Record<string, unknown>;
+
+  const state = m.state as Record<string, unknown> | undefined;
+  if (!state) return null;
+
+  const deviceId = (m.clientId as string) || (state.deviceId as string);
+  const deviceType = (state.deviceType as string) || 'Unknown';
+
+  if (!deviceId) return null;
+
+  return {
+    ts: new Date().toISOString(),
+    deviceId,
+    deviceType,
+    payload: state,
+  };
 }
