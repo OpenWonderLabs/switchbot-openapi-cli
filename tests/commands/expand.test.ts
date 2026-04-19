@@ -51,7 +51,21 @@ describe('devices expand', () => {
     apiMock.__instance.get.mockReset();
     apiMock.__instance.post.mockReset();
     apiMock.createClient.mockReset();
-    apiMock.createClient.mockImplementation(() => apiMock.__instance);
+    apiMock.createClient.mockImplementation(() => {
+      // Mirror the production client's dry-run interceptor: when --dry-run is
+      // in argv, mutating calls throw DryRunSignal without touching the
+      // underlying spy (matching the test's expectation that post is never
+      // *called through* to the transport in dry-run mode).
+      if (process.argv.includes('--dry-run')) {
+        return {
+          get: apiMock.__instance.get,
+          post: async (url: string) => {
+            throw new apiMock.DryRunSignal('POST', url);
+          },
+        };
+      }
+      return apiMock.__instance;
+    });
     apiMock.__instance.post.mockResolvedValue({ data: { body: {} } });
     updateCacheFromDeviceList(sampleBody);
   });

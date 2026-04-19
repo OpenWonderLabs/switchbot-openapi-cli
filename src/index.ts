@@ -1,6 +1,8 @@
 #!/usr/bin/env node
-import { Command, CommanderError } from 'commander';
+import { Command, CommanderError, InvalidArgumentError } from 'commander';
 import { createRequire } from 'node:module';
+import { intArg, stringArg, enumArg } from './utils/arg-parsers.js';
+import { parseDurationToMs } from './utils/flags.js';
 import { registerConfigCommand } from './commands/config.js';
 import { registerDevicesCommand } from './commands/devices.js';
 import { registerScenesCommand } from './commands/scenes.js';
@@ -22,26 +24,48 @@ const { version: pkgVersion } = require('../package.json') as { version: string 
 
 const program = new Command();
 
+// Top-level subcommand names. Used by stringArg to produce clearer errors when
+// a value is omitted and the next argv token turns out to be a subcommand name.
+const TOP_LEVEL_COMMANDS = [
+  'config', 'devices', 'scenes', 'webhook', 'completion', 'mcp',
+  'quota', 'catalog', 'cache', 'events', 'doctor', 'schema',
+  'history', 'plan', 'capabilities',
+] as const;
+
+const cacheModeArg = (value: string): string => {
+  if (value.startsWith('-')) {
+    throw new InvalidArgumentError(
+      `--cache requires a mode value, got "${value}". ` +
+        `Valid: "off", "auto", or a duration like "5m", "1h". Use --cache=<mode> if needed.`,
+    );
+  }
+  if (value === 'off' || value === 'auto') return value;
+  if (parseDurationToMs(value) !== null) return value;
+  throw new InvalidArgumentError(
+    `--cache must be "off", "auto", or a duration like "30s"/"5m"/"1h" (got "${value}")`,
+  );
+};
+
 program
   .name('switchbot')
   .description('Command-line tool for SwitchBot API v1.1')
   .version(pkgVersion)
   .option('--json', 'Output raw JSON response (disables tables; useful for pipes/scripts)')
-  .option('--format <type>', 'Output format: table (default), json, jsonl, tsv, yaml, id')
-  .option('--fields <csv>', 'Comma-separated list of columns to include (e.g. --fields=id,name,type)')
+  .option('--format <type>', 'Output format: table (default), json, jsonl, tsv, yaml, id', enumArg('--format', ['table', 'json', 'jsonl', 'tsv', 'yaml', 'id']))
+  .option('--fields <csv>', 'Comma-separated list of columns to include (e.g. --fields=id,name,type)', stringArg('--fields', { disallow: TOP_LEVEL_COMMANDS }))
   .option('-v, --verbose', 'Log HTTP request/response details to stderr')
   .option('--dry-run', 'Print mutating requests without sending them (GETs still execute)')
-  .option('--timeout <ms>', 'HTTP request timeout in milliseconds (default: 30000)')
-  .option('--retry-on-429 <n>', 'Max 429 retries before surfacing the error (default: 3)')
-  .option('--backoff <strategy>', 'Backoff strategy for retries: "linear" or "exponential" (default)')
+  .option('--timeout <ms>', 'HTTP request timeout in milliseconds (default: 30000)', intArg('--timeout', { min: 1 }))
+  .option('--retry-on-429 <n>', 'Max 429 retries before surfacing the error (default: 3)', intArg('--retry-on-429', { min: 0 }))
+  .option('--backoff <strategy>', 'Backoff strategy for retries: "linear" or "exponential" (default)', enumArg('--backoff', ['linear', 'exponential']))
   .option('--no-retry', 'Disable 429 retries entirely (equivalent to --retry-on-429 0)')
   .option('--no-quota', 'Disable the local ~/.switchbot/quota.json counter for this run')
-  .option('--cache <mode>', 'Cache mode: "off" | "auto" (default: list 1h, status off) | duration like 5m, 1h, 30s (enables both stores)')
+  .option('--cache <mode>', 'Cache mode: "off" | "auto" (default: list 1h, status off) | duration like 5m, 1h, 30s (enables both stores)', cacheModeArg)
   .option('--no-cache', 'Disable cache reads (equivalent to --cache off)')
-  .option('--config <path>', 'Override credential file location (default: ~/.switchbot/config.json)')
-  .option('--profile <name>', 'Use a named profile: ~/.switchbot/profiles/<name>.json')
+  .option('--config <path>', 'Override credential file location (default: ~/.switchbot/config.json)', stringArg('--config', { disallow: TOP_LEVEL_COMMANDS }))
+  .option('--profile <name>', 'Use a named profile: ~/.switchbot/profiles/<name>.json', stringArg('--profile', { disallow: TOP_LEVEL_COMMANDS }))
   .option('--audit-log', 'Append every mutating command to JSONL audit log (default path: ~/.switchbot/audit.log)')
-  .option('--audit-log-path <path>', 'Custom audit log file path; use together with --audit-log')
+  .option('--audit-log-path <path>', 'Custom audit log file path; use together with --audit-log', stringArg('--audit-log-path', { disallow: TOP_LEVEL_COMMANDS }))
   .showHelpAfterError('(run with --help to see usage)')
   .showSuggestionAfterError();
 
@@ -101,24 +125,34 @@ Discovery:
 Docs: https://github.com/OpenWonderLabs/SwitchBotAPI
 `);
 
-// Map commander usage errors (unknown option, missing argument, etc.) to exit code 2.
-program.exitOverride((err: CommanderError) => {
-  // --help and --version print to stdout and exit 0
+// Map commander usage errors (unknown option, missing argument, argParser
+// InvalidArgumentError, etc.) to exit code 2. Commander's exitOverride is
+// per-command: subcommand errors won't bubble to the root override, so walk
+// every registered command and apply the same handler.
+const usageExitHandler = (err: CommanderError): never => {
   if (err.code === 'commander.helpDisplayed' || err.code === 'commander.version') {
     process.exit(0);
   }
-  // Everything else from commander (unknown option, missing argument,
-  // invalid choice, conflicting options, unknown command) is a usage error.
   process.exit(2);
-});
+};
+
+function applyExitOverride(cmd: Command): void {
+  cmd.exitOverride(usageExitHandler);
+  cmd.commands.forEach(applyExitOverride);
+}
+applyExitOverride(program);
 
 try {
   await program.parseAsync();
 } catch (err) {
-  // exitOverride already handled CommanderErrors; anything that escapes is a
-  // runtime error (should be rare since actions use handleError).
+  // Subcommand-level CommanderErrors (e.g. InvalidArgumentError from an
+  // argParser on a subcommand option) don't always hit the root exitOverride.
+  // Mirror the root mapping so all usage errors surface as exit 2.
   if (err instanceof CommanderError) {
-    process.exit(err.exitCode ?? 2);
+    if (err.code === 'commander.helpDisplayed' || err.code === 'commander.version') {
+      process.exit(0);
+    }
+    process.exit(2);
   }
   throw err;
 }

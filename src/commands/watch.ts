@@ -3,6 +3,7 @@ import { printJson, isJsonMode, handleError, UsageError } from '../utils/output.
 import { fetchDeviceStatus } from '../lib/devices.js';
 import { getCachedDevice } from '../devices/cache.js';
 import { parseDurationToMs, getFields } from '../utils/flags.js';
+import { intArg, durationArg } from '../utils/arg-parsers.js';
 import { createClient } from '../api/client.js';
 import { resolveDeviceId } from '../utils/name-resolver.js';
 
@@ -76,9 +77,10 @@ export function registerWatchCommand(devices: Command): void {
     .option(
       '--interval <dur>',
       `Polling interval: "30s", "1m", "500ms", ... (default 30s, min ${MIN_INTERVAL_MS / 1000}s)`,
+      durationArg('--interval'),
       '30s',
     )
-    .option('--max <n>', 'Stop after N ticks (default: run until Ctrl-C)')
+    .option('--max <n>', 'Stop after N ticks (default: run until Ctrl-C)', intArg('--max', { min: 1 }))
     .option('--include-unchanged', 'Emit a tick even when no field changed')
     .addHelpText(
       'after',

@@ -10,7 +10,9 @@ import { runCli } from '../helpers/cli.js';
 // ---------------------------------------------------------------------------
 const mqttMock = vi.hoisted(() => ({
   messageHandler: null as ((topic: string, payload: Buffer) => void) | null,
+  stateHandler: null as ((state: string) => void) | null,
   connectShouldFireMessage: false,
+  connectShouldFireState: null as string | null,
   instance: null as {
     connect: ReturnType<typeof vi.fn>;
     disconnect: ReturnType<typeof vi.fn>;
@@ -30,6 +32,12 @@ vi.mock('../../src/mqtt/client.js', () => {
             }
           }, 0);
         }
+        if (mqttMock.connectShouldFireState) {
+          const state = mqttMock.connectShouldFireState;
+          setTimeout(() => {
+            if (mqttMock.stateHandler) mqttMock.stateHandler(state);
+          }, 0);
+        }
       }),
       disconnect: vi.fn().mockResolvedValue(undefined),
       subscribe: vi.fn(),
@@ -37,7 +45,10 @@ vi.mock('../../src/mqtt/client.js', () => {
         mqttMock.messageHandler = handler;
         return () => { mqttMock.messageHandler = null; };
       }),
-      onStateChange: vi.fn(() => () => {}),
+      onStateChange: vi.fn((handler: (state: string) => void) => {
+        mqttMock.stateHandler = handler;
+        return () => { mqttMock.stateHandler = null; };
+      }),
     };
     mqttMock.instance = inst;
     return inst;
@@ -241,7 +252,9 @@ const mockCredential = {
 describe('events mqtt-tail', () => {
   beforeEach(() => {
     mqttMock.messageHandler = null;
+    mqttMock.stateHandler = null;
     mqttMock.connectShouldFireMessage = false;
+    mqttMock.connectShouldFireState = null;
     vi.mocked(fetchMqttCredential).mockResolvedValue(mockCredential);
     vi.mocked(tryLoadConfig).mockReturnValue({ token: 'test-token', secret: 'test-secret' });
   });
@@ -285,5 +298,21 @@ describe('events mqtt-tail', () => {
   it('exits 2 when --max is not a positive integer', async () => {
     const res = await runCli(registerEventsCommand, ['events', 'mqtt-tail', '--max', '0']);
     expect(res.exitCode).toBe(2);
+  });
+
+  it('exits 2 when --max swallows "--help" (token-swallow regression)', async () => {
+    const res = await runCli(registerEventsCommand, ['events', 'mqtt-tail', '--max', '--help']);
+    expect(res.exitCode).toBe(2);
+    expect(res.stderr.join('\n')).toMatch(/--max.*numeric value/i);
+  });
+
+  it('exits 1 and stops cleanly when MQTT state transitions to "failed"', async () => {
+    // Simulates the real-world scenario where the MQTT credential expires and
+    // reconnect exhausts — the loop previously hung until Node killed it with
+    // exit code 13 (unsettled top-level await). Now it aborts and exits 1.
+    mqttMock.connectShouldFireState = 'failed';
+    const res = await runCli(registerEventsCommand, ['events', 'mqtt-tail']);
+    expect(res.exitCode).toBe(1);
+    expect(res.stderr.join('\n')).toMatch(/failed permanently|credential expired|reconnect exhausted/i);
   });
 });

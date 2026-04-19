@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import http from 'node:http';
 import { printJson, isJsonMode, handleError, UsageError } from '../utils/output.js';
+import { intArg } from '../utils/arg-parsers.js';
 import { SwitchBotMqttClient } from '../mqtt/client.js';
 import { fetchMqttCredential } from '../mqtt/credential.js';
 import { tryLoadConfig } from '../config.js';
@@ -141,10 +142,10 @@ export function registerEventsCommand(program: Command): void {
   events
     .command('tail')
     .description('Run a local HTTP receiver and print incoming webhook events as JSONL')
-    .option('--port <n>', `Local port to listen on (default ${DEFAULT_PORT})`, String(DEFAULT_PORT))
+    .option('--port <n>', `Local port to listen on (default ${DEFAULT_PORT})`, intArg('--port', { min: 1, max: 65535 }), String(DEFAULT_PORT))
     .option('--path <p>', `HTTP path to match (default "${DEFAULT_PATH}"; use "*" for all paths)`, DEFAULT_PATH)
     .option('--filter <expr>', 'Filter events, e.g. "deviceId=ABC123" or "type=Bot" (comma-separated)')
-    .option('--max <n>', 'Stop after N matching events (default: run until Ctrl-C)')
+    .option('--max <n>', 'Stop after N matching events (default: run until Ctrl-C)', intArg('--max', { min: 1 }))
     .addHelpText(
       'after',
       `
@@ -225,7 +226,7 @@ Examples:
     .command('mqtt-tail')
     .description('Subscribe to SwitchBot MQTT shadow events and stream them as JSONL')
     .option('--topic <pattern>', 'MQTT topic filter (default: SwitchBot shadow topic from credential)')
-    .option('--max <n>', 'Stop after N events (default: run until Ctrl-C)')
+    .option('--max <n>', 'Stop after N events (default: run until Ctrl-C)', intArg('--max', { min: 1 }))
     .option(
       '--sink <type>',
       'Output sink: stdout (default), file, webhook, openclaw, telegram, homeassistant (repeatable)',
@@ -396,9 +397,19 @@ Examples:
           }
         });
 
+        let mqttFailed = false;
         const unsubState = client.onStateChange((state) => {
           if (!isJsonMode()) {
             console.error(`[${new Date().toLocaleTimeString()}] MQTT state: ${state}`);
+          }
+          if (state === 'failed') {
+            mqttFailed = true;
+            if (!isJsonMode()) {
+              console.error(
+                'MQTT connection failed permanently (credential expired or reconnect exhausted) — exiting.',
+              );
+            }
+            ac.abort();
           }
         });
 
@@ -422,6 +433,11 @@ Examples:
           process.once('SIGTERM', cleanup);
           ac.signal.addEventListener('abort', cleanup, { once: true });
         });
+
+        if (mqttFailed) {
+          // Surface as a runtime error so supervisors (pm2, systemd) can restart.
+          process.exit(1);
+        }
       } catch (error) {
         handleError(error);
       }
