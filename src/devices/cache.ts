@@ -55,6 +55,20 @@ function cacheFilePath(): string {
 // In-memory hot-cache: undefined = not yet loaded, null = loaded but empty.
 let _listCache: DeviceCache | null | undefined = undefined;
 let _statusCache: StatusCache | undefined = undefined;
+// Mtime of the on-disk status file at the moment the hot cache was populated.
+// Used to invalidate the hot cache when another process (e.g. a long-running
+// MCP server alongside a one-shot CLI write) touches status.json. 0 means the
+// file did not exist when we loaded; any stat on a non-existent file yields
+// 0 from our helper, so existing-vs-missing stays distinguishable.
+let _statusCacheMtime = 0;
+
+function statStatusMtime(file: string): number {
+  try {
+    return fs.statSync(file).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
 
 /** Force the next loadCache() call to re-read from disk. Used in tests. */
 export function resetListCache(): void {
@@ -64,6 +78,7 @@ export function resetListCache(): void {
 /** Force the next loadStatusCache() call to re-read from disk. Used in tests. */
 export function resetStatusCache(): void {
   _statusCache = undefined;
+  _statusCacheMtime = 0;
 }
 
 export function loadCache(): DeviceCache | null {
@@ -210,10 +225,15 @@ function statusCacheFilePath(): string {
 }
 
 export function loadStatusCache(): StatusCache {
-  if (_statusCache !== undefined) return _statusCache;
   const file = statusCacheFilePath();
-  if (!fs.existsSync(file)) {
+  const currentMtime = statStatusMtime(file);
+  // Hot-cache hit: file hasn't changed on disk since our last load.
+  if (_statusCache !== undefined && currentMtime === _statusCacheMtime) {
+    return _statusCache;
+  }
+  if (currentMtime === 0) {
     _statusCache = { entries: {} };
+    _statusCacheMtime = 0;
     return _statusCache;
   }
   try {
@@ -221,12 +241,15 @@ export function loadStatusCache(): StatusCache {
     const parsed = JSON.parse(raw) as StatusCache;
     if (!parsed || typeof parsed.entries !== 'object' || parsed.entries === null) {
       _statusCache = { entries: {} };
+      _statusCacheMtime = currentMtime;
       return _statusCache;
     }
     _statusCache = parsed;
+    _statusCacheMtime = currentMtime;
     return parsed;
   } catch {
     _statusCache = { entries: {} };
+    _statusCacheMtime = currentMtime;
     return _statusCache;
   }
 }
@@ -238,6 +261,9 @@ function saveStatusCache(cache: StatusCache): void {
     const dir = path.dirname(file);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(file, JSON.stringify(cache, null, 2), { mode: 0o600 });
+    // Pin mtime to the file we just wrote so the next loadStatusCache()
+    // in this process treats it as a hot-cache hit rather than reloading.
+    _statusCacheMtime = statStatusMtime(file);
   } catch {
     /* best-effort */
   }
@@ -288,6 +314,7 @@ export function clearStatusCache(): void {
   const file = statusCacheFilePath();
   if (fs.existsSync(file)) fs.unlinkSync(file);
   _statusCache = { entries: {} };
+  _statusCacheMtime = 0;
 }
 
 /** Summary for `switchbot cache show`. */

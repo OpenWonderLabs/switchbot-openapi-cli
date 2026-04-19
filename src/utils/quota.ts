@@ -113,15 +113,23 @@ function ensureFlushHooks(): void {
 
   process.on('beforeExit', () => flushQuota());
   process.on('exit', () => flushQuota());
-  // SIGINT/SIGTERM: attaching a listener suppresses Node's default terminate.
-  // Flush the counter, then re-raise the conventional exit code (128 + signo).
+  // SIGINT/SIGTERM: the 'exit' event does not fire on signal-driven
+  // termination, so we need a listener to flush. But we must NOT call
+  // process.exit() here — that would short-circuit command-layer cleanup
+  // (e.g. `watch` / `events stream` unwinding MQTT connections). Exit is
+  // the command's job; ours is just to persist the counter.
+  //
+  // Special case: commands that don't register their own signal handler
+  // would hang if we attach a listener without terminating. When we're the
+  // sole listener, fall back to the conventional 128+signo exit code so
+  // short one-shot commands keep their old behavior.
   process.on('SIGINT', () => {
-    flushQuota();
-    process.exit(130);
+    try { flushQuota(); } catch { /* best-effort */ }
+    if (process.listenerCount('SIGINT') === 1) process.exit(130);
   });
   process.on('SIGTERM', () => {
-    flushQuota();
-    process.exit(143);
+    try { flushQuota(); } catch { /* best-effort */ }
+    if (process.listenerCount('SIGTERM') === 1) process.exit(143);
   });
 }
 

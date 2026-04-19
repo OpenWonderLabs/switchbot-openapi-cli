@@ -277,7 +277,11 @@ async function watchViaMqtt(
 
     await mqttClient.subscribeAll(credential.topics);
 
-    await new Promise<void>((resolve) => {
+    await new Promise<void>((resolve, reject) => {
+      mqttClient.onRuntimeError((err) => {
+        reject(err);
+        ac.abort();
+      });
       const cleanup = () => {
         mqttClient.end().then(resolve).catch(resolve);
       };

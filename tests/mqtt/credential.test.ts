@@ -22,17 +22,37 @@ const mockCredentialResponse = {
   data: {
     statusCode: 100,
     body: {
-      brokerUrl: 'mqtts://broker.example.com:8883',
-      clientId: 'test-client-id',
-      topics: ['switchbot/things/ABC123/shadow/update/documents'],
-      tls: {
-        caBase64: 'Q0FfQkFTRTY0',
-        certBase64: 'Q0VSVFwiQkFTRTY0',
-        keyBase64: 'S0VZX0JBU0U2NA==',
+      channels: {
+        mqtt: {
+          brokerUrl: 'mqtts://broker.example.com:8883',
+          region: 'us-east-1',
+          clientId: 'test-client-id',
+          topics: { status: 'switchbot/abc/devicestatus' },
+          qos: 1,
+          tls: {
+            enabled: true,
+            caBase64: 'Q0FfQkFTRTY0',
+            certBase64: 'Q0VSVFwiQkFTRTY0',
+            keyBase64: 'S0VZX0JBU0U2NA==',
+          },
+        },
       },
-      qos: 1,
     },
+    message: 'success',
   },
+};
+
+// Flat shape matching MqttCredential for cache round-trips.
+const mockCachedCredentialBase = {
+  brokerUrl: 'mqtts://broker.example.com:8883',
+  clientId: 'test-client-id',
+  topics: ['switchbot/abc/devicestatus'],
+  tls: {
+    caBase64: 'Q0FfQkFTRTY0',
+    certBase64: 'Q0VSVFwiQkFTRTY0',
+    keyBase64: 'S0VZX0JBU0U2NA==',
+  },
+  qos: 1,
 };
 
 describe('credential', () => {
@@ -51,11 +71,14 @@ describe('credential', () => {
 
       expect(mockAxios.post).toHaveBeenCalledWith(
         'https://api.switchbot.net/v1.1/iot/credential',
-        {},
+        expect.objectContaining({ instanceId: expect.stringMatching(/^[A-Za-z0-9]{12}$/) }),
         expect.objectContaining({
           headers: expect.objectContaining({
             Authorization: TOKEN,
-            src: 'OpenClaw',
+            nonce: 'OpenClaw',
+            sign: expect.any(String),
+            t: expect.any(Number),
+            'Content-Type': 'application/json',
           }),
         }),
       );
@@ -78,6 +101,42 @@ describe('credential', () => {
 
       await expect(fetchCredential(TOKEN, SECRET)).rejects.toThrow(/Unauthorized/);
     });
+
+    it('classifies body-level 401 as ApiError with auth-failed subKind', async () => {
+      mockAxios.post.mockResolvedValue({
+        data: { statusCode: 401, body: { message: 'Unauthorized' } },
+      });
+      try {
+        await fetchCredential(TOKEN, SECRET);
+        throw new Error('expected fetchCredential to throw');
+      } catch (err) {
+        const { ApiError } = await import('../../src/api/client.js');
+        expect(err).toBeInstanceOf(ApiError);
+        expect((err as InstanceType<typeof ApiError>).code).toBe(401);
+      }
+    });
+
+    it('classifies body-level 429 as ApiError with retryable=true', async () => {
+      mockAxios.post.mockResolvedValue({
+        data: { statusCode: 429, body: { message: 'Too Many Requests' } },
+      });
+      try {
+        await fetchCredential(TOKEN, SECRET);
+        throw new Error('expected fetchCredential to throw');
+      } catch (err) {
+        const { ApiError } = await import('../../src/api/client.js');
+        expect(err).toBeInstanceOf(ApiError);
+        expect((err as InstanceType<typeof ApiError>).code).toBe(429);
+        expect((err as InstanceType<typeof ApiError>).retryable).toBe(true);
+      }
+    });
+
+    it('handles null body without crashing', async () => {
+      mockAxios.post.mockResolvedValue({
+        data: { statusCode: 500, body: null },
+      });
+      await expect(fetchCredential(TOKEN, SECRET)).rejects.toThrow(/Unknown error/);
+    });
   });
 
   describe('loadCachedCredential', () => {
@@ -89,7 +148,7 @@ describe('credential', () => {
 
     it('returns cached credential if not expired', async () => {
       const cachedCred = {
-        ...mockCredentialResponse.data.body,
+        ...mockCachedCredentialBase,
         expiresAt: Date.now() + 3600000,
       };
       mockFs.readFile.mockResolvedValue(JSON.stringify(cachedCred));
@@ -100,7 +159,7 @@ describe('credential', () => {
 
     it('returns null if cached credential is expired', async () => {
       const expiredCred = {
-        ...mockCredentialResponse.data.body,
+        ...mockCachedCredentialBase,
         expiresAt: Date.now() - 1000,
       };
       mockFs.readFile.mockResolvedValue(JSON.stringify(expiredCred));
@@ -136,7 +195,7 @@ describe('credential', () => {
   describe('getCredential', () => {
     it('returns cached credential if available', async () => {
       const cachedCred = {
-        ...mockCredentialResponse.data.body,
+        ...mockCachedCredentialBase,
         expiresAt: Date.now() + 3600000,
       };
       mockFs.readFile.mockResolvedValue(JSON.stringify(cachedCred));

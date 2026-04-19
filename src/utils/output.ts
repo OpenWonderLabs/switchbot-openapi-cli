@@ -1,6 +1,7 @@
 import Table from 'cli-table3';
 import chalk from 'chalk';
 import { ApiError, DryRunSignal } from '../api/client.js';
+import { MqttError, type MqttErrorSubKind } from '../mqtt/errors.js';
 
 import { getFormat } from './flags.js';
 
@@ -59,7 +60,8 @@ export type ErrorSubKind =
   | 'auth-failed'
   | 'quota-exceeded'
   | 'device-busy'
-  | 'unknown-api-error';
+  | 'unknown-api-error'
+  | MqttErrorSubKind;
 
 export interface ErrorPayload {
   code: number;
@@ -101,6 +103,17 @@ export function buildErrorPayload(error: unknown): ErrorPayload {
   if (error instanceof UsageError) {
     return { code: 2, kind: 'usage', message: error.message };
   }
+  if (error instanceof MqttError) {
+    const payload: ErrorPayload = {
+      code: 1,
+      kind: 'runtime',
+      subKind: error.subKind,
+      message: error.message,
+    };
+    if (error.hint) payload.hint = error.hint;
+    if (error.retryable) payload.retryable = true;
+    return payload;
+  }
   const code = error instanceof ApiError ? error.code : 1;
   const kind: ErrorPayload['kind'] = error instanceof ApiError ? 'api' : 'runtime';
   const message = error instanceof Error ? error.message : 'An unknown error occurred';
@@ -132,6 +145,9 @@ export function handleError(error: unknown): never {
 
   if (error instanceof ApiError) {
     console.error(chalk.red(`Error (code ${error.code}): ${payload.message}`));
+    if (payload.hint) console.error(chalk.grey(`Hint: ${payload.hint}`));
+  } else if (error instanceof MqttError) {
+    console.error(chalk.red(`Error (${error.subKind}): ${payload.message}`));
     if (payload.hint) console.error(chalk.grey(`Hint: ${payload.hint}`));
   } else if (error instanceof Error) {
     console.error(chalk.red(`Error: ${payload.message}`));

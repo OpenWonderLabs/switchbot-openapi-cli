@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import http from 'node:http';
 import { printJson, isJsonMode, handleError, UsageError } from '../utils/output.js';
-import { parseEventStreamFilter, matchEventStreamFilter } from '../utils/filter.js';
+import { parseEventStreamFilter, matchShadowEventFilter } from '../utils/filter.js';
 import { loadConfig } from '../config.js';
 import { MqttTlsClient } from '../mqtt/client.js';
 import { getCredential } from '../mqtt/credential.js';
@@ -280,7 +280,7 @@ Examples:
                   const message = JSON.parse(payload.toString('utf-8'));
                   const event = extractShadowEvent(message);
                   if (!event) return;
-                  if (!matchEventStreamFilter(event.payload, filter)) return;
+                  if (!matchShadowEventFilter(event, filter)) return;
 
                   matchedCount++;
                   if (isJsonMode()) {
@@ -294,10 +294,15 @@ Examples:
                   if (maxMatched !== null && matchedCount >= maxMatched) {
                     ac.abort();
                   }
-                } catch (err) {
+                } catch {
                   // Silently skip unparseable events
                 }
               }) as (...args: unknown[]) => void);
+
+              mqttClient.onRuntimeError((err) => {
+                reject(err);
+                ac.abort();
+              });
 
               await mqttClient.subscribeAll(credential.topics);
 
@@ -318,7 +323,7 @@ Examples:
     });
 }
 
-function extractShadowEvent(message: unknown): DeviceShadowEvent | null {
+export function extractShadowEvent(message: unknown): DeviceShadowEvent | null {
   if (!message || typeof message !== 'object') return null;
   const m = message as Record<string, unknown>;
 

@@ -117,6 +117,21 @@ export function matchEventStreamFilter(body: unknown, filter: EventStreamFilter 
   return true;
 }
 
+/**
+ * Match a parsed MQTT shadow event (with top-level deviceId/deviceType) against
+ * an event stream filter. Use this for `events stream`; use
+ * matchEventStreamFilter for webhook bodies where fields live under `context`.
+ */
+export function matchShadowEventFilter(
+  event: { deviceId: string; deviceType: string },
+  filter: EventStreamFilter | null,
+): boolean {
+  if (!filter) return true;
+  if (filter.deviceId && event.deviceId !== filter.deviceId) return false;
+  if (filter.type && event.deviceType !== filter.type) return false;
+  return true;
+}
+
 interface FilterableDevice {
   deviceId: string;
   type: string;

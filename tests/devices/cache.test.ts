@@ -250,11 +250,25 @@ describe('status cache', () => {
     expect(loadStatusCache()).toEqual({ entries: {} });
   });
 
-  it('loadStatusCache serves hot-cache after the first read', () => {
+  it('loadStatusCache serves hot-cache when the on-disk file is unchanged', () => {
+    setCachedStatus('BOT1', { power: 'on' });
+    expect(loadStatusCache().entries.BOT1?.body).toEqual({ power: 'on' });
+
+    const spy = vi.spyOn(fs, 'readFileSync');
+    // Second call with the file unchanged: no re-read.
+    loadStatusCache();
+    loadStatusCache();
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it('loadStatusCache reloads when the on-disk file is touched by another writer', async () => {
     setCachedStatus('BOT1', { power: 'on' });
     const file = path.join(tmpDir, '.switchbot', 'status.json');
     expect(loadStatusCache().entries.BOT1?.body).toEqual({ power: 'on' });
 
+    // Ensure mtime advances on filesystems with coarse resolution.
+    await new Promise((r) => setTimeout(r, 20));
     fs.writeFileSync(
       file,
       JSON.stringify({
@@ -267,8 +281,9 @@ describe('status cache', () => {
       }),
     );
 
-    expect(loadStatusCache().entries.BOT1?.body).toEqual({ power: 'on' });
-    resetStatusCache();
+    // Without resetStatusCache(): the mtime change alone should invalidate
+    // the hot cache — this is exactly the cross-process case (long-running
+    // MCP alongside a one-shot CLI) that the mtime check was added for.
     expect(loadStatusCache().entries.BOT1?.body).toEqual({ power: 'off' });
   });
 });
