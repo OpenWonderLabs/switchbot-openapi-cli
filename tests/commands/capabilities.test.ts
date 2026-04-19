@@ -125,16 +125,16 @@ describe('capabilities', () => {
     expect(mcp.resources).toEqual(['switchbot://events']);
   });
 
-  it('surfaces.mqtt exposes envVars, cliCmd, mcpResource, and configured flag', async () => {
+  it('surfaces.mqtt exposes authSource, cliCmd, mcpResource, and protocol', async () => {
     const out = await runCapabilities();
     const mqtt = (out.surfaces as Record<string, Record<string, unknown>>).mqtt;
     expect(mqtt).toBeDefined();
     expect(mqtt.mode).toBe('consumer');
-    expect(Array.isArray(mqtt.envVars)).toBe(true);
-    expect((mqtt.envVars as string[])).toContain('SWITCHBOT_MQTT_HOST');
+    expect(typeof mqtt.authSource).toBe('string');
+    expect((mqtt.authSource as string)).toContain('SWITCHBOT_TOKEN');
     expect(mqtt.cliCmd).toBe('events mqtt-tail');
     expect(mqtt.mcpResource).toBe('switchbot://events');
-    expect(typeof mqtt.configured).toBe('boolean');
+    expect(mqtt.protocol).toMatch(/MQTTS/);
   });
 
   it('version matches semver format', async () => {

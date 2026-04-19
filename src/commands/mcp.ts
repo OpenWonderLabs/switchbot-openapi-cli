@@ -25,8 +25,7 @@ import { EventSubscriptionManager } from '../mcp/events-subscription.js';
 import { todayUsage } from '../utils/quota.js';
 import { describeCache } from '../devices/cache.js';
 import { withRequestContext } from '../lib/request-context.js';
-import { profileFilePath } from '../config.js';
-import { getMqttConfig } from '../mqtt/credential.js';
+import { profileFilePath, loadConfig } from '../config.js';
 import fs from 'node:fs';
 
 /**
@@ -493,7 +492,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         title: 'SwitchBot real-time shadow events',
         description:
           'Recent device shadow-update events received via MQTT. Returns a JSON snapshot of the ring buffer. ' +
-          'State is "disabled" when MQTT credentials are not configured (set SWITCHBOT_MQTT_HOST / USERNAME / PASSWORD).',
+          'State is "disabled" when REST credentials (SWITCHBOT_TOKEN + SWITCHBOT_SECRET) are not configured.',
         mimeType: 'application/json',
       },
       (_uri) => {
@@ -530,8 +529,8 @@ The MCP server exposes eight tools:
 
 Resource (read-only):
   - switchbot://events    snapshot of recent MQTT shadow events from the ring buffer
-    Requires SWITCHBOT_MQTT_HOST / SWITCHBOT_MQTT_USERNAME / SWITCHBOT_MQTT_PASSWORD
-    env vars; returns {state:"disabled"} when not configured.
+    Auto-provisioned from SWITCHBOT_TOKEN + SWITCHBOT_SECRET;
+    returns {state:"disabled"} when credentials are not configured.
 
 Example Claude Desktop config (~/Library/Application Support/Claude/claude_desktop_config.json):
 
@@ -595,16 +594,16 @@ Inspect locally:
           const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 
           // Initialize shared EventSubscriptionManager for event streaming.
-          // If MQTT creds are present, connect in the background so the HTTP server
-          // starts immediately; /ready reflects the real state.
+          // Credentials are auto-provisioned from the SwitchBot API using the
+          // account's token+secret — no extra MQTT env vars needed.
           const eventManager = new EventSubscriptionManager();
-          const mqttConfig = getMqttConfig();
-          if (mqttConfig) {
-            eventManager.initialize(mqttConfig).catch((err: unknown) => {
+          try {
+            const { token, secret } = loadConfig();
+            eventManager.initialize(token, secret).catch((err: unknown) => {
               console.error('MQTT initialization failed:', err instanceof Error ? err.message : String(err));
             });
-          } else {
-            console.error('MQTT disabled: set SWITCHBOT_MQTT_HOST, SWITCHBOT_MQTT_USERNAME, SWITCHBOT_MQTT_PASSWORD to enable real-time events.');
+          } catch {
+            console.error('MQTT disabled: credentials not configured.');
           }
 
           // Helper: constant-time token comparison
@@ -807,11 +806,13 @@ process_uptime_seconds ${Math.floor(process.uptime())}
         }
 
         const eventManager = new EventSubscriptionManager();
-        const mqttConfig = getMqttConfig();
-        if (mqttConfig) {
-          eventManager.initialize(mqttConfig).catch((err: unknown) => {
+        try {
+          const { token, secret } = loadConfig();
+          eventManager.initialize(token, secret).catch((err: unknown) => {
             console.error('MQTT initialization failed:', err instanceof Error ? err.message : String(err));
           });
+        } catch {
+          // Credentials not yet configured — MQTT will be unavailable until they are.
         }
         const server = createSwitchBotMcpServer({ eventManager });
         const transport = new StdioServerTransport();

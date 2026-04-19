@@ -1,31 +1,54 @@
-/**
- * Resolve MQTT broker config from environment variables.
- *
- * Required env vars:
- *   SWITCHBOT_MQTT_HOST      — broker hostname (e.g. mqtt.example.com)
- *   SWITCHBOT_MQTT_USERNAME  — MQTT username
- *   SWITCHBOT_MQTT_PASSWORD  — MQTT password
- *
- * Optional:
- *   SWITCHBOT_MQTT_PORT      — broker port (default 8883)
- */
-export interface MqttConfig {
-  host: string;
-  port: number;
-  username: string;
-  password: string;
+import crypto from 'node:crypto';
+import { buildAuthHeaders } from '../auth.js';
+
+export interface MqttCredential {
+  brokerUrl: string;
+  region: string;
+  clientId: string;
+  topics: {
+    status: string;
+  };
+  qos: number;
+  tls: {
+    enabled: boolean;
+    caBase64: string;
+    certBase64: string;
+    keyBase64: string;
+  };
 }
 
-export function getMqttConfig(): MqttConfig | null {
-  const host = process.env.SWITCHBOT_MQTT_HOST;
-  const username = process.env.SWITCHBOT_MQTT_USERNAME;
-  const password = process.env.SWITCHBOT_MQTT_PASSWORD;
+const CREDENTIAL_ENDPOINT = 'https://api.switchbot.net/v1.1/iot/credential';
 
-  if (!host || !username || !password) return null;
+export async function fetchMqttCredential(token: string, secret: string): Promise<MqttCredential> {
+  // Derive a stable instance ID per token so the server can track this client.
+  const instanceId = crypto.createHash('sha256').update(token).digest('hex').slice(0, 16);
 
-  const rawPort = process.env.SWITCHBOT_MQTT_PORT;
-  const port = rawPort ? Number(rawPort) : 8883;
-  if (!Number.isFinite(port) || port <= 0 || port > 65535) return null;
+  const headers = buildAuthHeaders(token, secret);
+  const res = await fetch(CREDENTIAL_ENDPOINT, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ instanceId }),
+    signal: AbortSignal.timeout(15000),
+  });
 
-  return { host, port, username, password };
+  if (!res.ok) {
+    throw new Error(`MQTT credential request failed: HTTP ${res.status} ${res.statusText}`);
+  }
+
+  const json = (await res.json()) as { statusCode: number; body: unknown };
+
+  if (json.statusCode !== 100) {
+    throw new Error(`MQTT credential API error: statusCode ${json.statusCode}`);
+  }
+
+  // Response shape: { statusCode, body: { body: { channels: { mqtt: ... } } } }
+  const outer = json.body as Record<string, unknown>;
+  const inner = ((outer.body as Record<string, unknown> | undefined) ?? outer) as Record<string, unknown>;
+  const channels = inner.channels as { mqtt: MqttCredential } | undefined;
+
+  if (!channels?.mqtt) {
+    throw new Error('Unexpected MQTT credential response — channels.mqtt missing');
+  }
+
+  return channels.mqtt;
 }

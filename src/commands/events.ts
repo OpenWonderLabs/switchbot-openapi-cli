@@ -2,7 +2,8 @@ import { Command } from 'commander';
 import http from 'node:http';
 import { printJson, isJsonMode, handleError, UsageError } from '../utils/output.js';
 import { SwitchBotMqttClient } from '../mqtt/client.js';
-import { getMqttConfig } from '../mqtt/credential.js';
+import { fetchMqttCredential } from '../mqtt/credential.js';
+import { loadConfig } from '../config.js';
 
 const DEFAULT_PORT = 3000;
 const DEFAULT_PATH = '/';
@@ -212,17 +213,15 @@ Examples:
 
   events
     .command('mqtt-tail')
-    .description('Subscribe to MQTT shadow events and stream them as JSONL (requires SWITCHBOT_MQTT_HOST/USERNAME/PASSWORD)')
-    .option('--topic <pattern>', 'MQTT topic filter (default: "#" — all topics)', '#')
+    .description('Subscribe to SwitchBot MQTT shadow events and stream them as JSONL')
+    .option('--topic <pattern>', 'MQTT topic filter (default: SwitchBot shadow topic from credential)')
     .option('--max <n>', 'Stop after N events (default: run until Ctrl-C)')
     .addHelpText(
       'after',
       `
-Requires three environment variables:
-  SWITCHBOT_MQTT_HOST      broker hostname
-  SWITCHBOT_MQTT_USERNAME  broker username
-  SWITCHBOT_MQTT_PASSWORD  broker password
-  SWITCHBOT_MQTT_PORT      broker port (default: 8883, MQTTS/TLS)
+Connects to the SwitchBot MQTT service using your existing credentials
+(SWITCHBOT_TOKEN + SWITCHBOT_SECRET or ~/.switchbot/config.json).
+No additional MQTT configuration required.
 
 Output (JSONL, one event per line):
   { "t": "<ISO>", "topic": "<mqtt-topic>", "payload": <parsed JSON or raw string> }
@@ -233,31 +232,43 @@ Examples:
   $ switchbot events mqtt-tail --max 10 --json
 `,
     )
-    .action(async (options: { topic: string; max?: string }) => {
+    .action(async (options: { topic?: string; max?: string }) => {
       try {
-        const cfg = getMqttConfig();
-        if (!cfg) {
-          throw new UsageError(
-            'MQTT is not configured. Set SWITCHBOT_MQTT_HOST, SWITCHBOT_MQTT_USERNAME, and SWITCHBOT_MQTT_PASSWORD.',
-          );
-        }
         const maxEvents: number | null = options.max !== undefined ? Number(options.max) : null;
         if (maxEvents !== null && (!Number.isInteger(maxEvents) || maxEvents < 1)) {
           throw new UsageError(`Invalid --max "${options.max}". Must be a positive integer.`);
         }
 
+        let creds: { token: string; secret: string };
+        try {
+          creds = loadConfig();
+        } catch {
+          throw new UsageError(
+            'No credentials found. Run \'switchbot config set-token\' or set SWITCHBOT_TOKEN and SWITCHBOT_SECRET.',
+          );
+        }
+
+        if (!isJsonMode()) {
+          console.error('Fetching MQTT credentials from SwitchBot service…');
+        }
+        const credential = await fetchMqttCredential(creds.token, creds.secret);
+        const topic = options.topic ?? credential.topics.status;
+
         let eventCount = 0;
         const ac = new AbortController();
-        const client = new SwitchBotMqttClient(cfg);
+        const client = new SwitchBotMqttClient(
+          credential,
+          () => fetchMqttCredential(creds.token, creds.secret),
+        );
 
-        const unsub = client.onMessage((topic, payload) => {
+        const unsub = client.onMessage((msgTopic, payload) => {
           let parsed: unknown;
           try {
             parsed = JSON.parse(payload.toString('utf-8'));
           } catch {
             parsed = payload.toString('utf-8');
           }
-          const record = { t: new Date().toISOString(), topic, payload: parsed };
+          const record = { t: new Date().toISOString(), topic: msgTopic, payload: parsed };
           if (isJsonMode()) {
             printJson(record);
           } else {
@@ -270,11 +281,11 @@ Examples:
         });
 
         if (!isJsonMode()) {
-          console.error(`Connecting to mqtts://${cfg.host}:${cfg.port} (Ctrl-C to stop)`);
+          console.error(`Connected to ${credential.brokerUrl} (Ctrl-C to stop)`);
         }
 
         await client.connect();
-        client.subscribe(options.topic);
+        client.subscribe(topic);
 
         await new Promise<void>((resolve) => {
           const cleanup = () => {

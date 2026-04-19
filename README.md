@@ -362,7 +362,7 @@ Filter keys: `deviceId=<id>`, `type=<deviceType>` (comma-separated for AND logic
 #### `events mqtt-tail` — real-time MQTT stream
 
 ```bash
-# Stream all shadow-update events from the MQTT broker
+# Stream all shadow-update events (runs in foreground until Ctrl-C)
 switchbot events mqtt-tail
 
 # Filter to a topic subtree
@@ -372,21 +372,24 @@ switchbot events mqtt-tail --topic 'switchbot/#'
 switchbot events mqtt-tail --max 10 --json
 ```
 
-Requires a SwitchBot-compatible MQTT broker. Set three environment variables before running:
-
-```bash
-export SWITCHBOT_MQTT_HOST=your.broker.host
-export SWITCHBOT_MQTT_USERNAME=your_username
-export SWITCHBOT_MQTT_PASSWORD=your_password
-# SWITCHBOT_MQTT_PORT defaults to 8883 (MQTTS/TLS)
-```
+Connects to the SwitchBot MQTT service automatically using the same credentials configured for the REST API (`SWITCHBOT_TOKEN` + `SWITCHBOT_SECRET`). No additional MQTT configuration is required — the client certificates are provisioned on first use.
 
 Output (one JSON line per message):
 ```
 { "t": "2024-01-01T12:00:00.000Z", "topic": "switchbot/abc123/status", "payload": {...} }
 ```
 
-Run `switchbot doctor` to verify MQTT is configured correctly before connecting.
+This command runs in the foreground and streams events until you press Ctrl-C. To run it persistently in the background, use a process manager:
+
+```bash
+# pm2
+pm2 start "switchbot events mqtt-tail --json" --name switchbot-events
+
+# nohup
+nohup switchbot events mqtt-tail --json >> ~/switchbot-events.log 2>&1 &
+```
+
+Run `switchbot doctor` to verify MQTT credentials are configured correctly before connecting.
 
 ### `completion` — shell tab-completion
 
@@ -608,10 +611,6 @@ Typical errors bubble up in the form `Error: <message>` on stderr. The SwitchBot
 | --------------------------- | ------------------------------------------------------------------ |
 | `SWITCHBOT_TOKEN`           | API token — takes priority over the config file                    |
 | `SWITCHBOT_SECRET`          | API secret — takes priority over the config file                   |
-| `SWITCHBOT_MQTT_HOST`       | MQTT broker hostname (enables real-time events via `events mqtt-tail` and `mcp serve`) |
-| `SWITCHBOT_MQTT_PORT`       | MQTT broker port (default: `8883`, MQTTS/TLS)                      |
-| `SWITCHBOT_MQTT_USERNAME`   | MQTT broker username                                               |
-| `SWITCHBOT_MQTT_PASSWORD`   | MQTT broker password                                               |
 | `NO_COLOR`                  | Disable ANSI colors in all output (automatically respected)        |
 
 ## Scripting examples

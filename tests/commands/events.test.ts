@@ -45,7 +45,18 @@ vi.mock('../../src/mqtt/client.js', () => {
 });
 
 vi.mock('../../src/mqtt/credential.js', () => ({
-  getMqttConfig: vi.fn().mockReturnValue(null),
+  fetchMqttCredential: vi.fn().mockResolvedValue({
+    brokerUrl: 'mqtts://broker.test:8883',
+    region: 'us-east-1',
+    clientId: 'test-client-id',
+    topics: { status: '$aws/things/+/shadow/update/accepted' },
+    qos: 0,
+    tls: { enabled: true, caBase64: 'Y2E=', certBase64: 'Y2VydA==', keyBase64: 'a2V5' },
+  }),
+}));
+
+vi.mock('../../src/config.js', () => ({
+  loadConfig: vi.fn().mockReturnValue({ token: 'test-token', secret: 'test-secret' }),
 }));
 
 async function postJson(port: number, path: string, body: unknown): Promise<number> {
@@ -213,33 +224,38 @@ describe('events tail receiver', () => {
 // ---------------------------------------------------------------------------
 // mqtt-tail subcommand tests
 // ---------------------------------------------------------------------------
-import { getMqttConfig } from '../../src/mqtt/credential.js';
+import { fetchMqttCredential } from '../../src/mqtt/credential.js';
+import { loadConfig } from '../../src/config.js';
+
+const mockCredential = {
+  brokerUrl: 'mqtts://broker.test:8883',
+  region: 'us-east-1',
+  clientId: 'test-client-id',
+  topics: { status: '$aws/things/+/shadow/update/accepted' },
+  qos: 0,
+  tls: { enabled: true, caBase64: 'Y2E=', certBase64: 'Y2VydA==', keyBase64: 'a2V5' },
+};
 
 describe('events mqtt-tail', () => {
   beforeEach(() => {
     mqttMock.messageHandler = null;
     mqttMock.connectShouldFireMessage = false;
-    vi.mocked(getMqttConfig).mockReturnValue(null);
+    vi.mocked(fetchMqttCredential).mockResolvedValue(mockCredential);
+    vi.mocked(loadConfig).mockReturnValue({ token: 'test-token', secret: 'test-secret' });
   });
 
   afterEach(() => {
     vi.clearAllMocks();
   });
 
-  it('exits 2 with UsageError when MQTT env vars are missing', async () => {
-    vi.mocked(getMqttConfig).mockReturnValue(null);
+  it('exits 2 with UsageError when no credentials are configured', async () => {
+    vi.mocked(loadConfig).mockImplementation(() => { throw new Error('no config'); });
     const res = await runCli(registerEventsCommand, ['events', 'mqtt-tail']);
     expect(res.exitCode).toBe(2);
-    expect(res.stderr.some((l) => l.includes('SWITCHBOT_MQTT_HOST'))).toBe(true);
+    expect(res.stderr.some((l) => l.includes('credentials'))).toBe(true);
   });
 
   it('outputs JSONL and stops after --max 1', async () => {
-    vi.mocked(getMqttConfig).mockReturnValue({
-      host: 'broker.test',
-      port: 8883,
-      username: 'user',
-      password: 'pass',
-    });
     mqttMock.connectShouldFireMessage = true;
 
     const res = await runCli(registerEventsCommand, ['events', 'mqtt-tail', '--max', '1']);
@@ -253,12 +269,6 @@ describe('events mqtt-tail', () => {
   });
 
   it('wraps output in envelope with --json --max 1', async () => {
-    vi.mocked(getMqttConfig).mockReturnValue({
-      host: 'broker.test',
-      port: 8883,
-      username: 'user',
-      password: 'pass',
-    });
     mqttMock.connectShouldFireMessage = true;
 
     const res = await runCli(registerEventsCommand, ['--json', 'events', 'mqtt-tail', '--max', '1']);
@@ -271,12 +281,6 @@ describe('events mqtt-tail', () => {
   });
 
   it('exits 2 when --max is not a positive integer', async () => {
-    vi.mocked(getMqttConfig).mockReturnValue({
-      host: 'broker.test',
-      port: 8883,
-      username: 'user',
-      password: 'pass',
-    });
     const res = await runCli(registerEventsCommand, ['events', 'mqtt-tail', '--max', '0']);
     expect(res.exitCode).toBe(2);
   });

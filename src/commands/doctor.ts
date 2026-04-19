@@ -6,7 +6,6 @@ import { printJson, isJsonMode } from '../utils/output.js';
 import { getEffectiveCatalog } from '../devices/catalog.js';
 import { configFilePath, listProfiles } from '../config.js';
 import { describeCache } from '../devices/cache.js';
-import { getMqttConfig } from '../mqtt/credential.js';
 
 interface Check {
   name: string;
@@ -114,18 +113,34 @@ function checkNodeVersion(): Check {
 }
 
 function checkMqtt(): Check {
-  const cfg = getMqttConfig();
-  if (!cfg) {
+  // MQTT credentials are auto-provisioned from the SwitchBot API using the
+  // account's token+secret — no extra env vars needed. Report availability
+  // based on whether REST credentials are configured (no network call).
+  const hasEnvCreds = Boolean(process.env.SWITCHBOT_TOKEN && process.env.SWITCHBOT_SECRET);
+  if (hasEnvCreds) {
     return {
       name: 'mqtt',
-      status: 'warn',
-      detail: "not configured — set SWITCHBOT_MQTT_HOST/USERNAME/PASSWORD to enable real-time events",
+      status: 'ok',
+      detail: "auto-provisioned from credentials — run 'switchbot events mqtt-tail' to test live connectivity",
     };
+  }
+  const file = configFilePath();
+  if (fs.existsSync(file)) {
+    try {
+      const cfg = JSON.parse(fs.readFileSync(file, 'utf-8'));
+      if (cfg.token && cfg.secret) {
+        return {
+          name: 'mqtt',
+          status: 'ok',
+          detail: "auto-provisioned from credentials — run 'switchbot events mqtt-tail' to test live connectivity",
+        };
+      }
+    } catch { /* fall through */ }
   }
   return {
     name: 'mqtt',
-    status: 'ok',
-    detail: `configured (mqtts://${cfg.host}:${cfg.port}) — credentials not verified; run 'switchbot events mqtt-tail' to test live connectivity`,
+    status: 'warn',
+    detail: "unavailable — configure credentials first (see credentials check above)",
   };
 }
 
