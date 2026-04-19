@@ -24,6 +24,9 @@ import { getCachedDevice } from '../devices/cache.js';
 import { EventSubscriptionManager } from '../mcp/events-subscription.js';
 import { todayUsage } from '../utils/quota.js';
 import { describeCache } from '../devices/cache.js';
+import { withRequestContext } from '../lib/request-context.js';
+import { profileFilePath } from '../config.js';
+import fs from 'node:fs';
 
 /**
  * Factory — build an McpServer with the six SwitchBot tools registered.
@@ -683,6 +686,21 @@ process_uptime_seconds ${Math.floor(process.uptime())}
               }
             }
 
+            // Reject unknown profiles early: avoids confusing downstream credential
+            // errors and protects against probing for valid profile names.
+            if (profile) {
+              const envCredsPresent = !!(process.env.SWITCHBOT_TOKEN && process.env.SWITCHBOT_SECRET);
+              if (!envCredsPresent && !fs.existsSync(profileFilePath(profile))) {
+                res.writeHead(401, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({
+                  jsonrpc: '2.0',
+                  error: { code: -32001, message: `Unknown profile: ${profile}` },
+                  id: null,
+                }));
+                return;
+              }
+            }
+
             // Stateless mode: fresh transport+server per request (SDK requirement).
             const reqTransport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
             const reqServer = createSwitchBotMcpServer({ eventManager });
@@ -692,15 +710,19 @@ process_uptime_seconds ${Math.floor(process.uptime())}
               reqTransport.close();
               reqServer.close();
             });
-            try {
-              await reqServer.connect(reqTransport);
-              await reqTransport.handleRequest(req, res);
-            } catch (err) {
-              if (!res.headersSent) {
-                res.writeHead(500, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32603, message: 'Internal server error' }, id: null }));
+            // Route per-request credentials via AsyncLocalStorage so loadConfig()
+            // picks up this request's profile instead of the process-global flag.
+            await withRequestContext({ profile: profile ?? undefined }, async () => {
+              try {
+                await reqServer.connect(reqTransport);
+                await reqTransport.handleRequest(req, res);
+              } catch (err) {
+                if (!res.headersSent) {
+                  res.writeHead(500, { 'Content-Type': 'application/json' });
+                  res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32603, message: 'Internal server error' }, id: null }));
+                }
               }
-            }
+            });
           });
 
           // Graceful shutdown

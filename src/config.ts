@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { getConfigPath, getProfile } from './utils/flags.js';
+import { getConfigPath } from './utils/flags.js';
+import { getActiveProfile } from './lib/request-context.js';
 
 export interface SwitchBotConfig {
   token: string;
@@ -11,7 +12,7 @@ export interface SwitchBotConfig {
 /**
  * Credential file resolution priority:
  *   1. --config <path> (absolute override — wins over everything)
- *   2. --profile <name> → ~/.switchbot/profiles/<name>.json
+ *   2. active profile (ALS request context, else --profile flag) → ~/.switchbot/profiles/<name>.json
  *   3. default        → ~/.switchbot/config.json
  *
  * Env SWITCHBOT_TOKEN+SWITCHBOT_SECRET still take priority inside loadConfig.
@@ -19,7 +20,7 @@ export interface SwitchBotConfig {
 export function configFilePath(): string {
   const override = getConfigPath();
   if (override) return path.resolve(override);
-  const profile = getProfile();
+  const profile = getActiveProfile();
   if (profile) {
     return path.join(os.homedir(), '.switchbot', 'profiles', `${profile}.json`);
   }
@@ -48,7 +49,7 @@ export function loadConfig(): SwitchBotConfig {
 
   const file = configFilePath();
   if (!fs.existsSync(file)) {
-    const profile = getProfile();
+    const profile = getActiveProfile();
     const hint = profile
       ? `No credentials configured for profile "${profile}". Run: switchbot --profile ${profile} config set-token <token> <secret>`
       : 'No credentials configured. Run: switchbot config set-token <token> <secret>';
