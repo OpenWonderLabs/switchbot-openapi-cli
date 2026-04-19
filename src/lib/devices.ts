@@ -1,5 +1,6 @@
 import type { AxiosInstance } from 'axios';
 import { createClient } from '../api/client.js';
+import { idempotencyCache } from './idempotency.js';
 import {
   findCatalogEntry,
   suggestedActions,
@@ -156,7 +157,8 @@ export async function executeCommand(
   cmd: string,
   parameter: unknown,
   commandType: 'command' | 'customize',
-  client?: AxiosInstance
+  client?: AxiosInstance,
+  options?: { idempotencyKey?: string }
 ): Promise<unknown> {
   const c = client ?? createClient();
   const body = {
@@ -173,26 +175,32 @@ export async function executeCommand(
     commandType,
     dryRun: isDryRun(),
   };
-  try {
-    const res = await c.post<{ body: unknown }>(
-      `/v1.1/devices/${deviceId}/commands`,
-      body
-    );
-    writeAudit({ ...baseAudit, result: 'ok' });
-    return res.data.body;
-  } catch (err) {
-    // Dry-run intercepts throw DryRunSignal — still log the intent.
-    if (err instanceof Error && err.name === 'DryRunSignal') {
+
+  // Wrap in idempotency cache if key is provided
+  const execute = async () => {
+    try {
+      const res = await c.post<{ body: unknown }>(
+        `/v1.1/devices/${deviceId}/commands`,
+        body
+      );
       writeAudit({ ...baseAudit, result: 'ok' });
-    } else {
-      writeAudit({
-        ...baseAudit,
-        result: 'error',
-        error: err instanceof Error ? err.message : String(err),
-      });
+      return res.data.body;
+    } catch (err) {
+      // Dry-run intercepts throw DryRunSignal — still log the intent.
+      if (err instanceof Error && err.name === 'DryRunSignal') {
+        writeAudit({ ...baseAudit, result: 'ok' });
+      } else {
+        writeAudit({
+          ...baseAudit,
+          result: 'error',
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+      throw err;
     }
-    throw err;
-  }
+  };
+
+  return idempotencyCache.run<unknown>(options?.idempotencyKey, execute);
 }
 
 /**
