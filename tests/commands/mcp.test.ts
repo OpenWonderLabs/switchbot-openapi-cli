@@ -76,13 +76,14 @@ describe('mcp server', () => {
     cacheMock.updateCacheFromDeviceList.mockClear();
   });
 
-  it('exposes the seven tools with titles and input schemas', async () => {
+  it('exposes the eight tools with titles and input schemas', async () => {
     const { client } = await pair();
     const { tools } = await client.listTools();
 
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual(
       [
+        'account_overview',
         'describe_device',
         'get_device_status',
         'list_devices',

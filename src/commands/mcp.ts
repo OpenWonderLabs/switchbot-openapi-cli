@@ -22,6 +22,8 @@ import { fetchScenes, executeScene } from '../lib/scenes.js';
 import { findCatalogEntry } from '../devices/catalog.js';
 import { getCachedDevice } from '../devices/cache.js';
 import { EventSubscriptionManager } from '../mcp/events-subscription.js';
+import { todayUsage } from '../utils/quota.js';
+import { describeCache } from '../devices/cache.js';
 
 /**
  * Factory — build an McpServer with the six SwitchBot tools registered.
@@ -377,6 +379,102 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         }
         throw err;
       }
+    }
+  );
+
+  // ---- account_overview ---------------------------------------------------
+  server.registerTool(
+    'account_overview',
+    {
+      title: 'Bootstrap account overview',
+      description:
+        'Get a complete account snapshot: devices, scenes, quota usage, cache status, and MQTT connection state. Use this for cold-start initialization or periodic health checks.',
+      inputSchema: {},
+      outputSchema: {
+        version: z.string(),
+        schemaVersion: z.string(),
+        devices: z.array(z.object({
+          deviceId: z.string(),
+          deviceName: z.string(),
+          deviceType: z.string().optional(),
+        }).passthrough()).describe('All physical devices'),
+        infraredRemotes: z.array(z.object({
+          deviceId: z.string(),
+          deviceName: z.string(),
+          remoteType: z.string(),
+        }).passthrough()).describe('All IR remotes'),
+        scenes: z.array(z.object({
+          sceneId: z.string(),
+          sceneName: z.string(),
+        }).passthrough()).describe('All manual scenes'),
+        quota: z.object({
+          date: z.string(),
+          total: z.number(),
+          remaining: z.number(),
+          endpoints: z.record(z.string(), z.number()).optional(),
+        }).describe('Today\'s quota usage'),
+        cache: z.object({
+          list: z.object({
+            path: z.string(),
+            exists: z.boolean(),
+            lastUpdated: z.string().optional(),
+            ageMs: z.number().optional(),
+            deviceCount: z.number().optional(),
+          }),
+          status: z.object({
+            path: z.string(),
+            exists: z.boolean(),
+            entryCount: z.number(),
+            oldestFetchedAt: z.string().optional(),
+            newestFetchedAt: z.string().optional(),
+          }),
+        }).describe('Cache status'),
+        mqtt: z.object({
+          state: z.string(),
+          subscribers: z.number(),
+        }).optional().describe('MQTT connection state (HTTP mode only)'),
+      },
+    },
+    async () => {
+      const deviceList = await fetchDeviceList();
+      const sceneList = await fetchScenes();
+      const cacheInfo = describeCache();
+      const quota = todayUsage();
+
+      const overview = {
+        version: '1.7.0',
+        schemaVersion: '1.1',
+        devices: deviceList.deviceList.map(toMcpDeviceListShape),
+        infraredRemotes: deviceList.infraredRemoteList.map(toMcpIrDeviceShape),
+        scenes: sceneList.map((s) => ({
+          sceneId: s.sceneId,
+          sceneName: s.sceneName,
+        })),
+        quota: {
+          date: quota.date,
+          total: quota.total,
+          remaining: quota.remaining,
+          endpoints: quota.endpoints,
+        },
+        cache: {
+          list: cacheInfo.list,
+          status: cacheInfo.status,
+        },
+        ...(eventManager ? {
+          mqtt: {
+            state: eventManager.getState(),
+            subscribers: eventManager.getSubscriberCount(),
+          },
+        } : {}),
+      };
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(overview, null, 2),
+        }],
+        structuredContent: overview,
+      };
     }
   );
 
