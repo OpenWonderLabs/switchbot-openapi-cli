@@ -37,6 +37,7 @@ Examples:
           scenes.map((s) => [s.sceneId, s.sceneName]),
           fmt,
           resolveFields(),
+          { id: 'sceneId', name: 'sceneName' },
         );
         if (fmt === 'table' && scenes.length === 0) {
           console.log('No scenes found');

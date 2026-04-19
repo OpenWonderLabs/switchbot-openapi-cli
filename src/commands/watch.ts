@@ -4,6 +4,7 @@ import { fetchDeviceStatus } from '../lib/devices.js';
 import { getCachedDevice } from '../devices/cache.js';
 import { parseDurationToMs, getFields } from '../utils/flags.js';
 import { createClient } from '../api/client.js';
+import { resolveDeviceId } from '../utils/name-resolver.js';
 
 const DEFAULT_INTERVAL_MS = 30_000;
 const MIN_INTERVAL_MS = 1_000;
@@ -70,7 +71,8 @@ export function registerWatchCommand(devices: Command): void {
   devices
     .command('watch')
     .description('Poll device status on an interval and emit field-level changes (JSONL)')
-    .argument('<deviceId...>', 'One or more deviceIds to watch')
+    .argument('[deviceId...]', 'One or more deviceIds to watch (or use --name for one device)')
+    .option('--name <query>', 'Resolve one device by fuzzy name (combined with any positional IDs)')
     .option(
       '--interval <dur>',
       `Polling interval: "30s", "1m", "500ms", ... (default 30s, min ${MIN_INTERVAL_MS / 1000}s)`,
@@ -92,18 +94,26 @@ Examples:
   $ switchbot devices watch ABC123 --fields battery,power --interval 1m
   $ switchbot devices watch ABC123 DEF456 --interval 30s --max 10
   $ switchbot devices watch ABC123 --json | jq 'select(.changed.power)'
+  $ switchbot devices watch --name "客厅空调" --interval 10s
 `,
     )
     .action(
       async (
         deviceIds: string[],
         options: {
+          name?: string;
           interval: string;
           max?: string;
           includeUnchanged?: boolean;
         },
       ) => {
         try {
+          const allIds = [...deviceIds];
+          if (options.name) {
+            const resolved = resolveDeviceId(undefined, options.name);
+            if (!allIds.includes(resolved)) allIds.push(resolved);
+          }
+          if (allIds.length === 0) throw new UsageError('Provide at least one deviceId argument or --name.');
           const parsed = parseDurationToMs(options.interval);
           if (parsed === null || parsed < MIN_INTERVAL_MS) {
             throw new UsageError(
@@ -138,7 +148,7 @@ Examples:
             // Poll all devices in parallel; one failure per device doesn't stop
             // the others.
             await Promise.all(
-              deviceIds.map(async (id) => {
+              allIds.map(async (id) => {
                 const cached = getCachedDevice(id);
                 try {
                   const body = await fetchDeviceStatus(id, client);

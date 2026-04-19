@@ -29,20 +29,28 @@ const MCP_TOOLS = [
   'run_scene',
   'search_catalog',
   'account_overview',
+  'get_device_history',
 ];
 
 export function registerCapabilitiesCommand(program: Command): void {
   program
     .command('capabilities')
     .description('Print a machine-readable manifest of CLI capabilities (for agent bootstrap)')
-    .action(() => {
+    .option('--minimal', 'Omit per-subcommand flag details to reduce output size')
+    .action((opts: { minimal?: boolean }) => {
       const catalog = getEffectiveCatalog();
-      const commands = program.commands
-        .filter((c) => c.name() !== 'capabilities')
-        .map((c) => ({
+      const allCommands = [
+        ...program.commands,
+        // Commander adds 'help' implicitly; include it explicitly so it appears in the manifest
+        { name: () => 'help', description: () => 'Display help for a command', commands: [], options: [], registeredArguments: [] } as unknown as Command,
+      ];
+      const commands = allCommands.map((c) => {
+        const entry: Record<string, unknown> = {
           name: c.name(),
           description: c.description(),
-          subcommands: c.commands.map((s) => ({
+        };
+        if (!opts.minimal) {
+          entry.subcommands = c.commands.map((s) => ({
             name: s.name(),
             description: s.description(),
             args: s.registeredArguments.map((a) => ({
@@ -54,8 +62,10 @@ export function registerCapabilitiesCommand(program: Command): void {
               flags: o.flags,
               description: o.description,
             })),
-          })),
-        }));
+          }));
+        }
+        return entry;
+      });
       const globalFlags = program.options.map((opt) => ({
         flags: opt.flags,
         description: opt.description,

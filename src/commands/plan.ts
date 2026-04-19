@@ -267,9 +267,15 @@ Workflow:
         process.exit(2);
       }
       if (isJsonMode()) {
-        printJson({ valid: true, steps: result.plan.steps.length });
+        const out: Record<string, unknown> = { valid: true, steps: result.plan.steps.length };
+        if (result.plan.steps.length === 0) out.warning = 'plan has no steps — nothing will execute';
+        printJson(out);
       } else {
-        console.log(`✓ plan valid (${result.plan.steps.length} step${result.plan.steps.length === 1 ? '' : 's'})`);
+        if (result.plan.steps.length === 0) {
+          console.log('✓ plan valid — but 0 steps: nothing will execute');
+        } else {
+          console.log(`✓ plan valid (${result.plan.steps.length} step${result.plan.steps.length === 1 ? '' : 's'})`);
+        }
       }
     });
 

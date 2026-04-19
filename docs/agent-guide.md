@@ -57,20 +57,37 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 }
 ```
 
-### Available tools (8)
+### Available tools (9)
 
-| Tool                | Purpose                                                           | Destructive-guard?       |
-|---------------------|-------------------------------------------------------------------|--------------------------|
-| `list_devices`      | Enumerate physical devices + IR remotes                           | —                        |
-| `get_device_status` | Live status for one device                                        | —                        |
-| `send_command`      | Dispatch a built-in or customize command                          | yes (`confirm: true` required) |
-| `list_scenes`       | Enumerate saved manual scenes                                     | —                        |
-| `run_scene`         | Execute a saved manual scene                                      | —                        |
-| `search_catalog`    | Look up device type by name/alias                                  | —                        |
-| `describe_device`   | Live status **plus** catalog-derived commands + suggested actions | —                        |
-| `account_overview`  | Single cold-start snapshot — devices, scenes, quota, cache, MQTT state. Call this first in a new agent session to avoid multiple round-trips. | — |
+| Tool                   | Purpose                                                           | Destructive-guard?       |
+|------------------------|-------------------------------------------------------------------|--------------------------|
+| `list_devices`         | Enumerate physical devices + IR remotes                           | —                        |
+| `get_device_status`    | Live status for one device                                        | —                        |
+| `send_command`         | Dispatch a built-in or customize command                          | yes (`confirm: true` required) |
+| `list_scenes`          | Enumerate saved manual scenes                                     | —                        |
+| `run_scene`            | Execute a saved manual scene                                      | —                        |
+| `search_catalog`       | Look up device type by name/alias                                  | —                        |
+| `describe_device`      | Live status **plus** catalog-derived commands + suggested actions | —                        |
+| `account_overview`     | Single cold-start snapshot — devices, scenes, quota, cache, MQTT state. Call this first in a new agent session to avoid multiple round-trips. | — |
+| `get_device_history`   | Latest state + rolling history from disk — zero quota cost        | —                        |
 
 The MCP server refuses destructive commands (Smart Lock `unlock`, Garage Door `open`, etc.) unless the tool call includes `confirm: true`. The allowed list is the `destructive: true` commands in the catalog — `switchbot schema export | jq '[.data.types[].commands[] | select(.destructive)]'` shows every one.
+
+### `get_device_history` — zero-cost state lookup
+
+Reads `~/.switchbot/device-history/<deviceId>.json` written by `events mqtt-tail`. Requires no API call and costs zero quota.
+
+```json
+// Without deviceId — list all devices with stored history
+{ "tool": "get_device_history" }
+// → { "devices": [{ "deviceId": "ABC123", "latest": { "t": "...", "payload": {...} } }] }
+
+// With deviceId — latest + rolling history (default 20, max 100 entries)
+{ "tool": "get_device_history", "deviceId": "ABC123", "limit": 5 }
+// → { "deviceId": "ABC123", "latest": {...}, "history": [{...}, ...] }
+```
+
+**Workflow**: run `switchbot events mqtt-tail` in the background (e.g. with pm2) to keep the history files fresh; then call `get_device_history` from any MCP session without consuming REST quota.
 
 ### MCP resource: `switchbot://events`
 
@@ -238,7 +255,25 @@ The audit format is JSONL with this shape:
   "dryRun": false, "result": "ok" }
 ```
 
-Pair with `switchbot devices watch --interval=30s` for continuous state diffs (add `--include-unchanged` to emit every tick even when nothing changed), `switchbot events tail` to receive webhook pushes locally, or `switchbot events mqtt-tail` for real-time MQTT shadow updates (requires `SWITCHBOT_MQTT_HOST` env vars — see [Environment variables](../README.md#environment-variables)).
+Pair with `switchbot devices watch --interval=30s` for continuous state diffs (add `--include-unchanged` to emit every tick even when nothing changed), `switchbot events tail` to receive webhook pushes locally, or `switchbot events mqtt-tail` for real-time MQTT shadow updates.
+
+#### Routing MQTT events to an OpenClaw agent
+
+Run `mqtt-tail` once with `--sink openclaw` to replace the SwitchBot channel plugin entirely — no separate plugin installation required:
+
+```bash
+switchbot events mqtt-tail \
+  --sink openclaw \
+  --openclaw-token <token> \
+  --openclaw-model my-home-agent
+
+# Persist history at the same time:
+switchbot events mqtt-tail \
+  --sink file --sink-file ~/.switchbot/events.jsonl \
+  --sink openclaw --openclaw-token <token> --openclaw-model home
+```
+
+OpenClaw exposes an OpenAI-compatible HTTP API at `http://localhost:18789/v1/chat/completions`. The sink formats each event as a short text message (e.g. `📱 Climate Panel: 27.5°C / 51%`) and POSTs it to the agent directly.
 
 ---
 

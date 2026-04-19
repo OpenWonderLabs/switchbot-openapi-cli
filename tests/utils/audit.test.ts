@@ -35,7 +35,7 @@ describe('audit log', () => {
 
   it('writeAudit appends JSONL when --audit-log <path> is set', () => {
     const file = path.join(tmp, 'audit.log');
-    process.argv = ['node', 'cli', '--audit-log', file];
+    process.argv = ['node', 'cli', '--audit-log', '--audit-log-path', file];
     writeAudit({
       t: '2026-04-18T10:00:00.000Z',
       kind: 'command',
@@ -65,7 +65,7 @@ describe('audit log', () => {
 
   it('writeAudit creates the parent directory if missing', () => {
     const file = path.join(tmp, 'nested', 'sub', 'audit.log');
-    process.argv = ['node', 'cli', '--audit-log', file];
+    process.argv = ['node', 'cli', '--audit-log', '--audit-log-path', file];
     writeAudit({
       t: '2026-04-18T10:00:00.000Z',
       kind: 'command',

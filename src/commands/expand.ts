@@ -3,6 +3,7 @@ import { handleError, isJsonMode, printJson, UsageError } from '../utils/output.
 import { getCachedDevice } from '../devices/cache.js';
 import { executeCommand, isDestructiveCommand, getDestructiveReason } from '../lib/devices.js';
 import { isDryRun } from '../utils/flags.js';
+import { resolveDeviceId } from '../utils/name-resolver.js';
 import { DryRunSignal } from '../api/client.js';
 
 // ---- Mapping tables --------------------------------------------------------
@@ -95,8 +96,9 @@ export function registerExpandCommand(devices: Command): void {
   devices
     .command('expand')
     .description('Send a command with semantic flags instead of raw positional parameters')
-    .argument('<deviceId>', 'Target device ID from "devices list"')
-    .argument('<command>', 'Command name: setAll (AC), setPosition (Curtain/Blind Tilt), setMode (Relay Switch 2)')
+    .argument('[deviceId]', 'Target device ID from "devices list" (or use --name)')
+    .argument('[command]', 'Command name: setAll (AC), setPosition (Curtain/Blind Tilt), setMode (Relay Switch 2)')
+    .option('--name <query>', 'Resolve device by fuzzy name instead of deviceId')
     .option('--temp <celsius>', 'AC setAll: temperature in Celsius (16-30)')
     .option('--mode <mode>', 'AC: auto|cool|dry|fan|heat  Curtain: default|performance|silent  Relay: toggle|edge|detached|momentary')
     .option('--fan <speed>', 'AC setAll: fan speed auto|low|mid|high')
@@ -133,17 +135,34 @@ Examples:
   $ switchbot devices expand <blindId>   setPosition  --direction up --angle 50
   $ switchbot devices expand <relayId>   setMode      --channel 1 --mode edge
   $ switchbot devices expand <acId>      setAll       --temp 22 --mode heat --fan auto --power on --dry-run
+  $ switchbot devices expand --name "客厅空调" setAll --temp 26 --mode cool --fan low --power on
 `)
     .action(async (
-      deviceId: string,
-      command: string,
+      deviceIdArg: string | undefined,
+      commandArg: string | undefined,
       options: {
+        name?: string;
         temp?: string; mode?: string; fan?: string; power?: string;
         position?: string; direction?: string; angle?: string;
         channel?: string; yes?: boolean;
       }
     ) => {
+      let deviceId = '';
+      let command = '';
       try {
+        // When --name is provided, Commander assigns the first positional to deviceIdArg
+        // and leaves commandArg undefined. Detect and shift.
+        let effectiveDeviceIdArg = deviceIdArg;
+        let effectiveCommand = commandArg;
+        if (options.name && deviceIdArg && !commandArg) {
+          effectiveCommand = deviceIdArg;
+          effectiveDeviceIdArg = undefined;
+        }
+
+        deviceId = resolveDeviceId(effectiveDeviceIdArg, options.name);
+        if (!effectiveCommand) throw new UsageError('A command argument is required (setAll, setPosition, setMode).');
+
+        command = effectiveCommand;
         const cached = getCachedDevice(deviceId);
         const deviceType = cached?.type ?? '';
 

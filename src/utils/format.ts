@@ -39,16 +39,18 @@ export function filterFields(
   headers: string[],
   rows: unknown[][],
   fields: string[] | undefined,
+  aliases?: Record<string, string>,
 ): { headers: string[]; rows: unknown[][] } {
   if (!fields || fields.length === 0) return { headers, rows };
-  const unknown = fields.filter((f) => !headers.includes(f));
+  const resolved = aliases ? fields.map((f) => aliases[f] ?? f) : fields;
+  const unknown = fields.filter((_, i) => !headers.includes(resolved[i]));
   if (unknown.length > 0) {
     throw new UsageError(
       `Unknown field(s): ${unknown.map((f) => `"${f}"`).join(', ')}. ` +
         `Allowed: ${headers.map((f) => `"${f}"`).join(', ')}.`,
     );
   }
-  const indices = fields.map((f) => headers.indexOf(f));
+  const indices = resolved.map((f) => headers.indexOf(f));
   return {
     headers: indices.map((i) => headers[i]),
     rows: rows.map((row) => indices.map((i) => row[i])),
@@ -75,8 +77,9 @@ export function renderRows(
   rows: unknown[][],
   format: OutputFormat,
   fields?: string[],
+  aliases?: Record<string, string>,
 ): void {
-  const filtered = filterFields(headers, rows, fields);
+  const filtered = filterFields(headers, rows, fields, aliases);
   const h = filtered.headers;
   const r = filtered.rows;
 

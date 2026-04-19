@@ -194,4 +194,16 @@ describe('devices expand', () => {
     expect(res.exitCode).toBe(2);
     expect(res.stderr.join('\n')).toContain("'expand' does not support");
   });
+
+  it('--name resolves device by fuzzy name', async () => {
+    const res = await runCli(registerDevicesCommand, [
+      'devices', 'expand', '--name', 'Curtain', 'setPosition',
+      '--position', '50',
+    ]);
+    expect(res.exitCode).toBe(null);
+    expect(apiMock.__instance.post).toHaveBeenCalledWith(
+      `/v1.1/devices/${CURTAIN_ID}/commands`,
+      expect.objectContaining({ command: 'setPosition' })
+    );
+  });
 });
