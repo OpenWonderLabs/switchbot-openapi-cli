@@ -11,6 +11,7 @@ List devices, query live status, send control commands, run scenes, and manage w
 
 - **npm package:** [`@switchbot/openapi-cli`](https://www.npmjs.com/package/@switchbot/openapi-cli)
 - **Source code:** [github.com/OpenWonderLabs/switchbot-openapi-cli](https://github.com/OpenWonderLabs/switchbot-openapi-cli)
+- **Release notes:** [GitHub Releases](https://github.com/OpenWonderLabs/switchbot-openapi-cli/releases)
 - **Issues / feature requests:** [GitHub Issues](https://github.com/OpenWonderLabs/switchbot-openapi-cli/issues)
 
 ---
@@ -42,6 +43,7 @@ Under the hood every surface shares the same catalog, cache, and HMAC client —
   - [`devices`](#devices--list-status-control)
   - [`scenes`](#scenes--run-manual-scenes)
   - [`webhook`](#webhook--receive-device-events-over-http)
+  - [`events`](#events--receive-mqtt-device-updates)
   - [`batch`](#batch--run-multiple-commands)
   - [`watch`](#watch--poll-device-status)
   - [`mcp`](#mcp--model-context-protocol-server)
@@ -277,6 +279,36 @@ switchbot webhook delete https://your.host/hook
 ```
 
 The CLI validates that `<url>` is an absolute `http://` or `https://` URL before calling the API. `--enable` and `--disable` are mutually exclusive.
+
+### `events` — receive MQTT device updates
+
+```bash
+# Subscribe to all device shadow updates over MQTT
+switchbot events stream
+
+# Filter events by device type
+switchbot events stream --filter type="Motion Sensor"
+
+# Filter by device ID and stop after 10 events
+switchbot events stream --filter deviceId=ABC123 --max 10
+
+# Verify MQTT connectivity without streaming
+switchbot events stream --probe
+
+# Output as JSONL for scripting
+switchbot events stream --filter type="Contact Sensor" --json | jq '.payload.moveDetected'
+```
+
+**Important:** `events stream` depends on the **SwitchBot IoT MQTT service**, which is not part of the official OpenAPI and is not documented in the SwitchBot API reference.
+This feature provides real-time device state changes but relies on an undocumented service endpoint.
+If SwitchBot's policy changes, this service may become unavailable; fall back to [`devices watch`](#watch--poll-device-status) for polling-based monitoring.
+
+Credentials are cached in `~/.switchbot/mqtt-credential.json` with a 1-hour TTL; use `--no-cache` to fetch fresh credentials.
+
+Output is JSONL (one event per line):
+```json
+{ "ts": "2026-04-19T10:23:45.123Z", "deviceId": "ABC123", "deviceType": "Motion Sensor", "payload": { "battery": 92, "moveDetected": true } }
+```
 
 ### `completion` — shell tab-completion
 
