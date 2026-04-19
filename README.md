@@ -394,7 +394,7 @@ Output is a stream of JSON status objects (with `--json`) or a refreshed table.
 switchbot mcp serve
 ```
 
-Exposes 7 MCP tools: `list_devices`, `describe_device`, `get_device_status`, `send_command`, `list_scenes`, `run_scene`, `search_catalog`.
+Exposes 8 MCP tools: `list_devices`, `describe_device`, `get_device_status`, `send_command`, `list_scenes`, `run_scene`, `search_catalog`, `events_recent` — plus one subscribable resource `switchbot://events` that pushes `notifications/resources/updated` on every MQTT shadow event.
 See [`docs/agent-guide.md`](./docs/agent-guide.md) for the full tool reference and safety rules (destructive-command guard).
 
 ### `cache` — inspect and clear local cache

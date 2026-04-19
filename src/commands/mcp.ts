@@ -2,6 +2,10 @@ import { Command } from 'commander';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import {
+  SubscribeRequestSchema,
+  UnsubscribeRequestSchema,
+} from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import { handleError, isJsonMode } from '../utils/output.js';
 import {
@@ -21,6 +25,7 @@ import {
 import { fetchScenes, executeScene } from '../lib/scenes.js';
 import { findCatalogEntry } from '../devices/catalog.js';
 import { getCachedDevice } from '../devices/cache.js';
+import { EventSubscriptionManager } from '../mcp/events-subscription.js';
 
 /**
  * Factory — build an McpServer with the six SwitchBot tools registered.
@@ -49,10 +54,10 @@ export function createSwitchBotMcpServer(): McpServer {
   const server = new McpServer(
     {
       name: 'switchbot',
-      version: '1.4.0',
+      version: '1.6.0',
     },
     {
-      capabilities: { tools: {} },
+      capabilities: { tools: {}, resources: { subscribe: true } },
       instructions:
         `SwitchBot is an IoT smart home brand by Wonderlabs, Inc. This MCP server controls physical devices \
 (Bot, Curtain, Smart Lock, Color Bulb, Meter, Plug, Robot Vacuum, etc.) and IR remotes \
@@ -378,6 +383,96 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
     }
   );
 
+  // ---- events resource + events_recent -------------------------------------
+  const eventsManager = new EventSubscriptionManager();
+  const EVENTS_URI = 'switchbot://events';
+  // Per-MCP-client subscription state: one unsubscribe function per URI.
+  const activeSubscriptions = new Map<string, () => Promise<void>>();
+
+  server.registerResource(
+    'events',
+    EVENTS_URI,
+    {
+      title: 'Live device shadow events (MQTT)',
+      description:
+        'Subscribe to receive notifications/resources/updated on every SwitchBot shadow event (device status change). Read returns the most recent 100 events as a JSON array.',
+      mimeType: 'application/json',
+    },
+    async (uri) => {
+      const events = eventsManager.getRecent();
+      return {
+        contents: [{
+          uri: uri.href,
+          mimeType: 'application/json',
+          text: JSON.stringify({ events }, null, 2),
+        }],
+      };
+    },
+  );
+
+  // Hook resources/subscribe -> start forwarding events as resource-updated
+  // notifications. Ref-counted inside eventsManager so multiple subscribers
+  // share one upstream MQTT client.
+  server.server.setRequestHandler(SubscribeRequestSchema, async (request) => {
+    if (request.params.uri !== EVENTS_URI) {
+      throw new Error(`Resource "${request.params.uri}" does not support subscription`);
+    }
+    if (activeSubscriptions.has(EVENTS_URI)) {
+      return {};
+    }
+    const unsubscribe = await eventsManager.subscribe(() => {
+      void server.server.sendResourceUpdated({ uri: EVENTS_URI });
+    });
+    activeSubscriptions.set(EVENTS_URI, unsubscribe);
+    return {};
+  });
+
+  server.server.setRequestHandler(UnsubscribeRequestSchema, async (request) => {
+    const unsub = activeSubscriptions.get(request.params.uri);
+    if (unsub) {
+      activeSubscriptions.delete(request.params.uri);
+      await unsub();
+    }
+    return {};
+  });
+
+  // Tear down MQTT on server close.
+  const originalClose = server.close.bind(server);
+  server.close = async () => {
+    try { await eventsManager.shutdown(); } catch { /* best-effort */ }
+    activeSubscriptions.clear();
+    return originalClose();
+  };
+
+  server.registerTool(
+    'events_recent',
+    {
+      title: 'Return the most recent buffered shadow events',
+      description:
+        'Returns the last N MQTT shadow events captured since this MCP server started. Use subscribe(switchbot://events) for push-style delivery.',
+      inputSchema: {
+        limit: z.number().int().min(1).max(100).optional().default(20).describe('Max events returned (default 20, max 100)'),
+      },
+      outputSchema: {
+        events: z.array(z.object({
+          ts: z.string(),
+          deviceId: z.string(),
+          deviceType: z.string(),
+          payload: z.record(z.string(), z.unknown()),
+        })),
+        total: z.number().int(),
+      },
+    },
+    async ({ limit }) => {
+      const events = eventsManager.getRecent(limit);
+      const structured = { events, total: events.length };
+      return {
+        content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+        structuredContent: structured,
+      };
+    },
+  );
+
   return server;
 }
 
@@ -386,7 +481,7 @@ export function registerMcpCommand(program: Command): void {
     .command('mcp')
     .description('Run as a Model Context Protocol server so AI agents can call SwitchBot tools')
     .addHelpText('after', `
-The MCP server exposes seven tools over stdio:
+The MCP server exposes eight tools over stdio:
   - list_devices          fetch all physical + IR devices
   - get_device_status     live status for a physical device
   - send_command          control a device (destructive commands need confirm:true)
@@ -394,6 +489,10 @@ The MCP server exposes seven tools over stdio:
   - run_scene             execute a manual scene
   - search_catalog        offline catalog search by type/alias
   - describe_device       metadata + commands + (optionally) live status for one device
+  - events_recent         last N MQTT shadow events from the in-process buffer
+
+And one subscribable resource:
+  - switchbot://events    push notifications/resources/updated on every shadow event
 
 Example Claude Desktop config (~/Library/Application Support/Claude/claude_desktop_config.json):
 
