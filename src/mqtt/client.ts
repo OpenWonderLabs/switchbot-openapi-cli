@@ -13,10 +13,10 @@ export class SwitchBotMqttClient {
   private credentialExpired = false;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 10;
+  private disconnecting = false;
   private handlers: Set<(state: MqttState) => void> = new Set();
   private messageHandlers: Set<(topic: string, payload: Buffer) => void> = new Set();
   private credentialRefreshCallback?: CredentialRefreshCallback;
-  private stableTimer: NodeJS.Timeout | null = null;
 
   constructor(credential: MqttCredential, onCredentialExpired?: CredentialRefreshCallback) {
     this.credential = credential;
@@ -72,7 +72,7 @@ export class SwitchBotMqttClient {
       });
 
       this.client.on('close', () => {
-        this.clearStableTimer();
+        if (this.disconnecting) return;
         if (this.credentialExpired) {
           this.setState('failed');
         } else if (this.reconnectAttempts < this.maxReconnectAttempts) {
@@ -150,13 +150,6 @@ export class SwitchBotMqttClient {
     }
   }
 
-  private clearStableTimer(): void {
-    if (this.stableTimer) {
-      clearTimeout(this.stableTimer);
-      this.stableTimer = null;
-    }
-  }
-
   subscribe(topic: string): void {
     if (this.client && this.state === 'connected') {
       this.client.subscribe(topic, (err) => {
@@ -190,13 +183,14 @@ export class SwitchBotMqttClient {
   }
 
   async disconnect(): Promise<void> {
-    this.clearStableTimer();
+    this.disconnecting = true;
     if (this.client) {
       await new Promise<void>((resolve) => {
         this.client?.end(false, () => resolve());
       });
       this.client = null;
-      this.setState('failed');
     }
+    this.disconnecting = false;
+    this.setState('failed');
   }
 }

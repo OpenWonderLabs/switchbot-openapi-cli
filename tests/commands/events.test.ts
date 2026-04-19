@@ -57,6 +57,7 @@ vi.mock('../../src/mqtt/credential.js', () => ({
 
 vi.mock('../../src/config.js', () => ({
   loadConfig: vi.fn().mockReturnValue({ token: 'test-token', secret: 'test-secret' }),
+  tryLoadConfig: vi.fn().mockReturnValue({ token: 'test-token', secret: 'test-secret' }),
 }));
 
 async function postJson(port: number, path: string, body: unknown): Promise<number> {
@@ -225,7 +226,7 @@ describe('events tail receiver', () => {
 // mqtt-tail subcommand tests
 // ---------------------------------------------------------------------------
 import { fetchMqttCredential } from '../../src/mqtt/credential.js';
-import { loadConfig } from '../../src/config.js';
+import { tryLoadConfig } from '../../src/config.js';
 
 const mockCredential = {
   brokerUrl: 'mqtts://broker.test:8883',
@@ -241,7 +242,7 @@ describe('events mqtt-tail', () => {
     mqttMock.messageHandler = null;
     mqttMock.connectShouldFireMessage = false;
     vi.mocked(fetchMqttCredential).mockResolvedValue(mockCredential);
-    vi.mocked(loadConfig).mockReturnValue({ token: 'test-token', secret: 'test-secret' });
+    vi.mocked(tryLoadConfig).mockReturnValue({ token: 'test-token', secret: 'test-secret' });
   });
 
   afterEach(() => {
@@ -249,7 +250,7 @@ describe('events mqtt-tail', () => {
   });
 
   it('exits 2 with UsageError when no credentials are configured', async () => {
-    vi.mocked(loadConfig).mockImplementation(() => { throw new Error('no config'); });
+    vi.mocked(tryLoadConfig).mockReturnValue(null);
     const res = await runCli(registerEventsCommand, ['events', 'mqtt-tail']);
     expect(res.exitCode).toBe(2);
     expect(res.stderr.some((l) => l.includes('credentials'))).toBe(true);

@@ -25,7 +25,7 @@ import { EventSubscriptionManager } from '../mcp/events-subscription.js';
 import { todayUsage } from '../utils/quota.js';
 import { describeCache } from '../devices/cache.js';
 import { withRequestContext } from '../lib/request-context.js';
-import { profileFilePath, loadConfig } from '../config.js';
+import { profileFilePath, loadConfig, tryLoadConfig } from '../config.js';
 import fs from 'node:fs';
 
 /**
@@ -597,12 +597,12 @@ Inspect locally:
           // Credentials are auto-provisioned from the SwitchBot API using the
           // account's token+secret — no extra MQTT env vars needed.
           const eventManager = new EventSubscriptionManager();
-          try {
-            const { token, secret } = loadConfig();
-            eventManager.initialize(token, secret).catch((err: unknown) => {
+          const mqttCreds = tryLoadConfig();
+          if (mqttCreds) {
+            eventManager.initialize(mqttCreds.token, mqttCreds.secret).catch((err: unknown) => {
               console.error('MQTT initialization failed:', err instanceof Error ? err.message : String(err));
             });
-          } catch {
+          } else {
             console.error('MQTT disabled: credentials not configured.');
           }
 
@@ -806,13 +806,11 @@ process_uptime_seconds ${Math.floor(process.uptime())}
         }
 
         const eventManager = new EventSubscriptionManager();
-        try {
-          const { token, secret } = loadConfig();
-          eventManager.initialize(token, secret).catch((err: unknown) => {
+        const mqttCreds = tryLoadConfig();
+        if (mqttCreds) {
+          eventManager.initialize(mqttCreds.token, mqttCreds.secret).catch((err: unknown) => {
             console.error('MQTT initialization failed:', err instanceof Error ? err.message : String(err));
           });
-        } catch {
-          // Credentials not yet configured — MQTT will be unavailable until they are.
         }
         const server = createSwitchBotMcpServer({ eventManager });
         const transport = new StdioServerTransport();

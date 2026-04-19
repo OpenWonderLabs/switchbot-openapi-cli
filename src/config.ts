@@ -71,6 +71,27 @@ export function loadConfig(): SwitchBotConfig {
   }
 }
 
+/**
+ * Like loadConfig but returns null instead of exiting. Use this in code paths
+ * that want graceful degradation (e.g. optional MQTT init in `mcp serve`).
+ */
+export function tryLoadConfig(): SwitchBotConfig | null {
+  const envToken = process.env.SWITCHBOT_TOKEN;
+  const envSecret = process.env.SWITCHBOT_SECRET;
+  if (envToken && envSecret) return { token: envToken, secret: envSecret };
+
+  const file = configFilePath();
+  if (!fs.existsSync(file)) return null;
+  try {
+    const raw = fs.readFileSync(file, 'utf-8');
+    const cfg = JSON.parse(raw) as SwitchBotConfig;
+    if (!cfg.token || !cfg.secret) return null;
+    return cfg;
+  } catch {
+    return null;
+  }
+}
+
 export function saveConfig(token: string, secret: string): void {
   const file = configFilePath();
   const dir = path.dirname(file);

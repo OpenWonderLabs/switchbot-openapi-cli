@@ -3,7 +3,7 @@ import http from 'node:http';
 import { printJson, isJsonMode, handleError, UsageError } from '../utils/output.js';
 import { SwitchBotMqttClient } from '../mqtt/client.js';
 import { fetchMqttCredential } from '../mqtt/credential.js';
-import { loadConfig } from '../config.js';
+import { tryLoadConfig } from '../config.js';
 
 const DEFAULT_PORT = 3000;
 const DEFAULT_PATH = '/';
@@ -240,13 +240,13 @@ Examples:
         }
 
         let creds: { token: string; secret: string };
-        try {
-          creds = loadConfig();
-        } catch {
+        const loaded = tryLoadConfig();
+        if (!loaded) {
           throw new UsageError(
             'No credentials found. Run \'switchbot config set-token\' or set SWITCHBOT_TOKEN and SWITCHBOT_SECRET.',
           );
         }
+        creds = loaded;
 
         if (!isJsonMode()) {
           console.error('Fetching MQTT credentials from SwitchBot service…');
