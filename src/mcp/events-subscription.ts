@@ -4,6 +4,7 @@ import { fetchDeviceList } from '../lib/devices.js';
 import { getCachedDevice } from '../devices/cache.js';
 import type { AxiosInstance } from 'axios';
 import { createClient } from '../api/client.js';
+import { log } from '../logger.js';
 
 export interface ShadowEvent {
   kind: 'shadow.updated';
@@ -81,8 +82,8 @@ export class EventSubscriptionManager {
               timestamp: Date.now(),
             });
           }
-        } catch {
-          // Ignore parsing errors
+        } catch (err) {
+          log.debug({ err, topic }, 'failed to parse shadow payload');
         }
       });
 
@@ -100,11 +101,7 @@ export class EventSubscriptionManager {
   ): () => void {
     // Validate filter syntax if provided
     if (filter) {
-      try {
-        parseFilter(filter);
-      } catch (err) {
-        throw err; // Will be caught by MCP tool
-      }
+      parseFilter(filter);
     }
 
     const subscriber: EventSubscriber = {

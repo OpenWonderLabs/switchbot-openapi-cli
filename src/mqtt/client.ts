@@ -23,7 +23,6 @@ export class SwitchBotMqttClient {
   private handlers: Set<(state: MqttState) => void> = new Set();
   private messageHandlers: Set<(topic: string, payload: Buffer) => void> = new Set();
   private authRefreshCallback?: AuthRefreshCallback;
-  private stableThresholdMs = 30000;
   private stableTimer: NodeJS.Timeout | null = null;
   private lastConnectionAttempt = 0;
 
@@ -56,7 +55,6 @@ export class SwitchBotMqttClient {
       this.client.on('connect', () => {
         this.reconnectAttempts = 0;
         this.setState('connected');
-        this.scheduleStableEvent();
         this.authRefreshNeeded = false;
       });
 
@@ -81,8 +79,7 @@ export class SwitchBotMqttClient {
 
       this.client.on('close', () => {
         this.clearStableTimer();
-        if (this.authRefreshNeeded) {
-          this.setState('failed');
+        if (this.authRefreshNeeded) {          this.setState('failed');
         } else if (this.reconnectAttempts < this.maxReconnectAttempts) {
           this.attemptReconnect();
         } else {
@@ -161,14 +158,6 @@ export class SwitchBotMqttClient {
         handler(newState);
       }
     }
-  }
-
-  private scheduleStableEvent(): void {
-    this.clearStableTimer();
-    this.stableTimer = setTimeout(() => {
-      // Emit stable event (for metrics/observability)
-      this.stableTimer = null;
-    }, this.stableThresholdMs);
   }
 
   private clearStableTimer(): void {
