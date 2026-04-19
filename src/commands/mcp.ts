@@ -86,7 +86,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
     {
       title: 'List all devices on the account',
       description:
-        'Fetch the inventory of physical devices and IR remotes on this SwitchBot account. Refreshes the local cache.',
+        'Fetch the complete inventory of physical devices and IR remotes on this SwitchBot account. Refreshes the local metadata cache and groups devices by type. Use this as the bootstrap call to discover available deviceIds. Devices without enableCloudService cannot receive commands via API. IR remotes depend on a Hub for connectivity.',
       inputSchema: {},
       outputSchema: {
         deviceList: z.array(z.object({
@@ -155,7 +155,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
     {
       title: 'Send a control command to a device',
       description:
-        'Send a control command (turnOn, setColor, startClean, unlock, ...) to a device. Destructive commands (unlock, garage open, keypad createKey) require confirm:true; otherwise they are rejected.',
+        'Execute a control command on a device (turnOn, setColor, startClean, unlock, openDoor, createKey, etc.). Destructive commands (Smart Lock unlock, Garage Door open, Keypad createKey/deleteKey) require confirm:true to proceed; otherwise rejected. Commands are validated offline against the device catalog. Use idempotencyKey to safely deduplicate retries within 60 seconds.',
       inputSchema: {
         deviceId: z.string().describe('Device ID from list_devices'),
         command: z.string().describe('Command name, case-sensitive (e.g. turnOn, setColor, unlock)'),
