@@ -238,7 +238,7 @@ The audit format is JSONL with this shape:
   "dryRun": false, "result": "ok" }
 ```
 
-Pair with `switchbot devices watch --interval=30s` for continuous state diffs (add `--include-unchanged` to emit every tick even when nothing changed), or `switchbot events tail` to receive webhook pushes locally.
+Pair with `switchbot devices watch --interval=30s` for continuous state diffs (add `--include-unchanged` to emit every tick even when nothing changed), `switchbot events tail` to receive webhook pushes locally, or `switchbot events mqtt-tail` for real-time MQTT shadow updates (requires `SWITCHBOT_MQTT_HOST` env vars — see [Environment variables](../README.md#environment-variables)).
 
 ---
 

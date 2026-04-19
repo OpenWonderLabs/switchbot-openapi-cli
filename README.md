@@ -7,7 +7,7 @@
 [![CI](https://github.com/OpenWonderLabs/switchbot-openapi-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/OpenWonderLabs/switchbot-openapi-cli/actions/workflows/ci.yml)
 
 Command-line interface for the [SwitchBot API v1.1](https://github.com/OpenWonderLabs/SwitchBotAPI).
-List devices, query live status, send control commands, run scenes, and manage webhooks — all from your terminal or shell scripts.
+List devices, query live status, send control commands, run scenes, receive real-time events, and connect AI agents via the built-in MCP server — all from your terminal or shell scripts.
 
 - **npm package:** [`@switchbot/openapi-cli`](https://www.npmjs.com/package/@switchbot/openapi-cli)
 - **Source code:** [github.com/OpenWonderLabs/switchbot-openapi-cli](https://github.com/OpenWonderLabs/switchbot-openapi-cli)
@@ -44,9 +44,15 @@ Under the hood every surface shares the same catalog, cache, and HMAC client —
   - [`scenes`](#scenes--run-manual-scenes)
   - [`webhook`](#webhook--receive-device-events-over-http)
   - [`events`](#events--receive-device-events)
-  - [`batch`](#batch--run-multiple-commands)
-  - [`watch`](#watch--poll-device-status)
+  - [`plan`](#plan--declarative-batch-operations)
+  - [`devices watch`](#devices-watch--poll-status)
   - [`mcp`](#mcp--model-context-protocol-server)
+  - [`doctor`](#doctor--self-check)
+  - [`quota`](#quota--api-request-counter)
+  - [`history`](#history--audit-log)
+  - [`catalog`](#catalog--device-type-catalog)
+  - [`schema`](#schema--export-catalog-as-json)
+  - [`capabilities`](#capabilities--cli-manifest)
   - [`cache`](#cache--inspect-and-clear-local-cache)
   - [`completion`](#completion--shell-tab-completion)
 - [Output modes](#output-modes)
@@ -68,7 +74,7 @@ Under the hood every surface shares the same catalog, cache, and HMAC client —
 - 🎨 **Dual output modes** — colorized tables by default; `--json` passthrough for `jq` and scripting
 - 🔐 **Secure credentials** — HMAC-SHA256 signed requests; config file written with `0600`; env-var override for CI
 - 🔍 **Dry-run mode** — preview every mutating request before it hits the API
-- 🧪 **Fully tested** — 592 Vitest tests, mocked axios, zero network in CI
+- 🧪 **Fully tested** — 692 Vitest tests, mocked axios, zero network in CI
 - ⚡ **Shell completion** — Bash / Zsh / Fish / PowerShell
 
 ## Requirements
@@ -273,13 +279,29 @@ switchbot devices expand <relayId> setMode --channel 1 --mode edge
 
 Run `switchbot devices expand <id> <command> --help` to see the available flags for any device command.
 
-#### `devices explain` — plain-language command description
+#### `devices explain` — one-shot device summary
 
 ```bash
-switchbot devices explain <deviceId> <command>   # e.g. "explain ABC123 setAll"
+# Metadata + supported commands + live status in one call
+switchbot devices explain <deviceId>
+
+# Skip live status fetch (catalog-only output, no API call)
+switchbot devices explain <deviceId> --no-live
 ```
 
-Returns a human-readable description of what the command does and what each parameter means.
+Returns a combined view: static catalog info (commands, parameters, status fields) merged with the current live status. For Hub devices, also lists connected child devices. Prefer this over separate `status` + `describe` calls.
+
+#### `devices meta` — local device metadata
+
+```bash
+switchbot devices meta set <deviceId> --alias "Office Light"
+switchbot devices meta set <deviceId> --hide          # hide from `devices list`
+switchbot devices meta get <deviceId>
+switchbot devices meta list                            # show all saved metadata
+switchbot devices meta clear <deviceId>
+```
+
+Stores local annotations (alias, hidden flag, notes) in `~/.switchbot/device-meta.json`. The alias is used as a display name; `--show-hidden` on `devices list` reveals hidden devices.
 
 ### `scenes` — run manual scenes
 
@@ -384,28 +406,36 @@ switchbot completion powershell >> $PROFILE
 
 Supported shells: `bash`, `zsh`, `fish`, `powershell` (`pwsh` is accepted as an alias).
 
-### `batch` — run multiple commands
+### `plan` — declarative batch operations
 
 ```bash
-# Run a sequence of commands from a JSON/YAML file
-switchbot batch run commands.json
-switchbot batch run commands.yaml --dry-run
+# Print the plan JSON Schema (give to your agent framework)
+switchbot plan schema
 
-# Validate a plan file without executing it
-switchbot batch validate commands.json
+# Validate a plan file without running it
+switchbot plan validate plan.json
+
+# Preview — mutations skipped, GETs still execute
+switchbot --dry-run plan run plan.json
+
+# Run — pass --yes to allow destructive steps
+switchbot plan run plan.json --yes
+switchbot plan run plan.json --continue-on-error
 ```
 
-A batch file is a JSON array of `{ deviceId, command, parameter?, commandType? }` objects.
+A plan file is a JSON document with `version`, `description`, and a `steps` array of `command`, `scene`, or `wait` steps. Steps execute sequentially; a failed step stops the run unless `--continue-on-error` is set. See [`docs/agent-guide.md`](./docs/agent-guide.md) for the full schema and agent integration patterns.
 
-### `watch` — poll device status
+### `devices watch` — poll status
 
 ```bash
 # Poll a device's status every 30 s until Ctrl-C
-switchbot watch <deviceId>
-switchbot watch <deviceId> --interval 10s --json
+switchbot devices watch <deviceId>
+
+# Custom interval; emit every tick even when nothing changed
+switchbot devices watch <deviceId> --interval 10s --include-unchanged --json
 ```
 
-Output is a stream of JSON status objects (with `--json`) or a refreshed table.
+Output is a JSONL stream of status-change events (with `--json`) or a refreshed table. Use `--max <n>` to stop after N ticks.
 
 ### `mcp` — Model Context Protocol server
 
@@ -416,6 +446,64 @@ switchbot mcp serve
 
 Exposes 8 MCP tools (`list_devices`, `describe_device`, `get_device_status`, `send_command`, `list_scenes`, `run_scene`, `search_catalog`, `account_overview`) plus a `switchbot://events` resource for real-time shadow updates.
 See [`docs/agent-guide.md`](./docs/agent-guide.md) for the full tool reference and safety rules (destructive-command guard).
+
+### `doctor` — self-check
+
+```bash
+switchbot doctor
+switchbot doctor --json
+```
+
+Runs 8 local checks (Node version, credentials, profiles, catalog, cache, quota file, clock, MQTT config) and exits 1 if any check fails. `warn` results exit 0. Use this to diagnose connectivity or config issues before running automation.
+
+### `quota` — API request counter
+
+```bash
+switchbot quota status     # today's usage + last 7 days
+switchbot quota reset      # delete the counter file
+```
+
+Tracks daily API calls against the 10,000/day account limit. The counter is stored in `~/.switchbot/quota.json` and incremented on every mutating request. Pass `--no-quota` to skip tracking for a single run.
+
+### `history` — audit log
+
+```bash
+switchbot history show              # recent entries (newest first)
+switchbot history show --limit 20   # last 20 entries
+switchbot history replay 7          # re-run entry #7
+switchbot --json history show --limit 50 | jq '.entries[] | select(.result=="error")'
+```
+
+Reads the JSONL audit log (`~/.switchbot/audit.log` by default; override with `--audit-log`). Each entry records the timestamp, command, device ID, result, and dry-run flag. `replay` re-runs the original command with the original arguments.
+
+### `catalog` — device type catalog
+
+```bash
+switchbot catalog show              # all 42 built-in types
+switchbot catalog show Bot          # one type
+switchbot catalog diff              # what a local overlay changes vs built-in
+switchbot catalog path              # location of the local overlay file
+```
+
+The built-in catalog ships with the package. Create `~/.switchbot/catalog-overlay.json` to add, extend, or override type definitions without modifying the package.
+
+### `schema` — export catalog as JSON
+
+```bash
+switchbot schema export                         # all types as structured JSON
+switchbot schema export --type 'Strip Light'    # one type
+switchbot schema export --role sensor           # filter by role
+```
+
+Exports the effective catalog in a machine-readable format. Pipe the output into an agent's system prompt or tool schema to give it a complete picture of controllable devices.
+
+### `capabilities` — CLI manifest
+
+```bash
+switchbot capabilities --json
+```
+
+Prints a versioned JSON manifest describing available surfaces (CLI, MCP, MQTT, plan runner), commands, and environment variables. Designed for agents and tooling that need to discover the CLI's capabilities programmatically.
 
 ### `cache` — inspect and clear local cache
 
@@ -547,7 +635,7 @@ npm install
 
 npm run dev -- <args>       # Run from TypeScript sources via tsx
 npm run build               # Compile to dist/
-npm test                    # Run the Vitest suite (592 tests)
+npm test                    # Run the Vitest suite (692 tests)
 npm run test:watch          # Watch mode
 npm run test:coverage       # Coverage report (v8, HTML + text)
 ```
@@ -569,21 +657,23 @@ src/
 ├── commands/
 │   ├── config.ts
 │   ├── devices.ts
+│   ├── expand.ts         # `devices expand` — semantic flag builder
+│   ├── explain.ts        # `devices explain` — one-shot device summary
+│   ├── device-meta.ts    # `devices meta` — local aliases / hide flags
 │   ├── scenes.ts
 │   ├── webhook.ts
-│   ├── batch.ts          # `switchbot batch run/validate`
-│   ├── watch.ts          # `switchbot watch <deviceId>`
-│   ├── mcp.ts            # `switchbot mcp serve` (MCP stdio server)
-│   ├── cache.ts          # `switchbot cache show/clear`
-│   ├── history.ts        # `switchbot history [replay]`
-│   ├── events.ts         # `switchbot events`
-│   ├── quota.ts          # `switchbot quota`
-│   ├── explain.ts        # `switchbot explain <deviceId>`
-│   ├── plan.ts           # `switchbot plan run <file>`
-│   ├── doctor.ts         # `switchbot doctor`
-│   ├── schema.ts         # `switchbot schema export`
-│   ├── catalog.ts        # `switchbot catalog search`
-│   └── completion.ts     # `switchbot completion bash|zsh|fish|powershell`
+│   ├── watch.ts          # `devices watch <deviceId>`
+│   ├── events.ts         # `events tail` / `events mqtt-tail`
+│   ├── mcp.ts            # `mcp serve` (MCP stdio/HTTP server)
+│   ├── plan.ts           # `plan run/validate`
+│   ├── cache.ts          # `cache show/clear`
+│   ├── history.ts        # `history show/replay`
+│   ├── quota.ts          # `quota status/reset`
+│   ├── catalog.ts        # `catalog show/diff/path`
+│   ├── schema.ts         # `schema export`
+│   ├── doctor.ts         # `doctor`
+│   ├── capabilities.ts   # `capabilities`
+│   └── completion.ts     # `completion bash|zsh|fish|powershell`
 └── utils/
     ├── flags.ts          # Global flag readers (isVerbose / isDryRun / getCacheMode / …)
     ├── output.ts         # printTable / printKeyValue / printJson / handleError / buildErrorPayload

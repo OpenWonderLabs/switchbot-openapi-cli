@@ -1,7 +1,7 @@
 {
   "name": "@switchbot/openapi-cli",
   "version": "2.0.1",
-  "description": "Command-line interface for SwitchBot API v1.1",
+  "description": "SwitchBot smart home CLI — control devices, run scenes, stream real-time events, and integrate AI agents via MCP. Full API v1.1 coverage.",
   "keywords": [
     "switchbot",
     "cli",
