@@ -303,7 +303,7 @@ describe('handleError', () => {
 describe('buildErrorPayload', () => {
   it('UsageError → code 2, kind usage', () => {
     const p = buildErrorPayload(new UsageError('bad flag'));
-    expect(p).toEqual({ code: 2, kind: 'usage', message: 'bad flag' });
+    expect(p).toEqual({ code: 2, kind: 'usage', message: 'bad flag', errorClass: 'usage', transient: false });
   });
 
   it('generic Error → code 1, kind runtime', () => {
@@ -313,6 +313,7 @@ describe('buildErrorPayload', () => {
     expect(p.message).toBe('oops');
     expect(p.hint).toBeUndefined();
     expect(p.retryable).toBeUndefined();
+    expect(p.transient).toBe(false);
   });
 
   it('unknown non-Error → code 1, kind runtime, fallback message', () => {
@@ -320,21 +321,24 @@ describe('buildErrorPayload', () => {
     expect(p.code).toBe(1);
     expect(p.kind).toBe('runtime');
     expect(p.message).toBe('An unknown error occurred');
+    expect(p.transient).toBe(false);
   });
 
   it('ApiError → code from error, kind api, hint from error', async () => {
     const { ApiError } = await import('../../src/api/client.js');
-    const p = buildErrorPayload(new ApiError('quota', 429, { retryable: true, hint: 'try later' }));
+    const p = buildErrorPayload(new ApiError('quota', 429, { retryable: true, hint: 'try later', transient: true }));
     expect(p.code).toBe(429);
     expect(p.kind).toBe('api');
     expect(p.message).toBe('quota');
     expect(p.hint).toBe('try later');
     expect(p.retryable).toBe(true);
+    expect(p.transient).toBe(true);
   });
 
   it('ApiError with known code gets hint from errorHint table when no explicit hint', async () => {
     const { ApiError } = await import('../../src/api/client.js');
     const p = buildErrorPayload(new ApiError('not found', 152));
     expect(p.hint).toContain('deviceId');
+    expect(p.transient).toBe(false);
   });
 });

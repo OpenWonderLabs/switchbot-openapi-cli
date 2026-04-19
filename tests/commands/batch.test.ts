@@ -224,7 +224,7 @@ describe('devices batch', () => {
     expect(parsed.summary.ok).toBe(1);
     expect(parsed.summary.failed).toBe(1);
     expect(parsed.failed[0].deviceId).toBe('BOT2');
-    expect(parsed.failed[0].error).toMatch(/timeout/);
+    expect(parsed.failed[0].error.message).toMatch(/timeout/);
   });
 
   it('refuses destructive commands without --yes', async () => {

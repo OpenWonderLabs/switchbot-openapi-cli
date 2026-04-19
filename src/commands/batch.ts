@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import type { AxiosInstance } from 'axios';
-import { printJson, isJsonMode, handleError } from '../utils/output.js';
+import { printJson, isJsonMode, handleError, buildErrorPayload, type ErrorPayload } from '../utils/output.js';
 import {
   fetchDeviceList,
   executeCommand,
@@ -15,7 +15,7 @@ import { getCachedTypeMap } from '../devices/cache.js';
 
 interface BatchResult {
   succeeded: Array<{ deviceId: string; result: unknown }>;
-  failed: Array<{ deviceId: string; error: string }>;
+  failed: Array<{ deviceId: string; error: ErrorPayload }>;
   summary: {
     total: number;
     ok: number;
@@ -23,6 +23,7 @@ interface BatchResult {
     skipped: number;
     durationMs: number;
     dryRun?: boolean;
+    schemaVersion?: string;
   };
 }
 
@@ -284,11 +285,11 @@ Examples:
             if (err instanceof DryRunSignal) {
               return { ok: 'dry-run' as const, deviceId: id };
             }
-            const message = err instanceof Error ? err.message : String(err);
+            const errorPayload = buildErrorPayload(err);
             if (!isJsonMode()) {
-              console.error(`✗ ${id}: ${message}`);
+              console.error(`✗ ${id}: ${errorPayload.message}`);
             }
-            return { ok: false as const, deviceId: id, error: message };
+            return { ok: false as const, deviceId: id, error: errorPayload };
           }
         });
 
@@ -300,7 +301,7 @@ Examples:
         const failed = outcomes.filter((o) => o.ok === false) as Array<{
           ok: false;
           deviceId: string;
-          error: string;
+          error: ErrorPayload;
         }>;
         const dryRunned = outcomes.filter((o) => o.ok === 'dry-run') as Array<{
           ok: 'dry-run';
@@ -316,6 +317,7 @@ Examples:
             failed: failed.length,
             skipped: dryRunned.length,
             durationMs: Date.now() - startedAt,
+            schemaVersion: '1.1',
             ...(dryRun ? { dryRun: true } : {}),
           },
         };
