@@ -12,6 +12,7 @@ import { parseFilter, applyFilter, FilterSyntaxError } from '../utils/filter.js'
 import { isDryRun } from '../utils/flags.js';
 import { DryRunSignal } from '../api/client.js';
 import { getCachedTypeMap } from '../devices/cache.js';
+import { writeRefusalAudit } from '../utils/audit.js';
 
 export interface BatchResult {
   succeeded: Array<{ deviceId: string; result: unknown }>;
@@ -148,6 +149,16 @@ export async function runBatchCommand(params: {
     }
   }
   if (blocked.length > 0) {
+    for (const b of blocked) {
+      writeRefusalAudit({
+        deviceId: b.deviceId,
+        command: params.command,
+        parameter: params.parameter,
+        commandType: effectiveType,
+        caller: 'mcp',
+        reason: b.reason,
+      });
+    }
     return { blocked: true, reason: 'destructive', devices: blocked };
   }
 
@@ -302,6 +313,16 @@ Examples:
         }
 
         if (blockedForDestructive.length > 0 && !options.yes) {
+          for (const b of blockedForDestructive) {
+            writeRefusalAudit({
+              deviceId: b.deviceId,
+              command: cmd,
+              parameter,
+              commandType: effectiveType,
+              caller: 'cli',
+              reason: b.reason,
+            });
+          }
           if (isJsonMode()) {
             const deviceIds = blockedForDestructive.map((b) => b.deviceId);
             console.error(JSON.stringify({

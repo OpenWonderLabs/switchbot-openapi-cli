@@ -5,6 +5,7 @@ import { executeCommand, isDestructiveCommand } from '../lib/devices.js';
 import { executeScene } from '../lib/scenes.js';
 import { getCachedDevice } from '../devices/cache.js';
 import { resolveDeviceId } from '../utils/name-resolver.js';
+import { writeRefusalAudit } from '../utils/audit.js';
 
 export interface PlanCommandStep {
   type: 'command';
@@ -225,6 +226,7 @@ export async function runPlan(
     yes?: boolean;
     continueOnError?: boolean;
     onStep?: (line: string) => void;
+    caller?: 'cli' | 'mcp';
   } = {},
 ): Promise<PlanRunResult> {
   const out: PlanRunResult = {
@@ -233,6 +235,7 @@ export async function runPlan(
     summary: { total: plan.steps.length, ok: 0, error: 0, skipped: 0 },
   };
   const emit = (line: string) => options.onStep?.(line);
+  const caller = options.caller ?? 'cli';
 
   for (let i = 0; i < plan.steps.length; i++) {
     const step = plan.steps[i];
@@ -265,6 +268,14 @@ export async function runPlan(
     const commandType = step.commandType ?? 'command';
     const destructive = isDestructiveCommand(deviceType, step.command, commandType);
     if (destructive && !options.yes) {
+      writeRefusalAudit({
+        deviceId: resolvedDeviceId,
+        command: step.command,
+        parameter: step.parameter,
+        commandType,
+        caller,
+        reason: `destructive command "${step.command}" on ${deviceType ?? 'unknown'} requires ${caller === 'mcp' ? 'yes:true' : '--yes'}`,
+      });
       out.results.push({
         step: idx,
         type: 'command',

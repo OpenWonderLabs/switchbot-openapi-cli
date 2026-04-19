@@ -172,6 +172,7 @@ export async function executeCommand(
     parameter,
     commandType,
     dryRun: isDryRun(),
+    destructive: isDestructiveCommand(getCachedDevice(deviceId)?.type, cmd, commandType),
   };
   try {
     const res = await c.post<{ body: unknown }>(

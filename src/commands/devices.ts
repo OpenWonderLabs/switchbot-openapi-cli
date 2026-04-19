@@ -23,6 +23,7 @@ import { registerExplainCommand } from './explain.js';
 import { registerExpandCommand } from './expand.js';
 import { registerDevicesMetaCommand } from './device-meta.js';
 import { isDryRun } from '../utils/flags.js';
+import { writeRefusalAudit } from '../utils/audit.js';
 
 export function registerDevicesCommand(program: Command): void {
   const devices = program
@@ -292,6 +293,14 @@ Examples:
       ) {
         const typeLabel = cachedForGuard?.type ?? 'unknown';
         const reason = getDestructiveReason(cachedForGuard?.type, cmd, options.type);
+        writeRefusalAudit({
+          deviceId,
+          command: cmd,
+          parameter,
+          commandType: (options.type === 'customize' ? 'customize' : 'command'),
+          caller: 'cli',
+          reason: reason ?? `destructive command "${cmd}" on ${typeLabel} requires --yes`,
+        });
         if (isJsonMode()) {
           console.error(JSON.stringify({
             error: {

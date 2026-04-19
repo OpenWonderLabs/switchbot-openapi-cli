@@ -31,6 +31,7 @@ import { runPlan, validatePlan } from './plan.js';
 import { createClient } from '../api/client.js';
 import { loadConfigForProfile, type SwitchBotConfig } from '../config.js';
 import { todayUsage } from '../utils/quota.js';
+import { writeRefusalAudit } from '../utils/audit.js';
 
 /**
  * Factory — build an McpServer with the SwitchBot tools registered
@@ -229,6 +230,14 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         const hint = reason
           ? `Re-issue with confirm:true after confirming with the user. Reason: ${reason}`
           : 'Re-issue the call with confirm:true to proceed.';
+        writeRefusalAudit({
+          deviceId,
+          command,
+          parameter,
+          commandType: effectiveType,
+          caller: 'mcp',
+          reason: reason ?? `destructive command "${command}" on ${typeName ?? 'unknown'} requires confirm:true`,
+        });
         return mcpError(
           'guard', 3,
           `Command "${command}" on device type "${typeName}" is destructive and requires confirm:true.`,
@@ -589,7 +598,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         });
       }
       try {
-        const out = await runPlan(v.plan, { yes, continueOnError });
+        const out = await runPlan(v.plan, { yes, continueOnError, caller: 'mcp' });
         return {
           content: [{ type: 'text', text: JSON.stringify({ ran: true, ...out }, null, 2) }],
           structuredContent: { ran: true, ...out } as unknown as Record<string, unknown>,

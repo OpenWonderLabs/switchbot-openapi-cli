@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { writeAudit, readAudit } from '../../src/utils/audit.js';
+import { writeAudit, readAudit, writeRefusalAudit } from '../../src/utils/audit.js';
 
 describe('audit log', () => {
   const originalArgv = process.argv;
@@ -95,5 +95,46 @@ describe('audit log', () => {
 
   it('readAudit returns [] when the file does not exist', () => {
     expect(readAudit(path.join(tmp, 'nope.log'))).toEqual([]);
+  });
+
+  it('rotates to <file>.1 when the log exceeds 10MB', () => {
+    const file = path.join(tmp, 'audit.log');
+    process.argv = ['node', 'cli', '--audit-log', file];
+    // Pre-fill 10MB+1 to force rotation on the next append.
+    const filler = 'x'.repeat(10 * 1024 * 1024 + 1);
+    fs.writeFileSync(file, filler);
+    writeAudit({
+      t: '2026-04-19T10:00:00.000Z',
+      kind: 'command',
+      deviceId: 'BOT',
+      command: 'turnOn',
+      parameter: undefined,
+      commandType: 'command',
+      dryRun: false,
+      result: 'ok',
+    });
+    expect(fs.existsSync(`${file}.1`)).toBe(true);
+    const lines = fs.readFileSync(file, 'utf-8').split('\n').filter(Boolean);
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0]).command).toBe('turnOn');
+  });
+
+  it('writeRefusalAudit records a refused destructive attempt', () => {
+    const file = path.join(tmp, 'audit.log');
+    process.argv = ['node', 'cli', '--audit-log', file];
+    writeRefusalAudit({
+      deviceId: 'LOCK1',
+      command: 'unlock',
+      commandType: 'command',
+      caller: 'cli',
+      reason: 'destructive command "unlock" on Smart Lock requires --yes',
+    });
+    const entries = readAudit(file);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].result).toBe('refused');
+    expect(entries[0].destructive).toBe(true);
+    expect(entries[0].confirmed).toBe(false);
+    expect(entries[0].caller).toBe('cli');
+    expect(entries[0].error).toContain('--yes');
   });
 });
