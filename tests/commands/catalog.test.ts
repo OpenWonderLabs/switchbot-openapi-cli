@@ -61,9 +61,9 @@ describe('catalog path', () => {
     writeOverlay([{ type: 'Bot' }]);
     const { stdout } = await runCli(registerCatalogCommand, ['--json', 'catalog', 'path']);
     const parsed = JSON.parse(stdout.join('\n'));
-    expect(parsed.exists).toBe(true);
-    expect(parsed.valid).toBe(true);
-    expect(parsed.entryCount).toBe(1);
+    expect(parsed.data.exists).toBe(true);
+    expect(parsed.data.valid).toBe(true);
+    expect(parsed.data.entryCount).toBe(1);
   });
 });
 
@@ -137,14 +137,14 @@ describe('catalog show', () => {
   it('emits JSON array with --json', async () => {
     const { stdout } = await runCli(registerCatalogCommand, ['--json', 'catalog', 'show']);
     const parsed = JSON.parse(stdout.join('\n'));
-    expect(Array.isArray(parsed)).toBe(true);
-    expect(parsed.find((e: { type: string }) => e.type === 'Bot')).toBeDefined();
+    expect(Array.isArray(parsed.data)).toBe(true);
+    expect(parsed.data.find((e: { type: string }) => e.type === 'Bot')).toBeDefined();
   });
 
   it('emits a single-entry JSON object when a type is given', async () => {
     const { stdout } = await runCli(registerCatalogCommand, ['--json', 'catalog', 'show', 'Bot']);
     const parsed = JSON.parse(stdout.join('\n'));
-    expect(parsed.type).toBe('Bot');
+    expect(parsed.data.type).toBe('Bot');
   });
 });
 
@@ -197,11 +197,11 @@ describe('catalog diff', () => {
     ]);
     const { stdout } = await runCli(registerCatalogCommand, ['--json', 'catalog', 'diff']);
     const parsed = JSON.parse(stdout.join('\n'));
-    expect(parsed.replaced).toHaveLength(1);
-    expect(parsed.replaced[0].type).toBe('Bot');
-    expect(parsed.replaced[0].changedKeys).toContain('role');
-    expect(parsed.removed).toContain('Curtain');
-    expect(parsed.added).toEqual([]);
+    expect(parsed.data.replaced).toHaveLength(1);
+    expect(parsed.data.replaced[0].type).toBe('Bot');
+    expect(parsed.data.replaced[0].changedKeys).toContain('role');
+    expect(parsed.data.removed).toContain('Curtain');
+    expect(parsed.data.added).toEqual([]);
   });
 });
 
@@ -223,6 +223,6 @@ describe('catalog refresh', () => {
   it('emits JSON with --json', async () => {
     const { stdout } = await runCli(registerCatalogCommand, ['--json', 'catalog', 'refresh']);
     const parsed = JSON.parse(stdout.join('\n'));
-    expect(parsed.refreshed).toBe(true);
+    expect(parsed.data.refreshed).toBe(true);
   });
 });

@@ -25,8 +25,8 @@ describe('doctor command', () => {
     const res = await runCli(registerDoctorCommand, ['--json', 'doctor']);
     expect(res.exitCode).toBe(1);
     const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
-    expect(payload.overall).toBe('fail');
-    const creds = payload.checks.find((c: { name: string }) => c.name === 'credentials');
+    expect(payload.data.overall).toBe('fail');
+    const creds = payload.data.checks.find((c: { name: string }) => c.name === 'credentials');
     expect(creds.status).toBe('fail');
     expect(creds.detail).toMatch(/config set-token/);
   });
@@ -37,7 +37,7 @@ describe('doctor command', () => {
     const res = await runCli(registerDoctorCommand, ['--json', 'doctor']);
     expect(res.exitCode).not.toBe(1);
     const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
-    const creds = payload.checks.find((c: { name: string }) => c.name === 'credentials');
+    const creds = payload.data.checks.find((c: { name: string }) => c.name === 'credentials');
     expect(creds.status).toBe('ok');
     expect(creds.detail).toMatch(/env/);
   });
@@ -50,7 +50,7 @@ describe('doctor command', () => {
     );
     const res = await runCli(registerDoctorCommand, ['--json', 'doctor']);
     const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
-    const creds = payload.checks.find((c: { name: string }) => c.name === 'credentials');
+    const creds = payload.data.checks.find((c: { name: string }) => c.name === 'credentials');
     expect(creds.status).toBe('ok');
     expect(creds.detail).toMatch(/config\.json/);
   });
@@ -64,7 +64,7 @@ describe('doctor command', () => {
     process.env.SWITCHBOT_SECRET = 's';
     const res = await runCli(registerDoctorCommand, ['--json', 'doctor']);
     const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
-    const profiles = payload.checks.find((c: { name: string }) => c.name === 'profiles');
+    const profiles = payload.data.checks.find((c: { name: string }) => c.name === 'profiles');
     expect(profiles.detail).toMatch(/found 2/);
     expect(profiles.detail).toMatch(/home/);
     expect(profiles.detail).toMatch(/work/);
@@ -75,7 +75,7 @@ describe('doctor command', () => {
     process.env.SWITCHBOT_SECRET = 's';
     const res = await runCli(registerDoctorCommand, ['--json', 'doctor']);
     const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
-    const cat = payload.checks.find((c: { name: string }) => c.name === 'catalog');
+    const cat = payload.data.checks.find((c: { name: string }) => c.name === 'catalog');
     expect(cat.detail).toMatch(/\d+ types loaded/);
   });
 });

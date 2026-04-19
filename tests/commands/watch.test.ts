@@ -120,7 +120,7 @@ describe('devices watch', () => {
     expect(res.exitCode).toBeNull();
     const lines = res.stdout.filter((l) => l.trim().startsWith('{'));
     expect(lines.length).toBe(1);
-    const ev = JSON.parse(lines[0]);
+    const ev = JSON.parse(lines[0]).data;
     expect(ev.deviceId).toBe('BOT1');
     expect(ev.type).toBe('Bot');
     expect(ev.tick).toBe(1);
@@ -142,7 +142,7 @@ describe('devices watch', () => {
 
     const events = res.stdout
       .filter((l) => l.trim().startsWith('{'))
-      .map((l) => JSON.parse(l));
+      .map((l) => JSON.parse(l).data);
     expect(events).toHaveLength(2);
     expect(events[0].tick).toBe(1);
     // Tick 2 should only include the power change — battery stayed 90.
@@ -164,7 +164,7 @@ describe('devices watch', () => {
 
     const events = res.stdout
       .filter((l) => l.trim().startsWith('{'))
-      .map((l) => JSON.parse(l));
+      .map((l) => JSON.parse(l).data);
     // Only tick 1 should have emitted (tick 2 had zero changes).
     expect(events).toHaveLength(1);
     expect(events[0].tick).toBe(1);
@@ -183,7 +183,7 @@ describe('devices watch', () => {
 
     const events = res.stdout
       .filter((l) => l.trim().startsWith('{'))
-      .map((l) => JSON.parse(l));
+      .map((l) => JSON.parse(l).data);
     expect(events).toHaveLength(2);
     expect(Object.keys(events[1].changed)).toHaveLength(0);
   }, 20_000);
@@ -199,7 +199,7 @@ describe('devices watch', () => {
     ]);
     expect(res.exitCode).toBeNull();
 
-    const ev = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{'))[0]);
+    const ev = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{'))[0]).data;
     expect(ev.changed.power).toBeDefined();
     expect(ev.changed.battery).toBeDefined();
     expect(ev.changed.temp).toBeUndefined();
@@ -223,7 +223,7 @@ describe('devices watch', () => {
     const events = [
       ...res.stdout.filter((l) => l.trim().startsWith('{')),
       ...res.stderr.filter((l) => l.trim().startsWith('{')),
-    ].map((l) => JSON.parse(l));
+    ].map((l) => JSON.parse(l).data);
     expect(events).toHaveLength(2);
     const byId = Object.fromEntries(events.map((e) => [e.deviceId, e]));
     expect(byId.BOT1.error).toMatch(/boom/);

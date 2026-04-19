@@ -4,12 +4,14 @@ import { ApiError, DryRunSignal } from '../api/client.js';
 
 import { getFormat } from './flags.js';
 
+export const SCHEMA_VERSION = '1.1';
+
 export function isJsonMode(): boolean {
   return process.argv.includes('--json') || getFormat() === 'json';
 }
 
 export function printJson(data: unknown): void {
-  console.log(JSON.stringify(data, null, 2));
+  console.log(JSON.stringify({ schemaVersion: SCHEMA_VERSION, data }, null, 2));
 }
 
 export function printTable(headers: string[], rows: (string | number | boolean | null | undefined)[][]): void {
@@ -146,7 +148,7 @@ export function handleError(error: unknown): never {
   const payload = buildErrorPayload(error);
 
   if (isJsonMode()) {
-    console.error(JSON.stringify({ error: payload }));
+    console.error(JSON.stringify({ schemaVersion: SCHEMA_VERSION, error: payload }));
     process.exit(payload.code === 2 ? 2 : 1);
   }
 

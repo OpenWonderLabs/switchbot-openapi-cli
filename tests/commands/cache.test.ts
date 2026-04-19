@@ -82,12 +82,12 @@ describe('cache show', () => {
     const result = await runCli(registerCacheCommand, ['--json', 'cache', 'show']);
     expect(result.exitCode).toBeNull();
     const parsed = JSON.parse(result.stdout.join('\n'));
-    expect(parsed.list.exists).toBe(true);
-    expect(parsed.list.deviceCount).toBe(3);
-    expect(parsed.status.entryCount).toBe(1);
-    expect(parsed.status.entries.BOT1.fetchedAt).toBe('2026-04-17T12:00:00.000Z');
+    expect(parsed.data.list.exists).toBe(true);
+    expect(parsed.data.list.deviceCount).toBe(3);
+    expect(parsed.data.status.entryCount).toBe(1);
+    expect(parsed.data.status.entries.BOT1.fetchedAt).toBe('2026-04-17T12:00:00.000Z');
     // --json output should not leak the raw status body (only timestamps).
-    expect(parsed.status.entries.BOT1.body).toBeUndefined();
+    expect(parsed.data.status.entries.BOT1.body).toBeUndefined();
   });
 });
 
@@ -145,7 +145,7 @@ describe('cache clear', () => {
     const result = await runCli(registerCacheCommand, ['--json', 'cache', 'clear', '--key', 'list']);
     expect(result.exitCode).toBeNull();
     const parsed = JSON.parse(result.stdout.join('\n'));
-    expect(parsed).toEqual({ cleared: ['list'] });
+    expect(parsed).toEqual({ schemaVersion: '1.1', data: { cleared: ['list'] } });
   });
 
   it('is a no-op when files do not exist', async () => {

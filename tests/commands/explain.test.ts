@@ -116,20 +116,20 @@ describe('devices explain', () => {
 
     expect(res.exitCode).toBeNull();
     const parsed = JSON.parse(res.stdout[0]);
-    expect(parsed.deviceId).toBe(DID);
-    expect(parsed.type).toBe('Bot');
-    expect(parsed.category).toBe('physical');
-    expect(parsed.name).toBe('My Bot');
-    expect(parsed.role).toBe('power');
-    expect(parsed.readOnly).toBe(false);
-    expect(Array.isArray(parsed.commands)).toBe(true);
-    expect(parsed.commands[0].command).toBe('turnOn');
-    expect(parsed.commands[0].idempotent).toBe(true);
-    expect(Array.isArray(parsed.statusFields)).toBe(true);
-    expect(parsed.liveStatus).toMatchObject({ power: 'on', battery: 95 });
-    expect(Array.isArray(parsed.suggestedActions)).toBe(true);
-    expect(Array.isArray(parsed.warnings)).toBe(true);
-    expect(parsed.warnings).toHaveLength(0);
+    expect(parsed.data.deviceId).toBe(DID);
+    expect(parsed.data.type).toBe('Bot');
+    expect(parsed.data.category).toBe('physical');
+    expect(parsed.data.name).toBe('My Bot');
+    expect(parsed.data.role).toBe('power');
+    expect(parsed.data.readOnly).toBe(false);
+    expect(Array.isArray(parsed.data.commands)).toBe(true);
+    expect(parsed.data.commands[0].command).toBe('turnOn');
+    expect(parsed.data.commands[0].idempotent).toBe(true);
+    expect(Array.isArray(parsed.data.statusFields)).toBe(true);
+    expect(parsed.data.liveStatus).toMatchObject({ power: 'on', battery: 95 });
+    expect(Array.isArray(parsed.data.suggestedActions)).toBe(true);
+    expect(Array.isArray(parsed.data.warnings)).toBe(true);
+    expect(parsed.data.warnings).toHaveLength(0);
   });
 
   it('--json: device not found emits { error: { code:1, kind:"runtime" } } on stderr', async () => {
@@ -182,7 +182,7 @@ describe('devices explain', () => {
     const res = await runExplain('--json', DID);
 
     const parsed = JSON.parse(res.stdout[0]);
-    expect(parsed.warnings.some((w: string) => w.toLowerCase().includes('cloud'))).toBe(true);
+    expect(parsed.data.warnings.some((w: string) => w.toLowerCase().includes('cloud'))).toBe(true);
   });
 
   it('--json: hub role fetches and lists IR children', async () => {
@@ -203,9 +203,9 @@ describe('devices explain', () => {
     const res = await runExplain('--json', DID);
 
     const parsed = JSON.parse(res.stdout[0]);
-    expect(parsed.children).toHaveLength(1);
-    expect(parsed.children[0].deviceId).toBe('IR-1');
-    expect(parsed.children[0].type).toBe('TV');
+    expect(parsed.data.children).toHaveLength(1);
+    expect(parsed.data.children[0].deviceId).toBe('IR-1');
+    expect(parsed.data.children[0].type).toBe('TV');
   });
 
   it('human mode: prints device header and commands', async () => {

@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { getEffectiveCatalog } from '../devices/catalog.js';
+import { printJson } from '../utils/output.js';
 
 const IDENTITY = {
   product: 'SwitchBot',
@@ -59,45 +60,39 @@ export function registerCapabilitiesCommand(program: Command): void {
         description: opt.description,
       }));
       const roles = [...new Set(catalog.map((e) => e.role ?? 'other'))].sort();
-      console.log(
-        JSON.stringify(
-          {
-            version: program.version(),
-            generatedAt: new Date().toISOString(),
-            identity: IDENTITY,
-            surfaces: {
-              mcp: {
-                entry: 'mcp serve',
-                protocol: 'stdio (default) or --port <n> for HTTP',
-                tools: MCP_TOOLS,
-              },
-              plan: {
-                schemaCmd: 'plan schema',
-                validateCmd: 'plan validate -',
-                runCmd: 'plan run -',
-              },
-              cli: {
-                catalogCmd: 'schema export',
-                discoveryCmd: 'capabilities',
-                healthCmd: 'doctor --json',
-                helpFlag: '--help',
-              },
-            },
-            commands,
-            globalFlags,
-            catalog: {
-              typeCount: catalog.length,
-              roles,
-              destructiveCommandCount: catalog.reduce(
-                (n, e) => n + e.commands.filter((c) => c.destructive).length,
-                0,
-              ),
-              readOnlyTypeCount: catalog.filter((e) => e.readOnly).length,
-            },
+      printJson({
+        version: program.version(),
+        generatedAt: new Date().toISOString(),
+        identity: IDENTITY,
+        surfaces: {
+          mcp: {
+            entry: 'mcp serve',
+            protocol: 'stdio (default) or --port <n> for HTTP',
+            tools: MCP_TOOLS,
           },
-          null,
-          2,
-        ),
-      );
+          plan: {
+            schemaCmd: 'plan schema',
+            validateCmd: 'plan validate -',
+            runCmd: 'plan run -',
+          },
+          cli: {
+            catalogCmd: 'schema export',
+            discoveryCmd: 'capabilities',
+            healthCmd: 'doctor --json',
+            helpFlag: '--help',
+          },
+        },
+        commands,
+        globalFlags,
+        catalog: {
+          typeCount: catalog.length,
+          roles,
+          destructiveCommandCount: catalog.reduce(
+            (n, e) => n + e.commands.filter((c) => c.destructive).length,
+            0,
+          ),
+          readOnlyTypeCount: catalog.filter((e) => e.readOnly).length,
+        },
+      });
     });
 }

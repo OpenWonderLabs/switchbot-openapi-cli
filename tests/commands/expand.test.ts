@@ -184,7 +184,7 @@ describe('devices expand', () => {
       '--temp', '26', '--mode', 'cool', '--fan', 'low', '--power', 'on', '--json',
     ]);
     const out = JSON.parse(res.stdout.join('\n'));
-    expect(out.subKind).toBe('ir-no-feedback');
+    expect(out.data.subKind).toBe('ir-no-feedback');
   });
 
   it('rejects unsupported command', async () => {

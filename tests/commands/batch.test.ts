@@ -156,9 +156,10 @@ describe('devices batch', () => {
     expect(result.exitCode).toBeNull();
     expect(apiMock.__instance.post).toHaveBeenCalledTimes(2);
     const parsed = JSON.parse(result.stdout[0]);
-    expect(parsed.summary.ok).toBe(2);
-    expect(parsed.summary.failed).toBe(0);
-    expect(parsed.succeeded.map((s: { deviceId: string }) => s.deviceId).sort()).toEqual(['BOT1', 'BOT2']);
+    expect(parsed.schemaVersion).toBe('1.1');
+    expect(parsed.data.summary.ok).toBe(2);
+    expect(parsed.data.summary.failed).toBe(0);
+    expect(parsed.data.succeeded.map((s: { deviceId: string }) => s.deviceId).sort()).toEqual(['BOT1', 'BOT2']);
   });
 
   it('dispatches by --ids (intersected with --filter when both are set)', async () => {
@@ -180,7 +181,7 @@ describe('devices batch', () => {
     // Only BOT1 and BOT2 pass the filter — LOCK1 is excluded.
     expect(apiMock.__instance.post).toHaveBeenCalledTimes(2);
     const parsed = JSON.parse(result.stdout[0]);
-    expect(parsed.summary.total).toBe(2);
+    expect(parsed.data.summary.total).toBe(2);
   });
 
   it('uses cached type info for --ids without fetching the device list', async () => {
@@ -221,10 +222,10 @@ describe('devices batch', () => {
 
     expect(result.exitCode).toBe(1);
     const parsed = JSON.parse(result.stdout[0]);
-    expect(parsed.summary.ok).toBe(1);
-    expect(parsed.summary.failed).toBe(1);
-    expect(parsed.failed[0].deviceId).toBe('BOT2');
-    expect(parsed.failed[0].error.message).toMatch(/timeout/);
+    expect(parsed.data.summary.ok).toBe(1);
+    expect(parsed.data.summary.failed).toBe(1);
+    expect(parsed.data.failed[0].deviceId).toBe('BOT2');
+    expect(parsed.data.failed[0].error.message).toMatch(/timeout/);
   });
 
   it('refuses destructive commands without --yes', async () => {
@@ -260,7 +261,7 @@ describe('devices batch', () => {
     expect(result.exitCode).toBeNull();
     expect(apiMock.__instance.post).toHaveBeenCalledTimes(1);
     const parsed = JSON.parse(result.stdout[0]);
-    expect(parsed.summary.ok).toBe(1);
+    expect(parsed.data.summary.ok).toBe(1);
   });
 
   it('--dry-run does not send POSTs and marks all as skipped', async () => {
@@ -284,10 +285,10 @@ describe('devices batch', () => {
 
     expect(result.exitCode).toBeNull();
     const parsed = JSON.parse(result.stdout[0]);
-    expect(parsed.summary.ok).toBe(0);
-    expect(parsed.summary.failed).toBe(0);
-    expect(parsed.summary.skipped).toBe(2);
-    expect(parsed.summary.dryRun).toBe(true);
+    expect(parsed.data.summary.ok).toBe(0);
+    expect(parsed.data.summary.failed).toBe(0);
+    expect(parsed.data.summary.skipped).toBe(2);
+    expect(parsed.data.summary.dryRun).toBe(true);
   });
 
   it('prints a human summary line when not in JSON mode', async () => {
@@ -321,7 +322,7 @@ describe('devices batch', () => {
     ]);
     expect(result.exitCode).toBeNull();
     const parsed = JSON.parse(result.stdout[0]);
-    expect(parsed.summary.total).toBe(0);
+    expect(parsed.data.summary.total).toBe(0);
     expect(apiMock.__instance.post).not.toHaveBeenCalled();
   });
 });
