@@ -71,7 +71,7 @@ export class SwitchBotMqttClient {
             (err.message.includes('401') ||
               err.message.includes('Unauthorized') ||
               err.message.includes('EACCES'))) ||
-          (err as any).code === 'EACCES'
+          (err as NodeJS.ErrnoException).code === 'EACCES'
         ) {
           this.authRefreshNeeded = true;
         }

@@ -1,6 +1,6 @@
 import { SwitchBotMqttClient, type MqttState } from '../mqtt/client.js';
 import { parseFilter, applyFilter, type FilterSyntaxError } from '../utils/filter.js';
-import { fetchDeviceList } from '../lib/devices.js';
+import { fetchDeviceList, type Device } from '../lib/devices.js';
 import { getCachedDevice } from '../devices/cache.js';
 import type { AxiosInstance } from 'axios';
 import { createClient } from '../api/client.js';
@@ -176,17 +176,19 @@ export class EventSubscriptionManager {
         return false; // Conservative: drop if unknown
       }
 
-      // Build a synthetic device object for filtering
-      const device = {
+      // Build a Device-compatible shape for applyFilter
+      const device: Device = {
         deviceId,
         deviceType: this.typeMap.get(deviceId) || cached.type,
         deviceName: cached.name,
         familyName: cached.familyName,
         roomName: cached.roomName,
+        enableCloudService: true,
+        hubDeviceId: '',
       };
 
       // Use applyFilter with single device in list
-      const matched = applyFilter(clauses, [device as any], [], new Map());
+      const matched = applyFilter(clauses, [device], [], new Map());
       return matched.length > 0;
     } catch {
       return false; // Invalid filter matches nothing
