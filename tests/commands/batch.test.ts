@@ -29,10 +29,20 @@ vi.mock('../../src/api/client.js', () => ({
 const cacheMock = vi.hoisted(() => ({
   map: new Map<string, { type: string; name: string; category: 'physical' | 'ir' }>(),
   getCachedDevice: vi.fn((id: string) => cacheMock.map.get(id) ?? null),
+  getCachedTypeMap: vi.fn((ids?: Iterable<string>) => {
+    const out = new Map<string, string>();
+    if (!ids) return out;
+    for (const id of ids) {
+      const entry = cacheMock.map.get(id);
+      if (entry?.type) out.set(id, entry.type);
+    }
+    return out;
+  }),
   updateCacheFromDeviceList: vi.fn(),
 }));
 vi.mock('../../src/devices/cache.js', () => ({
   getCachedDevice: cacheMock.getCachedDevice,
+  getCachedTypeMap: cacheMock.getCachedTypeMap,
   updateCacheFromDeviceList: cacheMock.updateCacheFromDeviceList,
   loadCache: vi.fn(() => null),
   clearCache: vi.fn(),
@@ -41,6 +51,7 @@ vi.mock('../../src/devices/cache.js', () => ({
   getCachedStatus: vi.fn(() => null),
   setCachedStatus: vi.fn(),
   clearStatusCache: vi.fn(),
+  resetStatusCache: vi.fn(),
   loadStatusCache: vi.fn(() => ({ entries: {} })),
   describeCache: vi.fn(() => ({
     list: { path: '', exists: false },
@@ -103,8 +114,10 @@ describe('devices batch', () => {
   beforeEach(() => {
     apiMock.__instance.get.mockReset();
     apiMock.__instance.post.mockReset();
+    apiMock.createClient.mockClear();
     cacheMock.map.clear();
     cacheMock.getCachedDevice.mockClear();
+    cacheMock.getCachedTypeMap.mockClear();
     flagsMock.dryRun = false;
   });
 
@@ -168,6 +181,26 @@ describe('devices batch', () => {
     expect(apiMock.__instance.post).toHaveBeenCalledTimes(2);
     const parsed = JSON.parse(result.stdout[0]);
     expect(parsed.summary.total).toBe(2);
+  });
+
+  it('uses cached type info for --ids without fetching the device list', async () => {
+    cacheMock.map.set('BOT1', { type: 'Bot', name: 'Kitchen', category: 'physical' });
+    cacheMock.map.set('BOT2', { type: 'Bot', name: 'Office', category: 'physical' });
+    apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body: {} } });
+
+    const result = await runCli(registerDevicesCommand, [
+      '--json',
+      'devices',
+      'batch',
+      'turnOn',
+      '--ids',
+      'BOT1,BOT2',
+    ]);
+
+    expect(result.exitCode).toBeNull();
+    expect(apiMock.__instance.get).not.toHaveBeenCalled();
+    expect(apiMock.createClient).toHaveBeenCalledTimes(1);
+    expect(apiMock.__instance.post).toHaveBeenCalledTimes(2);
   });
 
   it('surfaces partial failures in the failed[] array and exits 1', async () => {

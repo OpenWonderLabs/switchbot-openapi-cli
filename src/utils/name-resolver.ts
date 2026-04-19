@@ -38,10 +38,10 @@ function resolveDeviceByName(query: string): NameResolveResult {
     // exact match
     if (rawName === q) return { ok: true, deviceId };
 
-    // alias substring/fuzzy
+    // alias substring/fuzzy (only query ⊂ alias, not the reverse)
     if (alias) {
       const normAlias = normalizeDeviceName(alias);
-      if (normAlias.includes(q) || q.includes(normAlias)) {
+      if (normAlias.includes(q)) {
         candidates.push({ deviceId, name: device.name, score: 1 });
         continue;
       }
@@ -52,8 +52,9 @@ function resolveDeviceByName(query: string): NameResolveResult {
       }
     }
 
-    // name substring
-    if (rawName.includes(q) || q.includes(rawName)) {
+    // name substring (only query ⊂ name, not the reverse — avoids long queries
+    // collapsing onto short device names)
+    if (rawName.includes(q)) {
       candidates.push({ deviceId, name: device.name, score: 1 });
       continue;
     }

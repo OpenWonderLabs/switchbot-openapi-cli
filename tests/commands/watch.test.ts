@@ -28,10 +28,12 @@ const cacheMock = vi.hoisted(() => ({
   map: new Map<string, { type: string; name: string; category: 'physical' | 'ir' }>(),
   getCachedDevice: vi.fn((id: string) => cacheMock.map.get(id) ?? null),
   updateCacheFromDeviceList: vi.fn(),
+  getCachedTypeMap: vi.fn(() => new Map<string, string>()),
 }));
 
 vi.mock('../../src/devices/cache.js', () => ({
   getCachedDevice: cacheMock.getCachedDevice,
+  getCachedTypeMap: cacheMock.getCachedTypeMap,
   updateCacheFromDeviceList: cacheMock.updateCacheFromDeviceList,
   loadCache: vi.fn(() => null),
   clearCache: vi.fn(),
@@ -40,6 +42,7 @@ vi.mock('../../src/devices/cache.js', () => ({
   getCachedStatus: vi.fn(() => null),
   setCachedStatus: vi.fn(),
   clearStatusCache: vi.fn(),
+  resetStatusCache: vi.fn(),
   loadStatusCache: vi.fn(() => ({ entries: {} })),
   describeCache: vi.fn(() => ({
     list: { path: '', exists: false },
@@ -81,6 +84,7 @@ describe('devices watch', () => {
   beforeEach(() => {
     apiMock.__instance.get.mockReset();
     apiMock.__instance.post.mockReset();
+    apiMock.createClient.mockClear();
     cacheMock.map.clear();
     cacheMock.getCachedDevice.mockClear();
     // Make sleep near-instant so --max exits the loop quickly.
@@ -122,6 +126,7 @@ describe('devices watch', () => {
     expect(ev.tick).toBe(1);
     expect(ev.changed.power).toEqual({ from: null, to: 'on' });
     expect(ev.changed.battery).toEqual({ from: null, to: 90 });
+    expect(apiMock.createClient).toHaveBeenCalledTimes(1);
   });
 
   it('only emits changed fields on subsequent ticks', async () => {

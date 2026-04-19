@@ -38,6 +38,13 @@ export interface QuotaFile {
 }
 
 const MAX_RETAINED_DAYS = 7;
+const FLUSH_DELAY_MS = 250;
+
+let quotaCache: QuotaFile | null = null;
+let loadedPath: string | null = null;
+let dirty = false;
+let flushTimer: NodeJS.Timeout | null = null;
+let flushHooksRegistered = false;
 
 function quotaFilePath(): string {
   return path.join(os.homedir(), '.switchbot', 'quota.json');
@@ -56,8 +63,7 @@ function emptyFile(): QuotaFile {
   return { days: {} };
 }
 
-export function loadQuota(): QuotaFile {
-  const file = quotaFilePath();
+function loadQuotaFromDisk(file: string): QuotaFile {
   if (!fs.existsSync(file)) return emptyFile();
   try {
     const raw = fs.readFileSync(file, 'utf-8');
@@ -69,8 +75,7 @@ export function loadQuota(): QuotaFile {
   }
 }
 
-function saveQuota(data: QuotaFile): void {
-  const file = quotaFilePath();
+function saveQuota(data: QuotaFile, file = quotaFilePath()): void {
   const dir = path.dirname(file);
   try {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -78,6 +83,61 @@ function saveQuota(data: QuotaFile): void {
   } catch {
     // swallow: counting is best-effort, must not break a real API call
   }
+}
+
+function clearScheduledFlush(): void {
+  if (flushTimer) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+}
+
+function syncLoadedQuota(): QuotaFile {
+  const file = quotaFilePath();
+  if (loadedPath !== file) {
+    clearScheduledFlush();
+    quotaCache = loadQuotaFromDisk(file);
+    loadedPath = file;
+    dirty = false;
+  }
+  if (!quotaCache) {
+    quotaCache = loadQuotaFromDisk(file);
+    loadedPath = file;
+  }
+  return quotaCache;
+}
+
+function ensureFlushHooks(): void {
+  if (flushHooksRegistered) return;
+  flushHooksRegistered = true;
+
+  process.on('beforeExit', () => flushQuota());
+  process.on('exit', () => flushQuota());
+  // SIGINT/SIGTERM: attaching a listener suppresses Node's default terminate.
+  // Flush the counter, then re-raise the conventional exit code (128 + signo).
+  process.on('SIGINT', () => {
+    flushQuota();
+    process.exit(130);
+  });
+  process.on('SIGTERM', () => {
+    flushQuota();
+    process.exit(143);
+  });
+}
+
+function scheduleFlush(): void {
+  dirty = true;
+  ensureFlushHooks();
+  if (flushTimer) return;
+  flushTimer = setTimeout(() => {
+    flushTimer = null;
+    flushQuota();
+  }, FLUSH_DELAY_MS);
+  flushTimer.unref?.();
+}
+
+export function loadQuota(): QuotaFile {
+  return syncLoadedQuota();
 }
 
 function prune(data: QuotaFile): QuotaFile {
@@ -123,15 +183,31 @@ export function normaliseEndpoint(method: string, url: string): string {
 export function recordRequest(method: string, url: string, now: Date = new Date()): void {
   const key = today(now);
   const endpoint = normaliseEndpoint(method, url);
-  const data = loadQuota();
+  const data = syncLoadedQuota();
   const bucket: DayBucket = data.days[key] ?? { total: 0, endpoints: {} };
   bucket.total += 1;
   bucket.endpoints[endpoint] = (bucket.endpoints[endpoint] ?? 0) + 1;
   data.days[key] = bucket;
+  quotaCache = prune(data);
+  scheduleFlush();
+}
+
+export function flushQuota(): void {
+  if (!dirty) return;
+  const data = syncLoadedQuota();
   saveQuota(prune(data));
+  dirty = false;
+}
+
+export function resetQuotaState(): void {
+  clearScheduledFlush();
+  quotaCache = null;
+  loadedPath = null;
+  dirty = false;
 }
 
 export function resetQuota(): void {
+  resetQuotaState();
   const file = quotaFilePath();
   try {
     if (fs.existsSync(file)) fs.unlinkSync(file);

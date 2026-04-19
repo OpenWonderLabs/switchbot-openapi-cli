@@ -8,6 +8,7 @@ import {
   updateCacheFromDeviceList,
   setCachedStatus,
   resetListCache,
+  resetStatusCache,
 } from '../../src/devices/cache.js';
 import { runCli } from '../helpers/cli.js';
 
@@ -17,11 +18,13 @@ beforeEach(() => {
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sbcli-cachecmd-'));
   vi.spyOn(os, 'homedir').mockReturnValue(tmpHome);
   resetListCache();
+  resetStatusCache();
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
   resetListCache();
+  resetStatusCache();
   try {
     fs.rmSync(tmpHome, { recursive: true, force: true });
   } catch {

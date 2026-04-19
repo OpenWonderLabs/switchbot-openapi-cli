@@ -3,6 +3,7 @@ import { printJson, isJsonMode, handleError, UsageError } from '../utils/output.
 import { fetchDeviceStatus } from '../lib/devices.js';
 import { getCachedDevice } from '../devices/cache.js';
 import { parseDurationToMs, getFields } from '../utils/flags.js';
+import { createClient } from '../api/client.js';
 
 const DEFAULT_INTERVAL_MS = 30_000;
 const MIN_INTERVAL_MS = 1_000;
@@ -129,6 +130,7 @@ Examples:
 
           try {
           const prev = new Map<string, Record<string, unknown>>();
+          const client = createClient();
           let tick = 0;
           while (!ac.signal.aborted) {
             tick++;
@@ -139,7 +141,7 @@ Examples:
               deviceIds.map(async (id) => {
                 const cached = getCachedDevice(id);
                 try {
-                  const body = await fetchDeviceStatus(id);
+                  const body = await fetchDeviceStatus(id, client);
                   const changed = diff(prev.get(id), body, fields);
                   prev.set(id, body);
                   if (Object.keys(changed).length === 0 && !options.includeUnchanged) {

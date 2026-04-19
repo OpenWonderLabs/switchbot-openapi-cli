@@ -141,7 +141,7 @@ export async function fetchDeviceStatus(
     `/v1.1/devices/${deviceId}/status`
   );
   if (mode.statusTtlMs > 0) {
-    setCachedStatus(deviceId, res.data.body);
+    setCachedStatus(deviceId, res.data.body, new Date(), mode.statusTtlMs);
   }
   return res.data.body;
 }
