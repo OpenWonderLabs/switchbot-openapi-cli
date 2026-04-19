@@ -280,12 +280,12 @@ Examples:
           }
         });
 
+        await client.connect();
+        client.subscribe(topic);
+
         if (!isJsonMode()) {
           console.error(`Connected to ${credential.brokerUrl} (Ctrl-C to stop)`);
         }
-
-        await client.connect();
-        client.subscribe(topic);
 
         await new Promise<void>((resolve) => {
           const cleanup = () => {
