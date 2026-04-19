@@ -418,7 +418,11 @@ Inspect locally:
     .command('serve')
     .description('Start the MCP server on stdio (default) or HTTP (--port)')
     .option('--port <n>', 'Listen on HTTP instead of stdio (Streamable HTTP transport)')
-    .action(async (options: { port?: string }) => {
+    .option('--bind <host>', 'IP address to bind (default 127.0.0.1; use 0.0.0.0 to accept external connections)', '127.0.0.1')
+    .option('--auth-token <token>', 'Bearer token for HTTP requests (required for --bind 0.0.0.0; falls back to SWITCHBOT_MCP_TOKEN env var)')
+    .option('--cors-origin <url>', 'Allowed CORS origin(s) for HTTP (repeatable)')
+    .option('--rate-limit <n>', 'Max requests per minute per profile (default 60)', '60')
+    .action(async (options: { port?: string; bind?: string; authToken?: string; corsOrigin?: string | string[]; rateLimit?: string }) => {
       try {
         if (options.port) {
           const port = Number(options.port);
@@ -431,8 +435,105 @@ Inspect locally:
             }
             process.exit(2);
           }
+
+          const bind = options.bind ?? '127.0.0.1';
+          const authToken = options.authToken ?? process.env.SWITCHBOT_MCP_TOKEN;
+          const corsOrigins = Array.isArray(options.corsOrigin) ? options.corsOrigin : (options.corsOrigin ? [options.corsOrigin] : []);
+          const rateLimit = Math.max(1, Number(options.rateLimit) || 60);
+
+          // Guard: refuse to bind non-localhost without auth
+          const isLocalhost = bind === '127.0.0.1' || bind === 'localhost' || bind === '::1';
+          if (!isLocalhost && !authToken) {
+            const msg = 'Refusing to listen on 0.0.0.0 without --auth-token. Pass --auth-token <token> or bind to localhost (default).';
+            if (isJsonMode()) {
+              console.error(JSON.stringify({ error: { code: 2, kind: 'usage', message: msg } }));
+            } else {
+              console.error(msg);
+            }
+            process.exit(2);
+          }
+
           const { createServer } = await import('node:http');
+          const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+
+          // Helper: constant-time token comparison
+          const tokenMatch = (provided: string | undefined): boolean => {
+            if (!authToken) return true; // No token configured, allow all
+            if (!provided) return false;
+            const expected = authToken;
+            let match = true;
+            for (let i = 0; i < Math.max(expected.length, provided.length); i++) {
+              if ((expected[i] ?? '\0') !== (provided[i] ?? '\0')) match = false;
+            }
+            return match;
+          };
+
+          // Helper: rate limit check
+          const checkRateLimit = (profile: string): boolean => {
+            const now = Date.now();
+            const bucket = rateLimitMap.get(profile);
+            if (!bucket || now >= bucket.resetAt) {
+              rateLimitMap.set(profile, { count: 1, resetAt: now + 60000 });
+              return true;
+            }
+            bucket.count++;
+            return bucket.count <= rateLimit;
+          };
+
           const httpServer = createServer(async (req, res) => {
+            // Extract profile from header or query string
+            const headerProfile = req.headers['x-switchbot-profile'];
+            const profileHeader = Array.isArray(headerProfile) ? headerProfile[0] : headerProfile;
+            let profileQuery: string | undefined;
+            try {
+              const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
+              profileQuery = url.searchParams.get('profile') ?? undefined;
+            } catch { /* ignore */ }
+            const profile = profileHeader || profileQuery;
+
+            // CORS preflight
+            if (req.method === 'OPTIONS') {
+              if (corsOrigins.length > 0) {
+                const origin = req.headers.origin;
+                if (origin && corsOrigins.includes(origin)) {
+                  res.writeHead(200, {
+                    'Access-Control-Allow-Origin': origin,
+                    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+                    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+                  });
+                  res.end();
+                  return;
+                }
+              }
+              res.writeHead(204);
+              res.end();
+              return;
+            }
+
+            // Rate limit check
+            if (!checkRateLimit(profile ?? 'default')) {
+              res.writeHead(429, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32000, message: 'Rate limit exceeded' }, id: null }));
+              return;
+            }
+
+            // Auth check
+            const authHeader = req.headers.authorization;
+            const [scheme, token] = (authHeader ?? '').split(' ');
+            if (authToken && (scheme !== 'Bearer' || !tokenMatch(token))) {
+              res.writeHead(401, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32001, message: 'Unauthorized' }, id: null }));
+              return;
+            }
+
+            // CORS headers for allowed origins
+            if (corsOrigins.length > 0) {
+              const origin = req.headers.origin;
+              if (origin && corsOrigins.includes(origin)) {
+                res.setHeader('Access-Control-Allow-Origin', origin);
+              }
+            }
+
             // Stateless mode: fresh transport+server per request (SDK requirement).
             const reqTransport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
             const reqServer = createSwitchBotMcpServer();
@@ -452,8 +553,34 @@ Inspect locally:
               }
             }
           });
-          httpServer.listen(port, () => {
-            console.error(`SwitchBot MCP server listening on http://localhost:${port}/mcp`);
+
+          // Graceful shutdown
+          let isShuttingDown = false;
+          const gracefulShutdown = async () => {
+            if (isShuttingDown) return;
+            isShuttingDown = true;
+            console.error('Shutting down...');
+            httpServer.close(() => {
+              console.error('Server closed');
+              process.exit(0);
+            });
+            // Force exit after 30s
+            setTimeout(() => {
+              console.error('Force exiting after 30s timeout');
+              process.exit(1);
+            }, 30000);
+          };
+          process.on('SIGTERM', gracefulShutdown);
+          process.on('SIGINT', gracefulShutdown);
+
+          httpServer.listen(port, bind, () => {
+            console.error(`SwitchBot MCP server listening on http://${bind}:${port}/mcp`);
+            if (authToken) {
+              console.error('  Authentication: required (Bearer token)');
+            }
+            if (corsOrigins.length > 0) {
+              console.error(`  CORS origins: ${corsOrigins.join(', ')}`);
+            }
           });
           return;
         }
