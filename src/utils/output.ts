@@ -52,15 +52,52 @@ export class UsageError extends Error {
   }
 }
 
+export type ErrorSubKind =
+  | 'device-offline'
+  | 'device-not-found'
+  | 'command-not-supported'
+  | 'auth-failed'
+  | 'quota-exceeded'
+  | 'device-busy'
+  | 'unknown-api-error';
+
 export interface ErrorPayload {
   code: number;
   kind: 'usage' | 'api' | 'runtime';
+  subKind?: ErrorSubKind;
   message: string;
   hint?: string;
   retryable?: boolean;
+  context?: Record<string, unknown>;
+}
+
+export class StructuredUsageError extends Error {
+  constructor(message: string, public readonly context?: Record<string, unknown>) {
+    super(message);
+    this.name = 'StructuredUsageError';
+  }
+}
+
+function classifyApiError(code: number): ErrorSubKind {
+  switch (code) {
+    case 151:
+    case 160: return 'command-not-supported';
+    case 152: return 'device-not-found';
+    case 161:
+    case 171: return 'device-offline';
+    case 190: return 'device-busy';
+    case 401: return 'auth-failed';
+    case 429: return 'quota-exceeded';
+    default:  return 'unknown-api-error';
+  }
 }
 
 export function buildErrorPayload(error: unknown): ErrorPayload {
+  if (error instanceof StructuredUsageError) {
+    const payload: ErrorPayload = { code: 2, kind: 'usage', message: error.message };
+    if (error.context) payload.context = error.context;
+    return payload;
+  }
   if (error instanceof UsageError) {
     return { code: 2, kind: 'usage', message: error.message };
   }
@@ -70,6 +107,7 @@ export function buildErrorPayload(error: unknown): ErrorPayload {
   const hint = error instanceof ApiError ? (error.hint ?? errorHint(error.code)) : null;
   const retryable = error instanceof ApiError ? error.retryable : false;
   const payload: ErrorPayload = { code, kind, message };
+  if (error instanceof ApiError) payload.subKind = classifyApiError(error.code);
   if (hint) payload.hint = hint;
   if (retryable) payload.retryable = true;
   return payload;

@@ -1575,7 +1575,7 @@ describe('devices command', () => {
 
     it('fails when <deviceId> is missing (commander error)', async () => {
       const res = await runCli(registerDevicesCommand, ['devices', 'describe']);
-      expect(res.stderr.join('\n').toLowerCase()).toContain('missing required');
+      expect(res.stderr.join('\n').toLowerCase()).toContain('required');
     });
   });
 

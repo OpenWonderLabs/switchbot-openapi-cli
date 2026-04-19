@@ -3,6 +3,8 @@ import { printTable, printKeyValue, printJson, isJsonMode, handleError, UsageErr
 import { resolveFormat, resolveFields, renderRows } from '../utils/format.js';
 import { findCatalogEntry, getEffectiveCatalog, DeviceCatalogEntry } from '../devices/catalog.js';
 import { getCachedDevice } from '../devices/cache.js';
+import { loadDeviceMeta } from '../devices/device-meta.js';
+import { resolveDeviceId } from '../utils/name-resolver.js';
 import {
   fetchDeviceList,
   fetchDeviceStatus,
@@ -18,6 +20,8 @@ import {
 import { registerBatchCommand } from './batch.js';
 import { registerWatchCommand } from './watch.js';
 import { registerExplainCommand } from './explain.js';
+import { registerExpandCommand } from './expand.js';
+import { registerDevicesMetaCommand } from './device-meta.js';
 import { isDryRun } from '../utils/flags.js';
 
 export function registerDevicesCommand(program: Command): void {
@@ -78,11 +82,13 @@ Examples:
   $ switchbot devices list --json | jq '[.deviceList[], .infraredRemoteList[]] | group_by(.familyName)'
 `)
     .option('--wide', 'Show all columns (controlType, family, roomID, room, hub, cloud)')
-    .action(async (options: { wide?: boolean }) => {
+    .option('--show-hidden', 'Include devices hidden via "devices meta set --hide"')
+    .action(async (options: { wide?: boolean; showHidden?: boolean }) => {
       try {
         const body = await fetchDeviceList();
         const { deviceList, infraredRemoteList } = body;
         const fmt = resolveFormat();
+        const deviceMeta = loadDeviceMeta();
 
         if (fmt === 'json' && process.argv.includes('--json')) {
           printJson(body);
@@ -92,12 +98,13 @@ Examples:
         const hubLocation = buildHubLocationMap(deviceList);
 
         const narrowHeaders = ['deviceId', 'deviceName', 'type', 'category'];
-        const wideHeaders = ['deviceId', 'deviceName', 'type', 'category', 'controlType', 'family', 'roomID', 'room', 'hub', 'cloud'];
+        const wideHeaders = ['deviceId', 'deviceName', 'type', 'category', 'controlType', 'family', 'roomID', 'room', 'hub', 'cloud', 'alias'];
         const userFields = resolveFields();
         const headers = userFields ? wideHeaders : (options.wide ? wideHeaders : narrowHeaders);
         const rows: (string | boolean | null)[][] = [];
 
         for (const d of deviceList) {
+          if (!options.showHidden && deviceMeta.devices[d.deviceId]?.hidden) continue;
           rows.push([
             d.deviceId,
             d.deviceName,
@@ -109,10 +116,12 @@ Examples:
             d.roomName || '—',
             !d.hubDeviceId || d.hubDeviceId === '000000000000' ? '—' : d.hubDeviceId,
             d.enableCloudService,
+            deviceMeta.devices[d.deviceId]?.alias ?? '—',
           ]);
         }
 
         for (const d of infraredRemoteList) {
+          if (!options.showHidden && deviceMeta.devices[d.deviceId]?.hidden) continue;
           const inherited = hubLocation.get(d.hubDeviceId);
           rows.push([
             d.deviceId,
@@ -125,6 +134,7 @@ Examples:
             inherited?.room || '—',
             d.hubDeviceId,
             null,
+            deviceMeta.devices[d.deviceId]?.alias ?? '—',
           ]);
         }
 
@@ -133,7 +143,8 @@ Examples:
           return;
         }
 
-        renderRows(wideHeaders, rows, fmt, userFields ?? (options.wide ? undefined : narrowHeaders));
+        const defaultFields = options.wide ? undefined : narrowHeaders;
+        renderRows(wideHeaders, rows, fmt, userFields ?? defaultFields);
         if (fmt === 'table') {
           console.log(`\nTotal: ${deviceList.length} physical device(s), ${infraredRemoteList.length} IR remote device(s)`);
           console.log(`Tip: 'switchbot devices describe <deviceId>' shows a device's supported commands.`);
@@ -147,7 +158,8 @@ Examples:
   devices
     .command('status')
     .description('Query the real-time status of a specific device')
-    .argument('<deviceId>', 'Device ID from "devices list" (physical devices only; IR remotes have no status)')
+    .argument('[deviceId]', 'Device ID from "devices list" (or use --name)')
+    .option('--name <query>', 'Resolve device by fuzzy name instead of deviceId')
     .addHelpText('after', `
 Status fields vary by device type. To discover them without a live call:
 
@@ -158,13 +170,15 @@ all field names returned by your specific device, then narrow with --fields.
 
 Examples:
   $ switchbot devices status ABC123DEF456
+  $ switchbot devices status --name "客厅空调"
   $ switchbot devices status ABC123DEF456 --json
   $ switchbot devices status ABC123DEF456 --format yaml
   $ switchbot devices status ABC123DEF456 --format tsv --fields power,battery
   $ switchbot devices status ABC123DEF456 --json | jq '.battery'
 `)
-    .action(async (deviceId: string) => {
+    .action(async (deviceIdArg: string | undefined, options: { name?: string }) => {
       try {
+        const deviceId = resolveDeviceId(deviceIdArg, options.name);
         const body = await fetchDeviceStatus(deviceId);
         const fmt = resolveFormat();
 
@@ -191,9 +205,10 @@ Examples:
   devices
     .command('command')
     .description('Send a control command to a device')
-    .argument('<deviceId>', 'Target device ID from "devices list"')
+    .argument('[deviceId]', 'Target device ID (or use --name)')
     .argument('<cmd>', 'Command name, e.g. turnOn, turnOff, setColor, setBrightness, setAll, startClean')
     .argument('[parameter]', 'Command parameter. Omit for commands like turnOn/turnOff (defaults to "default"). Format depends on the command (see below).')
+    .option('--name <query>', 'Resolve device by fuzzy name instead of deviceId')
     .option('--type <commandType>', 'Command type: "command" for built-in commands (default), "customize" for user-defined IR buttons', 'command')
     .option('--yes', 'Confirm a destructive command (Smart Lock unlock, Garage open, …). --dry-run is always allowed without --yes.')
     .addHelpText('after', `
@@ -241,7 +256,8 @@ Examples:
   $ switchbot devices command ABC123 "MyButton" --type customize
   $ switchbot devices command <lockId> unlock --yes
 `)
-    .action(async (deviceId: string, cmd: string, parameter: string | undefined, options: { type: string; yes?: boolean }) => {
+    .action(async (deviceIdArg: string | undefined, cmd: string, parameter: string | undefined, options: { name?: string; type: string; yes?: boolean }) => {
+      const deviceId = resolveDeviceId(deviceIdArg, options.name);
       const validation = validateCommand(deviceId, cmd, parameter, options.type);
       if (!validation.ok) {
         const err = validation.error;
@@ -318,13 +334,21 @@ Examples:
           options.type as 'command' | 'customize'
         );
 
+        const isIr = getCachedDevice(deviceId)?.category === 'ir';
+
         if (isJsonMode()) {
-          printJson(body);
+          const result: Record<string, unknown> = { ok: true, command: cmd, deviceId };
+          if (isIr) result.subKind = 'ir-no-feedback';
+          if (body && typeof body === 'object' && Object.keys(body as object).length > 0) {
+            Object.assign(result, body);
+          }
+          printJson(result);
           return;
         }
 
         console.log(`✓ Command sent: ${cmd}`);
-        if (body && typeof body === 'object' && Object.keys(body).length > 0) {
+        if (isIr) console.log('  Note: IR command sent — no device confirmation (fire-and-forget).');
+        if (body && typeof body === 'object' && Object.keys(body as object).length > 0) {
           printKeyValue(body as Record<string, unknown>);
         }
       } catch (error) {
@@ -415,7 +439,8 @@ Examples:
   devices
     .command('describe')
     .description('Describe a device by ID: metadata + supported commands + status fields (1 API call)')
-    .argument('<deviceId>', 'Target device ID from "devices list"')
+    .argument('[deviceId]', 'Target device ID (or use --name)')
+    .option('--name <query>', 'Resolve device by fuzzy name instead of deviceId')
     .option('--live', 'Also fetch live status values and merge them into capabilities (costs 1 extra API call)')
     .addHelpText('after', `
 Makes a GET /v1.1/devices call to look up the device's type, then prints its
@@ -445,8 +470,9 @@ Examples:
   $ switchbot devices describe ABC123DEF456 --json
   $ switchbot devices describe <lockId> --json | jq '.capabilities.commands[] | select(.destructive)'
 `)
-    .action(async (deviceId: string, options: { live?: boolean }) => {
+    .action(async (deviceIdArg: string | undefined, options: { name?: string; live?: boolean }) => {
       try {
+        const deviceId = resolveDeviceId(deviceIdArg, options.name);
         const result = await describeDevice(deviceId, options);
         const { device, isPhysical, typeName, controlType, catalog, capabilities, source, suggestedActions: picks } = result;
 
@@ -531,6 +557,12 @@ Examples:
 
   // switchbot devices explain <id>
   registerExplainCommand(devices);
+
+  // switchbot devices expand <id> <cmd> [semantic flags]
+  registerExpandCommand(devices);
+
+  // switchbot devices meta set/get/list/clear
+  registerDevicesMetaCommand(devices);
 }
 
 function renderCatalogEntry(entry: DeviceCatalogEntry): void {

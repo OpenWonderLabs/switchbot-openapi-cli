@@ -4,10 +4,12 @@ import { printJson, isJsonMode, handleError } from '../utils/output.js';
 import { executeCommand, isDestructiveCommand } from '../lib/devices.js';
 import { executeScene } from '../lib/scenes.js';
 import { getCachedDevice } from '../devices/cache.js';
+import { resolveDeviceId } from '../utils/name-resolver.js';
 
 export interface PlanCommandStep {
   type: 'command';
-  deviceId: string;
+  deviceId?: string;
+  deviceName?: string;
   command: string;
   parameter?: unknown;
   commandType?: 'command' | 'customize';
@@ -51,10 +53,11 @@ const PLAN_JSON_SCHEMA = {
         oneOf: [
           {
             type: 'object',
-            required: ['type', 'deviceId', 'command'],
+            required: ['type', 'command'],
             properties: {
               type: { const: 'command' },
               deviceId: { type: 'string', minLength: 1 },
+              deviceName: { type: 'string', minLength: 1 },
               command: { type: 'string', minLength: 1 },
               parameter: {},
               commandType: { enum: ['command', 'customize'] },
@@ -119,8 +122,17 @@ export function validatePlan(raw: unknown): {
     const s = step as Record<string, unknown>;
     switch (s.type) {
       case 'command':
-        if (typeof s.deviceId !== 'string' || !s.deviceId) {
-          issues.push({ path: `${at}.deviceId`, message: 'must be a non-empty string' });
+        if (s.deviceId !== undefined && (typeof s.deviceId !== 'string' || !s.deviceId)) {
+          issues.push({ path: `${at}.deviceId`, message: 'must be a non-empty string when provided' });
+        }
+        if (s.deviceName !== undefined && (typeof s.deviceName !== 'string' || !s.deviceName)) {
+          issues.push({ path: `${at}.deviceName`, message: 'must be a non-empty string when provided' });
+        }
+        if (!s.deviceId && !s.deviceName) {
+          issues.push({ path: `${at}`, message: 'must have either "deviceId" or "deviceName"' });
+        }
+        if (s.deviceId && s.deviceName) {
+          issues.push({ path: `${at}`, message: '"deviceId" and "deviceName" cannot both be set' });
         }
         if (typeof s.command !== 'string' || !s.command) {
           issues.push({ path: `${at}.command`, message: 'must be a non-empty string' });
@@ -318,62 +330,63 @@ Workflow:
               continue;
             }
             // command
-            const deviceType = getCachedDevice(step.deviceId)?.type;
+            const resolvedDeviceId = resolveDeviceId(step.deviceId, step.deviceName);
+            const deviceType = getCachedDevice(resolvedDeviceId)?.type;
             const commandType = step.commandType ?? 'command';
             const destructive = isDestructiveCommand(deviceType, step.command, commandType);
             if (destructive && !options.yes) {
               out.results.push({
                 step: idx,
                 type: 'command',
-                deviceId: step.deviceId,
+                deviceId: resolvedDeviceId,
                 command: step.command,
                 status: 'skipped',
                 error: 'destructive — rerun with --yes',
               });
               out.summary.skipped++;
               if (!isJsonMode())
-                console.log(`  ${idx}. ⚠ skipped ${step.command} on ${step.deviceId} (destructive — pass --yes)`);
+                console.log(`  ${idx}. ⚠ skipped ${step.command} on ${resolvedDeviceId} (destructive — pass --yes)`);
               if (!options.continueOnError) break;
               continue;
             }
             try {
-              await executeCommand(step.deviceId, step.command, step.parameter, commandType);
+              await executeCommand(resolvedDeviceId, step.command, step.parameter, commandType);
               out.results.push({
                 step: idx,
                 type: 'command',
-                deviceId: step.deviceId,
+                deviceId: resolvedDeviceId,
                 command: step.command,
                 status: 'ok',
               });
               out.summary.ok++;
               if (!isJsonMode())
-                console.log(`  ${idx}. ✓ ${step.command} on ${step.deviceId}`);
+                console.log(`  ${idx}. ✓ ${step.command} on ${resolvedDeviceId}`);
             } catch (err) {
               if (err instanceof Error && err.name === 'DryRunSignal') {
                 out.results.push({
                   step: idx,
                   type: 'command',
-                  deviceId: step.deviceId,
+                  deviceId: resolvedDeviceId,
                   command: step.command,
                   status: 'ok',
                 });
                 out.summary.ok++;
                 if (!isJsonMode())
-                  console.log(`  ${idx}. ◦ dry-run ${step.command} on ${step.deviceId}`);
+                  console.log(`  ${idx}. ◦ dry-run ${step.command} on ${resolvedDeviceId}`);
                 continue;
               }
               const msg = err instanceof Error ? err.message : String(err);
               out.results.push({
                 step: idx,
                 type: 'command',
-                deviceId: step.deviceId,
+                deviceId: resolvedDeviceId,
                 command: step.command,
                 status: 'error',
                 error: msg,
               });
               out.summary.error++;
               if (!isJsonMode())
-                console.log(`  ${idx}. ✗ ${step.command} on ${step.deviceId}: ${msg}`);
+                console.log(`  ${idx}. ✗ ${step.command} on ${resolvedDeviceId}: ${msg}`);
               if (!options.continueOnError) break;
             }
           }
