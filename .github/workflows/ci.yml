@@ -21,4 +21,12 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      - name: CLI --version matches package.json
+        run: |
+          PKG=$(node -p "require('./package.json').version")
+          CLI=$(node dist/index.js --version)
+          if [ "$PKG" != "$CLI" ]; then
+            echo "Version drift: package.json=$PKG, CLI=$CLI"
+            exit 1
+          fi
       - run: npm test

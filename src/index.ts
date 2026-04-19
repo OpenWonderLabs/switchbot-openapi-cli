@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { Command, CommanderError } from 'commander';
+import { createRequire } from 'node:module';
 import { registerConfigCommand } from './commands/config.js';
 import { registerDevicesCommand } from './commands/devices.js';
 import { registerScenesCommand } from './commands/scenes.js';
@@ -16,12 +17,15 @@ import { registerHistoryCommand } from './commands/history.js';
 import { registerPlanCommand } from './commands/plan.js';
 import { registerCapabilitiesCommand } from './commands/capabilities.js';
 
+const require = createRequire(import.meta.url);
+const { version: pkgVersion } = require('../package.json') as { version: string };
+
 const program = new Command();
 
 program
   .name('switchbot')
   .description('Command-line tool for SwitchBot API v1.1')
-  .version('2.1.0')
+  .version(pkgVersion)
   .option('--json', 'Output raw JSON response (disables tables; useful for pipes/scripts)')
   .option('--format <type>', 'Output format: table (default), json, jsonl, tsv, yaml, id')
   .option('--fields <csv>', 'Comma-separated list of columns to include (e.g. --fields=id,name,type)')
