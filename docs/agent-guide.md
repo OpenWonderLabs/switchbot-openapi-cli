@@ -57,18 +57,26 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 }
 ```
 
-### Available tools
+### Available tools (8)
 
 | Tool                | Purpose                                                           | Destructive-guard?       |
 |---------------------|-------------------------------------------------------------------|--------------------------|
 | `list_devices`      | Enumerate physical devices + IR remotes                           | —                        |
 | `get_device_status` | Live status for one device                                        | —                        |
 | `send_command`      | Dispatch a built-in or customize command                          | yes (`confirm: true` required) |
+| `list_scenes`       | Enumerate saved manual scenes                                     | —                        |
 | `run_scene`         | Execute a saved manual scene                                      | —                        |
 | `search_catalog`    | Look up device type by name/alias                                  | —                        |
 | `describe_device`   | Live status **plus** catalog-derived commands + suggested actions | —                        |
+| `account_overview`  | Single cold-start snapshot — devices, scenes, quota, cache, MQTT state. Call this first in a new agent session to avoid multiple round-trips. | — |
 
-The MCP server refuses destructive commands (Smart Lock `unlock`, Garage Door `open`, etc.) unless the tool call includes `confirm: true`. The allowed list is the `destructive: true` commands in the catalog — `switchbot schema export | jq '[.types[].commands[] | select(.destructive)]'` shows every one.
+The MCP server refuses destructive commands (Smart Lock `unlock`, Garage Door `open`, etc.) unless the tool call includes `confirm: true`. The allowed list is the `destructive: true` commands in the catalog — `switchbot schema export | jq '[.data.types[].commands[] | select(.destructive)]'` shows every one.
+
+### MCP resource: `switchbot://events`
+
+Read-only snapshot of recent MQTT shadow-update events from the ring buffer. Returns `{state, count, events[]}`.
+
+Enabled when `SWITCHBOT_MQTT_HOST` / `SWITCHBOT_MQTT_USERNAME` / `SWITCHBOT_MQTT_PASSWORD` env vars are set; returns `{state:"disabled", count:0, events:[]}` otherwise. To enable real-time events, add those three env vars to the MCP server config alongside `SWITCHBOT_TOKEN` / `SWITCHBOT_SECRET`.
 
 ---
 
@@ -160,6 +168,26 @@ switchbot scenes list --format id      # ✓ — sceneId column present
 switchbot devices status <id> --format id  # ✗ — exits 2 (no ID column in status output)
 ```
 
+### `devices expand` — semantic parameter flags
+
+Some device commands require a packed string parameter (e.g., AC `setAll` takes `"26,2,2,on"`). `devices expand` accepts named flags and builds the parameter for you:
+
+```bash
+# Air Conditioner — setAll
+switchbot devices expand <acId> setAll --temp 26 --mode cool --fan low --power on
+
+# Curtain / Roller Shade — setPosition
+switchbot devices expand <curtainId> setPosition --position 50 --mode silent
+
+# Blind Tilt — setPosition
+switchbot devices expand <blindId> setPosition --direction up --angle 50
+
+# Relay Switch — setMode
+switchbot devices expand <relayId> setMode --channel 1 --mode edge
+```
+
+Use `switchbot devices expand --help` or `switchbot devices expand <id> <command> --help` for the full flag list per command.
+
 ---
 
 ## Catalog: the shared contract
@@ -210,7 +238,7 @@ The audit format is JSONL with this shape:
   "dryRun": false, "result": "ok" }
 ```
 
-Pair with `switchbot devices watch --interval=30s --on-change-only` for continuous state diffs, or `switchbot events tail --local` to receive webhook pushes locally.
+Pair with `switchbot devices watch --interval=30s` for continuous state diffs (add `--include-unchanged` to emit every tick even when nothing changed), or `switchbot events tail` to receive webhook pushes locally.
 
 ---
 
