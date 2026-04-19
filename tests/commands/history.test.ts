@@ -93,8 +93,8 @@ describe('history command', () => {
         '--json', 'history', 'show', '--file', auditFile,
       ]);
       const out = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
-      expect(out.total).toBe(1);
-      expect(out.entries[0].deviceId).toBe('A');
+      expect(out.data.total).toBe(1);
+      expect(out.data.entries[0].deviceId).toBe('A');
     });
   });
 

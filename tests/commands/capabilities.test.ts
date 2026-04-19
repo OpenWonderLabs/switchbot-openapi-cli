@@ -45,7 +45,7 @@ async function runCapabilities(): Promise<Record<string, unknown>> {
     logSpy.mockRestore();
   }
 
-  return JSON.parse(chunks.join('')) as Record<string, unknown>;
+  return (JSON.parse(chunks.join('')) as { data: Record<string, unknown> }).data;
 }
 
 describe('capabilities', () => {

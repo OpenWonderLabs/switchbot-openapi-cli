@@ -129,10 +129,13 @@ describe('renderRows', () => {
   it('json: outputs a JSON array of objects', () => {
     renderRows(headers, rows, 'json');
     const parsed = JSON.parse(logOutput.join('\n'));
-    expect(parsed).toEqual([
-      { deviceId: 'DEV1', name: 'Light', type: 'Bot' },
-      { deviceId: 'DEV2', name: 'Door', type: 'Smart Lock' },
-    ]);
+    expect(parsed).toEqual({
+      schemaVersion: '1.1',
+      data: [
+        { deviceId: 'DEV1', name: 'Light', type: 'Bot' },
+        { deviceId: 'DEV2', name: 'Door', type: 'Smart Lock' },
+      ],
+    });
   });
 
   it('yaml: outputs YAML documents with --- separators', () => {

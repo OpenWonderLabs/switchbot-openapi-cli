@@ -21,6 +21,13 @@ import {
 import { fetchScenes, executeScene } from '../lib/scenes.js';
 import { findCatalogEntry } from '../devices/catalog.js';
 import { getCachedDevice } from '../devices/cache.js';
+import { EventSubscriptionManager } from '../mcp/events-subscription.js';
+import { todayUsage } from '../utils/quota.js';
+import { describeCache } from '../devices/cache.js';
+import { withRequestContext } from '../lib/request-context.js';
+import { profileFilePath } from '../config.js';
+import { getMqttConfig } from '../mqtt/credential.js';
+import fs from 'node:fs';
 
 /**
  * Factory — build an McpServer with the six SwitchBot tools registered.
@@ -45,14 +52,15 @@ function mcpError(
   };
 }
 
-export function createSwitchBotMcpServer(): McpServer {
+export function createSwitchBotMcpServer(options?: { eventManager?: EventSubscriptionManager }): McpServer {
+  const eventManager = options?.eventManager;
   const server = new McpServer(
     {
       name: 'switchbot',
-      version: '1.4.0',
+      version: '2.0.0',
     },
     {
-      capabilities: { tools: {} },
+      capabilities: { tools: {}, resources: {} },
       instructions:
         `SwitchBot is an IoT smart home brand by Wonderlabs, Inc. This MCP server controls physical devices \
 (Bot, Curtain, Smart Lock, Color Bulb, Meter, Plug, Robot Vacuum, etc.) and IR remotes \
@@ -82,7 +90,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
     {
       title: 'List all devices on the account',
       description:
-        'Fetch the inventory of physical devices and IR remotes on this SwitchBot account. Refreshes the local cache.',
+        'Fetch the complete inventory of physical devices and IR remotes on this SwitchBot account. Refreshes the local metadata cache and groups devices by type. Use this as the bootstrap call to discover available deviceIds. Devices without enableCloudService cannot receive commands via API. IR remotes depend on a Hub for connectivity.',
       inputSchema: {},
       outputSchema: {
         deviceList: z.array(z.object({
@@ -151,7 +159,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
     {
       title: 'Send a control command to a device',
       description:
-        'Send a control command (turnOn, setColor, startClean, unlock, ...) to a device. Destructive commands (unlock, garage open, keypad createKey) require confirm:true; otherwise they are rejected.',
+        'Execute a control command on a device (turnOn, setColor, startClean, unlock, openDoor, createKey, etc.). Destructive commands (Smart Lock unlock, Garage Door open, Keypad createKey/deleteKey) require confirm:true to proceed; otherwise rejected. Commands are validated offline against the device catalog. Use idempotencyKey to safely deduplicate retries within 60 seconds.',
       inputSchema: {
         deviceId: z.string().describe('Device ID from list_devices'),
         command: z.string().describe('Command name, case-sensitive (e.g. turnOn, setColor, unlock)'),
@@ -378,6 +386,130 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
     }
   );
 
+  // ---- account_overview ---------------------------------------------------
+  server.registerTool(
+    'account_overview',
+    {
+      title: 'Bootstrap account overview',
+      description:
+        'Get a complete account snapshot: devices, scenes, quota usage, cache status, and MQTT connection state. Use this for cold-start initialization or periodic health checks.',
+      inputSchema: {},
+      outputSchema: {
+        version: z.string(),
+        schemaVersion: z.string(),
+        devices: z.array(z.object({
+          deviceId: z.string(),
+          deviceName: z.string(),
+          deviceType: z.string().optional(),
+        }).passthrough()).describe('All physical devices'),
+        infraredRemotes: z.array(z.object({
+          deviceId: z.string(),
+          deviceName: z.string(),
+          remoteType: z.string(),
+        }).passthrough()).describe('All IR remotes'),
+        scenes: z.array(z.object({
+          sceneId: z.string(),
+          sceneName: z.string(),
+        }).passthrough()).describe('All manual scenes'),
+        quota: z.object({
+          date: z.string(),
+          total: z.number(),
+          remaining: z.number(),
+          endpoints: z.record(z.string(), z.number()).optional(),
+        }).describe('Today\'s quota usage'),
+        cache: z.object({
+          list: z.object({
+            path: z.string(),
+            exists: z.boolean(),
+            lastUpdated: z.string().optional(),
+            ageMs: z.number().optional(),
+            deviceCount: z.number().optional(),
+          }),
+          status: z.object({
+            path: z.string(),
+            exists: z.boolean(),
+            entryCount: z.number(),
+            oldestFetchedAt: z.string().optional(),
+            newestFetchedAt: z.string().optional(),
+          }),
+        }).describe('Cache status'),
+        mqtt: z.object({
+          state: z.string(),
+          subscribers: z.number(),
+        }).optional().describe('MQTT connection state (HTTP mode only)'),
+      },
+    },
+    async () => {
+      const deviceList = await fetchDeviceList();
+      const sceneList = await fetchScenes();
+      const cacheInfo = describeCache();
+      const quota = todayUsage();
+
+      const overview = {
+        version: '2.0.0',
+        schemaVersion: '1.1',
+        devices: deviceList.deviceList.map(toMcpDeviceListShape),
+        infraredRemotes: deviceList.infraredRemoteList.map(toMcpIrDeviceShape),
+        scenes: sceneList.map((s) => ({
+          sceneId: s.sceneId,
+          sceneName: s.sceneName,
+        })),
+        quota: {
+          date: quota.date,
+          total: quota.total,
+          remaining: quota.remaining,
+          endpoints: quota.endpoints,
+        },
+        cache: {
+          list: cacheInfo.list,
+          status: cacheInfo.status,
+        },
+        ...(eventManager ? {
+          mqtt: {
+            state: eventManager.getState(),
+            subscribers: eventManager.getSubscriberCount(),
+          },
+        } : {}),
+      };
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(overview, null, 2),
+        }],
+        structuredContent: overview,
+      };
+    }
+  );
+
+  // switchbot://events resource — snapshot of recent shadow events from the ring buffer.
+  // Returns up to 100 recent events. When MQTT is disabled, returns an empty list with a state note.
+  // URI: switchbot://events  (optional query: ?filter=<expression>  ?limit=<n>)
+  if (eventManager) {
+    server.registerResource(
+      'events',
+      'switchbot://events',
+      {
+        title: 'SwitchBot real-time shadow events',
+        description:
+          'Recent device shadow-update events received via MQTT. Returns a JSON snapshot of the ring buffer. ' +
+          'State is "disabled" when MQTT credentials are not configured (set SWITCHBOT_MQTT_HOST / USERNAME / PASSWORD).',
+        mimeType: 'application/json',
+      },
+      (_uri) => {
+        const state = eventManager.getState();
+        const events = state !== 'disabled' ? eventManager.getRecentEvents(100) : [];
+        return {
+          contents: [{
+            uri: 'switchbot://events',
+            mimeType: 'application/json',
+            text: JSON.stringify({ state, count: events.length, events }, null, 2),
+          }],
+        };
+      },
+    );
+  }
+
   return server;
 }
 
@@ -418,7 +550,11 @@ Inspect locally:
     .command('serve')
     .description('Start the MCP server on stdio (default) or HTTP (--port)')
     .option('--port <n>', 'Listen on HTTP instead of stdio (Streamable HTTP transport)')
-    .action(async (options: { port?: string }) => {
+    .option('--bind <host>', 'IP address to bind (default 127.0.0.1; use 0.0.0.0 to accept external connections)', '127.0.0.1')
+    .option('--auth-token <token>', 'Bearer token for HTTP requests (required for --bind 0.0.0.0; falls back to SWITCHBOT_MCP_TOKEN env var)')
+    .option('--cors-origin <url>', 'Allowed CORS origin(s) for HTTP (repeatable)')
+    .option('--rate-limit <n>', 'Max requests per minute per profile (default 60)', '60')
+    .action(async (options: { port?: string; bind?: string; authToken?: string; corsOrigin?: string | string[]; rateLimit?: string }) => {
       try {
         if (options.port) {
           const port = Number(options.port);
@@ -431,29 +567,235 @@ Inspect locally:
             }
             process.exit(2);
           }
+
+          const bind = options.bind ?? '127.0.0.1';
+          const authToken = options.authToken ?? process.env.SWITCHBOT_MCP_TOKEN;
+          const corsOrigins = Array.isArray(options.corsOrigin) ? options.corsOrigin : (options.corsOrigin ? [options.corsOrigin] : []);
+          const rateLimit = Math.max(1, Number(options.rateLimit) || 60);
+
+          // Guard: refuse to bind non-localhost without auth
+          const isLocalhost = bind === '127.0.0.1' || bind === 'localhost' || bind === '::1';
+          if (!isLocalhost && !authToken) {
+            const msg = 'Refusing to listen on 0.0.0.0 without --auth-token. Pass --auth-token <token> or bind to localhost (default).';
+            if (isJsonMode()) {
+              console.error(JSON.stringify({ error: { code: 2, kind: 'usage', message: msg } }));
+            } else {
+              console.error(msg);
+            }
+            process.exit(2);
+          }
+
           const { createServer } = await import('node:http');
+          const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+
+          // Initialize shared EventSubscriptionManager for event streaming.
+          // If MQTT creds are present, connect in the background so the HTTP server
+          // starts immediately; /ready reflects the real state.
+          const eventManager = new EventSubscriptionManager();
+          const mqttConfig = getMqttConfig();
+          if (mqttConfig) {
+            eventManager.initialize(mqttConfig).catch((err: unknown) => {
+              console.error('MQTT initialization failed:', err instanceof Error ? err.message : String(err));
+            });
+          } else {
+            console.error('MQTT disabled: set SWITCHBOT_MQTT_HOST, SWITCHBOT_MQTT_USERNAME, SWITCHBOT_MQTT_PASSWORD to enable real-time events.');
+          }
+
+          // Helper: constant-time token comparison
+          const tokenMatch = (provided: string | undefined): boolean => {
+            if (!authToken) return true; // No token configured, allow all
+            if (!provided) return false;
+            const expected = authToken;
+            let match = true;
+            for (let i = 0; i < Math.max(expected.length, provided.length); i++) {
+              if ((expected[i] ?? '\0') !== (provided[i] ?? '\0')) match = false;
+            }
+            return match;
+          };
+
+          // Helper: rate limit check
+          const checkRateLimit = (profile: string): boolean => {
+            const now = Date.now();
+            const bucket = rateLimitMap.get(profile);
+            if (!bucket || now >= bucket.resetAt) {
+              rateLimitMap.set(profile, { count: 1, resetAt: now + 60000 });
+              return true;
+            }
+            bucket.count++;
+            return bucket.count <= rateLimit;
+          };
+
           const httpServer = createServer(async (req, res) => {
+            // Health and metrics routes (no auth required)
+            if (req.url === '/healthz' && req.method === 'GET') {
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({
+                ok: true,
+                version: '2.0.0',
+                pid: process.pid,
+                uptimeSec: Math.floor(process.uptime()),
+              }));
+              return;
+            }
+
+            if (req.url === '/ready' && req.method === 'GET') {
+              const state = eventManager.getState();
+              const ready = state !== 'failed' && state !== 'disabled';
+              const status = ready ? 200 : 503;
+              const body: Record<string, unknown> = { ready, version: '2.0.0', mqtt: state };
+              if (!ready) body.reason = state === 'disabled' ? 'mqtt disabled' : 'mqtt failed';
+              res.writeHead(status, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify(body));
+              return;
+            }
+
+            if (req.url === '/metrics' && req.method === 'GET') {
+              const mqttState = eventManager.getState();
+              const metrics = `# HELP switchbot_mqtt_connected MQTT connection status (0=disconnected, 1=connected)
+# TYPE switchbot_mqtt_connected gauge
+switchbot_mqtt_connected ${mqttState === 'connected' ? 1 : 0}
+
+# HELP switchbot_mqtt_state Current MQTT state (1 for the active state, 0 otherwise)
+# TYPE switchbot_mqtt_state gauge
+switchbot_mqtt_state{state="disabled"} ${mqttState === 'disabled' ? 1 : 0}
+switchbot_mqtt_state{state="connecting"} ${mqttState === 'connecting' ? 1 : 0}
+switchbot_mqtt_state{state="connected"} ${mqttState === 'connected' ? 1 : 0}
+switchbot_mqtt_state{state="reconnecting"} ${mqttState === 'reconnecting' ? 1 : 0}
+switchbot_mqtt_state{state="failed"} ${mqttState === 'failed' ? 1 : 0}
+
+# HELP switchbot_mqtt_subscribers Number of active event subscribers
+# TYPE switchbot_mqtt_subscribers gauge
+switchbot_mqtt_subscribers ${eventManager.getSubscriberCount()}
+
+# HELP process_uptime_seconds Process uptime in seconds
+# TYPE process_uptime_seconds gauge
+process_uptime_seconds ${Math.floor(process.uptime())}
+`;
+              res.writeHead(200, { 'Content-Type': 'text/plain; version=0.0.4; charset=utf-8' });
+              res.end(metrics);
+              return;
+            }
+
+            // Extract profile from header or query string
+            const headerProfile = req.headers['x-switchbot-profile'];
+            const profileHeader = Array.isArray(headerProfile) ? headerProfile[0] : headerProfile;
+            let profileQuery: string | undefined;
+            try {
+              const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
+              profileQuery = url.searchParams.get('profile') ?? undefined;
+            } catch { /* ignore */ }
+            const profile = profileHeader || profileQuery;
+
+            // CORS preflight
+            if (req.method === 'OPTIONS') {
+              if (corsOrigins.length > 0) {
+                const origin = req.headers.origin;
+                if (origin && corsOrigins.includes(origin)) {
+                  res.writeHead(200, {
+                    'Access-Control-Allow-Origin': origin,
+                    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+                    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+                  });
+                  res.end();
+                  return;
+                }
+              }
+              res.writeHead(204);
+              res.end();
+              return;
+            }
+
+            // Rate limit check
+            if (!checkRateLimit(profile ?? 'default')) {
+              res.writeHead(429, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32000, message: 'Rate limit exceeded' }, id: null }));
+              return;
+            }
+
+            // Auth check
+            const authHeader = req.headers.authorization;
+            const [scheme, token] = (authHeader ?? '').split(' ');
+            if (authToken && (scheme !== 'Bearer' || !tokenMatch(token))) {
+              res.writeHead(401, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32001, message: 'Unauthorized' }, id: null }));
+              return;
+            }
+
+            // CORS headers for allowed origins
+            if (corsOrigins.length > 0) {
+              const origin = req.headers.origin;
+              if (origin && corsOrigins.includes(origin)) {
+                res.setHeader('Access-Control-Allow-Origin', origin);
+              }
+            }
+
+            // Reject unknown profiles early: avoids confusing downstream credential
+            // errors and protects against probing for valid profile names.
+            if (profile) {
+              const envCredsPresent = !!(process.env.SWITCHBOT_TOKEN && process.env.SWITCHBOT_SECRET);
+              if (!envCredsPresent && !fs.existsSync(profileFilePath(profile))) {
+                res.writeHead(401, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({
+                  jsonrpc: '2.0',
+                  error: { code: -32001, message: `Unknown profile: ${profile}` },
+                  id: null,
+                }));
+                return;
+              }
+            }
+
             // Stateless mode: fresh transport+server per request (SDK requirement).
             const reqTransport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-            const reqServer = createSwitchBotMcpServer();
+            const reqServer = createSwitchBotMcpServer({ eventManager });
             // Register cleanup before any async work so it fires on both normal
             // close and error-path close (after the 500 response ends).
             res.on('close', () => {
               reqTransport.close();
               reqServer.close();
             });
-            try {
-              await reqServer.connect(reqTransport);
-              await reqTransport.handleRequest(req, res);
-            } catch (err) {
-              if (!res.headersSent) {
-                res.writeHead(500, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32603, message: 'Internal server error' }, id: null }));
+            // Route per-request credentials via AsyncLocalStorage so loadConfig()
+            // picks up this request's profile instead of the process-global flag.
+            await withRequestContext({ profile: profile ?? undefined }, async () => {
+              try {
+                await reqServer.connect(reqTransport);
+                await reqTransport.handleRequest(req, res);
+              } catch (err) {
+                if (!res.headersSent) {
+                  res.writeHead(500, { 'Content-Type': 'application/json' });
+                  res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32603, message: 'Internal server error' }, id: null }));
+                }
               }
-            }
+            });
           });
-          httpServer.listen(port, () => {
-            console.error(`SwitchBot MCP server listening on http://localhost:${port}/mcp`);
+
+          // Graceful shutdown
+          let isShuttingDown = false;
+          const gracefulShutdown = async () => {
+            if (isShuttingDown) return;
+            isShuttingDown = true;
+            console.error('Shutting down...');
+            await eventManager.shutdown();
+            httpServer.close(() => {
+              console.error('Server closed');
+              process.exit(0);
+            });
+            // Force exit after 30s
+            setTimeout(() => {
+              console.error('Force exiting after 30s timeout');
+              process.exit(1);
+            }, 30000);
+          };
+          process.on('SIGTERM', gracefulShutdown);
+          process.on('SIGINT', gracefulShutdown);
+
+          httpServer.listen(port, bind, () => {
+            console.error(`SwitchBot MCP server listening on http://${bind}:${port}/mcp`);
+            if (authToken) {
+              console.error('  Authentication: required (Bearer token)');
+            }
+            if (corsOrigins.length > 0) {
+              console.error(`  CORS origins: ${corsOrigins.join(', ')}`);
+            }
           });
           return;
         }

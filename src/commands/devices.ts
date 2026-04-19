@@ -211,6 +211,7 @@ Examples:
     .option('--name <query>', 'Resolve device by fuzzy name instead of deviceId')
     .option('--type <commandType>', 'Command type: "command" for built-in commands (default), "customize" for user-defined IR buttons', 'command')
     .option('--yes', 'Confirm a destructive command (Smart Lock unlock, Garage open, …). --dry-run is always allowed without --yes.')
+    .option('--idempotency-key <key>', 'Idempotency key for deduplication (60s window; same key replays cached result)')
     .addHelpText('after', `
 ────────────────────────────────────────────────────────────────────────
 For the full list of commands a specific device supports — and their
@@ -256,7 +257,7 @@ Examples:
   $ switchbot devices command ABC123 "MyButton" --type customize
   $ switchbot devices command <lockId> unlock --yes
 `)
-    .action(async (deviceIdArg: string | undefined, cmd: string, parameter: string | undefined, options: { name?: string; type: string; yes?: boolean }) => {
+    .action(async (deviceIdArg: string | undefined, cmd: string, parameter: string | undefined, options: { name?: string; type: string; yes?: boolean; idempotencyKey?: string }) => {
       const deviceId = resolveDeviceId(deviceIdArg, options.name);
       const validation = validateCommand(deviceId, cmd, parameter, options.type);
       if (!validation.ok) {
@@ -331,7 +332,9 @@ Examples:
           deviceId,
           cmd,
           parsedParam,
-          options.type as 'command' | 'customize'
+          options.type as 'command' | 'customize',
+          undefined,
+          { idempotencyKey: options.idempotencyKey }
         );
 
         const isIr = getCachedDevice(deviceId)?.category === 'ir';

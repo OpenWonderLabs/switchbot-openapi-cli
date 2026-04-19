@@ -48,10 +48,10 @@ describe('quota command', () => {
     const result = await runCli(registerQuotaCommand, ['--json', 'quota', 'status']);
     expect(result.exitCode).toBeNull();
     const parsed = JSON.parse(result.stdout[0]);
-    expect(parsed.today.total).toBe(3);
-    expect(parsed.today.remaining).toBe(10_000 - 3);
-    expect(parsed.today.dailyLimit).toBe(10_000);
-    expect(parsed.today.endpoints['GET /v1.1/devices']).toBe(2);
+    expect(parsed.data.today.total).toBe(3);
+    expect(parsed.data.today.remaining).toBe(10_000 - 3);
+    expect(parsed.data.today.dailyLimit).toBe(10_000);
+    expect(parsed.data.today.endpoints['GET /v1.1/devices']).toBe(2);
   });
 
   it('status says "no requests recorded yet" with an empty counter', async () => {
@@ -74,6 +74,6 @@ describe('quota command', () => {
     await seedQuota();
     const result = await runCli(registerQuotaCommand, ['--json', 'quota', 'reset']);
     expect(result.exitCode).toBeNull();
-    expect(JSON.parse(result.stdout[0])).toEqual({ reset: true });
+    expect(JSON.parse(result.stdout[0])).toEqual({ schemaVersion: '1.1', data: { reset: true } });
   });
 });

@@ -4,12 +4,14 @@ import { ApiError, DryRunSignal } from '../api/client.js';
 
 import { getFormat } from './flags.js';
 
+export const SCHEMA_VERSION = '1.1';
+
 export function isJsonMode(): boolean {
   return process.argv.includes('--json') || getFormat() === 'json';
 }
 
 export function printJson(data: unknown): void {
-  console.log(JSON.stringify(data, null, 2));
+  console.log(JSON.stringify({ schemaVersion: SCHEMA_VERSION, data }, null, 2));
 }
 
 export function printTable(headers: string[], rows: (string | number | boolean | null | undefined)[][]): void {
@@ -69,6 +71,9 @@ export interface ErrorPayload {
   hint?: string;
   retryable?: boolean;
   context?: Record<string, unknown>;
+  retryAfterMs?: number;
+  transient?: boolean;
+  errorClass?: 'network' | 'api' | 'device-offline' | 'device-busy' | 'guard' | 'usage';
 }
 
 export class StructuredUsageError extends Error {
@@ -94,22 +99,44 @@ function classifyApiError(code: number): ErrorSubKind {
 
 export function buildErrorPayload(error: unknown): ErrorPayload {
   if (error instanceof StructuredUsageError) {
-    const payload: ErrorPayload = { code: 2, kind: 'usage', message: error.message };
+    const payload: ErrorPayload = {
+      code: 2,
+      kind: 'usage',
+      message: error.message,
+      errorClass: 'usage',
+      transient: false
+    };
     if (error.context) payload.context = error.context;
     return payload;
   }
   if (error instanceof UsageError) {
-    return { code: 2, kind: 'usage', message: error.message };
+    return { code: 2, kind: 'usage', message: error.message, errorClass: 'usage', transient: false };
   }
   const code = error instanceof ApiError ? error.code : 1;
   const kind: ErrorPayload['kind'] = error instanceof ApiError ? 'api' : 'runtime';
   const message = error instanceof Error ? error.message : 'An unknown error occurred';
   const hint = error instanceof ApiError ? (error.hint ?? errorHint(error.code)) : null;
   const retryable = error instanceof ApiError ? error.retryable : false;
-  const payload: ErrorPayload = { code, kind, message };
+  const retryAfterMs = error instanceof ApiError ? error.retryAfterMs : undefined;
+  const transient = error instanceof ApiError ? error.transient : false;
+
+  // Classify error
+  let errorClass: ErrorPayload['errorClass'] = 'api';
+  if (kind === 'runtime') {
+    errorClass = 'api';
+  } else if (transient && code >= 500) {
+    errorClass = 'api';
+  } else if (code === 0) {
+    errorClass = 'network';
+  } else if (code >= 400) {
+    errorClass = 'api';
+  }
+
+  const payload: ErrorPayload = { code, kind, message, errorClass, transient };
   if (error instanceof ApiError) payload.subKind = classifyApiError(error.code);
   if (hint) payload.hint = hint;
   if (retryable) payload.retryable = true;
+  if (retryAfterMs !== undefined) payload.retryAfterMs = retryAfterMs;
   return payload;
 }
 
@@ -121,7 +148,7 @@ export function handleError(error: unknown): never {
   const payload = buildErrorPayload(error);
 
   if (isJsonMode()) {
-    console.error(JSON.stringify({ error: payload }));
+    console.error(JSON.stringify({ schemaVersion: SCHEMA_VERSION, error: payload }));
     process.exit(payload.code === 2 ? 2 : 1);
   }
 

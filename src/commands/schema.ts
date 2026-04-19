@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { printJson, isJsonMode } from '../utils/output.js';
+import { printJson } from '../utils/output.js';
 import { getEffectiveCatalog, type CommandSpec, type DeviceCatalogEntry } from '../devices/catalog.js';
 
 interface SchemaEntry {
@@ -91,11 +91,6 @@ Examples:
         generatedAt: new Date().toISOString(),
         types: filtered.map(toSchemaEntry),
       };
-      // Always JSON — schema export without JSON would be a category error.
-      if (isJsonMode()) {
-        printJson(payload);
-      } else {
-        console.log(JSON.stringify(payload, null, 2));
-      }
+      printJson(payload);
     });
 }

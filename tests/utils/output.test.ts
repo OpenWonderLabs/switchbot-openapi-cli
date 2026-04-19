@@ -7,6 +7,7 @@ import {
   handleError,
   buildErrorPayload,
   UsageError,
+  SCHEMA_VERSION,
 } from '../../src/utils/output.js';
 
 describe('isJsonMode', () => {
@@ -35,21 +36,27 @@ describe('isJsonMode', () => {
 });
 
 describe('printJson', () => {
-  it('writes pretty-printed JSON with 2-space indent', () => {
+  it('wraps payload in {schemaVersion, data} envelope with 2-space indent', () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     printJson({ a: 1, b: [2, 3] });
     expect(logSpy).toHaveBeenCalledTimes(1);
     const out = logSpy.mock.calls[0][0];
-    expect(out).toBe(JSON.stringify({ a: 1, b: [2, 3] }, null, 2));
+    expect(out).toBe(JSON.stringify({ schemaVersion: SCHEMA_VERSION, data: { a: 1, b: [2, 3] } }, null, 2));
     expect(out).toContain('\n  ');
+    expect(JSON.parse(out)).toEqual({ schemaVersion: '1.1', data: { a: 1, b: [2, 3] } });
   });
 
-  it('handles null and primitives', () => {
+  it('wraps null and primitive payloads inside data', () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     printJson(null);
     printJson(42);
     printJson('hi');
-    expect(logSpy.mock.calls.map((c) => c[0])).toEqual(['null', '42', '"hi"']);
+    const parsed = logSpy.mock.calls.map((c) => JSON.parse(String(c[0])));
+    expect(parsed).toEqual([
+      { schemaVersion: '1.1', data: null },
+      { schemaVersion: '1.1', data: 42 },
+      { schemaVersion: '1.1', data: 'hi' },
+    ]);
   });
 });
 
@@ -242,6 +249,7 @@ describe('handleError', () => {
       expect(() => handleError(new ApiError('bad device', 190))).toThrow('__exit');
       const raw = errSpy.mock.calls[0][0];
       const parsed = JSON.parse(raw);
+      expect(parsed.schemaVersion).toBe('1.1');
       expect(parsed.error.code).toBe(190);
       expect(parsed.error.message).toBe('bad device');
       expect(parsed.error.hint).toMatch(/devices/);
@@ -303,7 +311,7 @@ describe('handleError', () => {
 describe('buildErrorPayload', () => {
   it('UsageError → code 2, kind usage', () => {
     const p = buildErrorPayload(new UsageError('bad flag'));
-    expect(p).toEqual({ code: 2, kind: 'usage', message: 'bad flag' });
+    expect(p).toEqual({ code: 2, kind: 'usage', message: 'bad flag', errorClass: 'usage', transient: false });
   });
 
   it('generic Error → code 1, kind runtime', () => {
@@ -313,6 +321,7 @@ describe('buildErrorPayload', () => {
     expect(p.message).toBe('oops');
     expect(p.hint).toBeUndefined();
     expect(p.retryable).toBeUndefined();
+    expect(p.transient).toBe(false);
   });
 
   it('unknown non-Error → code 1, kind runtime, fallback message', () => {
@@ -320,21 +329,24 @@ describe('buildErrorPayload', () => {
     expect(p.code).toBe(1);
     expect(p.kind).toBe('runtime');
     expect(p.message).toBe('An unknown error occurred');
+    expect(p.transient).toBe(false);
   });
 
   it('ApiError → code from error, kind api, hint from error', async () => {
     const { ApiError } = await import('../../src/api/client.js');
-    const p = buildErrorPayload(new ApiError('quota', 429, { retryable: true, hint: 'try later' }));
+    const p = buildErrorPayload(new ApiError('quota', 429, { retryable: true, hint: 'try later', transient: true }));
     expect(p.code).toBe(429);
     expect(p.kind).toBe('api');
     expect(p.message).toBe('quota');
     expect(p.hint).toBe('try later');
     expect(p.retryable).toBe(true);
+    expect(p.transient).toBe(true);
   });
 
   it('ApiError with known code gets hint from errorHint table when no explicit hint', async () => {
     const { ApiError } = await import('../../src/api/client.js');
     const p = buildErrorPayload(new ApiError('not found', 152));
     expect(p.hint).toContain('deviceId');
+    expect(p.transient).toBe(false);
   });
 });

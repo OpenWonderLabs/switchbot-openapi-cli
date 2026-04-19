@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import type { AxiosInstance } from 'axios';
-import { printJson, isJsonMode, handleError } from '../utils/output.js';
+import { printJson, isJsonMode, handleError, buildErrorPayload, type ErrorPayload } from '../utils/output.js';
 import {
   fetchDeviceList,
   executeCommand,
@@ -15,7 +15,7 @@ import { getCachedTypeMap } from '../devices/cache.js';
 
 interface BatchResult {
   succeeded: Array<{ deviceId: string; result: unknown }>;
-  failed: Array<{ deviceId: string; error: string }>;
+  failed: Array<{ deviceId: string; error: ErrorPayload }>;
   summary: {
     total: number;
     ok: number;
@@ -23,6 +23,7 @@ interface BatchResult {
     skipped: number;
     durationMs: number;
     dryRun?: boolean;
+    schemaVersion?: string;
   };
 }
 
@@ -125,6 +126,7 @@ export function registerBatchCommand(devices: Command): void {
     .option('--yes', 'Allow destructive commands (Smart Lock unlock, garage open, ...)')
     .option('--type <commandType>', '"command" (default) or "customize" for user-defined IR buttons', 'command')
     .option('--stdin', 'Read deviceIds from stdin, one per line (same as trailing "-")')
+    .option('--idempotency-key-prefix <prefix>', 'Prefix for idempotency keys (key per device: <prefix>-<deviceId>)')
     .addHelpText('after', `
 Targets are resolved in this priority order:
   1. --ids when present       (explicit deviceIds)
@@ -166,6 +168,7 @@ Examples:
           yes?: boolean;
           type: string;
           stdin?: boolean;
+          idempotencyKeyPrefix?: string;
         },
         commandObj: Command
       ) => {
@@ -266,7 +269,12 @@ Examples:
 
         const outcomes = await runPool(resolved.ids, concurrency, async (id) => {
           try {
-            const result = await executeCommand(id, cmd, parsedParam, effectiveType, getClient());
+            const idempotencyKey = options.idempotencyKeyPrefix
+              ? `${options.idempotencyKeyPrefix}-${id}`
+              : undefined;
+            const result = await executeCommand(id, cmd, parsedParam, effectiveType, getClient(), {
+              idempotencyKey,
+            });
             if (!isJsonMode()) {
               console.log(`✓ ${id}: ${cmd}`);
             }
@@ -277,11 +285,11 @@ Examples:
             if (err instanceof DryRunSignal) {
               return { ok: 'dry-run' as const, deviceId: id };
             }
-            const message = err instanceof Error ? err.message : String(err);
+            const errorPayload = buildErrorPayload(err);
             if (!isJsonMode()) {
-              console.error(`✗ ${id}: ${message}`);
+              console.error(`✗ ${id}: ${errorPayload.message}`);
             }
-            return { ok: false as const, deviceId: id, error: message };
+            return { ok: false as const, deviceId: id, error: errorPayload };
           }
         });
 
@@ -293,7 +301,7 @@ Examples:
         const failed = outcomes.filter((o) => o.ok === false) as Array<{
           ok: false;
           deviceId: string;
-          error: string;
+          error: ErrorPayload;
         }>;
         const dryRunned = outcomes.filter((o) => o.ok === 'dry-run') as Array<{
           ok: 'dry-run';
@@ -309,6 +317,7 @@ Examples:
             failed: failed.length,
             skipped: dryRunned.length,
             durationMs: Date.now() - startedAt,
+            schemaVersion: '1.1',
             ...(dryRun ? { dryRun: true } : {}),
           },
         };

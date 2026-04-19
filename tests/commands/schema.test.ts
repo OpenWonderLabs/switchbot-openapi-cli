@@ -6,7 +6,9 @@ describe('schema export', () => {
   it('dumps every catalog type as a JSON payload', async () => {
     const res = await runCli(registerSchemaCommand, ['schema', 'export']);
     const out = res.stdout.join('');
-    const parsed = JSON.parse(out);
+    const envelope = JSON.parse(out);
+    expect(envelope.schemaVersion).toBe('1.1');
+    const parsed = envelope.data;
     expect(parsed.version).toBe('1.0');
     expect(parsed.generatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(Array.isArray(parsed.types)).toBe(true);
@@ -22,20 +24,20 @@ describe('schema export', () => {
 
   it('filters by --type (matches name + aliases, case-insensitive)', async () => {
     const res = await runCli(registerSchemaCommand, ['schema', 'export', '--type', 'bot']);
-    const parsed = JSON.parse(res.stdout.join(''));
+    const parsed = JSON.parse(res.stdout.join('')).data;
     expect(parsed.types).toHaveLength(1);
     expect(parsed.types[0].type).toBe('Bot');
   });
 
   it('returns an empty types[] when --type does not match', async () => {
     const res = await runCli(registerSchemaCommand, ['schema', 'export', '--type', 'NoSuchType']);
-    const parsed = JSON.parse(res.stdout.join(''));
+    const parsed = JSON.parse(res.stdout.join('')).data;
     expect(parsed.types).toEqual([]);
   });
 
   it('tags a known destructive command', async () => {
     const res = await runCli(registerSchemaCommand, ['schema', 'export']);
-    const parsed = JSON.parse(res.stdout.join(''));
+    const parsed = JSON.parse(res.stdout.join('')).data;
     const lock = parsed.types.find(
       (t: { type: string }) => t.type === 'Smart Lock' || t.type === 'Smart Lock Pro',
     );
@@ -46,7 +48,7 @@ describe('schema export', () => {
 
   it('--role filters to the matching functional group', async () => {
     const res = await runCli(registerSchemaCommand, ['schema', 'export', '--role', 'lighting']);
-    const parsed = JSON.parse(res.stdout.join(''));
+    const parsed = JSON.parse(res.stdout.join('')).data;
     expect(parsed.types.length).toBeGreaterThan(0);
     for (const t of parsed.types) {
       expect(t.role).toBe('lighting');
@@ -56,7 +58,7 @@ describe('schema export', () => {
 
   it('--role and --category can be combined', async () => {
     const res = await runCli(registerSchemaCommand, ['schema', 'export', '--role', 'security', '--category', 'physical']);
-    const parsed = JSON.parse(res.stdout.join(''));
+    const parsed = JSON.parse(res.stdout.join('')).data;
     expect(parsed.types.length).toBeGreaterThan(0);
     for (const t of parsed.types) {
       expect(t.role).toBe('security');
@@ -66,13 +68,13 @@ describe('schema export', () => {
 
   it('--role returns empty types[] for an unknown role', async () => {
     const res = await runCli(registerSchemaCommand, ['schema', 'export', '--role', 'nonexistent']);
-    const parsed = JSON.parse(res.stdout.join(''));
+    const parsed = JSON.parse(res.stdout.join('')).data;
     expect(parsed.types).toEqual([]);
   });
 
   it('schema export includes description on every type', async () => {
     const res = await runCli(registerSchemaCommand, ['schema', 'export']);
-    const parsed = JSON.parse(res.stdout.join(''));
+    const parsed = JSON.parse(res.stdout.join('')).data;
     for (const t of parsed.types) {
       expect(t.description, `${t.type} missing description in export`).toBeTypeOf('string');
       expect((t.description as string).length, `${t.type} description is empty`).toBeGreaterThan(0);

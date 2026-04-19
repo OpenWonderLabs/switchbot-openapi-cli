@@ -103,7 +103,7 @@ export function createClient(): AxiosInstance {
           throw new ApiError(
             `Request timed out after ${getTimeout()}ms (override with --timeout <ms>)`,
             0,
-            { retryable: false }
+            { transient: true, retryable: false }
           );
         }
         const status = error.response?.status;
@@ -144,20 +144,34 @@ export function createClient(): AxiosInstance {
           throw new ApiError(
             'Authentication failed: invalid token or daily 10,000-request quota exceeded',
             401,
-            { retryable: false, hint: 'Run `switchbot config set-token <token> <secret>` to re-enter credentials, or `switchbot quota status` to check today\'s local count.' }
+            {
+              transient: false,
+              retryable: false,
+              hint: 'Run `switchbot config set-token <token> <secret>` to re-enter credentials, or `switchbot quota status` to check today\'s local count.'
+            }
           );
         }
         if (status === 429) {
+          const retryAfter = error.response?.headers?.['retry-after'];
+          const retryAfterMs = nextRetryDelayMs(maxRetries - 1, backoff, retryAfter);
           throw new ApiError(
             'Request rate too high: daily 10,000-request quota exceeded (retries exhausted)',
             429,
-            { retryable: true, hint: 'Use `switchbot quota status` to see today\'s usage; raise `--retry-on-429 <n>` for more retries.' }
+            {
+              retryable: true,
+              transient: true,
+              retryAfterMs,
+              hint: 'Use `switchbot quota status` to see today\'s usage; raise `--retry-on-429 <n>` for more retries.'
+            }
           );
         }
         throw new ApiError(
           `HTTP ${status ?? '?'}: ${error.message}`,
           status ?? 0,
-          { retryable: status !== undefined && status >= 500 }
+          {
+            retryable: status !== undefined && status >= 500,
+            transient: status !== undefined && (status >= 500 || status === 0) // 5xx, 0 = connection error
+          }
         );
       }
       throw error;
@@ -170,11 +184,15 @@ export function createClient(): AxiosInstance {
 export interface ApiErrorMeta {
   retryable?: boolean;
   hint?: string;
+  retryAfterMs?: number;
+  transient?: boolean;
 }
 
 export class ApiError extends Error {
   public readonly retryable: boolean;
   public readonly hint?: string;
+  public readonly retryAfterMs?: number;
+  public readonly transient: boolean;
   constructor(
     message: string,
     public readonly code: number,
@@ -184,5 +202,7 @@ export class ApiError extends Error {
     this.name = 'ApiError';
     this.retryable = meta.retryable ?? false;
     this.hint = meta.hint;
+    this.retryAfterMs = meta.retryAfterMs;
+    this.transient = meta.transient ?? false;
   }
 }

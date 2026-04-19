@@ -69,7 +69,7 @@ describe('config command', () => {
       configMock.listProfiles.mockReturnValue(['home']);
       const res = await runCli(registerConfigCommand, ['--json', 'config', 'list-profiles']);
       const out = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
-      expect(out.profiles).toEqual(['home']);
+      expect(out.data.profiles).toEqual(['home']);
     });
   });
 
