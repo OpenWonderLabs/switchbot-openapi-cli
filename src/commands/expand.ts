@@ -152,11 +152,16 @@ Examples:
         if (command === 'setAll') {
           parameter = buildAcSetAll(options);
         } else if (command === 'setPosition') {
-          const isBlind = deviceType === 'Blind Tilt';
+          if (!cached) {
+            throw new UsageError(
+              `Device ${deviceId} is not in the local cache — run 'switchbot devices list' first so 'expand' knows whether this is a Curtain or a Blind Tilt.`
+            );
+          }
+          const isBlind = deviceType.startsWith('Blind Tilt');
           parameter = isBlind
             ? buildBlindTiltSetPosition(options)
             : buildCurtainSetPosition(options);
-        } else if (command === 'setMode' && (deviceType.startsWith('Relay Switch') || options.channel !== undefined)) {
+        } else if (command === 'setMode' && deviceType.startsWith('Relay Switch')) {
           parameter = buildRelaySetMode(options);
         } else {
           throw new UsageError(

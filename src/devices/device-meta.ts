@@ -32,7 +32,12 @@ export function loadDeviceMeta(): DeviceMetaFile {
   try {
     const raw = fs.readFileSync(file, 'utf-8');
     const parsed = JSON.parse(raw) as DeviceMetaFile;
-    if (!parsed || typeof parsed.devices !== 'object' || parsed.devices === null) {
+    if (
+      !parsed ||
+      parsed.version !== '1' ||
+      typeof parsed.devices !== 'object' ||
+      parsed.devices === null
+    ) {
       return { version: '1', devices: {} };
     }
     return parsed;
@@ -45,7 +50,9 @@ export function saveDeviceMeta(meta: DeviceMetaFile): void {
   const file = metaFilePath();
   const dir = path.dirname(file);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(meta, null, 2), { mode: 0o600 });
+  const tmp = `${file}.tmp-${process.pid}`;
+  fs.writeFileSync(tmp, JSON.stringify(meta, null, 2), { mode: 0o600 });
+  fs.renameSync(tmp, file);
 }
 
 export function getDeviceMeta(deviceId: string): DeviceMeta | null {

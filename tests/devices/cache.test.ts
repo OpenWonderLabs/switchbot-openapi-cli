@@ -16,6 +16,7 @@ import {
   clearStatusCache,
   describeCache,
   resetListCache,
+  resetStatusCache,
 } from '../../src/devices/cache.js';
 
 // Redirect the cache to a test-only temp directory by overriding both
@@ -27,11 +28,13 @@ beforeEach(() => {
   vi.spyOn(os, 'homedir').mockReturnValue(tmpDir);
   process.argv = ['node', 'switchbot'];
   resetListCache();
+  resetStatusCache();
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
   resetListCache();
+  resetStatusCache();
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -245,6 +248,28 @@ describe('status cache', () => {
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'status.json'), '{not json');
     expect(loadStatusCache()).toEqual({ entries: {} });
+  });
+
+  it('loadStatusCache serves hot-cache after the first read', () => {
+    setCachedStatus('BOT1', { power: 'on' });
+    const file = path.join(tmpDir, '.switchbot', 'status.json');
+    expect(loadStatusCache().entries.BOT1?.body).toEqual({ power: 'on' });
+
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        entries: {
+          BOT1: {
+            fetchedAt: new Date().toISOString(),
+            body: { power: 'off' },
+          },
+        },
+      }),
+    );
+
+    expect(loadStatusCache().entries.BOT1?.body).toEqual({ power: 'on' });
+    resetStatusCache();
+    expect(loadStatusCache().entries.BOT1?.body).toEqual({ power: 'off' });
   });
 });
 

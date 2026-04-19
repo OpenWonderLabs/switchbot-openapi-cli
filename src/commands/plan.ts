@@ -54,6 +54,10 @@ const PLAN_JSON_SCHEMA = {
           {
             type: 'object',
             required: ['type', 'command'],
+            oneOf: [
+              { required: ['deviceId'], not: { required: ['deviceName'] } },
+              { required: ['deviceName'], not: { required: ['deviceId'] } },
+            ],
             properties: {
               type: { const: 'command' },
               deviceId: { type: 'string', minLength: 1 },

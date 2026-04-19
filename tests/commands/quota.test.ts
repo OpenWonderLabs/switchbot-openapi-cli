@@ -23,10 +23,11 @@ afterEach(() => {
 
 async function seedQuota(): Promise<void> {
   // Write a quota file with a couple of entries on today's date.
-  const { recordRequest } = await import('../../src/utils/quota.js');
+  const { recordRequest, flushQuota } = await import('../../src/utils/quota.js');
   recordRequest('GET', 'https://api.switch-bot.com/v1.1/devices');
   recordRequest('GET', 'https://api.switch-bot.com/v1.1/devices');
   recordRequest('POST', 'https://api.switch-bot.com/v1.1/devices/ABC/commands');
+  flushQuota();
 }
 
 describe('quota command', () => {

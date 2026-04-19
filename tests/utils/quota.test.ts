@@ -13,8 +13,10 @@ beforeEach(() => {
   vi.spyOn(os, 'homedir').mockReturnValue(tmpRoot);
 });
 
-afterEach(() => {
+afterEach(async () => {
   vi.restoreAllMocks();
+  const { resetQuotaState } = await importQuota();
+  resetQuotaState();
   try {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   } catch {
@@ -79,10 +81,11 @@ describe('recordRequest + todayUsage', () => {
   });
 
   it('increments per call and writes to ~/.switchbot/quota.json', async () => {
-    const { recordRequest, todayUsage } = await importQuota();
+    const { recordRequest, todayUsage, flushQuota } = await importQuota();
     recordRequest('GET', 'https://api.switch-bot.com/v1.1/devices');
     recordRequest('GET', 'https://api.switch-bot.com/v1.1/devices');
     recordRequest('POST', 'https://api.switch-bot.com/v1.1/devices/DEAD1234/commands');
+    flushQuota();
     const u = todayUsage();
     expect(u.total).toBe(3);
     expect(u.endpoints['GET /v1.1/devices']).toBe(2);
@@ -100,13 +103,14 @@ describe('recordRequest + todayUsage', () => {
   });
 
   it('retains at most 7 days of history', async () => {
-    const { recordRequest, loadQuota } = await importQuota();
+    const { recordRequest, loadQuota, flushQuota } = await importQuota();
     const base = new Date('2026-04-10T12:00:00');
     for (let i = 0; i < 10; i++) {
       const d = new Date(base);
       d.setDate(base.getDate() + i);
       recordRequest('GET', 'https://api.switch-bot.com/v1.1/devices', d);
     }
+    flushQuota();
     const data = loadQuota();
     expect(Object.keys(data.days).length).toBe(7);
   });
@@ -117,6 +121,12 @@ describe('recordRequest + todayUsage', () => {
     fs.writeFileSync(path.join(dir, 'quota.json'), 'not valid json {');
     const { todayUsage, recordRequest } = await importQuota();
     expect(todayUsage().total).toBe(0);
+    recordRequest('GET', 'https://api.switch-bot.com/v1.1/devices');
+    expect(todayUsage().total).toBe(1);
+  });
+
+  it('keeps pending usage visible before the debounced flush runs', async () => {
+    const { recordRequest, todayUsage } = await importQuota();
     recordRequest('GET', 'https://api.switch-bot.com/v1.1/devices');
     expect(todayUsage().total).toBe(1);
   });

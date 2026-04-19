@@ -54,10 +54,16 @@ function cacheFilePath(): string {
 
 // In-memory hot-cache: undefined = not yet loaded, null = loaded but empty.
 let _listCache: DeviceCache | null | undefined = undefined;
+let _statusCache: StatusCache | undefined = undefined;
 
 /** Force the next loadCache() call to re-read from disk. Used in tests. */
 export function resetListCache(): void {
   _listCache = undefined;
+}
+
+/** Force the next loadStatusCache() call to re-read from disk. Used in tests. */
+export function resetStatusCache(): void {
+  _statusCache = undefined;
 }
 
 export function loadCache(): DeviceCache | null {
@@ -86,6 +92,26 @@ export function getCachedDevice(deviceId: string): CachedDevice | null {
   const cache = loadCache();
   if (!cache) return null;
   return cache.devices[deviceId] ?? null;
+}
+
+/** Build a deviceId -> type map from the metadata cache. */
+export function getCachedTypeMap(deviceIds?: Iterable<string>): Map<string, string> {
+  const cache = loadCache();
+  const out = new Map<string, string>();
+  if (!cache) return out;
+
+  if (deviceIds) {
+    for (const id of deviceIds) {
+      const entry = cache.devices[id];
+      if (entry?.type) out.set(id, entry.type);
+    }
+    return out;
+  }
+
+  for (const [deviceId, entry] of Object.entries(cache.devices)) {
+    if (entry.type) out.set(deviceId, entry.type);
+  }
+  return out;
 }
 
 export function updateCacheFromDeviceList(body: DeviceListBodyShape): void {
@@ -184,21 +210,29 @@ function statusCacheFilePath(): string {
 }
 
 export function loadStatusCache(): StatusCache {
+  if (_statusCache !== undefined) return _statusCache;
   const file = statusCacheFilePath();
-  if (!fs.existsSync(file)) return { entries: {} };
+  if (!fs.existsSync(file)) {
+    _statusCache = { entries: {} };
+    return _statusCache;
+  }
   try {
     const raw = fs.readFileSync(file, 'utf-8');
     const parsed = JSON.parse(raw) as StatusCache;
     if (!parsed || typeof parsed.entries !== 'object' || parsed.entries === null) {
-      return { entries: {} };
+      _statusCache = { entries: {} };
+      return _statusCache;
     }
+    _statusCache = parsed;
     return parsed;
   } catch {
-    return { entries: {} };
+    _statusCache = { entries: {} };
+    return _statusCache;
   }
 }
 
 function saveStatusCache(cache: StatusCache): void {
+  _statusCache = cache;
   try {
     const file = statusCacheFilePath();
     const dir = path.dirname(file);
@@ -238,20 +272,22 @@ function evictExpiredStatusEntries(cache: StatusCache, ttlMs: number, now = Date
 export function setCachedStatus(
   deviceId: string,
   body: Record<string, unknown>,
-  now = new Date()
+  now = new Date(),
+  ttlMsForGc = DEFAULT_STATUS_GC_TTL_MS
 ): void {
   const cache = loadStatusCache();
   cache.entries[deviceId] = {
     fetchedAt: now.toISOString(),
     body,
   };
-  evictExpiredStatusEntries(cache, DEFAULT_STATUS_GC_TTL_MS, now.getTime());
+  evictExpiredStatusEntries(cache, ttlMsForGc, now.getTime());
   saveStatusCache(cache);
 }
 
 export function clearStatusCache(): void {
   const file = statusCacheFilePath();
   if (fs.existsSync(file)) fs.unlinkSync(file);
+  _statusCache = { entries: {} };
 }
 
 /** Summary for `switchbot cache show`. */

@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import type { AxiosInstance } from 'axios';
 import { printJson, isJsonMode, handleError } from '../utils/output.js';
 import {
   fetchDeviceList,
@@ -6,9 +7,11 @@ import {
   isDestructiveCommand,
   buildHubLocationMap,
 } from '../lib/devices.js';
+import { createClient } from '../api/client.js';
 import { parseFilter, applyFilter, FilterSyntaxError } from '../utils/filter.js';
 import { isDryRun } from '../utils/flags.js';
 import { DryRunSignal } from '../api/client.js';
+import { getCachedTypeMap } from '../devices/cache.js';
 
 interface BatchResult {
   succeeded: Array<{ deviceId: string; result: unknown }>;
@@ -58,7 +61,7 @@ async function resolveTargetIds(options: {
   filter?: string;
   ids?: string;
   readStdin: boolean;
-}): Promise<{ ids: string[]; typeMap: Map<string, string> }> {
+}, getClient?: () => AxiosInstance): Promise<{ ids: string[]; typeMap: Map<string, string> }> {
   const explicit: string[] = [];
 
   if (options.ids) {
@@ -84,18 +87,14 @@ async function resolveTargetIds(options: {
     );
   }
 
-  // Always fetch the device list so we can (a) apply --filter when present
-  // and (b) build a deviceId → deviceType map for destructive/validation
-  // checks regardless of how the ids were provided.
-  const body = await fetchDeviceList();
-  const hubLoc = buildHubLocationMap(body.deviceList);
-
-  const typeMap = new Map<string, string>();
-  for (const d of body.deviceList) if (d.deviceType) typeMap.set(d.deviceId, d.deviceType);
-  for (const ir of body.infraredRemoteList) typeMap.set(ir.deviceId, ir.remoteType);
+  const typeMap = getCachedTypeMap(explicit);
 
   let ids: string[];
   if (hasFilter) {
+    const body = await fetchDeviceList(getClient?.());
+    const hubLoc = buildHubLocationMap(body.deviceList);
+    for (const d of body.deviceList) if (d.deviceType) typeMap.set(d.deviceId, d.deviceType);
+    for (const ir of body.infraredRemoteList) typeMap.set(ir.deviceId, ir.remoteType);
     const clauses = parseFilter(options.filter);
     const matched = applyFilter(clauses, body.deviceList, body.infraredRemoteList, hubLoc);
     const filteredIds = new Set(matched.map((m) => m.deviceId));
@@ -103,6 +102,12 @@ async function resolveTargetIds(options: {
       explicit.length > 0 ? explicit.filter((id) => filteredIds.has(id)) : [...filteredIds];
   } else {
     ids = explicit;
+    const missingTypeInfo = ids.some((id) => !typeMap.has(id));
+    if (missingTypeInfo) {
+      const body = await fetchDeviceList(getClient?.());
+      for (const d of body.deviceList) if (d.deviceType) typeMap.set(d.deviceId, d.deviceType);
+      for (const ir of body.infraredRemoteList) typeMap.set(ir.deviceId, ir.remoteType);
+    }
   }
 
   return { ids, typeMap };
@@ -167,6 +172,8 @@ Examples:
         // Trailing "-" sentinel selects stdin mode.
         const extra = commandObj.args ?? [];
         const readStdin = Boolean(options.stdin) || extra.includes('-');
+        let client: AxiosInstance | undefined;
+        const getClient = (): AxiosInstance => (client ??= createClient());
 
         let resolved: Awaited<ReturnType<typeof resolveTargetIds>>;
         try {
@@ -174,7 +181,7 @@ Examples:
             filter: options.filter,
             ids: options.ids,
             readStdin,
-          });
+          }, getClient);
         } catch (error) {
           if (error instanceof FilterSyntaxError) {
             if (isJsonMode()) {
@@ -259,7 +266,7 @@ Examples:
 
         const outcomes = await runPool(resolved.ids, concurrency, async (id) => {
           try {
-            const result = await executeCommand(id, cmd, parsedParam, effectiveType);
+            const result = await executeCommand(id, cmd, parsedParam, effectiveType, getClient());
             if (!isJsonMode()) {
               console.log(`✓ ${id}: ${cmd}`);
             }
