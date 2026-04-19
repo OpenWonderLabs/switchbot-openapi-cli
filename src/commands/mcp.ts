@@ -26,10 +26,14 @@ import { fetchScenes, executeScene } from '../lib/scenes.js';
 import { findCatalogEntry } from '../devices/catalog.js';
 import { getCachedDevice } from '../devices/cache.js';
 import { EventSubscriptionManager } from '../mcp/events-subscription.js';
+import { resolveTargetIds, runBatchCommand } from './batch.js';
+import { runPlan, validatePlan } from './plan.js';
+import { createClient } from '../api/client.js';
+import { todayUsage } from '../utils/quota.js';
 
 /**
- * Factory — build an McpServer with the six SwitchBot tools registered.
- * Exported so tests and alternative transports can reuse it.
+ * Factory — build an McpServer with the SwitchBot tools registered
+ * (device control, plan run, webhooks, quota, events resource).
  */
 
 type McpErrorKind = 'api' | 'runtime' | 'usage' | 'guard';
@@ -473,6 +477,264 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
     },
   );
 
+  // ---- devices_batch --------------------------------------------------------
+  server.registerTool(
+    'devices_batch',
+    {
+      title: 'Send the same command to many devices',
+      description:
+        'Fan a single command out to many devices in parallel. Provide either explicit ids[] OR a filter string (e.g. "type=Bot,family=Home"). Destructive commands require yes:true. Returns per-device succeeded/failed breakdown.',
+      inputSchema: {
+        command: z.string().describe('Command name, e.g. turnOn, turnOff, setBrightness'),
+        parameter: z
+          .union([z.string(), z.number(), z.boolean(), z.record(z.string(), z.unknown()), z.array(z.unknown())])
+          .optional()
+          .describe('Command parameter (omit for no-arg commands)'),
+        ids: z.array(z.string()).optional().describe('Explicit list of deviceIds to target'),
+        filter: z.string().optional().describe('Filter expression, e.g. "type=Bot,family=Home"'),
+        commandType: z.enum(['command', 'customize']).optional().default('command'),
+        concurrency: z.number().int().min(1).max(20).optional().default(5),
+        yes: z.boolean().optional().default(false).describe('Required true for destructive commands (unlock, garage open, ...)'),
+      },
+    },
+    async ({ command, parameter, ids, filter, commandType, concurrency, yes }) => {
+      if ((!ids || ids.length === 0) && !filter) {
+        return mcpError('usage', 2, 'devices_batch requires ids[] or filter to pick targets', {
+          hint: 'Pass ids:["ID1","ID2"] or filter:"type=Bot,family=Home".',
+        });
+      }
+      try {
+        const resolved = await resolveTargetIds({
+          filter,
+          ids: ids?.join(','),
+          readStdin: false,
+        });
+        if (resolved.ids.length === 0) {
+          const empty = { succeeded: [], failed: [], summary: { total: 0, ok: 0, failed: 0, skipped: 0, durationMs: 0 } };
+          return {
+            content: [{ type: 'text', text: JSON.stringify(empty, null, 2) }],
+            structuredContent: empty,
+          };
+        }
+        const result = await runBatchCommand({
+          ids: resolved.ids,
+          typeMap: resolved.typeMap,
+          command,
+          parameter,
+          commandType,
+          concurrency,
+          yes,
+        });
+        if ('blocked' in result) {
+          return mcpError(
+            'guard', 3,
+            `Destructive command "${command}" requires yes:true on ${result.devices.length} device(s).`,
+            {
+              hint: 'Re-issue the call with yes:true after confirming with the user.',
+              context: { command, deviceIds: result.devices.map((d) => d.deviceId) },
+            },
+          );
+        }
+        return {
+          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+          structuredContent: result as unknown as Record<string, unknown>,
+        };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return mcpError('runtime', 1, msg);
+      }
+    },
+  );
+
+  // ---- plan_run -------------------------------------------------------------
+  server.registerTool(
+    'plan_run',
+    {
+      title: 'Execute an agent-authored plan',
+      description:
+        'Validate and execute a SwitchBot plan (version 1.0). The plan JSON describes a sequence of command/scene/wait steps. Destructive steps require yes:true.',
+      inputSchema: {
+        plan: z
+          .object({
+            version: z.string(),
+            description: z.string().optional(),
+            steps: z.array(z.record(z.string(), z.unknown())),
+          })
+          .passthrough()
+          .describe('Plan object (see `switchbot plan schema` for the full JSON Schema)'),
+        yes: z.boolean().optional().default(false).describe('Authorize destructive steps (unlock, garage open, ...)'),
+        continueOnError: z.boolean().optional().default(false).describe('Keep running after a failed step'),
+      },
+    },
+    async ({ plan, yes, continueOnError }) => {
+      const v = validatePlan(plan);
+      if (!v.ok) {
+        return mcpError('usage', 2, 'plan failed schema validation', {
+          context: { issues: v.issues },
+        });
+      }
+      try {
+        const out = await runPlan(v.plan, { yes, continueOnError });
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ ran: true, ...out }, null, 2) }],
+          structuredContent: { ran: true, ...out } as unknown as Record<string, unknown>,
+        };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return mcpError('runtime', 1, msg);
+      }
+    },
+  );
+
+  // ---- webhook tools --------------------------------------------------------
+  function assertWebhookUrl(url: string): string | null {
+    let parsed: URL;
+    try { parsed = new URL(url); } catch { return `Invalid URL "${url}"`; }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return `URL must use http:// or https:// (got "${parsed.protocol}")`;
+    }
+    return null;
+  }
+
+  server.registerTool(
+    'webhook_setup',
+    {
+      title: 'Configure the webhook receiver URL',
+      description:
+        'Register an absolute http(s):// URL where SwitchBot will POST state-change events. Only one webhook is active per account.',
+      inputSchema: {
+        url: z.string().describe('Absolute http(s):// URL'),
+      },
+    },
+    async ({ url }) => {
+      const err = assertWebhookUrl(url);
+      if (err) return mcpError('usage', 2, err);
+      try {
+        const client = createClient();
+        await client.post('/v1.1/webhook/setupWebhook', { action: 'setupWebhook', url, deviceList: 'ALL' });
+        const structured = { ok: true as const, url };
+        return { content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }], structuredContent: structured };
+      } catch (e) {
+        return mcpError('api', 1, e instanceof Error ? e.message : String(e));
+      }
+    },
+  );
+
+  server.registerTool(
+    'webhook_query',
+    {
+      title: 'Query webhook configuration',
+      description:
+        'List all configured webhook URLs, or pass `url` to fetch the enable/deviceList/timestamps for a specific one.',
+      inputSchema: {
+        url: z.string().optional().describe('If set, fetch details for this URL; otherwise list all'),
+      },
+    },
+    async ({ url }) => {
+      try {
+        const client = createClient();
+        if (url) {
+          const res = await client.post<{ body: unknown[] }>(
+            '/v1.1/webhook/queryWebhook',
+            { action: 'queryDetails', urls: [url] },
+          );
+          return {
+            content: [{ type: 'text', text: JSON.stringify(res.data.body ?? [], null, 2) }],
+            structuredContent: { details: res.data.body ?? [] },
+          };
+        }
+        const res = await client.post<{ body: { urls: string[] } }>(
+          '/v1.1/webhook/queryWebhook',
+          { action: 'queryUrl' },
+        );
+        const urls = res.data.body.urls ?? [];
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ urls }, null, 2) }],
+          structuredContent: { urls },
+        };
+      } catch (e) {
+        return mcpError('api', 1, e instanceof Error ? e.message : String(e));
+      }
+    },
+  );
+
+  server.registerTool(
+    'webhook_update',
+    {
+      title: 'Enable, disable, or re-submit a webhook',
+      description:
+        'Update an already-registered webhook URL. Pass enable:true or enable:false to toggle; omit to re-submit without change.',
+      inputSchema: {
+        url: z.string().describe('URL of the webhook to update'),
+        enable: z.boolean().optional().describe('true enables, false disables; omit for no-change re-submit'),
+      },
+    },
+    async ({ url, enable }) => {
+      const err = assertWebhookUrl(url);
+      if (err) return mcpError('usage', 2, err);
+      try {
+        const client = createClient();
+        const config: { url: string; enable?: boolean } = { url };
+        if (enable !== undefined) config.enable = enable;
+        await client.post('/v1.1/webhook/updateWebhook', { action: 'updateWebhook', config });
+        const status = enable === true ? 'enabled' : enable === false ? 'disabled' : 'updated';
+        const structured = { ok: true as const, url, status };
+        return { content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }], structuredContent: structured };
+      } catch (e) {
+        return mcpError('api', 1, e instanceof Error ? e.message : String(e));
+      }
+    },
+  );
+
+  server.registerTool(
+    'webhook_delete',
+    {
+      title: 'Delete a webhook',
+      description: 'Remove a webhook registration by URL.',
+      inputSchema: {
+        url: z.string().describe('URL of the webhook to remove'),
+      },
+    },
+    async ({ url }) => {
+      const err = assertWebhookUrl(url);
+      if (err) return mcpError('usage', 2, err);
+      try {
+        const client = createClient();
+        await client.post('/v1.1/webhook/deleteWebhook', { action: 'deleteWebhook', url });
+        const structured = { ok: true as const, url };
+        return { content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }], structuredContent: structured };
+      } catch (e) {
+        return mcpError('api', 1, e instanceof Error ? e.message : String(e));
+      }
+    },
+  );
+
+  // ---- quota_status ---------------------------------------------------------
+  server.registerTool(
+    'quota_status',
+    {
+      title: "Report today's local API quota usage",
+      description:
+        "Return today's locally-tracked SwitchBot API usage (10,000/day budget). This is the CLI's own counter — SwitchBot does not expose a server-side quota endpoint. `serverQuotaKnown` will be true once a ratelimit header has been observed.",
+      inputSchema: {},
+      outputSchema: {
+        date: z.string(),
+        total: z.number().int(),
+        remaining: z.number().int(),
+        endpoints: z.record(z.string(), z.number().int()),
+        serverQuotaKnown: z.literal(false),
+      },
+    },
+    async () => {
+      const usage = todayUsage();
+      const structured = { ...usage, serverQuotaKnown: false as const };
+      return {
+        content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+        structuredContent: structured,
+      };
+    },
+  );
+
   return server;
 }
 
@@ -481,18 +743,25 @@ export function registerMcpCommand(program: Command): void {
     .command('mcp')
     .description('Run as a Model Context Protocol server so AI agents can call SwitchBot tools')
     .addHelpText('after', `
-The MCP server exposes eight tools over stdio:
-  - list_devices          fetch all physical + IR devices
-  - get_device_status     live status for a physical device
-  - send_command          control a device (destructive commands need confirm:true)
-  - list_scenes           list all manual scenes
-  - run_scene             execute a manual scene
-  - search_catalog        offline catalog search by type/alias
-  - describe_device       metadata + commands + (optionally) live status for one device
-  - events_recent         last N MQTT shadow events from the in-process buffer
+The MCP server exposes these tools over stdio:
+  list_devices            fetch all physical + IR devices
+  get_device_status       live status for a physical device
+  send_command            control a device (destructive commands need confirm:true)
+  devices_batch           run one command across many devices in parallel
+  list_scenes             list all manual scenes
+  run_scene               execute a manual scene
+  search_catalog          offline catalog search by type/alias
+  describe_device         metadata + commands + (optionally) live status for one device
+  events_recent           last N MQTT shadow events from the in-process buffer
+  plan_run                validate + execute a SwitchBot plan (v1.0)
+  webhook_setup           configure the account's webhook receiver URL
+  webhook_query           list webhook URLs, or fetch details for one
+  webhook_update          enable/disable a registered webhook URL
+  webhook_delete          remove a webhook registration
+  quota_status            today's local API quota usage
 
 And one subscribable resource:
-  - switchbot://events    push notifications/resources/updated on every shadow event
+  switchbot://events      push notifications/resources/updated on every shadow event
 
 Example Claude Desktop config (~/Library/Application Support/Claude/claude_desktop_config.json):
 

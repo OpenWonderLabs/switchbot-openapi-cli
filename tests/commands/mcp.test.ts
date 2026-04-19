@@ -40,6 +40,20 @@ const cacheMock = vi.hoisted(() => {
 vi.mock('../../src/devices/cache.js', () => ({
   getCachedDevice: cacheMock.getCachedDevice,
   updateCacheFromDeviceList: cacheMock.updateCacheFromDeviceList,
+  getCachedTypeMap: vi.fn((ids?: Iterable<string>) => {
+    const out = new Map<string, string>();
+    if (ids) {
+      for (const id of ids) {
+        const entry = cacheMock.map.get(id);
+        if (entry?.type) out.set(id, entry.type);
+      }
+    } else {
+      for (const [id, entry] of cacheMock.map.entries()) {
+        if (entry.type) out.set(id, entry.type);
+      }
+    }
+    return out;
+  }),
   loadCache: vi.fn(() => null),
   clearCache: vi.fn(),
   isListCacheFresh: vi.fn(() => false),
@@ -76,7 +90,7 @@ describe('mcp server', () => {
     cacheMock.updateCacheFromDeviceList.mockClear();
   });
 
-  it('exposes the eight tools with titles and input schemas', async () => {
+  it('exposes the expanded tool catalog with titles and input schemas', async () => {
     const { client } = await pair();
     const { tools } = await client.listTools();
 
@@ -84,13 +98,20 @@ describe('mcp server', () => {
     expect(names).toEqual(
       [
         'describe_device',
+        'devices_batch',
         'events_recent',
         'get_device_status',
         'list_devices',
         'list_scenes',
+        'plan_run',
+        'quota_status',
         'run_scene',
         'search_catalog',
         'send_command',
+        'webhook_delete',
+        'webhook_query',
+        'webhook_setup',
+        'webhook_update',
       ].sort()
     );
 
@@ -323,5 +344,114 @@ describe('mcp server', () => {
       '/v1.1/devices/COLDBOT/commands',
       expect.objectContaining({ command: 'turnOn' })
     );
+  });
+
+  it('devices_batch requires ids or filter', async () => {
+    const { client } = await pair();
+    const res = await client.callTool({
+      name: 'devices_batch',
+      arguments: { command: 'turnOff' },
+    });
+    expect(res.isError).toBe(true);
+    const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    expect(parsed.error.kind).toBe('usage');
+  });
+
+  it('devices_batch fans a command across the supplied ids', async () => {
+    cacheMock.map.set('B1', { type: 'Bot', name: 'Bot 1', category: 'physical' });
+    cacheMock.map.set('B2', { type: 'Bot', name: 'Bot 2', category: 'physical' });
+    apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body: {} } });
+    const { client } = await pair();
+
+    const res = await client.callTool({
+      name: 'devices_batch',
+      arguments: { command: 'turnOff', ids: ['B1', 'B2'] },
+    });
+    expect(res.isError).toBeFalsy();
+    const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    expect(parsed.summary.total).toBe(2);
+    expect(parsed.summary.ok).toBe(2);
+  });
+
+  it('devices_batch blocks destructive commands unless yes:true', async () => {
+    cacheMock.map.set('L1', { type: 'Smart Lock', name: 'Lock', category: 'physical' });
+    const { client } = await pair();
+    const res = await client.callTool({
+      name: 'devices_batch',
+      arguments: { command: 'unlock', ids: ['L1'] },
+    });
+    expect(res.isError).toBe(true);
+    const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    expect(parsed.error.kind).toBe('guard');
+    expect(apiMock.__instance.post).not.toHaveBeenCalled();
+  });
+
+  it('plan_run executes a simple wait+scene plan', async () => {
+    apiMock.__instance.post.mockResolvedValueOnce({ data: { statusCode: 100, body: {} } });
+    const { client } = await pair();
+    const res = await client.callTool({
+      name: 'plan_run',
+      arguments: {
+        plan: {
+          version: '1.0',
+          steps: [
+            { type: 'wait', ms: 1 },
+            { type: 'scene', sceneId: 'SC1' },
+          ],
+        },
+      },
+    });
+    expect(res.isError).toBeFalsy();
+    const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    expect(parsed.ran).toBe(true);
+    expect(parsed.summary).toEqual({ total: 2, ok: 2, error: 0, skipped: 0 });
+  });
+
+  it('plan_run rejects an invalid plan shape', async () => {
+    const { client } = await pair();
+    const res = await client.callTool({
+      name: 'plan_run',
+      arguments: { plan: { version: '2.0', steps: [] } },
+    });
+    expect(res.isError).toBe(true);
+    const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    expect(parsed.error.kind).toBe('usage');
+  });
+
+  it('webhook_setup rejects a non-http URL', async () => {
+    const { client } = await pair();
+    const res = await client.callTool({
+      name: 'webhook_setup',
+      arguments: { url: 'ftp://example.com/hook' },
+    });
+    expect(res.isError).toBe(true);
+    expect(apiMock.__instance.post).not.toHaveBeenCalled();
+  });
+
+  it('webhook_setup POSTs to the SwitchBot setup endpoint', async () => {
+    apiMock.__instance.post.mockResolvedValueOnce({ data: { statusCode: 100, body: {} } });
+    const { client } = await pair();
+    const res = await client.callTool({
+      name: 'webhook_setup',
+      arguments: { url: 'https://example.com/hook' },
+    });
+    expect(res.isError).toBeFalsy();
+    expect(apiMock.__instance.post).toHaveBeenCalledWith(
+      '/v1.1/webhook/setupWebhook',
+      expect.objectContaining({ url: 'https://example.com/hook', deviceList: 'ALL' }),
+    );
+  });
+
+  it('quota_status returns today\'s local counter', async () => {
+    const { client } = await pair();
+    const res = await client.callTool({ name: 'quota_status', arguments: {} });
+    expect(res.isError).toBeFalsy();
+    const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    expect(parsed).toMatchObject({
+      date: expect.any(String),
+      total: expect.any(Number),
+      remaining: expect.any(Number),
+      serverQuotaKnown: false,
+    });
   });
 });

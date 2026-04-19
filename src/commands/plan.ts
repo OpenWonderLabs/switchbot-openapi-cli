@@ -204,7 +204,7 @@ function readStdin(): Promise<string> {
   });
 }
 
-interface PlanRunResult {
+export interface PlanRunResult {
   plan: Plan;
   results: Array<
     | { step: number; type: 'command'; deviceId: string; command: string; status: 'ok' | 'error' | 'skipped'; error?: string }
@@ -212,6 +212,112 @@ interface PlanRunResult {
     | { step: number; type: 'wait'; ms: number; status: 'ok' | 'skipped' }
   >;
   summary: { total: number; ok: number; error: number; skipped: number };
+}
+
+/**
+ * Shared plan executor used by both the CLI `plan run` action and the MCP
+ * `plan_run` tool. `onStep` is an optional progress hook for human output;
+ * MCP callers leave it unset and consume the returned PlanRunResult instead.
+ */
+export async function runPlan(
+  plan: Plan,
+  options: {
+    yes?: boolean;
+    continueOnError?: boolean;
+    onStep?: (line: string) => void;
+  } = {},
+): Promise<PlanRunResult> {
+  const out: PlanRunResult = {
+    plan,
+    results: [],
+    summary: { total: plan.steps.length, ok: 0, error: 0, skipped: 0 },
+  };
+  const emit = (line: string) => options.onStep?.(line);
+
+  for (let i = 0; i < plan.steps.length; i++) {
+    const step = plan.steps[i];
+    const idx = i + 1;
+    if (step.type === 'wait') {
+      await new Promise((r) => setTimeout(r, step.ms));
+      out.results.push({ step: idx, type: 'wait', ms: step.ms, status: 'ok' });
+      out.summary.ok++;
+      emit(`  ${idx}. wait ${step.ms}ms`);
+      continue;
+    }
+    if (step.type === 'scene') {
+      try {
+        await executeScene(step.sceneId);
+        out.results.push({ step: idx, type: 'scene', sceneId: step.sceneId, status: 'ok' });
+        out.summary.ok++;
+        emit(`  ${idx}. ✓ scene ${step.sceneId}`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        out.results.push({ step: idx, type: 'scene', sceneId: step.sceneId, status: 'error', error: msg });
+        out.summary.error++;
+        emit(`  ${idx}. ✗ scene ${step.sceneId}: ${msg}`);
+        if (!options.continueOnError) break;
+      }
+      continue;
+    }
+    // command
+    const resolvedDeviceId = resolveDeviceId(step.deviceId, step.deviceName);
+    const deviceType = getCachedDevice(resolvedDeviceId)?.type;
+    const commandType = step.commandType ?? 'command';
+    const destructive = isDestructiveCommand(deviceType, step.command, commandType);
+    if (destructive && !options.yes) {
+      out.results.push({
+        step: idx,
+        type: 'command',
+        deviceId: resolvedDeviceId,
+        command: step.command,
+        status: 'skipped',
+        error: 'destructive — rerun with --yes',
+      });
+      out.summary.skipped++;
+      emit(`  ${idx}. ⚠ skipped ${step.command} on ${resolvedDeviceId} (destructive — pass --yes)`);
+      if (!options.continueOnError) break;
+      continue;
+    }
+    try {
+      await executeCommand(resolvedDeviceId, step.command, step.parameter, commandType);
+      out.results.push({
+        step: idx,
+        type: 'command',
+        deviceId: resolvedDeviceId,
+        command: step.command,
+        status: 'ok',
+      });
+      out.summary.ok++;
+      emit(`  ${idx}. ✓ ${step.command} on ${resolvedDeviceId}`);
+    } catch (err) {
+      if (err instanceof Error && err.name === 'DryRunSignal') {
+        out.results.push({
+          step: idx,
+          type: 'command',
+          deviceId: resolvedDeviceId,
+          command: step.command,
+          status: 'ok',
+        });
+        out.summary.ok++;
+        emit(`  ${idx}. ◦ dry-run ${step.command} on ${resolvedDeviceId}`);
+        continue;
+      }
+      const msg = err instanceof Error ? err.message : String(err);
+      out.results.push({
+        step: idx,
+        type: 'command',
+        deviceId: resolvedDeviceId,
+        command: step.command,
+        status: 'error',
+        error: msg,
+      });
+      out.summary.error++;
+      emit(`  ${idx}. ✗ ${step.command} on ${resolvedDeviceId}: ${msg}`);
+      if (!options.continueOnError) break;
+    }
+  }
+
+  return out;
 }
 
 export function registerPlanCommand(program: Command): void {
@@ -301,110 +407,24 @@ Workflow:
           process.exit(2);
         }
 
-        const out: PlanRunResult = {
-          plan: v.plan,
-          results: [],
-          summary: { total: v.plan.steps.length, ok: 0, error: 0, skipped: 0 },
-        };
-
+        let out: PlanRunResult;
         try {
-          for (let i = 0; i < v.plan.steps.length; i++) {
-            const step = v.plan.steps[i];
-            const idx = i + 1;
-            if (step.type === 'wait') {
-              await new Promise((r) => setTimeout(r, step.ms));
-              out.results.push({ step: idx, type: 'wait', ms: step.ms, status: 'ok' });
-              out.summary.ok++;
-              if (!isJsonMode()) console.log(`  ${idx}. wait ${step.ms}ms`);
-              continue;
-            }
-            if (step.type === 'scene') {
-              try {
-                await executeScene(step.sceneId);
-                out.results.push({ step: idx, type: 'scene', sceneId: step.sceneId, status: 'ok' });
-                out.summary.ok++;
-                if (!isJsonMode()) console.log(`  ${idx}. ✓ scene ${step.sceneId}`);
-              } catch (err) {
-                const msg = err instanceof Error ? err.message : String(err);
-                out.results.push({ step: idx, type: 'scene', sceneId: step.sceneId, status: 'error', error: msg });
-                out.summary.error++;
-                if (!isJsonMode()) console.log(`  ${idx}. ✗ scene ${step.sceneId}: ${msg}`);
-                if (!options.continueOnError) break;
-              }
-              continue;
-            }
-            // command
-            const resolvedDeviceId = resolveDeviceId(step.deviceId, step.deviceName);
-            const deviceType = getCachedDevice(resolvedDeviceId)?.type;
-            const commandType = step.commandType ?? 'command';
-            const destructive = isDestructiveCommand(deviceType, step.command, commandType);
-            if (destructive && !options.yes) {
-              out.results.push({
-                step: idx,
-                type: 'command',
-                deviceId: resolvedDeviceId,
-                command: step.command,
-                status: 'skipped',
-                error: 'destructive — rerun with --yes',
-              });
-              out.summary.skipped++;
-              if (!isJsonMode())
-                console.log(`  ${idx}. ⚠ skipped ${step.command} on ${resolvedDeviceId} (destructive — pass --yes)`);
-              if (!options.continueOnError) break;
-              continue;
-            }
-            try {
-              await executeCommand(resolvedDeviceId, step.command, step.parameter, commandType);
-              out.results.push({
-                step: idx,
-                type: 'command',
-                deviceId: resolvedDeviceId,
-                command: step.command,
-                status: 'ok',
-              });
-              out.summary.ok++;
-              if (!isJsonMode())
-                console.log(`  ${idx}. ✓ ${step.command} on ${resolvedDeviceId}`);
-            } catch (err) {
-              if (err instanceof Error && err.name === 'DryRunSignal') {
-                out.results.push({
-                  step: idx,
-                  type: 'command',
-                  deviceId: resolvedDeviceId,
-                  command: step.command,
-                  status: 'ok',
-                });
-                out.summary.ok++;
-                if (!isJsonMode())
-                  console.log(`  ${idx}. ◦ dry-run ${step.command} on ${resolvedDeviceId}`);
-                continue;
-              }
-              const msg = err instanceof Error ? err.message : String(err);
-              out.results.push({
-                step: idx,
-                type: 'command',
-                deviceId: resolvedDeviceId,
-                command: step.command,
-                status: 'error',
-                error: msg,
-              });
-              out.summary.error++;
-              if (!isJsonMode())
-                console.log(`  ${idx}. ✗ ${step.command} on ${resolvedDeviceId}: ${msg}`);
-              if (!options.continueOnError) break;
-            }
-          }
-
-          if (isJsonMode()) {
-            printJson({ ran: true, ...out });
-          } else {
-            const { ok, error, skipped, total } = out.summary;
-            console.log(`\nsummary: ok=${ok} error=${error} skipped=${skipped} total=${total}`);
-          }
+          out = await runPlan(v.plan, {
+            yes: options.yes,
+            continueOnError: options.continueOnError,
+            onStep: isJsonMode() ? undefined : (line) => console.log(line),
+          });
         } catch (err) {
           handleError(err);
         }
-        if (out.summary.error > 0) process.exit(1);
+
+        if (isJsonMode()) {
+          printJson({ ran: true, ...out! });
+        } else {
+          const { ok, error, skipped, total } = out!.summary;
+          console.log(`\nsummary: ok=${ok} error=${error} skipped=${skipped} total=${total}`);
+        }
+        if (out!.summary.error > 0) process.exit(1);
       },
     );
 }

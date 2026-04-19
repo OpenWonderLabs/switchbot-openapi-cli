@@ -13,7 +13,7 @@ import { isDryRun } from '../utils/flags.js';
 import { DryRunSignal } from '../api/client.js';
 import { getCachedTypeMap } from '../devices/cache.js';
 
-interface BatchResult {
+export interface BatchResult {
   succeeded: Array<{ deviceId: string; result: unknown }>;
   failed: Array<{ deviceId: string; error: string }>;
   summary: {
@@ -24,6 +24,12 @@ interface BatchResult {
     durationMs: number;
     dryRun?: boolean;
   };
+}
+
+export interface BatchBlockedResult {
+  blocked: true;
+  reason: 'destructive';
+  devices: Array<{ deviceId: string; reason: string }>;
 }
 
 const DEFAULT_CONCURRENCY = 5;
@@ -57,7 +63,7 @@ async function runPool<T, R>(
   return results;
 }
 
-async function resolveTargetIds(options: {
+export async function resolveTargetIds(options: {
   filter?: string;
   ids?: string;
   readStdin: boolean;
@@ -111,6 +117,72 @@ async function resolveTargetIds(options: {
   }
 
   return { ids, typeMap };
+}
+
+/**
+ * Shared batch executor used by both the CLI `devices batch` action and the
+ * MCP `devices_batch` tool. The caller is responsible for resolving targets;
+ * this function handles destructive-guard pre-flight, pool execution, and
+ * BatchResult aggregation.
+ */
+export async function runBatchCommand(params: {
+  ids: string[];
+  typeMap: Map<string, string>;
+  command: string;
+  parameter?: unknown;
+  commandType?: 'command' | 'customize';
+  concurrency?: number;
+  yes?: boolean;
+  getClient?: () => AxiosInstance;
+}): Promise<BatchResult | BatchBlockedResult> {
+  const effectiveType = params.commandType === 'customize' ? 'customize' : 'command';
+
+  const blocked: Array<{ deviceId: string; reason: string }> = [];
+  for (const id of params.ids) {
+    const t = params.typeMap.get(id);
+    if (isDestructiveCommand(t, params.command, effectiveType) && !params.yes) {
+      blocked.push({
+        deviceId: id,
+        reason: `destructive command "${params.command}" on ${t ?? 'unknown'} requires yes:true`,
+      });
+    }
+  }
+  if (blocked.length > 0) {
+    return { blocked: true, reason: 'destructive', devices: blocked };
+  }
+
+  const client = params.getClient ?? (() => createClient());
+  const concurrency = Math.max(1, params.concurrency ?? DEFAULT_CONCURRENCY);
+  const dryRun = isDryRun();
+  const startedAt = Date.now();
+
+  const outcomes = await runPool(params.ids, concurrency, async (id) => {
+    try {
+      const result = await executeCommand(id, params.command, params.parameter ?? 'default', effectiveType, client());
+      return { ok: true as const, deviceId: id, result };
+    } catch (err) {
+      if (err instanceof DryRunSignal) return { ok: 'dry-run' as const, deviceId: id };
+      const message = err instanceof Error ? err.message : String(err);
+      return { ok: false as const, deviceId: id, error: message };
+    }
+  });
+
+  const succeeded = outcomes.filter((o) => o.ok === true) as Array<{ ok: true; deviceId: string; result: unknown }>;
+  const failed = outcomes.filter((o) => o.ok === false) as Array<{ ok: false; deviceId: string; error: string }>;
+  const dryRunned = outcomes.filter((o) => o.ok === 'dry-run') as Array<{ ok: 'dry-run'; deviceId: string }>;
+
+  return {
+    succeeded: succeeded.map((s) => ({ deviceId: s.deviceId, result: s.result })),
+    failed: failed.map((f) => ({ deviceId: f.deviceId, error: f.error })),
+    summary: {
+      total: params.ids.length,
+      ok: succeeded.length,
+      failed: failed.length,
+      skipped: dryRunned.length,
+      durationMs: Date.now() - startedAt,
+      ...(dryRun ? { dryRun: true } : {}),
+    },
+  };
 }
 
 export function registerBatchCommand(devices: Command): void {
