@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { printJson, isJsonMode, handleError, UsageError } from '../utils/output.js';
+import { printJsonLine, isJsonMode, handleError, UsageError } from '../utils/output.js';
 import { fetchDeviceStatus } from '../lib/devices.js';
 import { getCachedDevice, loadStatusCache, setCachedStatus } from '../devices/cache.js';
 import { parseDurationToMs, getFields, isVerbose } from '../utils/flags.js';
@@ -178,7 +178,7 @@ async function watchViaPolling(
               changed,
             };
             if (isJsonMode()) {
-              printJson(ev);
+              printJsonLine(ev);
             } else {
               console.log(formatHumanLine(ev));
             }
@@ -192,7 +192,7 @@ async function watchViaPolling(
               error: err instanceof Error ? err.message : String(err),
             };
             if (isJsonMode()) {
-              printJson(ev);
+              printJsonLine(ev);
             } else {
               console.error(formatHumanLine(ev));
             }
@@ -263,7 +263,7 @@ async function watchViaMqtt(
           changed,
         };
         if (isJsonMode()) {
-          printJson(ev);
+          printJsonLine(ev);
         } else {
           console.log(formatHumanLine(ev));
         }

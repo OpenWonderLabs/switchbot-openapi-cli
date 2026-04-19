@@ -75,7 +75,7 @@ const flagsMock = vi.hoisted(() => ({
 vi.mock('../../src/utils/flags.js', () => flagsMock);
 
 import { registerDevicesCommand } from '../../src/commands/devices.js';
-import { runCli } from '../helpers/cli.js';
+import { runCli, parseEnvelope } from '../helpers/cli.js';
 
 const DEVICE_LIST_BODY = {
   deviceList: [
@@ -155,7 +155,7 @@ describe('devices batch', () => {
 
     expect(result.exitCode).toBeNull();
     expect(apiMock.__instance.post).toHaveBeenCalledTimes(2);
-    const parsed = JSON.parse(result.stdout[0]);
+    const parsed = parseEnvelope(result.stdout[0]) as any;
     expect(parsed.summary.ok).toBe(2);
     expect(parsed.summary.failed).toBe(0);
     expect(parsed.succeeded.map((s: { deviceId: string }) => s.deviceId).sort()).toEqual(['BOT1', 'BOT2']);
@@ -179,7 +179,7 @@ describe('devices batch', () => {
     expect(result.exitCode).toBeNull();
     // Only BOT1 and BOT2 pass the filter — LOCK1 is excluded.
     expect(apiMock.__instance.post).toHaveBeenCalledTimes(2);
-    const parsed = JSON.parse(result.stdout[0]);
+    const parsed = parseEnvelope(result.stdout[0]) as any;
     expect(parsed.summary.total).toBe(2);
   });
 
@@ -220,7 +220,7 @@ describe('devices batch', () => {
     ]);
 
     expect(result.exitCode).toBe(1);
-    const parsed = JSON.parse(result.stdout[0]);
+    const parsed = parseEnvelope(result.stdout[0]) as any;
     expect(parsed.summary.ok).toBe(1);
     expect(parsed.summary.failed).toBe(1);
     expect(parsed.failed[0].deviceId).toBe('BOT2');
@@ -259,7 +259,7 @@ describe('devices batch', () => {
 
     expect(result.exitCode).toBeNull();
     expect(apiMock.__instance.post).toHaveBeenCalledTimes(1);
-    const parsed = JSON.parse(result.stdout[0]);
+    const parsed = parseEnvelope(result.stdout[0]) as any;
     expect(parsed.summary.ok).toBe(1);
   });
 
@@ -283,7 +283,7 @@ describe('devices batch', () => {
     ]);
 
     expect(result.exitCode).toBeNull();
-    const parsed = JSON.parse(result.stdout[0]);
+    const parsed = parseEnvelope(result.stdout[0]) as any;
     expect(parsed.summary.ok).toBe(0);
     expect(parsed.summary.failed).toBe(0);
     expect(parsed.summary.skipped).toBe(2);
@@ -320,7 +320,7 @@ describe('devices batch', () => {
       'type=Unicorn',
     ]);
     expect(result.exitCode).toBeNull();
-    const parsed = JSON.parse(result.stdout[0]);
+    const parsed = parseEnvelope(result.stdout[0]) as any;
     expect(parsed.summary.total).toBe(0);
     expect(apiMock.__instance.post).not.toHaveBeenCalled();
   });

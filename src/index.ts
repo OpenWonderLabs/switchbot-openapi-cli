@@ -16,6 +16,7 @@ import { registerSchemaCommand } from './commands/schema.js';
 import { registerHistoryCommand } from './commands/history.js';
 import { registerPlanCommand } from './commands/plan.js';
 import { registerCapabilitiesCommand } from './commands/capabilities.js';
+import { beginCommand } from './utils/output.js';
 
 const require = createRequire(import.meta.url);
 const { version: pkgVersion } = require('../package.json') as { version: string };
@@ -42,7 +43,17 @@ program
   .option('--profile <name>', 'Use a named profile: ~/.switchbot/profiles/<name>.json')
   .option('--audit-log [path]', 'Append every mutating command to JSONL audit log (default ~/.switchbot/audit.log)')
   .showHelpAfterError('(run with --help to see usage)')
-  .showSuggestionAfterError();
+  .showSuggestionAfterError()
+  .hook('preAction', (_thisCommand, actionCommand) => {
+    // Build dotted command path (e.g. "devices.status") by walking up parents.
+    const names: string[] = [];
+    let cur: Command | null = actionCommand;
+    while (cur && cur.name() !== 'switchbot') {
+      names.unshift(cur.name());
+      cur = cur.parent;
+    }
+    beginCommand(names.join('.'));
+  });
 
 registerConfigCommand(program);
 registerDevicesCommand(program);

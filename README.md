@@ -142,7 +142,8 @@ switchbot config show
 
 | Option                      | Description                                                              |
 | --------------------------- | ------------------------------------------------------------------------ |
-| `--json`                    | Print the raw JSON response instead of a formatted table                 |
+| `--json`                    | Print a structured JSON envelope instead of a formatted table            |
+| `--json-legacy`             | Opt out of the v1.6.0 envelope — emit the bare v1.5.0 payload (removed in v1.7.0) |
 | `--format <fmt>`            | Output format: `tsv`, `yaml`, `jsonl`, `json`, `id`                     |
 | `--fields <cols>`           | Comma-separated column names to include (e.g. `deviceId,type`)          |
 | `-v`, `--verbose`           | Log HTTP request/response details to stderr                              |
@@ -180,6 +181,41 @@ switchbot devices command ABC123 turnOn --dry-run
 # [dry-run] Would POST https://api.switch-bot.com/v1.1/devices/ABC123/commands
 # [dry-run] body: {"command":"turnOn","parameter":"default","commandType":"command"}
 ```
+
+### JSON envelope (v1.6.0+)
+
+Every `--json` response is wrapped in a unified envelope so agents can parse one
+shape across every command:
+
+```json
+{
+  "schemaVersion": "1",
+  "ok": true,
+  "data": { /* command-specific payload */ },
+  "meta": { "command": "devices.status", "durationMs": 123 }
+}
+```
+
+Errors use the same envelope with `ok: false` and an `error` block:
+
+```json
+{
+  "schemaVersion": "1",
+  "ok": false,
+  "error": { "code": 190, "kind": "api", "subKind": "device-busy", "message": "...", "hint": "...", "retryable": false },
+  "meta": { "command": "devices.command", "durationMs": 12 }
+}
+```
+
+Key changes vs v1.5.0:
+
+- **Errors now go to `stdout`** in `--json` mode (previously `stderr`). Agents can pipe a single stream.
+- A top-level `schemaVersion: "1"` lets consumers detect breaking shape changes.
+- Streaming commands (`devices watch`, `events stream`, `events tail`) still emit **bare JSON per line** — the envelope applies to one-shot responses.
+
+Migration: scripts that parsed `--json` against the v1.5.0 shape can either
+unwrap `.data` or pass `--json-legacy` for the old bare payload (removed in
+v1.7.0).
 
 ## Commands
 

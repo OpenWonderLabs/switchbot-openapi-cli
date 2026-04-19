@@ -35,21 +35,43 @@ describe('isJsonMode', () => {
 });
 
 describe('printJson', () => {
-  it('writes pretty-printed JSON with 2-space indent', () => {
+  it('writes pretty-printed envelope JSON with 2-space indent', () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     printJson({ a: 1, b: [2, 3] });
     expect(logSpy).toHaveBeenCalledTimes(1);
-    const out = logSpy.mock.calls[0][0];
-    expect(out).toBe(JSON.stringify({ a: 1, b: [2, 3] }, null, 2));
-    expect(out).toContain('\n  ');
+    const parsed = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(parsed.schemaVersion).toBe('1');
+    expect(parsed.ok).toBe(true);
+    expect(parsed.data).toEqual({ a: 1, b: [2, 3] });
+    expect(parsed.meta).toBeDefined();
+    expect(logSpy.mock.calls[0][0]).toContain('\n  ');
   });
 
-  it('handles null and primitives', () => {
+  it('wraps null and primitive payloads in .data', () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     printJson(null);
     printJson(42);
     printJson('hi');
-    expect(logSpy.mock.calls.map((c) => c[0])).toEqual(['null', '42', '"hi"']);
+    const parsed = logSpy.mock.calls.map((c) => JSON.parse(c[0]));
+    expect(parsed[0].data).toBeNull();
+    expect(parsed[1].data).toBe(42);
+    expect(parsed[2].data).toBe('hi');
+    for (const p of parsed) {
+      expect(p.schemaVersion).toBe('1');
+      expect(p.ok).toBe(true);
+    }
+  });
+
+  it('emits the legacy bare shape when --json-legacy is passed', () => {
+    const originalArgv = process.argv;
+    process.argv = ['node', 'cli', '--json-legacy'];
+    try {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      printJson({ a: 1 });
+      expect(logSpy.mock.calls[0][0]).toBe(JSON.stringify({ a: 1 }, null, 2));
+    } finally {
+      process.argv = originalArgv;
+    }
   });
 });
 
@@ -232,16 +254,18 @@ describe('handleError', () => {
       process.argv = originalArgv;
     });
 
-    it('outputs structured JSON error to stderr for ApiError', async () => {
+    it('outputs structured JSON error envelope to stdout for ApiError', async () => {
       const { ApiError } = await import('../../src/api/client.js');
-      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
       vi.spyOn(process, 'exit').mockImplementation(() => {
         throw new Error('__exit');
       });
 
       expect(() => handleError(new ApiError('bad device', 190))).toThrow('__exit');
-      const raw = errSpy.mock.calls[0][0];
+      const raw = logSpy.mock.calls[0][0];
       const parsed = JSON.parse(raw);
+      expect(parsed.schemaVersion).toBe('1');
+      expect(parsed.ok).toBe(false);
       expect(parsed.error.code).toBe(190);
       expect(parsed.error.message).toBe('bad device');
       expect(parsed.error.hint).toMatch(/devices/);
@@ -249,53 +273,63 @@ describe('handleError', () => {
 
     it('marks 429 errors as retryable when ApiError.retryable is true', async () => {
       const { ApiError } = await import('../../src/api/client.js');
-      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
       vi.spyOn(process, 'exit').mockImplementation(() => {
         throw new Error('__exit');
       });
 
-      // Simulate what client.ts creates: retryable: true set explicitly.
       expect(() => handleError(new ApiError('rate limited', 429, { retryable: true, hint: 'check quota' }))).toThrow('__exit');
-      const parsed = JSON.parse(errSpy.mock.calls[0][0]);
+      const parsed = JSON.parse(logSpy.mock.calls[0][0]);
       expect(parsed.error.retryable).toBe(true);
       expect(parsed.error.hint).toBe('check quota');
     });
 
     it('prefers ApiError.hint over errorHint fallback when both exist', async () => {
       const { ApiError } = await import('../../src/api/client.js');
-      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
       vi.spyOn(process, 'exit').mockImplementation(() => {
         throw new Error('__exit');
       });
 
-      // code 429 has an errorHint, but the explicit hint should win.
       expect(() => handleError(new ApiError('over limit', 429, { retryable: true, hint: 'custom hint from client' }))).toThrow('__exit');
-      const parsed = JSON.parse(errSpy.mock.calls[0][0]);
+      const parsed = JSON.parse(logSpy.mock.calls[0][0]);
       expect(parsed.error.hint).toBe('custom hint from client');
     });
 
     it('does NOT set retryable when ApiError.retryable is false', async () => {
       const { ApiError } = await import('../../src/api/client.js');
-      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
       vi.spyOn(process, 'exit').mockImplementation(() => {
         throw new Error('__exit');
       });
 
       expect(() => handleError(new ApiError('auth failed', 401, { retryable: false }))).toThrow('__exit');
-      const parsed = JSON.parse(errSpy.mock.calls[0][0]);
+      const parsed = JSON.parse(logSpy.mock.calls[0][0]);
       expect(parsed.error.retryable).toBeUndefined();
     });
 
-    it('outputs structured JSON error for generic Error', () => {
-      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    it('outputs structured JSON error envelope for generic Error', () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
       vi.spyOn(process, 'exit').mockImplementation(() => {
         throw new Error('__exit');
       });
 
       expect(() => handleError(new Error('kaboom'))).toThrow('__exit');
-      const parsed = JSON.parse(errSpy.mock.calls[0][0]);
+      const parsed = JSON.parse(logSpy.mock.calls[0][0]);
       expect(parsed.error.code).toBe(1);
       expect(parsed.error.message).toBe('kaboom');
+    });
+
+    it('emits the legacy {error:...} shape on stderr when --json-legacy is passed', () => {
+      process.argv = ['node', 'cli', '--json', '--json-legacy', 'devices', 'status', 'X'];
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.spyOn(process, 'exit').mockImplementation(() => {
+        throw new Error('__exit');
+      });
+
+      expect(() => handleError(new Error('legacy path'))).toThrow('__exit');
+      const parsed = JSON.parse(errSpy.mock.calls[0][0]);
+      expect(parsed).toEqual({ error: { code: 1, kind: 'runtime', message: 'legacy path' } });
     });
   });
 });

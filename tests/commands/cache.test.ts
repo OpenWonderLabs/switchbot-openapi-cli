@@ -10,7 +10,7 @@ import {
   resetListCache,
   resetStatusCache,
 } from '../../src/devices/cache.js';
-import { runCli } from '../helpers/cli.js';
+import { runCli, parseEnvelope } from '../helpers/cli.js';
 
 let tmpHome: string;
 
@@ -81,12 +81,14 @@ describe('cache show', () => {
     setCachedStatus('BOT1', { power: 'on' }, new Date('2026-04-17T12:00:00Z'));
     const result = await runCli(registerCacheCommand, ['--json', 'cache', 'show']);
     expect(result.exitCode).toBeNull();
-    const parsed = JSON.parse(result.stdout.join('\n'));
+    const parsed = parseEnvelope(result.stdout.join('\n')) as {
+      list: { exists: boolean; deviceCount: number };
+      status: { entryCount: number; entries: Record<string, { fetchedAt: string; body?: unknown }> };
+    };
     expect(parsed.list.exists).toBe(true);
     expect(parsed.list.deviceCount).toBe(3);
     expect(parsed.status.entryCount).toBe(1);
     expect(parsed.status.entries.BOT1.fetchedAt).toBe('2026-04-17T12:00:00.000Z');
-    // --json output should not leak the raw status body (only timestamps).
     expect(parsed.status.entries.BOT1.body).toBeUndefined();
   });
 });
@@ -144,7 +146,7 @@ describe('cache clear', () => {
     updateCacheFromDeviceList(SAMPLE_BODY);
     const result = await runCli(registerCacheCommand, ['--json', 'cache', 'clear', '--key', 'list']);
     expect(result.exitCode).toBeNull();
-    const parsed = JSON.parse(result.stdout.join('\n'));
+    const parsed = parseEnvelope(result.stdout.join('\n'));
     expect(parsed).toEqual({ cleared: ['list'] });
   });
 

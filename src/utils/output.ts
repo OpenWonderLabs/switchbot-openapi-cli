@@ -5,12 +5,82 @@ import { MqttError, type MqttErrorSubKind } from '../mqtt/errors.js';
 
 import { getFormat } from './flags.js';
 
+export const SCHEMA_VERSION = '1';
+
 export function isJsonMode(): boolean {
   return process.argv.includes('--json') || getFormat() === 'json';
 }
 
+/**
+ * Back-compat opt-out. `--json-legacy` makes `printJson(data)` emit the bare
+ * payload (v1.5.0 behavior) instead of the v1.6.0 envelope. Planned removal
+ * in v1.7.0. Scripts that parse CLI `--json` output and can't be updated
+ * across a single minor-version bump should use this flag.
+ */
+export function isJsonLegacyMode(): boolean {
+  return process.argv.includes('--json-legacy');
+}
+
+/**
+ * Module-level state captured at action entry. Lets `printJson` build
+ * `meta.command` and `meta.durationMs` without threading the command object
+ * through every .action handler.
+ */
+let activeCommand: string | undefined;
+let activeStart: number | undefined;
+
+export function beginCommand(command: string): void {
+  activeCommand = command;
+  activeStart = Date.now();
+}
+
+export function getActiveCommand(): string | undefined {
+  return activeCommand;
+}
+
+function buildMeta(): { command?: string; durationMs?: number } {
+  const meta: { command?: string; durationMs?: number } = {};
+  if (activeCommand) meta.command = activeCommand;
+  if (activeStart !== undefined) meta.durationMs = Date.now() - activeStart;
+  return meta;
+}
+
+export interface SuccessEnvelope<T = unknown> {
+  schemaVersion: string;
+  ok: true;
+  data: T;
+  meta: { command?: string; durationMs?: number };
+}
+
+export interface ErrorEnvelope {
+  schemaVersion: string;
+  ok: false;
+  error: ErrorPayload;
+  meta: { command?: string; durationMs?: number };
+}
+
 export function printJson(data: unknown): void {
-  console.log(JSON.stringify(data, null, 2));
+  if (isJsonLegacyMode()) {
+    console.log(JSON.stringify(data, null, 2));
+    return;
+  }
+  const envelope: SuccessEnvelope = {
+    schemaVersion: SCHEMA_VERSION,
+    ok: true,
+    data,
+    meta: buildMeta(),
+  };
+  console.log(JSON.stringify(envelope, null, 2));
+}
+
+/**
+ * Emit a single JSON line without the envelope. Used by streaming commands
+ * (watch, events stream/tail) where each stdout line is one event and wrapping
+ * every event in a full envelope is wasteful. JSONL consumers read one event
+ * per line; the `schemaVersion` guarantee does not apply to stream payloads.
+ */
+export function printJsonLine(data: unknown): void {
+  console.log(JSON.stringify(data));
 }
 
 export function printTable(headers: string[], rows: (string | number | boolean | null | undefined)[][]): void {
@@ -126,6 +196,28 @@ export function buildErrorPayload(error: unknown): ErrorPayload {
   return payload;
 }
 
+/**
+ * Emit a structured error. In JSON mode the envelope goes to **stdout** (so
+ * agents reading stdout get both success and failure payloads in one stream).
+ * Legacy JSON mode keeps the pre-1.6.0 stderr behavior and the bare
+ * `{error:...}` shape.
+ */
+export function printErrorEnvelope(payload: ErrorPayload): void {
+  if (isJsonLegacyMode()) {
+    // v1.5.0 shape: {error: ...} on stderr.
+    console.error(JSON.stringify({ error: payload }));
+    return;
+  }
+  const envelope: ErrorEnvelope = {
+    schemaVersion: SCHEMA_VERSION,
+    ok: false,
+    error: payload,
+    meta: buildMeta(),
+  };
+  // v1.6.0: errors go to stdout in JSON mode so agents can parse one stream.
+  console.log(JSON.stringify(envelope));
+}
+
 export function handleError(error: unknown): never {
   if (error instanceof DryRunSignal) {
     process.exit(0);
@@ -134,7 +226,7 @@ export function handleError(error: unknown): never {
   const payload = buildErrorPayload(error);
 
   if (isJsonMode()) {
-    console.error(JSON.stringify({ error: payload }));
+    printErrorEnvelope(payload);
     process.exit(payload.code === 2 ? 2 : 1);
   }
 

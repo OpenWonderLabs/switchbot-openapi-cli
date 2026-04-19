@@ -22,7 +22,7 @@ vi.mock('../../src/api/client.js', () => ({
 }));
 
 import { registerDevicesCommand } from '../../src/commands/devices.js';
-import { runCli } from '../helpers/cli.js';
+import { runCli, parseEnvelope } from '../helpers/cli.js';
 import { updateCacheFromDeviceList, resetListCache } from '../../src/devices/cache.js';
 
 const AC_ID = 'AC-001';
@@ -183,7 +183,7 @@ describe('devices expand', () => {
       'devices', 'expand', AC_ID, 'setAll',
       '--temp', '26', '--mode', 'cool', '--fan', 'low', '--power', 'on', '--json',
     ]);
-    const out = JSON.parse(res.stdout.join('\n'));
+    const out = parseEnvelope(res.stdout.join('\n')) as any;
     expect(out.subKind).toBe('ir-no-feedback');
   });
 

@@ -76,3 +76,25 @@ export async function runCli(
 function stripTrailingNewline(s: string): string {
   return s.endsWith('\n') ? s.slice(0, -1) : s;
 }
+
+/**
+ * Parse a JSON envelope ({schemaVersion, ok, data, meta}) from CLI stdout and
+ * return the inner `data` payload. Falls back to the raw parse for legacy
+ * shapes, so tests can be updated incrementally. Also returns the raw parse
+ * when the envelope is an error (ok:false) — callers should check `ok` first.
+ */
+export function parseEnvelope(raw: string): unknown {
+  const parsed = JSON.parse(raw) as unknown;
+  if (
+    parsed !== null &&
+    typeof parsed === 'object' &&
+    'schemaVersion' in parsed &&
+    (parsed as { schemaVersion: unknown }).schemaVersion === '1' &&
+    'ok' in parsed
+  ) {
+    const p = parsed as { ok: boolean; data?: unknown };
+    if (p.ok) return p.data;
+    return parsed;
+  }
+  return parsed;
+}

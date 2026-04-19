@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Command } from 'commander';
-import { runCli } from '../helpers/cli.js';
+import { runCli, parseEnvelope } from '../helpers/cli.js';
 
 // ---------------------------------------------------------------------------
 // Mock the lib/devices layer so no real HTTP calls are made.
@@ -115,7 +115,7 @@ describe('devices explain', () => {
     const res = await runExplain('--json', DID);
 
     expect(res.exitCode).toBeNull();
-    const parsed = JSON.parse(res.stdout[0]);
+    const parsed = parseEnvelope(res.stdout[0]) as any;
     expect(parsed.deviceId).toBe(DID);
     expect(parsed.type).toBe('Bot');
     expect(parsed.category).toBe('physical');
@@ -132,14 +132,16 @@ describe('devices explain', () => {
     expect(parsed.warnings).toHaveLength(0);
   });
 
-  it('--json: device not found emits { error: { code:1, kind:"runtime" } } on stderr', async () => {
+  it('--json: device not found emits error envelope on stdout', async () => {
     devicesMock.describeDevice.mockRejectedValue(new devicesMock.DeviceNotFoundError('MISSING'));
 
     const res = await runExplain('--json', 'MISSING');
 
     expect(res.exitCode).toBe(1);
-    expect(res.stdout).toHaveLength(0);
-    const parsed = JSON.parse(res.stderr[0]);
+    expect(res.stderr).toHaveLength(0);
+    const parsed = JSON.parse(res.stdout[0]);
+    expect(parsed.schemaVersion).toBe('1');
+    expect(parsed.ok).toBe(false);
     expect(parsed.error.code).toBe(1);
     expect(parsed.error.kind).toBe('runtime');
     expect(parsed.error.message).toContain('MISSING');
@@ -181,7 +183,7 @@ describe('devices explain', () => {
 
     const res = await runExplain('--json', DID);
 
-    const parsed = JSON.parse(res.stdout[0]);
+    const parsed = parseEnvelope(res.stdout[0]) as any;
     expect(parsed.warnings.some((w: string) => w.toLowerCase().includes('cloud'))).toBe(true);
   });
 
@@ -202,7 +204,7 @@ describe('devices explain', () => {
 
     const res = await runExplain('--json', DID);
 
-    const parsed = JSON.parse(res.stdout[0]);
+    const parsed = parseEnvelope(res.stdout[0]) as any;
     expect(parsed.children).toHaveLength(1);
     expect(parsed.children[0].deviceId).toBe('IR-1');
     expect(parsed.children[0].type).toBe('TV');

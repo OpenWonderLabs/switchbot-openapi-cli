@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import http from 'node:http';
-import { printJson, isJsonMode, handleError, UsageError } from '../utils/output.js';
+import { printJson, printJsonLine, isJsonMode, handleError, UsageError } from '../utils/output.js';
 import { parseEventStreamFilter, matchShadowEventFilter } from '../utils/filter.js';
 import { isVerbose } from '../utils/flags.js';
 import { loadConfig } from '../config.js';
@@ -184,7 +184,7 @@ Examples:
               if (!ev.matched) return;
               matchedCount++;
               if (isJsonMode()) {
-                printJson(ev);
+                printJsonLine(ev);
               } else {
                 const when = new Date(ev.t).toLocaleTimeString();
                 console.log(`[${when}] ${ev.remote} ${ev.path} ${JSON.stringify(ev.body)}`);
@@ -291,7 +291,7 @@ Examples:
 
               matchedCount++;
               if (isJsonMode()) {
-                printJson(event);
+                printJsonLine(event);
               } else {
                 const when = new Date(event.ts).toLocaleTimeString();
                 const payloadStr = JSON.stringify(event.payload);

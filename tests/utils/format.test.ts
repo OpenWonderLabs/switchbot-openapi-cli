@@ -129,7 +129,9 @@ describe('renderRows', () => {
   it('json: outputs a JSON array of objects', () => {
     renderRows(headers, rows, 'json');
     const parsed = JSON.parse(logOutput.join('\n'));
-    expect(parsed).toEqual([
+    expect(parsed.schemaVersion).toBe('1');
+    expect(parsed.ok).toBe(true);
+    expect(parsed.data).toEqual([
       { deviceId: 'DEV1', name: 'Light', type: 'Bot' },
       { deviceId: 'DEV2', name: 'Door', type: 'Smart Lock' },
     ]);

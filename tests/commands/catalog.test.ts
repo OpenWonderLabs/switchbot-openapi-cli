@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { runCli } from '../helpers/cli.js';
+import { runCli, parseEnvelope } from '../helpers/cli.js';
 import { registerCatalogCommand } from '../../src/commands/catalog.js';
 import { resetCatalogOverlayCache } from '../../src/devices/catalog.js';
 
@@ -60,7 +60,7 @@ describe('catalog path', () => {
   it('emits JSON when --json is passed', async () => {
     writeOverlay([{ type: 'Bot' }]);
     const { stdout } = await runCli(registerCatalogCommand, ['--json', 'catalog', 'path']);
-    const parsed = JSON.parse(stdout.join('\n'));
+    const parsed = parseEnvelope(stdout.join('\n')) as any;
     expect(parsed.exists).toBe(true);
     expect(parsed.valid).toBe(true);
     expect(parsed.entryCount).toBe(1);
@@ -136,14 +136,14 @@ describe('catalog show', () => {
 
   it('emits JSON array with --json', async () => {
     const { stdout } = await runCli(registerCatalogCommand, ['--json', 'catalog', 'show']);
-    const parsed = JSON.parse(stdout.join('\n'));
+    const parsed = parseEnvelope(stdout.join('\n')) as any[];
     expect(Array.isArray(parsed)).toBe(true);
     expect(parsed.find((e: { type: string }) => e.type === 'Bot')).toBeDefined();
   });
 
   it('emits a single-entry JSON object when a type is given', async () => {
     const { stdout } = await runCli(registerCatalogCommand, ['--json', 'catalog', 'show', 'Bot']);
-    const parsed = JSON.parse(stdout.join('\n'));
+    const parsed = parseEnvelope(stdout.join('\n')) as any;
     expect(parsed.type).toBe('Bot');
   });
 });
@@ -196,7 +196,7 @@ describe('catalog diff', () => {
       { type: 'Curtain', remove: true },
     ]);
     const { stdout } = await runCli(registerCatalogCommand, ['--json', 'catalog', 'diff']);
-    const parsed = JSON.parse(stdout.join('\n'));
+    const parsed = parseEnvelope(stdout.join('\n')) as any;
     expect(parsed.replaced).toHaveLength(1);
     expect(parsed.replaced[0].type).toBe('Bot');
     expect(parsed.replaced[0].changedKeys).toContain('role');
@@ -222,7 +222,7 @@ describe('catalog refresh', () => {
 
   it('emits JSON with --json', async () => {
     const { stdout } = await runCli(registerCatalogCommand, ['--json', 'catalog', 'refresh']);
-    const parsed = JSON.parse(stdout.join('\n'));
+    const parsed = parseEnvelope(stdout.join('\n')) as any;
     expect(parsed.refreshed).toBe(true);
   });
 });

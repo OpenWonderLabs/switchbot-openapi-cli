@@ -12,7 +12,7 @@ const configMock = vi.hoisted(() => ({
 vi.mock('../../src/config.js', () => configMock);
 
 import { registerConfigCommand } from '../../src/commands/config.js';
-import { runCli } from '../helpers/cli.js';
+import { runCli, parseEnvelope } from '../helpers/cli.js';
 
 describe('config command', () => {
   beforeEach(() => {
@@ -68,7 +68,7 @@ describe('config command', () => {
     it('emits JSON with --json', async () => {
       configMock.listProfiles.mockReturnValue(['home']);
       const res = await runCli(registerConfigCommand, ['--json', 'config', 'list-profiles']);
-      const out = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+      const out = parseEnvelope(res.stdout.filter((l) => l.trim().startsWith('{')).join('')) as any;
       expect(out.profiles).toEqual(['home']);
     });
   });

@@ -65,7 +65,7 @@ const flagsMock = vi.hoisted(() => ({
 vi.mock('../../src/utils/flags.js', () => flagsMock);
 
 import { registerPlanCommand, validatePlan } from '../../src/commands/plan.js';
-import { runCli } from '../helpers/cli.js';
+import { runCli, parseEnvelope } from '../helpers/cli.js';
 
 describe('plan command', () => {
   let tmp: string;
@@ -123,7 +123,7 @@ describe('plan command', () => {
   describe('plan schema', () => {
     it('prints the JSON Schema', async () => {
       const res = await runCli(registerPlanCommand, ['plan', 'schema']);
-      const parsed = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+      const parsed = parseEnvelope(res.stdout.filter((l) => l.trim().startsWith('{')).join('')) as any;
       expect(parsed.$id).toMatch(/plan-1\.0/);
       expect(parsed.required).toContain('steps');
     });
@@ -156,7 +156,7 @@ describe('plan command', () => {
         steps: [{ type: 'command', deviceId: 'A', command: 'turnOn' }],
       });
       const res = await runCli(registerPlanCommand, ['--json', 'plan', 'validate', file]);
-      const out = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+      const out = parseEnvelope(res.stdout.filter((l) => l.trim().startsWith('{')).join('')) as any;
       expect(out.valid).toBe(true);
       expect(out.steps).toBe(1);
     });
@@ -246,7 +246,7 @@ describe('plan command', () => {
       });
       apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body: {} } });
       const res = await runCli(registerPlanCommand, ['--json', 'plan', 'run', file]);
-      const out = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+      const out = parseEnvelope(res.stdout.filter((l) => l.trim().startsWith('{')).join('')) as any;
       expect(out.ran).toBe(true);
       expect(out.summary).toEqual({ total: 1, ok: 1, error: 0, skipped: 0 });
     });

@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { registerHistoryCommand } from '../../src/commands/history.js';
-import { runCli } from '../helpers/cli.js';
+import { runCli, parseEnvelope } from '../helpers/cli.js';
 
 const apiMock = vi.hoisted(() => {
   const instance = { get: vi.fn(), post: vi.fn() };
@@ -92,7 +92,7 @@ describe('history command', () => {
       const res = await runCli(registerHistoryCommand, [
         '--json', 'history', 'show', '--file', auditFile,
       ]);
-      const out = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+      const out = parseEnvelope(res.stdout.filter((l) => l.trim().startsWith('{')).join('')) as any;
       expect(out.total).toBe(1);
       expect(out.entries[0].deviceId).toBe('A');
     });

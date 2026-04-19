@@ -35,7 +35,7 @@ vi.mock('../../src/api/client.js', () => ({
 }));
 
 import { registerDevicesCommand } from '../../src/commands/devices.js';
-import { runCli } from '../helpers/cli.js';
+import { runCli, parseEnvelope } from '../helpers/cli.js';
 import { updateCacheFromDeviceList, resetListCache } from '../../src/devices/cache.js';
 
 // ---- Helpers -----------------------------------------------------------
@@ -471,7 +471,7 @@ describe('devices command', () => {
       const res = await runCli(registerDevicesCommand, [
         'devices', 'status', 'ABC', '--format', 'json',
       ]);
-      const parsed = JSON.parse(res.stdout.join('\n'));
+      const parsed = parseEnvelope(res.stdout.join('\n')) as any[];
       expect(Array.isArray(parsed)).toBe(true);
       expect(parsed[0]).toEqual({ power: 'off', battery: 50 });
     });
@@ -512,7 +512,7 @@ describe('devices command', () => {
       const res = await runCli(registerDevicesCommand, [
         'devices', 'status', 'DEV2', '--format', 'json',
       ]);
-      const parsed = JSON.parse(res.stdout.join('\n'));
+      const parsed = parseEnvelope(res.stdout.join('\n')) as any[];
       expect(parsed[0].power).toBe('on');
       // Nested object/array fields come through as real JS values.
       expect(parsed[0].motion).toEqual({ x: 1, y: 2 });
@@ -1384,7 +1384,7 @@ describe('devices command', () => {
     it('--json mode outputs {device, controlType, catalog}', async () => {
       apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
       const res = await runCli(registerDevicesCommand, ['devices', 'describe', 'BLE-001', '--json']);
-      const parsed = JSON.parse(res.stdout.join('\n'));
+      const parsed = parseEnvelope(res.stdout.join('\n')) as any;
       expect(parsed).toHaveProperty('device');
       expect(parsed).toHaveProperty('controlType', 'Bot');
       expect(parsed).toHaveProperty('catalog');
@@ -1395,7 +1395,7 @@ describe('devices command', () => {
     it('--json for IR remote surfaces controlType from the device', async () => {
       apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
       const res = await runCli(registerDevicesCommand, ['devices', 'describe', 'IR-001', '--json']);
-      const parsed = JSON.parse(res.stdout.join('\n'));
+      const parsed = parseEnvelope(res.stdout.join('\n')) as any;
       expect(parsed).toHaveProperty('controlType', 'TV');
       expect(parsed).not.toHaveProperty('category');
     });
@@ -1408,7 +1408,7 @@ describe('devices command', () => {
         'BLE-001',
         '--json',
       ]);
-      const parsed = JSON.parse(res.stdout.join('\n'));
+      const parsed = parseEnvelope(res.stdout.join('\n')) as any;
       expect(parsed.source).toBe('catalog');
       expect(parsed.capabilities).toBeDefined();
       expect(parsed.capabilities.role).toBe('other');
@@ -1438,7 +1438,7 @@ describe('devices command', () => {
         'LOCK-1',
         '--json',
       ]);
-      const parsed = JSON.parse(res.stdout.join('\n'));
+      const parsed = parseEnvelope(res.stdout.join('\n')) as any;
       const unlock = parsed.capabilities.commands.find(
         (c: { command: string }) => c.command === 'unlock'
       );
@@ -1505,7 +1505,7 @@ describe('devices command', () => {
       expect(apiMock.__instance.get).toHaveBeenCalledTimes(2);
       expect(apiMock.__instance.get).toHaveBeenNthCalledWith(1, '/v1.1/devices');
       expect(apiMock.__instance.get).toHaveBeenNthCalledWith(2, '/v1.1/devices/BLE-001/status');
-      const parsed = JSON.parse(res.stdout.join('\n'));
+      const parsed = parseEnvelope(res.stdout.join('\n')) as any;
       expect(parsed.source).toBe('catalog+live');
       expect(parsed.capabilities.liveStatus).toEqual({ power: 'on', battery: 87 });
     });
@@ -1520,7 +1520,7 @@ describe('devices command', () => {
         '--json',
       ]);
       expect(apiMock.__instance.get).toHaveBeenCalledTimes(1);
-      const parsed = JSON.parse(res.stdout.join('\n'));
+      const parsed = parseEnvelope(res.stdout.join('\n')) as any;
       expect(parsed.source).toBe('catalog');
       expect(parsed.capabilities.liveStatus).toBeUndefined();
     });
@@ -1537,7 +1537,7 @@ describe('devices command', () => {
         '--json',
       ]);
       expect(res.exitCode).toBeNull(); // not a fatal exit
-      const parsed = JSON.parse(res.stdout.join('\n'));
+      const parsed = parseEnvelope(res.stdout.join('\n')) as any;
       expect(parsed.source).toBe('catalog+live');
       expect(parsed.capabilities.liveStatus).toHaveProperty('error', 'device offline');
     });
@@ -1561,7 +1561,7 @@ describe('devices command', () => {
         '--json',
       ]);
       expect(res.exitCode).toBeNull();
-      const parsed = JSON.parse(res.stdout.join('\n'));
+      const parsed = parseEnvelope(res.stdout.join('\n')) as any;
       expect(parsed.source).toBe('none');
       expect(parsed.capabilities).toBeNull();
     });
