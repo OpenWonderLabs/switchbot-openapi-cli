@@ -21,12 +21,16 @@ export function isDryRun(): boolean {
   return process.argv.includes('--dry-run');
 }
 
-/** HTTP request timeout in milliseconds. Default 30s. */
+/** HTTP request timeout in milliseconds. Default 30s. Minimum 100ms (values below 100ms are ignored). */
 export function getTimeout(): number {
   const v = getFlagValue('--timeout');
   if (!v) return 30_000;
   const n = Number(v);
   if (!Number.isFinite(n) || n <= 0) return 30_000;
+  if (n < 100) {
+    process.stderr.write(`Warning: --timeout ${n}ms is too low to complete any request; using 100ms minimum.\n`);
+    return 100;
+  }
   return n;
 }
 
@@ -41,19 +45,15 @@ export function getProfile(): string | undefined {
 }
 
 /**
- * Audit log path. `--audit-log <path>` enables JSONL append on every mutating
- * command; default path is ~/.switchbot/audit.log when `--audit-log` is given
- * without a value. Returns null when the flag is absent.
+ * Audit log path. `--audit-log` enables JSONL append on every mutating command.
+ * Use `--audit-log-path <path>` to specify a custom file; otherwise defaults to
+ * ~/.switchbot/audit.log. Returns null when --audit-log is absent.
  */
 export function getAuditLog(): string | null {
-  const idx = process.argv.indexOf('--audit-log');
-  if (idx === -1) return null;
-  const next = process.argv[idx + 1];
-  if (!next || next.startsWith('-')) {
-    // bare --audit-log → default location
-    return `${process.env.HOME ?? process.env.USERPROFILE ?? '.'}/.switchbot/audit.log`;
-  }
-  return next;
+  if (!process.argv.includes('--audit-log')) return null;
+  const customPath = getFlagValue('--audit-log-path');
+  if (customPath) return customPath;
+  return `${process.env.HOME ?? process.env.USERPROFILE ?? '.'}/.switchbot/audit.log`;
 }
 
 /**

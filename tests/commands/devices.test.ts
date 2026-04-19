@@ -408,6 +408,30 @@ describe('devices command', () => {
       const out = res.stdout.join('\n');
       expect(out).not.toContain('physical device');
     });
+
+    it('--filter category=physical shows only physical devices in table mode', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list', '--filter', 'category=physical']);
+      const out = res.stdout.join('\n');
+      expect(out).toContain('BLE-001');
+      expect(out).not.toContain('IR-001');
+    });
+
+    it('--filter category=ir shows only IR remotes in table mode', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list', '--filter', 'category=ir']);
+      const out = res.stdout.join('\n');
+      expect(out).not.toContain('BLE-001');
+      expect(out).toContain('IR-001');
+    });
+
+    it('--filter --json applies filter to JSON output', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list', '--filter', 'category=physical', '--json']);
+      const out = JSON.parse(res.stdout.join('\n'));
+      expect(out.data.deviceList).toHaveLength(3);
+      expect(out.data.infraredRemoteList).toHaveLength(0);
+    });
   });
 
   // =====================================================================
@@ -473,7 +497,10 @@ describe('devices command', () => {
       ]);
       const parsed = JSON.parse(res.stdout.join('\n'));
       expect(Array.isArray(parsed.data)).toBe(true);
-      expect(parsed.data[0]).toEqual({ power: 'off', battery: 50 });
+      // _fetchedAt is added by the CLI; verify other fields are present
+      expect(parsed.data[0].power).toBe('off');
+      expect(parsed.data[0].battery).toBe(50);
+      expect(parsed.data[0]._fetchedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     });
 
     it('serializes nested objects to JSON strings in tsv output', async () => {
@@ -527,8 +554,8 @@ describe('devices command', () => {
         'devices', 'status', 'DEV3', '--format', 'tsv',
       ]);
       const lines = res.stdout.join('\n').split('\n');
-      // null maps to empty string in cellToString
-      expect(lines[1]).toBe('on\t');
+      // null maps to empty string in cellToString; _fetchedAt column is also present
+      expect(lines[1]).toMatch(/^on\t\t/);
     });
   });
 
@@ -1189,7 +1216,7 @@ describe('devices command', () => {
     it('--format=tsv outputs tab-separated catalog rows', async () => {
       const res = await runCli(registerDevicesCommand, ['devices', 'types', '--format', 'tsv']);
       const lines = res.stdout.join('\n').split('\n');
-      expect(lines[0]).toBe('type\tcategory\tcommands\taliases');
+      expect(lines[0]).toBe('type\trole\tcategory\tcommands\taliases');
       expect(lines.find((l) => l.startsWith('Bot\t'))).toBeDefined();
     });
 

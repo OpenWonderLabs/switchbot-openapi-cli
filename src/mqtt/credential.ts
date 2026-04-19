@@ -20,8 +20,9 @@ export interface MqttCredential {
 const CREDENTIAL_ENDPOINT = 'https://api.switchbot.net/v1.1/iot/credential';
 
 export async function fetchMqttCredential(token: string, secret: string): Promise<MqttCredential> {
-  // Derive a stable instance ID per token so the server can track this client.
-  const instanceId = crypto.createHash('sha256').update(token).digest('hex').slice(0, 16);
+  // Use a random instanceId so each CLI session gets its own clientId, avoiding
+  // conflicts with the SwitchBot cloud service that shares the same account credentials.
+  const instanceId = crypto.randomUUID().replace(/-/g, '').slice(0, 16);
 
   const headers = buildAuthHeaders(token, secret);
   const res = await fetch(CREDENTIAL_ENDPOINT, {

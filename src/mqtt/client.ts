@@ -26,6 +26,15 @@ export class SwitchBotMqttClient {
   async connect(): Promise<void> {
     if (this.client && this.state === 'connected') return;
 
+    // Remove stale listeners before replacing the client instance, otherwise
+    // the old client's close event fires after the new connection is established
+    // (AWS IoT drops the old session), triggering a spurious reconnect loop.
+    if (this.client) {
+      this.client.removeAllListeners();
+      this.client.end(true);
+      this.client = null;
+    }
+
     this.setState('connecting');
     this.credentialExpired = false;
     this.reconnectAttempts = 0;

@@ -22,6 +22,7 @@ import { fetchScenes, executeScene } from '../lib/scenes.js';
 import { findCatalogEntry } from '../devices/catalog.js';
 import { getCachedDevice } from '../devices/cache.js';
 import { EventSubscriptionManager } from '../mcp/events-subscription.js';
+import { deviceHistoryStore } from '../mcp/device-history.js';
 import { todayUsage } from '../utils/quota.js';
 import { describeCache } from '../devices/cache.js';
 import { withRequestContext } from '../lib/request-context.js';
@@ -148,6 +149,46 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
       return {
         content: [{ type: 'text', text: JSON.stringify(body, null, 2) }],
         structuredContent: { status: body as { deviceId?: string; deviceType?: string; [key: string]: unknown } },
+      };
+    }
+  );
+
+  // ---- get_device_history ----------------------------------------------------
+  server.registerTool(
+    'get_device_history',
+    {
+      title: 'Get locally-persisted device state history',
+      description:
+        'Return device state history recorded from MQTT events (persisted to ~/.switchbot/device-history/). ' +
+        'No API call — zero quota cost. Use when you need recent historical readings or want to avoid a live API call. ' +
+        'Omit deviceId to list all devices with stored history.',
+      inputSchema: {
+        deviceId: z.string().optional().describe('Device MAC address (deviceId). Omit to list all devices with history.'),
+        limit: z.number().int().min(1).max(100).optional().describe('Max history entries to return (default 20, max 100)'),
+      },
+      outputSchema: {
+        deviceId: z.string().optional(),
+        latest: z.unknown().optional(),
+        history: z.array(z.unknown()).optional(),
+        devices: z.array(z.object({ deviceId: z.string(), latest: z.unknown() })).optional(),
+      },
+    },
+    async ({ deviceId, limit }) => {
+      if (deviceId) {
+        const latest = deviceHistoryStore.getLatest(deviceId);
+        const history = deviceHistoryStore.getHistory(deviceId, limit ?? 20);
+        const result = { deviceId, latest, history };
+        return {
+          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+          structuredContent: result,
+        };
+      }
+      const ids = deviceHistoryStore.listDevices();
+      const devices = ids.map((id) => ({ deviceId: id, latest: deviceHistoryStore.getLatest(id) }));
+      const result = { devices };
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+        structuredContent: result,
       };
     }
   );

@@ -6,6 +6,7 @@ import { getCachedDevice } from '../devices/cache.js';
 import type { AxiosInstance } from 'axios';
 import { createClient } from '../api/client.js';
 import { log } from '../logger.js';
+import { deviceHistoryStore } from './device-history.js';
 
 export interface ShadowEvent {
   kind: 'shadow.updated';
@@ -65,12 +66,18 @@ export class EventSubscriptionManager {
       client.onMessage((topic, payload) => {
         try {
           const data = JSON.parse(payload.toString());
-          const deviceId = this.extractDeviceId(topic);
-          if (deviceId && data.state) {
+          // Support SwitchBot direct format: { eventType, context: { deviceMac, deviceType, ... } }
+          // and AWS IoT shadow format: $aws/things/<id>/shadow/... with data.state
+          const context = data.context as Record<string, unknown> | undefined;
+          const deviceId = (context?.deviceMac as string | undefined) ?? this.extractDeviceId(topic);
+          const payloadData = context ?? data.state;
+          const deviceType = String(context?.deviceType ?? 'Unknown');
+          if (deviceId && payloadData) {
+            deviceHistoryStore.record(deviceId, topic, deviceType, payloadData);
             this.addEvent({
               kind: 'shadow.updated',
               deviceId,
-              payload: data.state,
+              payload: payloadData,
               timestamp: Date.now(),
             });
           }

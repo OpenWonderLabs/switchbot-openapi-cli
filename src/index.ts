@@ -40,7 +40,8 @@ program
   .option('--no-cache', 'Disable cache reads (equivalent to --cache off)')
   .option('--config <path>', 'Override credential file location (default: ~/.switchbot/config.json)')
   .option('--profile <name>', 'Use a named profile: ~/.switchbot/profiles/<name>.json')
-  .option('--audit-log [path]', 'Append every mutating command to JSONL audit log (default ~/.switchbot/audit.log)')
+  .option('--audit-log', 'Append every mutating command to JSONL audit log (default path: ~/.switchbot/audit.log)')
+  .option('--audit-log-path <path>', 'Custom audit log file path; use together with --audit-log')
   .showHelpAfterError('(run with --help to see usage)')
   .showSuggestionAfterError();
 

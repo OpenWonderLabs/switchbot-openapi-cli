@@ -165,7 +165,8 @@ switchbot config show
 | `--no-retry`                | Disable automatic 429 retries                                            |
 | `--backoff <strategy>`      | Retry backoff: `exponential` (default) or `linear`                      |
 | `--no-quota`                | Disable local request-quota tracking                                     |
-| `--audit-log [path]`        | Append mutating commands to a JSONL audit log (default path: `~/.switchbot/audit.log`) |
+| `--audit-log`               | Append mutating commands to a JSONL audit log (default path: `~/.switchbot/audit.log`) |
+| `--audit-log-path <path>`   | Custom audit log path; use together with `--audit-log`                   |
 | `-V`, `--version`           | Print the CLI version                                                    |
 | `-h`, `--help`              | Show help for any command or subcommand                                  |
 
@@ -212,6 +213,11 @@ switchbot devices list --json | jq '.deviceList[].deviceId'
 # Physical: category = "physical"
 switchbot devices list --format=tsv --fields=deviceId,type,category
 
+# Filter devices by type / name / category / room (server-side filter keys)
+switchbot devices list --filter category=physical
+switchbot devices list --filter type=Bot
+switchbot devices list --filter name=living,category=physical
+
 # Filter by family / room (family & room info requires the 'src: OpenClaw'
 # header, which this CLI sends on every request)
 switchbot devices list --json | jq '.deviceList[] | select(.familyName == "Home")'
@@ -221,6 +227,16 @@ switchbot devices list --json | jq '[.deviceList[], .infraredRemoteList[]] | gro
 switchbot devices status <deviceId>
 switchbot devices status <deviceId> --json
 
+# Resolve device by fuzzy name instead of ID (status, command, describe, expand, watch)
+switchbot devices status --name "客厅空调"
+switchbot devices command --name "Office Light" turnOn
+switchbot devices describe --name "Kitchen Bot"
+
+# Batch status across multiple devices
+switchbot devices status --ids ABC,DEF,GHI
+switchbot devices status --ids ABC,DEF --fields power,battery  # only show specific fields
+switchbot devices status --ids ABC,DEF --format jsonl           # one JSON line per device
+
 # Send a control command
 switchbot devices command <deviceId> <cmd> [parameter] [--type command|customize]
 
@@ -229,7 +245,7 @@ switchbot devices describe <deviceId>
 switchbot devices describe <deviceId> --json
 
 # Discover what's supported (offline reference, no API call)
-switchbot devices types                 # List all device types + IR remote types
+switchbot devices types                 # List all device types + IR remote types (incl. role column)
 switchbot devices commands <type>       # Show commands, parameter formats, and status fields
 switchbot devices commands Bot
 switchbot devices commands "Smart Lock"
@@ -268,6 +284,8 @@ Some commands require a packed string like `"26,2,2,on"`. `devices expand` build
 ```bash
 # Air Conditioner — setAll
 switchbot devices expand <acId> setAll --temp 26 --mode cool --fan low --power on
+# Resolve by name
+switchbot devices expand --name "客厅空调" setAll --temp 26 --mode cool --fan low --power on
 
 # Curtain / Roller Shade — setPosition
 switchbot devices expand <curtainId> setPosition --position 50 --mode silent
@@ -412,6 +430,40 @@ nohup switchbot events mqtt-tail --json >> ~/switchbot-events.log 2>&1 &
 
 Run `switchbot doctor` to verify MQTT credentials are configured correctly before connecting.
 
+#### `mqtt-tail` sinks — route events to external services
+
+By default `mqtt-tail` prints JSONL to stdout. Use `--sink` (repeatable) to route events to one or more destinations instead:
+
+| Sink | Required flags |
+|---|---|
+| `stdout` | (default when no `--sink` given) |
+| `file` | `--sink-file <path>` — append JSONL |
+| `webhook` | `--webhook-url <url>` — HTTP POST each event |
+| `openclaw` | `--openclaw-url`, `--openclaw-token` (or `$OPENCLAW_TOKEN`), `--openclaw-model` |
+| `telegram` | `--telegram-token` (or `$TELEGRAM_TOKEN`), `--telegram-chat <chatId>` |
+| `homeassistant` | `--ha-url <url>` + `--ha-webhook-id` (no auth) or `--ha-token` (REST event API) |
+
+```bash
+# Push events to an OpenClaw agent (replaces the SwitchBot channel plugin)
+switchbot events mqtt-tail \
+  --sink openclaw \
+  --openclaw-token <token> \
+  --openclaw-model my-home-agent
+
+# Write to file + push to OpenClaw simultaneously
+switchbot events mqtt-tail \
+  --sink file --sink-file ~/.switchbot/events.jsonl \
+  --sink openclaw --openclaw-token <token> --openclaw-model home
+
+# Generic webhook (n8n, Make, etc.)
+switchbot events mqtt-tail --sink webhook --webhook-url https://n8n.local/hook/abc
+
+# Forward to Home Assistant via webhook trigger
+switchbot events mqtt-tail --sink homeassistant --ha-url http://homeassistant.local:8123 --ha-webhook-id switchbot
+```
+
+Device state is also persisted to `~/.switchbot/device-history/<deviceId>.json` (latest + 100-entry ring buffer) regardless of sink configuration. This enables the `get_device_history` MCP tool to answer state queries without an API call.
+
 ### `completion` — shell tab-completion
 
 ```bash
@@ -498,7 +550,7 @@ switchbot history replay 7          # re-run entry #7
 switchbot --json history show --limit 50 | jq '.entries[] | select(.result=="error")'
 ```
 
-Reads the JSONL audit log (`~/.switchbot/audit.log` by default; override with `--audit-log`). Each entry records the timestamp, command, device ID, result, and dry-run flag. `replay` re-runs the original command with the original arguments.
+Reads the JSONL audit log (`~/.switchbot/audit.log` by default; override with `--audit-log --audit-log-path <path>`). Each entry records the timestamp, command, device ID, result, and dry-run flag. `replay` re-runs the original command with the original arguments.
 
 ### `catalog` — device type catalog
 

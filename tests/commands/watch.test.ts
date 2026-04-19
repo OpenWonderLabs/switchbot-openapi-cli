@@ -229,4 +229,12 @@ describe('devices watch', () => {
     expect(byId.BOT1.error).toMatch(/boom/);
     expect(byId.BOT2.changed.power).toEqual({ from: null, to: 'on' });
   });
+
+  it('exits 2 when no deviceId and no --name', async () => {
+    const res = await runCli(registerDevicesCommand, [
+      'devices', 'watch', '--max', '1',
+    ]);
+    expect(res.exitCode).toBe(2);
+    expect(res.stderr.join('\n')).toMatch(/deviceId.*--name|--name.*deviceId/i);
+  });
 });

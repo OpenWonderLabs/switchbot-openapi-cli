@@ -76,7 +76,7 @@ export class DeviceNotFoundError extends Error {
 export class CommandValidationError extends Error {
   constructor(
     message: string,
-    public readonly kind: 'unknown-command' | 'unexpected-parameter',
+    public readonly kind: 'unknown-command' | 'unexpected-parameter' | 'missing-parameter',
     public readonly hint?: string
   ) {
     super(message);
@@ -229,12 +229,16 @@ export function validateCommand(
   const spec = builtinCommands.find((c) => c.command === cmd);
   if (!spec) {
     const unique = [...new Set(builtinCommands.map((c) => c.command))];
+    const caseMatch = unique.find((c) => c.toLowerCase() === cmd.toLowerCase());
+    const hint = caseMatch
+      ? `Did you mean "${caseMatch}"? Supported commands: ${unique.join(', ')}`
+      : `Supported commands: ${unique.join(', ')}`;
     return {
       ok: false,
       error: new CommandValidationError(
         `"${cmd}" is not a supported command for ${cached.name} (${cached.type}).`,
         'unknown-command',
-        `Supported commands: ${unique.join(', ')}`
+        hint
       ),
     };
   }
@@ -248,6 +252,22 @@ export function validateCommand(
         `"${cmd}" takes no parameter, but one was provided: "${parameter}".`,
         'unexpected-parameter',
         `Try: switchbot devices command ${deviceId} ${cmd}`
+      ),
+    };
+  }
+
+  // Warn when a parameter is required but the user omitted it
+  const paramRequired = !noParamExpected && spec.parameter !== 'default';
+  if (paramRequired && !userProvidedParam) {
+    const example = (spec as { exampleParams?: string[] }).exampleParams?.[0];
+    return {
+      ok: false,
+      error: new CommandValidationError(
+        `"${cmd}" requires a parameter (${spec.parameter}).`,
+        'missing-parameter',
+        example
+          ? `Example: switchbot devices command <deviceId> ${cmd} "${example}"`
+          : `See: switchbot devices commands ${cached.type}`,
       ),
     };
   }

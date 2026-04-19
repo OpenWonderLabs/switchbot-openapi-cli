@@ -80,22 +80,63 @@ Examples:
   $ switchbot devices list --format tsv --fields deviceId,deviceName,type,category
   $ switchbot devices list --json | jq '.deviceList[] | select(.familyName == "家里")'
   $ switchbot devices list --json | jq '[.deviceList[], .infraredRemoteList[]] | group_by(.familyName)'
+  $ switchbot devices list --filter type="Air Conditioner"
+  $ switchbot devices list --filter category=ir
+  $ switchbot devices list --filter name=living,category=physical
 `)
     .option('--wide', 'Show all columns (controlType, family, roomID, room, hub, cloud)')
     .option('--show-hidden', 'Include devices hidden via "devices meta set --hide"')
-    .action(async (options: { wide?: boolean; showHidden?: boolean }) => {
+    .option('--filter <expr>', 'Filter devices: "type=X", "name=X", "category=physical|ir", "room=X" (comma-separated key=value pairs)')
+    .action(async (options: { wide?: boolean; showHidden?: boolean; filter?: string }) => {
       try {
         const body = await fetchDeviceList();
         const { deviceList, infraredRemoteList } = body;
         const fmt = resolveFormat();
         const deviceMeta = loadDeviceMeta();
 
-        if (fmt === 'json' && process.argv.includes('--json')) {
-          printJson(body);
-          return;
+        const hubLocation = buildHubLocationMap(deviceList);
+
+        // Parse --filter into a simple predicate map
+        interface ListFilter { type?: string; name?: string; category?: string; room?: string; }
+        let listFilter: ListFilter | null = null;
+        if (options.filter) {
+          listFilter = {};
+          for (const pair of options.filter.split(',')) {
+            const eq = pair.indexOf('=');
+            if (eq === -1) throw new UsageError(`Invalid --filter pair "${pair.trim()}". Expected key=value.`);
+            const k = pair.slice(0, eq).trim();
+            const v = pair.slice(eq + 1).trim();
+            if (!['type', 'name', 'category', 'room'].includes(k)) {
+              throw new UsageError(`Unknown --filter key "${k}". Supported: type, name, category, room.`);
+            }
+            (listFilter as Record<string, string>)[k] = v.toLowerCase();
+          }
         }
 
-        const hubLocation = buildHubLocationMap(deviceList);
+        const matchesFilter = (entry: { type: string; name: string; category: 'physical' | 'ir'; room: string }) => {
+          if (!listFilter) return true;
+          if (listFilter.type && !entry.type.toLowerCase().includes(listFilter.type)) return false;
+          if (listFilter.name && !entry.name.toLowerCase().includes(listFilter.name)) return false;
+          if (listFilter.category && entry.category !== listFilter.category) return false;
+          if (listFilter.room && !entry.room.toLowerCase().includes(listFilter.room)) return false;
+          return true;
+        };
+
+        if (fmt === 'json' && process.argv.includes('--json')) {
+          if (listFilter) {
+            const filteredDeviceList = deviceList.filter((d) =>
+              matchesFilter({ type: d.deviceType || '', name: d.deviceName, category: 'physical', room: d.roomName || '' })
+            );
+            const filteredIrList = infraredRemoteList.filter((d) => {
+              const inherited = hubLocation.get(d.hubDeviceId);
+              return matchesFilter({ type: d.remoteType, name: d.deviceName, category: 'ir', room: inherited?.room || '' });
+            });
+            printJson({ ok: true, deviceList: filteredDeviceList, infraredRemoteList: filteredIrList });
+          } else {
+            printJson({ ok: true, ...(body as object) });
+          }
+          return;
+        }
 
         const narrowHeaders = ['deviceId', 'deviceName', 'type', 'category'];
         const wideHeaders = ['deviceId', 'deviceName', 'type', 'category', 'controlType', 'family', 'roomID', 'room', 'hub', 'cloud', 'alias'];
@@ -105,6 +146,7 @@ Examples:
 
         for (const d of deviceList) {
           if (!options.showHidden && deviceMeta.devices[d.deviceId]?.hidden) continue;
+          if (!matchesFilter({ type: d.deviceType || '', name: d.deviceName, category: 'physical', room: d.roomName || '' })) continue;
           rows.push([
             d.deviceId,
             d.deviceName,
@@ -123,6 +165,7 @@ Examples:
         for (const d of infraredRemoteList) {
           if (!options.showHidden && deviceMeta.devices[d.deviceId]?.hidden) continue;
           const inherited = hubLocation.get(d.hubDeviceId);
+          if (!matchesFilter({ type: d.remoteType, name: d.deviceName, category: 'ir', room: inherited?.room || '' })) continue;
           rows.push([
             d.deviceId,
             d.deviceName,
@@ -139,14 +182,23 @@ Examples:
         }
 
         if (rows.length === 0 && fmt === 'table') {
-          console.log('No devices found');
+          console.log(listFilter ? 'No devices matched the filter.' : 'No devices found');
           return;
         }
 
         const defaultFields = options.wide ? undefined : narrowHeaders;
-        renderRows(wideHeaders, rows, fmt, userFields ?? defaultFields);
+        // Accept API field names and short aliases alongside canonical column names
+        const DEVICE_LIST_ALIASES: Record<string, string> = {
+          name: 'deviceName', deviceType: 'type', type: 'type',
+          roomName: 'room', familyName: 'family',
+          hubDeviceId: 'hub', enableCloudService: 'cloud',
+        };
+        renderRows(wideHeaders, rows, fmt, userFields ?? defaultFields, DEVICE_LIST_ALIASES);
         if (fmt === 'table') {
-          console.log(`\nTotal: ${deviceList.length} physical device(s), ${infraredRemoteList.length} IR remote device(s)`);
+          const totalLabel = listFilter
+            ? `${rows.length} match(es) (${deviceList.length} physical + ${infraredRemoteList.length} IR before filter)`
+            : `${deviceList.length} physical device(s), ${infraredRemoteList.length} IR remote device(s)`;
+          console.log(`\nTotal: ${totalLabel}`);
           console.log(`Tip: 'switchbot devices describe <deviceId>' shows a device's supported commands.`);
         }
       } catch (error) {
@@ -158,8 +210,9 @@ Examples:
   devices
     .command('status')
     .description('Query the real-time status of a specific device')
-    .argument('[deviceId]', 'Device ID from "devices list" (or use --name)')
+    .argument('[deviceId]', 'Device ID from "devices list" (or use --name or --ids)')
     .option('--name <query>', 'Resolve device by fuzzy name instead of deviceId')
+    .option('--ids <list>', 'Comma-separated device IDs for batch status (incompatible with --name)')
     .addHelpText('after', `
 Status fields vary by device type. To discover them without a live call:
 
@@ -174,28 +227,71 @@ Examples:
   $ switchbot devices status ABC123DEF456 --json
   $ switchbot devices status ABC123DEF456 --format yaml
   $ switchbot devices status ABC123DEF456 --format tsv --fields power,battery
-  $ switchbot devices status ABC123DEF456 --json | jq '.battery'
+  $ switchbot devices status ABC123DEF456 --json | jq '.data.battery'
+  $ switchbot devices status --ids ABC123,DEF456,GHI789
+  $ switchbot devices status --ids ABC123,DEF456 --fields power,battery
 `)
-    .action(async (deviceIdArg: string | undefined, options: { name?: string }) => {
+    .action(async (deviceIdArg: string | undefined, options: { name?: string; ids?: string }) => {
       try {
+        // Batch mode: --ids id1,id2,id3
+        if (options.ids) {
+          if (options.name) throw new UsageError('--ids and --name cannot be used together.');
+          const ids = options.ids.split(',').map((s) => s.trim()).filter(Boolean);
+          if (ids.length === 0) throw new UsageError('--ids requires at least one device ID.');
+          const results = await Promise.allSettled(ids.map((id) => fetchDeviceStatus(id)));
+          const fetchedAt = new Date().toISOString();
+          const batch = results.map((r, i) =>
+            r.status === 'fulfilled'
+              ? { deviceId: ids[i], ok: true, _fetchedAt: fetchedAt, ...(r.value as object) }
+              : { deviceId: ids[i], ok: false, error: (r.reason as Error)?.message ?? String(r.reason) },
+          );
+          const batchFmt = resolveFormat();
+          if (isJsonMode() || batchFmt === 'json') {
+            printJson(batch);
+          } else if (batchFmt === 'jsonl') {
+            for (const entry of batch) {
+              console.log(JSON.stringify(entry));
+            }
+          } else {
+            const fields = resolveFields();
+            for (const entry of batch) {
+              const { deviceId, ok, error, _fetchedAt: ts, ...status } = entry as Record<string, unknown>;
+              console.log(`\n─── ${String(deviceId)} ───`);
+              if (!ok) {
+                console.error(`  error: ${String(error)}`);
+              } else {
+                const displayStatus: Record<string, unknown> = fields
+                  ? Object.fromEntries(fields.map((f) => [f, (status as Record<string, unknown>)[f] ?? null]))
+                  : (status as Record<string, unknown>);
+                printKeyValue(displayStatus);
+                console.error(`  fetched at ${String(ts)}`);
+              }
+            }
+          }
+          return;
+        }
+
         const deviceId = resolveDeviceId(deviceIdArg, options.name);
         const body = await fetchDeviceStatus(deviceId);
+        const fetchedAt = new Date().toISOString();
         const fmt = resolveFormat();
 
         if (fmt === 'json' && process.argv.includes('--json')) {
-          printJson(body);
+          printJson({ ...(body as object), _fetchedAt: fetchedAt });
           return;
         }
 
         if (fmt !== 'table') {
-          const allHeaders = Object.keys(body);
-          const allRows = [Object.values(body) as unknown[]];
+          const statusWithTs = { ...(body as Record<string, unknown>), _fetchedAt: fetchedAt };
+          const allHeaders = Object.keys(statusWithTs);
+          const allRows = [Object.values(statusWithTs) as unknown[]];
           const fields = resolveFields();
           renderRows(allHeaders, allRows, fmt, fields);
           return;
         }
 
         printKeyValue(body);
+        console.error(`\nfetched at ${fetchedAt}`);
       } catch (error) {
         handleError(error);
       }
@@ -206,7 +302,7 @@ Examples:
     .command('command')
     .description('Send a control command to a device')
     .argument('[deviceId]', 'Target device ID (or use --name)')
-    .argument('<cmd>', 'Command name, e.g. turnOn, turnOff, setColor, setBrightness, setAll, startClean')
+    .argument('[cmd]', 'Command name, e.g. turnOn, turnOff, setColor, setBrightness, setAll, startClean')
     .argument('[parameter]', 'Command parameter. Omit for commands like turnOn/turnOff (defaults to "default"). Format depends on the command (see below).')
     .option('--name <query>', 'Resolve device by fuzzy name instead of deviceId')
     .option('--type <commandType>', 'Command type: "command" for built-in commands (default), "customize" for user-defined IR buttons', 'command')
@@ -257,8 +353,31 @@ Examples:
   $ switchbot devices command ABC123 "MyButton" --type customize
   $ switchbot devices command <lockId> unlock --yes
 `)
-    .action(async (deviceIdArg: string | undefined, cmd: string, parameter: string | undefined, options: { name?: string; type: string; yes?: boolean; idempotencyKey?: string }) => {
-      const deviceId = resolveDeviceId(deviceIdArg, options.name);
+    .action(async (deviceIdArg: string | undefined, cmdArg: string | undefined, parameter: string | undefined, options: { name?: string; type: string; yes?: boolean; idempotencyKey?: string }) => {
+      try {
+        // BUG-FIX: When --name is provided, Commander misassigns the first positional
+        // to [deviceId] instead of [cmd]. Detect and shift positionals accordingly.
+        let cmd: string;
+        let effectiveDeviceIdArg: string | undefined;
+        if (options.name) {
+          if (deviceIdArg && cmdArg) {
+            throw new UsageError('Provide either a deviceId argument or --name, not both.');
+          }
+          if (!deviceIdArg && !cmdArg) {
+            throw new UsageError('Command name is required (e.g. turnOn, turnOff, setAll).');
+          }
+          // --name "x" turnOn  →  deviceIdArg="turnOn", cmdArg=undefined → shift
+          cmd = (deviceIdArg ?? cmdArg) as string;
+          effectiveDeviceIdArg = undefined;
+        } else {
+          if (!cmdArg) {
+            throw new UsageError('Command name is required (e.g. turnOn, turnOff, setAll).');
+          }
+          cmd = cmdArg;
+          effectiveDeviceIdArg = deviceIdArg;
+        }
+
+        const deviceId = resolveDeviceId(effectiveDeviceIdArg, options.name);
       const validation = validateCommand(deviceId, cmd, parameter, options.type);
       if (!validation.ok) {
         const err = validation.error;
@@ -317,7 +436,11 @@ Examples:
         process.exit(2);
       }
 
-      try {
+        // Warn when --yes is given but the command is not destructive (no-op flag)
+        if (options.yes && !isDestructiveCommand(cachedForGuard?.type, cmd, options.type) && !isDryRun()) {
+          console.error(`Note: --yes has no effect; "${cmd}" is not a destructive command.`);
+        }
+
         // parameter may be a JSON object string (e.g. S10 startClean) or a plain string
         let parsedParam: unknown = parameter ?? 'default';
         if (parameter) {
@@ -349,12 +472,18 @@ Examples:
           return;
         }
 
-        console.log(`✓ Command sent: ${cmd}`);
-        if (isIr) console.log('  Note: IR command sent — no device confirmation (fire-and-forget).');
-        if (body && typeof body === 'object' && Object.keys(body as object).length > 0) {
-          printKeyValue(body as Record<string, unknown>);
+        if (isIr) {
+          console.log(`→ IR signal sent: ${cmd} (no feedback — fire-and-forget)`);
+        } else {
+          console.log(`✓ Command sent: ${cmd}`);
+          if (body && typeof body === 'object' && Object.keys(body as object).length > 0) {
+            printKeyValue(body as Record<string, unknown>);
+          }
         }
       } catch (error) {
+        // Re-throw mock process.exit signals (Vitest intercepts process.exit as thrown
+        // Error('__exit__')) so they aren't double-handled and the exit code is preserved.
+        if (error instanceof Error && error.message === '__exit__') throw error;
         handleError(error);
       }
     });
@@ -379,9 +508,10 @@ Examples:
           printJson(catalog);
           return;
         }
-        const headers = ['type', 'category', 'commands', 'aliases'];
+        const headers = ['type', 'role', 'category', 'commands', 'aliases'];
         const rows = catalog.map((e) => [
           e.type,
+          e.role ?? '—',
           e.category,
           String(e.commands.length),
           (e.aliases ?? []).join(', ') || '—',
@@ -581,14 +711,19 @@ function renderCatalogEntry(entry: DeviceCatalogEntry): void {
     console.log('\nCommands: (none — status-only device)');
   } else {
     console.log('\nCommands:');
+    const hasExamples = entry.commands.some((c) => c.exampleParams && c.exampleParams.length > 0);
     const rows = entry.commands.map((c) => {
       const flags: string[] = [];
       if (c.commandType === 'customize') flags.push('customize');
       if (c.destructive) flags.push('!destructive');
       const label = flags.length > 0 ? `${c.command}  [${flags.join(', ')}]` : c.command;
-      return [label, c.parameter, c.description];
+      const base = [label, c.parameter, c.description];
+      return hasExamples ? [...base, (c.exampleParams ?? []).join(' | ') || ''] : base;
     });
-    printTable(['command', 'parameter', 'description'], rows);
+    const tableHeaders = hasExamples
+      ? ['command', 'parameter', 'description', 'example']
+      : ['command', 'parameter', 'description'];
+    printTable(tableHeaders, rows);
     const hasDestructive = entry.commands.some((c) => c.destructive);
     if (hasDestructive) {
       console.log('\n[!destructive] commands have hard-to-reverse real-world effects — confirm before issuing.');

@@ -116,12 +116,13 @@ describe('capabilities', () => {
     expect(cat.typeCount as number).toBeGreaterThan(10);
   });
 
-  it('surfaces.mcp.tools has 8 entries including send_command and account_overview', async () => {
+  it('surfaces.mcp.tools has 9 entries including send_command, account_overview and get_device_history', async () => {
     const out = await runCapabilities();
     const mcp = (out.surfaces as Record<string, { tools: string[]; resources: string[] }>).mcp;
-    expect(mcp.tools).toHaveLength(8);
+    expect(mcp.tools).toHaveLength(9);
     expect(mcp.tools).toContain('send_command');
     expect(mcp.tools).toContain('account_overview');
+    expect(mcp.tools).toContain('get_device_history');
     expect(mcp.resources).toEqual(['switchbot://events']);
   });
 
