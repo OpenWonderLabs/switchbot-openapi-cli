@@ -52,6 +52,7 @@ Run any subcommand with --help for its own flags and examples.
   // switchbot devices list
   devices
     .command('list')
+    .alias('ls')
     .description('List all physical devices and IR remote devices on the account')
     .addHelpText('after', `
 Default columns: deviceId, deviceName, type, category
@@ -378,7 +379,12 @@ Examples:
         }
 
         const deviceId = resolveDeviceId(effectiveDeviceIdArg, options.name);
-      const validation = validateCommand(deviceId, cmd, parameter, options.type);
+        if (!getCachedDevice(deviceId)) {
+          console.error(
+            `Note: device ${deviceId} is not in the local cache — run 'switchbot devices list' first to enable command validation.`,
+          );
+        }
+        const validation = validateCommand(deviceId, cmd, parameter, options.type);
       if (!validation.ok) {
         const err = validation.error;
         if (isJsonMode()) {
