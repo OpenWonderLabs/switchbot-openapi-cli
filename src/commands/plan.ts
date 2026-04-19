@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import fs from 'node:fs';
+import type { AxiosInstance } from 'axios';
 import { printJson, isJsonMode, handleError } from '../utils/output.js';
 import { executeCommand, isDestructiveCommand } from '../lib/devices.js';
 import { executeScene } from '../lib/scenes.js';
@@ -227,6 +228,7 @@ export async function runPlan(
     continueOnError?: boolean;
     onStep?: (line: string) => void;
     caller?: 'cli' | 'mcp';
+    getClient?: () => AxiosInstance;
   } = {},
 ): Promise<PlanRunResult> {
   const out: PlanRunResult = {
@@ -236,6 +238,7 @@ export async function runPlan(
   };
   const emit = (line: string) => options.onStep?.(line);
   const caller = options.caller ?? 'cli';
+  const clientFor = () => options.getClient?.();
 
   for (let i = 0; i < plan.steps.length; i++) {
     const step = plan.steps[i];
@@ -249,7 +252,7 @@ export async function runPlan(
     }
     if (step.type === 'scene') {
       try {
-        await executeScene(step.sceneId);
+        await executeScene(step.sceneId, clientFor());
         out.results.push({ step: idx, type: 'scene', sceneId: step.sceneId, status: 'ok' });
         out.summary.ok++;
         emit(`  ${idx}. ✓ scene ${step.sceneId}`);
@@ -290,7 +293,7 @@ export async function runPlan(
       continue;
     }
     try {
-      await executeCommand(resolvedDeviceId, step.command, step.parameter, commandType);
+      await executeCommand(resolvedDeviceId, step.command, step.parameter, commandType, clientFor());
       out.results.push({
         step: idx,
         type: 'command',

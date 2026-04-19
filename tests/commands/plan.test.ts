@@ -64,7 +64,7 @@ const flagsMock = vi.hoisted(() => ({
 }));
 vi.mock('../../src/utils/flags.js', () => flagsMock);
 
-import { registerPlanCommand, validatePlan } from '../../src/commands/plan.js';
+import { registerPlanCommand, validatePlan, runPlan } from '../../src/commands/plan.js';
 import { runCli, parseEnvelope } from '../helpers/cli.js';
 
 describe('plan command', () => {
@@ -249,6 +249,30 @@ describe('plan command', () => {
       const out = parseEnvelope(res.stdout.filter((l) => l.trim().startsWith('{')).join('')) as any;
       expect(out.ran).toBe(true);
       expect(out.summary).toEqual({ total: 1, ok: 1, error: 0, skipped: 0 });
+    });
+
+    it('runPlan honors a custom getClient (regression: MCP HTTP per-profile routing)', async () => {
+      const customInstance = { get: vi.fn(), post: vi.fn() };
+      customInstance.post.mockResolvedValue({ data: { statusCode: 100, body: {} } });
+      apiMock.createClient.mockClear();
+      apiMock.__instance.post.mockReset();
+
+      const out = await runPlan(
+        {
+          version: '1.0',
+          steps: [
+            { type: 'command', deviceId: 'BOT1', command: 'turnOn' },
+            { type: 'scene', sceneId: 'S1' },
+          ],
+        },
+        { caller: 'mcp', getClient: () => customInstance as never },
+      );
+
+      expect(out.summary).toEqual({ total: 2, ok: 2, error: 0, skipped: 0 });
+      // Custom client got the traffic; the default factory was never touched.
+      expect(customInstance.post).toHaveBeenCalledTimes(2);
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
+      expect(apiMock.createClient).not.toHaveBeenCalled();
     });
   });
 });

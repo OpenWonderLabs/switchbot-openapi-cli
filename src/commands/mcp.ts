@@ -7,7 +7,7 @@ import {
   UnsubscribeRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
-import { handleError, isJsonMode } from '../utils/output.js';
+import { handleError, isJsonMode, printErrorEnvelope } from '../utils/output.js';
 import {
   fetchDeviceList,
   fetchDeviceStatus,
@@ -411,7 +411,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
   );
 
   // ---- events resource + events_recent -------------------------------------
-  const eventsManager = new EventSubscriptionManager();
+  const eventsManager = new EventSubscriptionManager({ configResolver });
   const EVENTS_URI = 'switchbot://events';
   // Per-MCP-client subscription state: one unsubscribe function per URI.
   const activeSubscriptions = new Map<string, () => Promise<void>>();
@@ -598,7 +598,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         });
       }
       try {
-        const out = await runPlan(v.plan, { yes, continueOnError, caller: 'mcp' });
+        const out = await runPlan(v.plan, { yes, continueOnError, caller: 'mcp', getClient });
         return {
           content: [{ type: 'text', text: JSON.stringify({ ran: true, ...out }, null, 2) }],
           structuredContent: { ran: true, ...out } as unknown as Record<string, unknown>,
@@ -830,7 +830,7 @@ HTTP transport (multi-tenant):
           if (!Number.isFinite(port) || port < 1 || port > 65535) {
             const msg = `Invalid --port "${options.port}". Must be 1-65535.`;
             if (isJsonMode()) {
-              console.error(JSON.stringify({ error: { code: 2, kind: 'usage', message: msg } }));
+              printErrorEnvelope({ code: 2, kind: 'usage', message: msg });
             } else {
               console.error(msg);
             }

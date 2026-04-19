@@ -135,7 +135,7 @@ export type ErrorSubKind =
 
 export interface ErrorPayload {
   code: number;
-  kind: 'usage' | 'api' | 'runtime';
+  kind: 'usage' | 'api' | 'runtime' | 'guard';
   subKind?: ErrorSubKind;
   message: string;
   hint?: string;

@@ -2,7 +2,7 @@ import { MqttTlsClient } from '../mqtt/client.js';
 import { getCredential } from '../mqtt/credential.js';
 import { extractShadowEvent } from '../mqtt/shadow.js';
 import { setCachedStatus, loadStatusCache } from '../devices/cache.js';
-import { loadConfig } from '../config.js';
+import { loadConfig, type SwitchBotConfig } from '../config.js';
 import type { DeviceShadowEvent } from '../mqtt/types.js';
 
 type EventHandler = (event: DeviceShadowEvent) => void;
@@ -15,14 +15,28 @@ const DEFAULT_RING_SIZE = 100;
  * down, so N MCP clients (each with their own `resources/subscribe` call)
  * share one upstream MQTT connection. A ring buffer keeps the most recent N
  * events for `events_recent`.
+ *
+ * For HTTP transport the owning MCP server passes a `configResolver` that
+ * reads per-request credentials (profile header / query) — without it, this
+ * manager would fall back to `loadConfig()` and every tenant would end up
+ * on the server's default credentials. Stdio transport can safely omit the
+ * resolver since stdio is single-tenant by design.
  */
 export class EventSubscriptionManager {
   private client: MqttTlsClient | null = null;
   private clientStarting: Promise<void> | null = null;
   private readonly handlers = new Set<EventHandler>();
   private readonly ring: DeviceShadowEvent[] = [];
+  private readonly configResolver: () => SwitchBotConfig;
 
-  constructor(private readonly ringSize: number = DEFAULT_RING_SIZE) {}
+  constructor(
+    options: { ringSize?: number; configResolver?: () => SwitchBotConfig } = {},
+  ) {
+    this.ringSize = options.ringSize ?? DEFAULT_RING_SIZE;
+    this.configResolver = options.configResolver ?? (() => loadConfig());
+  }
+
+  private readonly ringSize: number;
 
   async subscribe(handler: EventHandler): Promise<() => Promise<void>> {
     this.handlers.add(handler);
@@ -52,7 +66,7 @@ export class EventSubscriptionManager {
   private async start(): Promise<void> {
     if (this.client) return;
     this.clientStarting = (async () => {
-      const config = loadConfig();
+      const config = this.configResolver();
       const credential = await getCredential(config.token, config.secret);
       const client = new MqttTlsClient();
       await client.connect(credential);

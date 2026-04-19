@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { printTable, printKeyValue, printJson, isJsonMode, handleError, UsageError } from '../utils/output.js';
+import { printTable, printKeyValue, printJson, printErrorEnvelope, isJsonMode, handleError, UsageError, type ErrorPayload } from '../utils/output.js';
 import { resolveFormat, resolveFields, renderRows } from '../utils/format.js';
 import { findCatalogEntry, getEffectiveCatalog, DeviceCatalogEntry } from '../devices/catalog.js';
 import { getCachedDevice } from '../devices/cache.js';
@@ -263,10 +263,14 @@ Examples:
       if (!validation.ok) {
         const err = validation.error;
         if (isJsonMode()) {
-          const obj: Record<string, unknown> = { code: 2, kind: 'usage', message: err.message };
-          if (err.hint) obj.hint = err.hint;
-          obj.context = { validationKind: err.kind };
-          console.error(JSON.stringify({ error: obj }));
+          const payload: ErrorPayload = {
+            code: 2,
+            kind: 'usage',
+            message: err.message,
+            context: { validationKind: err.kind },
+          };
+          if (err.hint) payload.hint = err.hint;
+          printErrorEnvelope(payload);
         } else {
           console.error(`Error: ${err.message}`);
           if (err.hint) console.error(err.hint);

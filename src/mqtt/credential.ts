@@ -6,7 +6,6 @@ import axios from 'axios';
 import { ApiError } from '../api/client.js';
 import { MqttError } from './errors.js';
 import type { MqttCredential } from './types.js';
-import { getProfile } from '../utils/flags.js';
 
 const CREDENTIAL_ENDPOINT = 'https://api.switchbot.net/v1.1/iot/credential';
 const TTL_MS = 3600000; // 1 hour
@@ -19,15 +18,24 @@ const EARLY_EXPIRY_MS = 600_000; // 10 minutes — refresh before the credential
 // endpoint responds with statusCode 190 "param is invalid".
 const CREDENTIAL_NONCE = 'OpenClaw';
 
-function credentialCachePath(): string {
-  const profile = getProfile();
-  const filename = profile ? `mqtt-credential.${profile}.json` : 'mqtt-credential.json';
-  return path.join(os.homedir(), '.switchbot', filename);
+/**
+ * Content-addressed cache key: derive the filename from the token+secret so
+ * each distinct credential gets its own cache file. This eliminates the
+ * previous argv/`--profile` dependency, which was unsafe under the HTTP MCP
+ * transport (no argv per request) and across CLI invocations that share a
+ * process (e.g. the MCP server itself).
+ */
+function cacheKeyFor(token: string, secret: string): string {
+  return crypto.createHash('sha256').update(`${token}\0${secret}`, 'utf8').digest('hex').slice(0, 16);
 }
 
-async function ensureCachedir(): Promise<void> {
-  const dir = path.dirname(credentialCachePath());
-  await fs.mkdir(dir, { recursive: true });
+function credentialCachePath(token: string, secret: string): string {
+  const key = cacheKeyFor(token, secret);
+  return path.join(os.homedir(), '.switchbot', `mqtt-credential.${key}.json`);
+}
+
+async function ensureCachedir(file: string): Promise<void> {
+  await fs.mkdir(path.dirname(file), { recursive: true });
 }
 
 function generateInstanceId(): string {
@@ -170,9 +178,9 @@ export async function fetchCredential(token: string, secret: string): Promise<Mq
   };
 }
 
-export async function loadCachedCredential(): Promise<MqttCredential | null> {
+export async function loadCachedCredential(token: string, secret: string): Promise<MqttCredential | null> {
   try {
-    const data = await fs.readFile(credentialCachePath(), 'utf-8');
+    const data = await fs.readFile(credentialCachePath(token, secret), 'utf-8');
     const cred = JSON.parse(data) as MqttCredential;
     const timeUntilExpiry = cred.expiresAt - Date.now();
     if (timeUntilExpiry > EARLY_EXPIRY_MS) {
@@ -184,13 +192,15 @@ export async function loadCachedCredential(): Promise<MqttCredential | null> {
   return null;
 }
 
-export async function saveCachedCredential(cred: MqttCredential): Promise<void> {
-  await ensureCachedir();
-  const cachePath = credentialCachePath();
+export async function saveCachedCredential(token: string, secret: string, cred: MqttCredential): Promise<void> {
+  const cachePath = credentialCachePath(token, secret);
+  await ensureCachedir(cachePath);
   const tmp = `${cachePath}.tmp`;
   try {
-    await fs.writeFile(tmp, JSON.stringify(cred, null, 2));
+    // TLS private-key material: restrict to 0600 like audit log / config.
+    await fs.writeFile(tmp, JSON.stringify(cred, null, 2), { mode: 0o600 });
     await fs.rename(tmp, cachePath);
+    try { await fs.chmod(cachePath, 0o600); } catch { /* non-posix */ }
   } catch (err) {
     try { await fs.unlink(tmp); } catch { /* ignore */ }
     throw err;
@@ -199,10 +209,10 @@ export async function saveCachedCredential(cred: MqttCredential): Promise<void> 
 
 export async function getCredential(token: string, secret: string, noCache = false): Promise<MqttCredential> {
   if (!noCache) {
-    const cached = await loadCachedCredential();
+    const cached = await loadCachedCredential(token, secret);
     if (cached) return cached;
   }
   const fresh = await fetchCredential(token, secret);
-  await saveCachedCredential(fresh);
+  await saveCachedCredential(token, secret, fresh);
   return fresh;
 }

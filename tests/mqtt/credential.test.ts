@@ -13,6 +13,8 @@ const mockFs = fs as unknown as {
   writeFile: ReturnType<typeof vi.fn>;
   rename: ReturnType<typeof vi.fn>;
   mkdir: ReturnType<typeof vi.fn>;
+  chmod: ReturnType<typeof vi.fn>;
+  unlink: ReturnType<typeof vi.fn>;
 };
 
 const TOKEN = 'test-token';
@@ -142,7 +144,7 @@ describe('credential', () => {
   describe('loadCachedCredential', () => {
     it('returns null if cache file does not exist', async () => {
       mockFs.readFile.mockRejectedValue(new Error('ENOENT'));
-      const result = await loadCachedCredential();
+      const result = await loadCachedCredential(TOKEN, SECRET);
       expect(result).toBeNull();
     });
 
@@ -153,7 +155,7 @@ describe('credential', () => {
       };
       mockFs.readFile.mockResolvedValue(JSON.stringify(cachedCred));
 
-      const result = await loadCachedCredential();
+      const result = await loadCachedCredential(TOKEN, SECRET);
       expect(result).toEqual(cachedCred);
     });
 
@@ -164,13 +166,22 @@ describe('credential', () => {
       };
       mockFs.readFile.mockResolvedValue(JSON.stringify(expiredCred));
 
-      const result = await loadCachedCredential();
+      const result = await loadCachedCredential(TOKEN, SECRET);
       expect(result).toBeNull();
+    });
+
+    it('reads different files for different token/secret pairs (content-addressed)', async () => {
+      mockFs.readFile.mockRejectedValue(new Error('ENOENT'));
+      await loadCachedCredential('tokA', 'secA');
+      await loadCachedCredential('tokB', 'secB');
+      const paths = mockFs.readFile.mock.calls.map((c) => c[0]);
+      expect(paths[0]).not.toEqual(paths[1]);
+      expect(String(paths[0])).toMatch(/mqtt-credential\.[0-9a-f]{16}\.json$/);
     });
   });
 
   describe('saveCachedCredential', () => {
-    it('writes credential to cache file with atomic rename', async () => {
+    it('writes credential to cache file with atomic rename + 0600 perms', async () => {
       const cred = {
         brokerUrl: 'test',
         clientId: 'test',
@@ -183,12 +194,18 @@ describe('credential', () => {
       mockFs.mkdir.mockResolvedValue(undefined);
       mockFs.writeFile.mockResolvedValue(undefined);
       mockFs.rename.mockResolvedValue(undefined);
+      mockFs.chmod.mockResolvedValue(undefined);
 
-      await saveCachedCredential(cred);
+      await saveCachedCredential(TOKEN, SECRET, cred);
 
       expect(mockFs.mkdir).toHaveBeenCalled();
-      expect(mockFs.writeFile).toHaveBeenCalledWith(expect.stringContaining('.tmp'), expect.any(String));
+      expect(mockFs.writeFile).toHaveBeenCalledWith(
+        expect.stringContaining('.tmp'),
+        expect.any(String),
+        expect.objectContaining({ mode: 0o600 }),
+      );
       expect(mockFs.rename).toHaveBeenCalled();
+      expect(mockFs.chmod).toHaveBeenCalledWith(expect.stringMatching(/mqtt-credential\..+\.json$/), 0o600);
     });
   });
 

@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { saveConfig, showConfig, listProfiles } from '../config.js';
-import { isJsonMode, printJson } from '../utils/output.js';
+import { isJsonMode, printJson, printErrorEnvelope } from '../utils/output.js';
 import chalk from 'chalk';
 
 function parseEnvFile(file: string): { token?: string; secret?: string } {
@@ -74,7 +74,7 @@ Files are written with mode 0600. Profiles live under ~/.switchbot/profiles/<nam
         if (!fs.existsSync(options.fromEnvFile)) {
           const msg = `--from-env-file: file not found: ${options.fromEnvFile}`;
           if (isJsonMode()) {
-            console.error(JSON.stringify({ error: { code: 2, kind: 'usage', message: msg } }));
+            printErrorEnvelope({ code: 2, kind: 'usage', message: msg });
           } else {
             console.error(msg);
           }
@@ -89,7 +89,7 @@ Files are written with mode 0600. Profiles live under ~/.switchbot/profiles/<nam
         if (!options.opSecret) {
           const msg = '--from-op requires --op-secret <ref> for the secret reference.';
           if (isJsonMode()) {
-            console.error(JSON.stringify({ error: { code: 2, kind: 'usage', message: msg } }));
+            printErrorEnvelope({ code: 2, kind: 'usage', message: msg });
           } else {
             console.error(msg);
           }
@@ -101,7 +101,7 @@ Files are written with mode 0600. Profiles live under ~/.switchbot/profiles/<nam
         } catch (err) {
           const msg = `1Password CLI read failed: ${err instanceof Error ? err.message : String(err)}`;
           if (isJsonMode()) {
-            console.error(JSON.stringify({ error: { code: 1, kind: 'runtime', message: msg, hint: 'Ensure the "op" CLI is installed and authenticated (op signin).' } }));
+            printErrorEnvelope({ code: 1, kind: 'runtime', message: msg, hint: 'Ensure the "op" CLI is installed and authenticated (op signin).' });
           } else {
             console.error(msg);
             console.error('Ensure the "op" CLI is installed and authenticated (op signin).');
@@ -113,7 +113,7 @@ Files are written with mode 0600. Profiles live under ~/.switchbot/profiles/<nam
       if (!token || !secret) {
         const msg = 'Missing token/secret. Provide positional arguments or use --from-env-file / --from-op.';
         if (isJsonMode()) {
-          console.error(JSON.stringify({ error: { code: 2, kind: 'usage', message: msg } }));
+          printErrorEnvelope({ code: 2, kind: 'usage', message: msg });
         } else {
           console.error(msg);
         }

@@ -109,7 +109,7 @@ describe('EventSubscriptionManager', () => {
   });
 
   it('buffers events in a ring (last N events retrievable via getRecent)', async () => {
-    const mgr = new EventSubscriptionManager(3);
+    const mgr = new EventSubscriptionManager({ ringSize: 3 });
     await mgr.subscribe(() => {});
     for (let i = 0; i < 5; i++) fakeMqtt.emitMessage(makeShadow(`D${i}`));
     const recent = mgr.getRecent();
@@ -117,7 +117,7 @@ describe('EventSubscriptionManager', () => {
   });
 
   it('getRecent(n) caps to the requested window', async () => {
-    const mgr = new EventSubscriptionManager(10);
+    const mgr = new EventSubscriptionManager({ ringSize: 10 });
     await mgr.subscribe(() => {});
     for (let i = 0; i < 5; i++) fakeMqtt.emitMessage(makeShadow(`D${i}`));
     expect(mgr.getRecent(2).map((e) => e.deviceId)).toEqual(['D3', 'D4']);
