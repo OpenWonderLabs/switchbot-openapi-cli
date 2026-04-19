@@ -21,6 +21,7 @@ import {
 import { fetchScenes, executeScene } from '../lib/scenes.js';
 import { findCatalogEntry } from '../devices/catalog.js';
 import { getCachedDevice } from '../devices/cache.js';
+import { EventSubscriptionManager } from '../mcp/events-subscription.js';
 
 /**
  * Factory — build an McpServer with the six SwitchBot tools registered.
@@ -45,7 +46,8 @@ function mcpError(
   };
 }
 
-export function createSwitchBotMcpServer(): McpServer {
+export function createSwitchBotMcpServer(options?: { eventManager?: EventSubscriptionManager }): McpServer {
+  const eventManager = options?.eventManager;
   const server = new McpServer(
     {
       name: 'switchbot',
@@ -378,6 +380,9 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
     }
   );
 
+  // TODO: switchbot://events resource (event stream subscription) — to be implemented with resource URIs
+  // For now, event streaming is only accessible via MQTT directly; MCP resource binding coming in Phase E
+
   return server;
 }
 
@@ -455,6 +460,10 @@ Inspect locally:
 
           const { createServer } = await import('node:http');
           const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+
+          // Initialize shared EventSubscriptionManager for event streaming
+          const eventManager = new EventSubscriptionManager();
+          let mqttInitialized = false;
 
           // Helper: constant-time token comparison
           const tokenMatch = (provided: string | undefined): boolean => {
@@ -536,7 +545,7 @@ Inspect locally:
 
             // Stateless mode: fresh transport+server per request (SDK requirement).
             const reqTransport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-            const reqServer = createSwitchBotMcpServer();
+            const reqServer = createSwitchBotMcpServer({ eventManager });
             // Register cleanup before any async work so it fires on both normal
             // close and error-path close (after the 500 response ends).
             res.on('close', () => {
@@ -560,6 +569,7 @@ Inspect locally:
             if (isShuttingDown) return;
             isShuttingDown = true;
             console.error('Shutting down...');
+            await eventManager.shutdown();
             httpServer.close(() => {
               console.error('Server closed');
               process.exit(0);
