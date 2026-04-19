@@ -230,6 +230,7 @@ export function todayUsage(now: Date = new Date()): {
   total: number;
   remaining: number;
   endpoints: Record<string, number>;
+  server?: { remaining: number; observedAt: string };
 } {
   const key = today(now);
   const data = loadQuota();
@@ -239,5 +240,34 @@ export function todayUsage(now: Date = new Date()): {
     total: bucket.total,
     remaining: Math.max(0, DAILY_QUOTA - bucket.total),
     endpoints: { ...bucket.endpoints },
+    ...(serverObservation ? { server: { ...serverObservation } } : {}),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Server-authoritative quota (best-effort).
+//
+// SwitchBot does not expose a dedicated quota endpoint. Some deployments
+// include `X-Ratelimit-Remaining` / `X-Ratelimit-Reset` headers on API
+// responses, which the axios response interceptor feeds us here. The
+// observation is advisory — if the header goes missing, callers fall
+// back to the local counter.
+// ---------------------------------------------------------------------------
+interface ServerQuotaObservation {
+  remaining: number;
+  observedAt: string;
+}
+let serverObservation: ServerQuotaObservation | null = null;
+
+export function recordServerQuota(remaining: number, now: Date = new Date()): void {
+  if (!Number.isFinite(remaining) || remaining < 0) return;
+  serverObservation = { remaining: Math.floor(remaining), observedAt: now.toISOString() };
+}
+
+export function getServerQuota(): ServerQuotaObservation | null {
+  return serverObservation ? { ...serverObservation } : null;
+}
+
+export function clearServerQuota(): void {
+  serverObservation = null;
 }

@@ -42,6 +42,7 @@ Examples:
             remaining: usage.remaining,
             dailyLimit: DAILY_QUOTA,
             endpoints: usage.endpoints,
+            ...(usage.server ? { server: usage.server } : {}),
           },
           history: history.days,
         });
@@ -51,6 +52,11 @@ Examples:
       console.log(`Today (${usage.date}):`);
       console.log(`  Requests used:      ${usage.total} / ${DAILY_QUOTA}`);
       console.log(`  Remaining budget:   ${usage.remaining}`);
+      if (usage.server) {
+        const age = Date.now() - Date.parse(usage.server.observedAt);
+        const freshness = age < 10 * 60_000 ? 'fresh' : `${Math.round(age / 60_000)}m old`;
+        console.log(`  Server remaining:   ${usage.server.remaining} (${freshness})`);
+      }
       if (Object.keys(usage.endpoints).length === 0) {
         console.log('  (no requests recorded yet)');
       } else {

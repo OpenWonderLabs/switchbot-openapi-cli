@@ -15,7 +15,7 @@ import {
   isQuotaDisabled,
 } from '../utils/flags.js';
 import { nextRetryDelayMs, sleep } from '../utils/retry.js';
-import { recordRequest } from '../utils/quota.js';
+import { recordRequest, recordServerQuota } from '../utils/quota.js';
 
 const API_ERROR_MESSAGES: Record<number, string> = {
   151: 'Device type does not support this command',
@@ -89,6 +89,16 @@ export function createClient(overrides?: Partial<SwitchBotConfig>): AxiosInstanc
         const method = (response.config.method ?? 'get').toUpperCase();
         const url = `${response.config.baseURL ?? ''}${response.config.url ?? ''}`;
         recordRequest(method, url);
+        // Opportunistic: some SwitchBot deployments include a ratelimit
+        // header we can report as server-authoritative quota. Header names
+        // can arrive in any case; axios lowercases them.
+        const headers = response.headers as Record<string, string | undefined>;
+        const remainingHeader =
+          headers?.['x-ratelimit-remaining'] ?? headers?.['X-Ratelimit-Remaining'];
+        if (remainingHeader !== undefined) {
+          const n = Number(remainingHeader);
+          if (Number.isFinite(n)) recordServerQuota(n);
+        }
       }
       const data = response.data as { statusCode?: number; message?: string };
       if (data.statusCode !== undefined && data.statusCode !== 100) {

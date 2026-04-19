@@ -730,19 +730,26 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
     {
       title: "Report today's local API quota usage",
       description:
-        "Return today's locally-tracked SwitchBot API usage (10,000/day budget). This is the CLI's own counter — SwitchBot does not expose a server-side quota endpoint. `serverQuotaKnown` will be true once a ratelimit header has been observed.",
+        "Return today's locally-tracked SwitchBot API usage (10,000/day budget). `serverQuotaKnown` is true when a ratelimit header has been observed this session; the `server.remaining` value is then advisory but authoritative.",
       inputSchema: {},
       outputSchema: {
         date: z.string(),
         total: z.number().int(),
         remaining: z.number().int(),
         endpoints: z.record(z.string(), z.number().int()),
-        serverQuotaKnown: z.literal(false),
+        serverQuotaKnown: z.boolean(),
+        server: z.object({
+          remaining: z.number().int(),
+          observedAt: z.string(),
+        }).optional(),
       },
     },
     async () => {
       const usage = todayUsage();
-      const structured = { ...usage, serverQuotaKnown: false as const };
+      const structured = {
+        ...usage,
+        serverQuotaKnown: usage.server !== undefined,
+      };
       return {
         content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
         structuredContent: structured,
