@@ -1,4 +1,4 @@
-import { connect as mqttConnect, type MqttClient } from 'mqtt';
+import { connect as mqttConnect, type MqttClient, type IClientOptions } from 'mqtt';
 import * as tls from 'node:tls';
 import type { MqttCredential } from './types.js';
 
@@ -40,10 +40,10 @@ export class MqttTlsClient {
     const cert = Buffer.from(credential.tls.certBase64, 'base64');
     const key = Buffer.from(credential.tls.keyBase64, 'base64');
 
-    const tlsOptions = {
-      ca,
-      cert,
-      key,
+    const tlsOptions: Partial<IClientOptions> = {
+      ca: [ca],
+      cert: [cert],
+      key: [key],
       rejectUnauthorized: true,
     };
 
@@ -52,7 +52,7 @@ export class MqttTlsClient {
 
   private async connectWithRetry(
     credential: MqttCredential,
-    tlsOptions: tls.SecureContextOptions,
+    tlsOptions: Partial<IClientOptions>,
   ): Promise<void> {
     for (let attempt = 0; attempt < this.reconnectConfig.maxAttempts; attempt++) {
       if (this.abortSignal?.aborted) throw new Error('Connection aborted');
@@ -81,30 +81,32 @@ export class MqttTlsClient {
     throw new Error('MQTT connection failed: max retries exhausted');
   }
 
-  private doConnect(credential: MqttCredential, tlsOptions: tls.SecureContextOptions): Promise<void> {
+  private doConnect(credential: MqttCredential, tlsOptions: Partial<IClientOptions>): Promise<void> {
     return new Promise((resolve, reject) => {
       const url = credential.brokerUrl;
-      this.client = mqttConnect(url, {
+      const options: IClientOptions = {
+        ...tlsOptions,
         clientId: credential.clientId,
         clean: true,
-        reconnectPeriod: 0, // Disable auto-reconnect; we handle it
+        reconnectPeriod: 0,
         connectTimeout: 30000,
-        ...tlsOptions,
-      });
+      };
 
-      const onConnect = () => {
+      this.client = mqttConnect(url, options);
+
+      const onConnect = (): void => {
         this.client?.removeListener('error', onError);
         this.client?.removeListener('close', onClose);
         resolve();
       };
 
-      const onError = (err: Error) => {
+      const onError = (err: Error): void => {
         this.client?.removeListener('connect', onConnect);
         this.client?.removeListener('close', onClose);
         reject(err);
       };
 
-      const onClose = () => {
+      const onClose = (): void => {
         this.client?.removeListener('connect', onConnect);
         this.client?.removeListener('error', onError);
         reject(new Error('Connection closed'));
@@ -123,7 +125,7 @@ export class MqttTlsClient {
         return;
       }
 
-      this.client.subscribe(topics, (err) => {
+      this.client.subscribe(topics, (err: Error | null) => {
         if (err) reject(err);
         else resolve();
       });
@@ -132,17 +134,14 @@ export class MqttTlsClient {
 
   on(event: string, handler: (...args: unknown[]) => void): void {
     if (!this.client) throw new Error('Client not connected');
-    this.client.on(event, handler);
+    this.client.on(event as any, handler as any);
   }
 
   async end(): Promise<void> {
     if (this.reconnectTimeoutId) clearTimeout(this.reconnectTimeoutId);
+    if (!this.client) return;
     return new Promise((resolve) => {
-      if (!this.client) {
-        resolve();
-        return;
-      }
-      this.client.end(resolve);
+      this.client?.end(false, resolve as any);
     });
   }
 
@@ -152,7 +151,6 @@ export class MqttTlsClient {
 
   checkConnectionStability(): void {
     if (this.connectionStableTime && Date.now() - this.connectionStableTime > 30000) {
-      // Connection is stable; reset attempt counter
       this.reconnectAttempts = 0;
     }
   }
