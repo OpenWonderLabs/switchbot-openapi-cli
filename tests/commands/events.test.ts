@@ -37,6 +37,7 @@ vi.mock('../../src/mqtt/client.js', () => {
         mqttMock.messageHandler = handler;
         return () => { mqttMock.messageHandler = null; };
       }),
+      onStateChange: vi.fn(() => () => {}),
     };
     mqttMock.instance = inst;
     return inst;

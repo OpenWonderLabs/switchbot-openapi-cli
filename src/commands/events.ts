@@ -280,6 +280,12 @@ Examples:
           }
         });
 
+        const unsubState = client.onStateChange((state) => {
+          if (!isJsonMode()) {
+            console.error(`[${new Date().toLocaleTimeString()}] MQTT state: ${state}`);
+          }
+        });
+
         await client.connect();
         client.subscribe(topic);
 
@@ -292,6 +298,7 @@ Examples:
             process.removeListener('SIGINT', cleanup);
             process.removeListener('SIGTERM', cleanup);
             unsub();
+            unsubState();
             client.disconnect().then(resolve).catch(resolve);
           };
           process.once('SIGINT', cleanup);
