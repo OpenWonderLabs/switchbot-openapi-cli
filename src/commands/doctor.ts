@@ -125,7 +125,7 @@ function checkMqtt(): Check {
   return {
     name: 'mqtt',
     status: 'ok',
-    detail: `configured (mqtts://${cfg.host}:${cfg.port}) — run 'switchbot events mqtt-tail' to verify`,
+    detail: `configured (mqtts://${cfg.host}:${cfg.port}) — credentials not verified; run 'switchbot events mqtt-tail' to test live connectivity`,
   };
 }
 

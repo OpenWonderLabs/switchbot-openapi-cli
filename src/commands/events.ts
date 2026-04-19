@@ -125,7 +125,7 @@ export function startReceiver(
 export function registerEventsCommand(program: Command): void {
   const events = program
     .command('events')
-    .description('Subscribe to local webhook events forwarded by SwitchBot');
+    .description('Receive SwitchBot device events — webhook receiver (tail) or MQTT stream (mqtt-tail)');
 
   events
     .command('tail')

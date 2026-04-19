@@ -518,7 +518,7 @@ export function registerMcpCommand(program: Command): void {
     .command('mcp')
     .description('Run as a Model Context Protocol server so AI agents can call SwitchBot tools')
     .addHelpText('after', `
-The MCP server exposes seven tools over stdio:
+The MCP server exposes eight tools:
   - list_devices          fetch all physical + IR devices
   - get_device_status     live status for a physical device
   - send_command          control a device (destructive commands need confirm:true)
@@ -526,6 +526,12 @@ The MCP server exposes seven tools over stdio:
   - run_scene             execute a manual scene
   - search_catalog        offline catalog search by type/alias
   - describe_device       metadata + commands + (optionally) live status for one device
+  - account_overview      single cold-start snapshot: devices + scenes + quota + cache + MQTT state
+
+Resource (read-only):
+  - switchbot://events    snapshot of recent MQTT shadow events from the ring buffer
+    Requires SWITCHBOT_MQTT_HOST / SWITCHBOT_MQTT_USERNAME / SWITCHBOT_MQTT_PASSWORD
+    env vars; returns {state:"disabled"} when not configured.
 
 Example Claude Desktop config (~/Library/Application Support/Claude/claude_desktop_config.json):
 
@@ -800,7 +806,14 @@ process_uptime_seconds ${Math.floor(process.uptime())}
           return;
         }
 
-        const server = createSwitchBotMcpServer();
+        const eventManager = new EventSubscriptionManager();
+        const mqttConfig = getMqttConfig();
+        if (mqttConfig) {
+          eventManager.initialize(mqttConfig).catch((err: unknown) => {
+            console.error('MQTT initialization failed:', err instanceof Error ? err.message : String(err));
+          });
+        }
+        const server = createSwitchBotMcpServer({ eventManager });
         const transport = new StdioServerTransport();
         await server.connect(transport);
       } catch (error) {
