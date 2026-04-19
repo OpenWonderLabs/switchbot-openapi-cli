@@ -10,6 +10,14 @@ export interface FilterClause {
   value: string;
 }
 
+/**
+ * A simple event filter for MQTT shadow updates.
+ */
+export interface EventStreamFilter {
+  deviceId?: string;
+  type?: string;
+}
+
 export class FilterSyntaxError extends Error {
   constructor(message: string) {
     super(message);
@@ -58,6 +66,55 @@ export function parseFilter(expr: string | undefined): FilterClause[] {
   }
 
   return clauses;
+}
+
+/**
+ * Parse a simple event stream filter (deviceId=X or type=Y).
+ */
+export function parseEventStreamFilter(flag: string | undefined): EventStreamFilter | null {
+  if (!flag) return null;
+  const allowed = new Set(['deviceId', 'type']);
+  const out: EventStreamFilter = {};
+  for (const pair of flag.split(',')) {
+    const eq = pair.indexOf('=');
+    if (eq === -1 || eq === 0) {
+      throw new FilterSyntaxError(
+        `Invalid --filter pair "${pair.trim()}". Expected "key=value". Supported keys: deviceId, type.`
+      );
+    }
+    const k = pair.slice(0, eq).trim();
+    const v = pair.slice(eq + 1).trim();
+    if (!v) {
+      throw new FilterSyntaxError(
+        `Empty value for --filter key "${k}". Expected "key=value". Supported keys: deviceId, type.`
+      );
+    }
+    if (!allowed.has(k)) {
+      throw new FilterSyntaxError(
+        `Unknown --filter key "${k}". Supported keys: deviceId, type.`
+      );
+    }
+    if (k === 'deviceId') out.deviceId = v;
+    else if (k === 'type') out.type = v;
+  }
+  return out;
+}
+
+/**
+ * Match an event body against an event stream filter.
+ */
+export function matchEventStreamFilter(body: unknown, filter: EventStreamFilter | null): boolean {
+  if (!filter) return true;
+  if (!body || typeof body !== 'object') return false;
+  const b = body as Record<string, unknown>;
+  const ctx = (b.context ?? b) as Record<string, unknown>;
+  if (filter.deviceId && ctx.deviceMac !== filter.deviceId && ctx.deviceId !== filter.deviceId) {
+    return false;
+  }
+  if (filter.type && ctx.deviceType !== filter.type) {
+    return false;
+  }
+  return true;
 }
 
 interface FilterableDevice {
