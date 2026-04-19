@@ -278,6 +278,8 @@ Examples:
 
         await new Promise<void>((resolve) => {
           const cleanup = () => {
+            process.removeListener('SIGINT', cleanup);
+            process.removeListener('SIGTERM', cleanup);
             unsub();
             client.disconnect().then(resolve).catch(resolve);
           };
