@@ -6,6 +6,7 @@ import { printJson, isJsonMode } from '../utils/output.js';
 import { getEffectiveCatalog } from '../devices/catalog.js';
 import { configFilePath, listProfiles } from '../config.js';
 import { describeCache } from '../devices/cache.js';
+import { getMqttConfig } from '../mqtt/credential.js';
 
 interface Check {
   name: string;
@@ -112,6 +113,22 @@ function checkNodeVersion(): Check {
   return { name: 'node', status: 'ok', detail: `Node ${process.versions.node}` };
 }
 
+function checkMqtt(): Check {
+  const cfg = getMqttConfig();
+  if (!cfg) {
+    return {
+      name: 'mqtt',
+      status: 'warn',
+      detail: "not configured — set SWITCHBOT_MQTT_HOST/USERNAME/PASSWORD to enable real-time events",
+    };
+  }
+  return {
+    name: 'mqtt',
+    status: 'ok',
+    detail: `configured (mqtts://${cfg.host}:${cfg.port}) — credentials not verified; run 'switchbot events mqtt-tail' to test live connectivity`,
+  };
+}
+
 export function registerDoctorCommand(program: Command): void {
   program
     .command('doctor')
@@ -133,6 +150,7 @@ Examples:
         checkCache(),
         checkQuotaFile(),
         checkClockSkew(),
+        checkMqtt(),
       ];
       const summary = {
         ok: checks.filter((c) => c.status === 'ok').length,

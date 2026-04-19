@@ -1,6 +1,8 @@
 import { Command } from 'commander';
 import http from 'node:http';
 import { printJson, isJsonMode, handleError, UsageError } from '../utils/output.js';
+import { SwitchBotMqttClient } from '../mqtt/client.js';
+import { getMqttConfig } from '../mqtt/credential.js';
 
 const DEFAULT_PORT = 3000;
 const DEFAULT_PATH = '/';
@@ -123,7 +125,7 @@ export function startReceiver(
 export function registerEventsCommand(program: Command): void {
   const events = program
     .command('events')
-    .description('Subscribe to local webhook events forwarded by SwitchBot');
+    .description('Receive SwitchBot device events — webhook receiver (tail) or MQTT stream (mqtt-tail)');
 
   events
     .command('tail')
@@ -198,6 +200,88 @@ Examples:
           const cleanup = () => {
             server?.close();
             resolve();
+          };
+          process.once('SIGINT', cleanup);
+          process.once('SIGTERM', cleanup);
+          ac.signal.addEventListener('abort', cleanup, { once: true });
+        });
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  events
+    .command('mqtt-tail')
+    .description('Subscribe to MQTT shadow events and stream them as JSONL (requires SWITCHBOT_MQTT_HOST/USERNAME/PASSWORD)')
+    .option('--topic <pattern>', 'MQTT topic filter (default: "#" — all topics)', '#')
+    .option('--max <n>', 'Stop after N events (default: run until Ctrl-C)')
+    .addHelpText(
+      'after',
+      `
+Requires three environment variables:
+  SWITCHBOT_MQTT_HOST      broker hostname
+  SWITCHBOT_MQTT_USERNAME  broker username
+  SWITCHBOT_MQTT_PASSWORD  broker password
+  SWITCHBOT_MQTT_PORT      broker port (default: 8883, MQTTS/TLS)
+
+Output (JSONL, one event per line):
+  { "t": "<ISO>", "topic": "<mqtt-topic>", "payload": <parsed JSON or raw string> }
+
+Examples:
+  $ switchbot events mqtt-tail
+  $ switchbot events mqtt-tail --topic 'switchbot/#'
+  $ switchbot events mqtt-tail --max 10 --json
+`,
+    )
+    .action(async (options: { topic: string; max?: string }) => {
+      try {
+        const cfg = getMqttConfig();
+        if (!cfg) {
+          throw new UsageError(
+            'MQTT is not configured. Set SWITCHBOT_MQTT_HOST, SWITCHBOT_MQTT_USERNAME, and SWITCHBOT_MQTT_PASSWORD.',
+          );
+        }
+        const maxEvents: number | null = options.max !== undefined ? Number(options.max) : null;
+        if (maxEvents !== null && (!Number.isInteger(maxEvents) || maxEvents < 1)) {
+          throw new UsageError(`Invalid --max "${options.max}". Must be a positive integer.`);
+        }
+
+        let eventCount = 0;
+        const ac = new AbortController();
+        const client = new SwitchBotMqttClient(cfg);
+
+        const unsub = client.onMessage((topic, payload) => {
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(payload.toString('utf-8'));
+          } catch {
+            parsed = payload.toString('utf-8');
+          }
+          const record = { t: new Date().toISOString(), topic, payload: parsed };
+          if (isJsonMode()) {
+            printJson(record);
+          } else {
+            console.log(JSON.stringify(record));
+          }
+          eventCount++;
+          if (maxEvents !== null && eventCount >= maxEvents) {
+            ac.abort();
+          }
+        });
+
+        if (!isJsonMode()) {
+          console.error(`Connecting to mqtts://${cfg.host}:${cfg.port} (Ctrl-C to stop)`);
+        }
+
+        await client.connect();
+        client.subscribe(options.topic);
+
+        await new Promise<void>((resolve) => {
+          const cleanup = () => {
+            process.removeListener('SIGINT', cleanup);
+            process.removeListener('SIGTERM', cleanup);
+            unsub();
+            client.disconnect().then(resolve).catch(resolve);
           };
           process.once('SIGINT', cleanup);
           process.once('SIGTERM', cleanup);

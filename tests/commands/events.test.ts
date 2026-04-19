@@ -1,8 +1,52 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import http from 'node:http';
 import { once } from 'node:events';
 import { AddressInfo } from 'node:net';
-import { startReceiver } from '../../src/commands/events.js';
+import { startReceiver, registerEventsCommand } from '../../src/commands/events.js';
+import { runCli } from '../helpers/cli.js';
+
+// ---------------------------------------------------------------------------
+// Shared mock state for SwitchBotMqttClient — hoisted so the factory can use it
+// ---------------------------------------------------------------------------
+const mqttMock = vi.hoisted(() => ({
+  messageHandler: null as ((topic: string, payload: Buffer) => void) | null,
+  connectShouldFireMessage: false,
+  instance: null as {
+    connect: ReturnType<typeof vi.fn>;
+    disconnect: ReturnType<typeof vi.fn>;
+    subscribe: ReturnType<typeof vi.fn>;
+    onMessage: ReturnType<typeof vi.fn>;
+  } | null,
+}));
+
+vi.mock('../../src/mqtt/client.js', () => {
+  const MockSwitchBotMqttClient = vi.fn(function (this: unknown) {
+    const inst = {
+      connect: vi.fn(async () => {
+        if (mqttMock.connectShouldFireMessage) {
+          setTimeout(() => {
+            if (mqttMock.messageHandler) {
+              mqttMock.messageHandler('test/topic', Buffer.from(JSON.stringify({ state: 'on' })));
+            }
+          }, 0);
+        }
+      }),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      subscribe: vi.fn(),
+      onMessage: vi.fn((handler: (topic: string, payload: Buffer) => void) => {
+        mqttMock.messageHandler = handler;
+        return () => { mqttMock.messageHandler = null; };
+      }),
+    };
+    mqttMock.instance = inst;
+    return inst;
+  });
+  return { SwitchBotMqttClient: MockSwitchBotMqttClient };
+});
+
+vi.mock('../../src/mqtt/credential.js', () => ({
+  getMqttConfig: vi.fn().mockReturnValue(null),
+}));
 
 async function postJson(port: number, path: string, body: unknown): Promise<number> {
   const payload = typeof body === 'string' ? body : JSON.stringify(body);
@@ -163,5 +207,77 @@ describe('events tail receiver', () => {
     });
     await new Promise<void>((r) => server.close(() => r()));
     expect(status).toBe(413);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// mqtt-tail subcommand tests
+// ---------------------------------------------------------------------------
+import { getMqttConfig } from '../../src/mqtt/credential.js';
+
+describe('events mqtt-tail', () => {
+  beforeEach(() => {
+    mqttMock.messageHandler = null;
+    mqttMock.connectShouldFireMessage = false;
+    vi.mocked(getMqttConfig).mockReturnValue(null);
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('exits 2 with UsageError when MQTT env vars are missing', async () => {
+    vi.mocked(getMqttConfig).mockReturnValue(null);
+    const res = await runCli(registerEventsCommand, ['events', 'mqtt-tail']);
+    expect(res.exitCode).toBe(2);
+    expect(res.stderr.some((l) => l.includes('SWITCHBOT_MQTT_HOST'))).toBe(true);
+  });
+
+  it('outputs JSONL and stops after --max 1', async () => {
+    vi.mocked(getMqttConfig).mockReturnValue({
+      host: 'broker.test',
+      port: 8883,
+      username: 'user',
+      password: 'pass',
+    });
+    mqttMock.connectShouldFireMessage = true;
+
+    const res = await runCli(registerEventsCommand, ['events', 'mqtt-tail', '--max', '1']);
+    expect(res.exitCode).toBe(null);
+    const jsonLines = res.stdout.filter((l) => l.trim().startsWith('{'));
+    expect(jsonLines).toHaveLength(1);
+    const parsed = JSON.parse(jsonLines[0]) as { t: string; topic: string; payload: unknown };
+    expect(parsed.topic).toBe('test/topic');
+    expect(parsed.payload).toEqual({ state: 'on' });
+    expect(typeof parsed.t).toBe('string');
+  });
+
+  it('wraps output in envelope with --json --max 1', async () => {
+    vi.mocked(getMqttConfig).mockReturnValue({
+      host: 'broker.test',
+      port: 8883,
+      username: 'user',
+      password: 'pass',
+    });
+    mqttMock.connectShouldFireMessage = true;
+
+    const res = await runCli(registerEventsCommand, ['--json', 'events', 'mqtt-tail', '--max', '1']);
+    expect(res.exitCode).toBe(null);
+    const jsonLines = res.stdout.filter((l) => l.trim().startsWith('{'));
+    expect(jsonLines).toHaveLength(1);
+    const parsed = JSON.parse(jsonLines[0]) as { schemaVersion: string; data: { topic: string } };
+    expect(parsed.schemaVersion).toBe('1.1');
+    expect(parsed.data.topic).toBe('test/topic');
+  });
+
+  it('exits 2 when --max is not a positive integer', async () => {
+    vi.mocked(getMqttConfig).mockReturnValue({
+      host: 'broker.test',
+      port: 8883,
+      username: 'user',
+      password: 'pass',
+    });
+    const res = await runCli(registerEventsCommand, ['events', 'mqtt-tail', '--max', '0']);
+    expect(res.exitCode).toBe(2);
   });
 });
