@@ -588,6 +588,48 @@ Inspect locally:
           };
 
           const httpServer = createServer(async (req, res) => {
+            // Health and metrics routes (no auth required)
+            if (req.url === '/healthz' && req.method === 'GET') {
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({
+                ok: true,
+                version: '1.7.0',
+                pid: process.pid,
+                uptimeSec: Math.floor(process.uptime()),
+              }));
+              return;
+            }
+
+            if (req.url === '/ready' && req.method === 'GET') {
+              const ready = !eventManager || eventManager.getState() !== 'failed';
+              const status = ready ? 200 : 503;
+              res.writeHead(status, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({
+                ready,
+                version: '1.7.0',
+                mqtt: eventManager ? eventManager.getState() : 'idle',
+              }));
+              return;
+            }
+
+            if (req.url === '/metrics' && req.method === 'GET') {
+              const metrics = `# HELP switchbot_mqtt_connected MQTT connection status (0=disconnected, 1=connected)
+# TYPE switchbot_mqtt_connected gauge
+switchbot_mqtt_connected ${eventManager && eventManager.getState() === 'connected' ? 1 : 0}
+
+# HELP switchbot_mqtt_subscribers Number of active event subscribers
+# TYPE switchbot_mqtt_subscribers gauge
+switchbot_mqtt_subscribers ${eventManager ? eventManager.getSubscriberCount() : 0}
+
+# HELP process_uptime_seconds Process uptime in seconds
+# TYPE process_uptime_seconds gauge
+process_uptime_seconds ${Math.floor(process.uptime())}
+`;
+              res.writeHead(200, { 'Content-Type': 'text/plain; version=0.0.4; charset=utf-8' });
+              res.end(metrics);
+              return;
+            }
+
             // Extract profile from header or query string
             const headerProfile = req.headers['x-switchbot-profile'];
             const profileHeader = Array.isArray(headerProfile) ? headerProfile[0] : headerProfile;

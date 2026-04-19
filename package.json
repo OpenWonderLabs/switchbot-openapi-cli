@@ -52,6 +52,7 @@
     "commander": "^12.1.0",
     "js-yaml": "^4.1.1",
     "mqtt": "^5.3.0",
+    "pino": "^9.0.0",
     "uuid": "^11.0.5"
   },
   "devDependencies": {
