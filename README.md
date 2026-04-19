@@ -43,6 +43,7 @@ Under the hood every surface shares the same catalog, cache, and HMAC client —
   - [`devices`](#devices--list-status-control)
   - [`scenes`](#scenes--run-manual-scenes)
   - [`webhook`](#webhook--receive-device-events-over-http)
+  - [`events`](#events--receive-device-events)
   - [`batch`](#batch--run-multiple-commands)
   - [`watch`](#watch--poll-device-status)
   - [`mcp`](#mcp--model-context-protocol-server)
@@ -307,6 +308,64 @@ switchbot webhook delete https://your.host/hook
 
 The CLI validates that `<url>` is an absolute `http://` or `https://` URL before calling the API. `--enable` and `--disable` are mutually exclusive.
 
+### `events` — receive device events
+
+Two subcommands cover the two ways SwitchBot can push state changes to you.
+
+#### `events tail` — local webhook receiver
+
+```bash
+# Listen on port 3000 and print every incoming webhook POST
+switchbot events tail
+
+# Filter to one device
+switchbot events tail --filter deviceId=ABC123
+
+# Stop after 5 matching events
+switchbot events tail --filter 'type=WoMeter' --max 5
+
+# Custom port / path
+switchbot events tail --port 8080 --path /hook --json
+```
+
+Run `switchbot webhook setup https://your.host/hook` first to tell SwitchBot where to send events, then expose the local port via ngrok/cloudflared and point the webhook URL at it. `events tail` only runs the local receiver — tunnelling is up to you.
+
+Output (one JSON line per matched event):
+```
+{ "t": "2024-01-01T12:00:00.000Z", "remote": "1.2.3.4:54321", "path": "/", "body": {...}, "matched": true }
+```
+
+Filter keys: `deviceId=<id>`, `type=<deviceType>` (comma-separated for AND logic).
+
+#### `events mqtt-tail` — real-time MQTT stream
+
+```bash
+# Stream all shadow-update events from the MQTT broker
+switchbot events mqtt-tail
+
+# Filter to a topic subtree
+switchbot events mqtt-tail --topic 'switchbot/#'
+
+# Stop after 10 events
+switchbot events mqtt-tail --max 10 --json
+```
+
+Requires a SwitchBot-compatible MQTT broker. Set three environment variables before running:
+
+```bash
+export SWITCHBOT_MQTT_HOST=your.broker.host
+export SWITCHBOT_MQTT_USERNAME=your_username
+export SWITCHBOT_MQTT_PASSWORD=your_password
+# SWITCHBOT_MQTT_PORT defaults to 8883 (MQTTS/TLS)
+```
+
+Output (one JSON line per message):
+```
+{ "t": "2024-01-01T12:00:00.000Z", "topic": "switchbot/abc123/status", "payload": {...} }
+```
+
+Run `switchbot doctor` to verify MQTT is configured correctly before connecting.
+
 ### `completion` — shell tab-completion
 
 ```bash
@@ -457,11 +516,15 @@ Typical errors bubble up in the form `Error: <message>` on stderr. The SwitchBot
 
 ## Environment variables
 
-| Variable            | Description                                                        |
-| ------------------- | ------------------------------------------------------------------ |
-| `SWITCHBOT_TOKEN`   | API token — takes priority over the config file                    |
-| `SWITCHBOT_SECRET`  | API secret — takes priority over the config file                   |
-| `NO_COLOR`          | Disable ANSI colors in all output (automatically respected)        |
+| Variable                    | Description                                                        |
+| --------------------------- | ------------------------------------------------------------------ |
+| `SWITCHBOT_TOKEN`           | API token — takes priority over the config file                    |
+| `SWITCHBOT_SECRET`          | API secret — takes priority over the config file                   |
+| `SWITCHBOT_MQTT_HOST`       | MQTT broker hostname (enables real-time events via `events mqtt-tail` and `mcp serve`) |
+| `SWITCHBOT_MQTT_PORT`       | MQTT broker port (default: `8883`, MQTTS/TLS)                      |
+| `SWITCHBOT_MQTT_USERNAME`   | MQTT broker username                                               |
+| `SWITCHBOT_MQTT_PASSWORD`   | MQTT broker password                                               |
+| `NO_COLOR`                  | Disable ANSI colors in all output (automatically respected)        |
 
 ## Scripting examples
 
