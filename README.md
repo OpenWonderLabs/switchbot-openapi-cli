@@ -392,10 +392,25 @@ Output is a stream of JSON status objects (with `--json`) or a refreshed table.
 ```bash
 # Start the stdio MCP server (connect via Claude, Cursor, etc.)
 switchbot mcp serve
+
+# Or HTTP transport for multi-tenant MCP hosts
+switchbot mcp serve --port 3030
+# Pass x-switchbot-profile: <name> header (or ?profile=<name>) to route
+# a request to a specific credential profile.
 ```
 
-Exposes 8 MCP tools: `list_devices`, `describe_device`, `get_device_status`, `send_command`, `list_scenes`, `run_scene`, `search_catalog`, `events_recent` — plus one subscribable resource `switchbot://events` that pushes `notifications/resources/updated` on every MQTT shadow event.
-See [`docs/agent-guide.md`](./docs/agent-guide.md) for the full tool reference and safety rules (destructive-command guard).
+Exposes 15 MCP tools:
+
+- Control/read: `list_devices`, `describe_device`, `get_device_status`, `send_command`, `devices_batch`, `list_scenes`, `run_scene`, `search_catalog`
+- Plans & events: `plan_run`, `events_recent`
+- Webhook management: `webhook_setup`, `webhook_query`, `webhook_update`, `webhook_delete`
+- Diagnostics: `quota_status`
+
+Plus one subscribable resource `switchbot://events` that pushes `notifications/resources/updated` on every MQTT shadow event (no polling required).
+
+Destructive commands (Smart Lock unlock, Garage open, Keypad createKey/deleteKey) require `confirm: true` on `send_command` and `yes: true` on `devices_batch` / `plan_run`; refused attempts are recorded in the audit log when `--audit-log` is enabled.
+
+See [`docs/agent-guide.md`](./docs/agent-guide.md) for the full tool reference and safety rules.
 
 ### `cache` — inspect and clear local cache
 
@@ -566,7 +581,7 @@ src/
     ├── format.ts         # renderRows / filterFields / output-format dispatch
     ├── audit.ts          # JSONL audit log writer
     └── quota.ts          # Local daily-quota counter
-tests/                    # Vitest suite (592 tests, mocked axios, no network)
+tests/                    # Vitest suite (725 tests, mocked axios, no network)
 ```
 
 ### Release flow
