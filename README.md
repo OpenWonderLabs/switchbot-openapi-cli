@@ -252,6 +252,34 @@ Generic parameter shapes (which one applies is decided by the device — see the
 
 For the complete per-device command reference, see the [SwitchBot API docs](https://github.com/OpenWonderLabs/SwitchBotAPI#send-device-control-commands).
 
+#### `devices expand` — named flags for packed parameters
+
+Some commands require a packed string like `"26,2,2,on"`. `devices expand` builds it from readable flags:
+
+```bash
+# Air Conditioner — setAll
+switchbot devices expand <acId> setAll --temp 26 --mode cool --fan low --power on
+
+# Curtain / Roller Shade — setPosition
+switchbot devices expand <curtainId> setPosition --position 50 --mode silent
+
+# Blind Tilt — setPosition
+switchbot devices expand <blindId> setPosition --direction up --angle 50
+
+# Relay Switch — setMode
+switchbot devices expand <relayId> setMode --channel 1 --mode edge
+```
+
+Run `switchbot devices expand <id> <command> --help` to see the available flags for any device command.
+
+#### `devices explain` — plain-language command description
+
+```bash
+switchbot devices explain <deviceId> <command>   # e.g. "explain ABC123 setAll"
+```
+
+Returns a human-readable description of what the command does and what each parameter means.
+
 ### `scenes` — run manual scenes
 
 ```bash
@@ -327,7 +355,7 @@ Output is a stream of JSON status objects (with `--json`) or a refreshed table.
 switchbot mcp serve
 ```
 
-Exposes 7 MCP tools: `list_devices`, `describe_device`, `get_device_status`, `send_command`, `list_scenes`, `run_scene`, `search_catalog`.
+Exposes 8 MCP tools (`list_devices`, `describe_device`, `get_device_status`, `send_command`, `list_scenes`, `run_scene`, `search_catalog`, `account_overview`) plus a `switchbot://events` resource for real-time shadow updates.
 See [`docs/agent-guide.md`](./docs/agent-guide.md) for the full tool reference and safety rules (destructive-command guard).
 
 ### `cache` — inspect and clear local cache

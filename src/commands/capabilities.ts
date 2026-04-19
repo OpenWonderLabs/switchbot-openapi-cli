@@ -28,6 +28,7 @@ const MCP_TOOLS = [
   'list_scenes',
   'run_scene',
   'search_catalog',
+  'account_overview',
 ];
 
 export function registerCapabilitiesCommand(program: Command): void {
@@ -69,6 +70,7 @@ export function registerCapabilitiesCommand(program: Command): void {
             entry: 'mcp serve',
             protocol: 'stdio (default) or --port <n> for HTTP',
             tools: MCP_TOOLS,
+            resources: ['switchbot://events'],
           },
           plan: {
             schemaCmd: 'plan schema',
