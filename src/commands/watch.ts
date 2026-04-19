@@ -4,6 +4,9 @@ import { fetchDeviceStatus } from '../lib/devices.js';
 import { getCachedDevice } from '../devices/cache.js';
 import { parseDurationToMs, getFields } from '../utils/flags.js';
 import { createClient } from '../api/client.js';
+import { loadConfig } from '../config.js';
+import { MqttTlsClient } from '../mqtt/client.js';
+import { getCredential } from '../mqtt/credential.js';
 
 const DEFAULT_INTERVAL_MS = 30_000;
 const MIN_INTERVAL_MS = 1_000;
@@ -78,6 +81,7 @@ export function registerWatchCommand(devices: Command): void {
     )
     .option('--max <n>', 'Stop after N ticks (default: run until Ctrl-C)')
     .option('--include-unchanged', 'Emit a tick even when no field changed')
+    .option('--via-mqtt', 'Subscribe to MQTT shadow updates instead of polling (requires online broker)')
     .addHelpText(
       'after',
       `
@@ -101,17 +105,10 @@ Examples:
           interval: string;
           max?: string;
           includeUnchanged?: boolean;
+          viaMqtt?: boolean;
         },
       ) => {
         try {
-          const parsed = parseDurationToMs(options.interval);
-          if (parsed === null || parsed < MIN_INTERVAL_MS) {
-            throw new UsageError(
-              `Invalid --interval "${options.interval}". Minimum is ${MIN_INTERVAL_MS / 1000}s.`,
-            );
-          }
-          const intervalMs = parsed;
-
           let maxTicks: number | null = null;
           if (options.max !== undefined) {
             const n = Number(options.max);
@@ -123,73 +120,171 @@ Examples:
 
           const fields: string[] | null = getFields() ?? null;
 
-          const ac = new AbortController();
-          const onSig = () => ac.abort();
-          process.on('SIGINT', onSig);
-          process.on('SIGTERM', onSig);
-
-          try {
-          const prev = new Map<string, Record<string, unknown>>();
-          const client = createClient();
-          let tick = 0;
-          while (!ac.signal.aborted) {
-            tick++;
-            const t = new Date().toISOString();
-            // Poll all devices in parallel; one failure per device doesn't stop
-            // the others.
-            await Promise.all(
-              deviceIds.map(async (id) => {
-                const cached = getCachedDevice(id);
-                try {
-                  const body = await fetchDeviceStatus(id, client);
-                  const changed = diff(prev.get(id), body, fields);
-                  prev.set(id, body);
-                  if (Object.keys(changed).length === 0 && !options.includeUnchanged) {
-                    return;
-                  }
-                  const ev: TickEvent = {
-                    t,
-                    tick,
-                    deviceId: id,
-                    type: cached?.type,
-                    changed,
-                  };
-                  if (isJsonMode()) {
-                    // JSONL: one event per line (printJson with newline).
-                    printJson(ev);
-                  } else {
-                    console.log(formatHumanLine(ev));
-                  }
-                } catch (err) {
-                  const ev: TickEvent = {
-                    t,
-                    tick,
-                    deviceId: id,
-                    type: cached?.type,
-                    changed: {},
-                    error: err instanceof Error ? err.message : String(err),
-                  };
-                  if (isJsonMode()) {
-                    printJson(ev);
-                  } else {
-                    console.error(formatHumanLine(ev));
-                  }
-                }
-              }),
-            );
-
-            if (maxTicks !== null && tick >= maxTicks) break;
-            await sleep(intervalMs, ac.signal);
-          }
-          } catch (err) {
-            handleError(err);
-          } finally {
-            process.off('SIGINT', onSig);
-            process.off('SIGTERM', onSig);
+          if (options.viaMqtt) {
+            await watchViaMqtt(deviceIds, maxTicks, fields);
+          } else {
+            const parsed = parseDurationToMs(options.interval);
+            if (parsed === null || parsed < MIN_INTERVAL_MS) {
+              throw new UsageError(
+                `Invalid --interval "${options.interval}". Minimum is ${MIN_INTERVAL_MS / 1000}s.`,
+              );
+            }
+            const intervalMs = parsed;
+            await watchViaPolling(deviceIds, intervalMs, maxTicks, fields, options.includeUnchanged);
           }
         } catch (error) {
           handleError(error);
         }
       },
     );
+}
+
+async function watchViaPolling(
+  deviceIds: string[],
+  intervalMs: number,
+  maxTicks: number | null,
+  fields: string[] | null,
+  includeUnchanged?: boolean,
+): Promise<void> {
+  const prev = new Map<string, Record<string, unknown>>();
+  const client = createClient();
+  let tick = 0;
+
+  const ac = new AbortController();
+  const onSig = () => ac.abort();
+  process.on('SIGINT', onSig);
+  process.on('SIGTERM', onSig);
+
+  try {
+    while (!ac.signal.aborted) {
+      tick++;
+      const t = new Date().toISOString();
+      await Promise.all(
+        deviceIds.map(async (id) => {
+          const cached = getCachedDevice(id);
+          try {
+            const body = await fetchDeviceStatus(id, client);
+            const changed = diff(prev.get(id), body, fields);
+            prev.set(id, body);
+            if (Object.keys(changed).length === 0 && !includeUnchanged) {
+              return;
+            }
+            const ev: TickEvent = {
+              t,
+              tick,
+              deviceId: id,
+              type: cached?.type,
+              changed,
+            };
+            if (isJsonMode()) {
+              printJson(ev);
+            } else {
+              console.log(formatHumanLine(ev));
+            }
+          } catch (err) {
+            const ev: TickEvent = {
+              t,
+              tick,
+              deviceId: id,
+              type: cached?.type,
+              changed: {},
+              error: err instanceof Error ? err.message : String(err),
+            };
+            if (isJsonMode()) {
+              printJson(ev);
+            } else {
+              console.error(formatHumanLine(ev));
+            }
+          }
+        }),
+      );
+
+      if (maxTicks !== null && tick >= maxTicks) break;
+      await sleep(intervalMs, ac.signal);
+    }
+  } finally {
+    process.off('SIGINT', onSig);
+    process.off('SIGTERM', onSig);
+  }
+}
+
+async function watchViaMqtt(
+  deviceIds: string[],
+  maxTicks: number | null,
+  fields: string[] | null,
+): Promise<void> {
+  const config = loadConfig();
+  const credential = await getCredential(config.token, config.secret);
+  const mqttClient = new MqttTlsClient();
+  const ac = new AbortController();
+
+  const onSig = () => ac.abort();
+  process.on('SIGINT', onSig);
+  process.on('SIGTERM', onSig);
+
+  try {
+    mqttClient.setAbortSignal(ac.signal);
+    await mqttClient.connect(credential);
+
+    if (!isJsonMode()) {
+      const brokerHost = new URL(credential.brokerUrl).hostname || credential.brokerUrl;
+      console.error(`[mqtt] connected to ${brokerHost}`);
+      console.error(`[mqtt] subscribed to ${credential.topics.length} topics`);
+    }
+
+    const prev = new Map<string, Record<string, unknown>>();
+    const deviceIdSet = new Set(deviceIds);
+    let tick = 0;
+
+    mqttClient.on('message', ((topic: string, payload: Buffer) => {
+      try {
+        const message = JSON.parse(payload.toString('utf-8'));
+        const m = message as Record<string, unknown>;
+        const state = m.state as Record<string, unknown> | undefined;
+        if (!state) return;
+
+        const deviceId = (m.clientId as string) || (state.deviceId as string);
+        if (!deviceId || !deviceIdSet.has(deviceId)) return;
+
+        tick++;
+        const t = new Date().toISOString();
+        const cached = getCachedDevice(deviceId);
+        const changed = diff(prev.get(deviceId), state, fields);
+        prev.set(deviceId, state);
+
+        if (Object.keys(changed).length === 0) return;
+
+        const ev: TickEvent = {
+          t,
+          tick,
+          deviceId,
+          type: cached?.type,
+          changed,
+        };
+        if (isJsonMode()) {
+          printJson(ev);
+        } else {
+          console.log(formatHumanLine(ev));
+        }
+
+        if (maxTicks !== null && tick >= maxTicks) {
+          ac.abort();
+        }
+      } catch (err) {
+        // Silently skip unparseable messages
+      }
+    }) as (...args: unknown[]) => void);
+
+    await mqttClient.subscribeAll(credential.topics);
+
+    await new Promise<void>((resolve) => {
+      const cleanup = () => {
+        mqttClient.end().then(resolve).catch(resolve);
+      };
+      ac.signal.addEventListener('abort', cleanup, { once: true });
+    });
+  } finally {
+    process.off('SIGINT', onSig);
+    process.off('SIGTERM', onSig);
+  }
 }
