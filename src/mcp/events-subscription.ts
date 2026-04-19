@@ -1,4 +1,5 @@
 import { SwitchBotMqttClient, type MqttState } from '../mqtt/client.js';
+import { fetchMqttCredential } from '../mqtt/credential.js';
 import { parseFilter, applyFilter, type FilterSyntaxError } from '../utils/filter.js';
 import { fetchDeviceList, type Device } from '../lib/devices.js';
 import { getCachedDevice } from '../devices/cache.js';
@@ -45,20 +46,11 @@ export class EventSubscriptionManager {
     this.getClient = getClient;
   }
 
-  async initialize(mqttConfig: {
-    host: string;
-    port: number;
-    username: string;
-    password: string;
-  }): Promise<void> {
+  async initialize(token: string, secret: string): Promise<void> {
     if (!this.mqttClient) {
-      const client = new SwitchBotMqttClient(mqttConfig, async () => {
-        // Auth refresh callback - would need credential resolution here
-        return {
-          username: mqttConfig.username,
-          password: mqttConfig.password,
-        };
-      });
+      const credential = await fetchMqttCredential(token, secret);
+
+      const client = new SwitchBotMqttClient(credential, () => fetchMqttCredential(token, secret));
 
       client.onStateChange((state) => {
         if (state === 'connected') {
@@ -66,7 +58,7 @@ export class EventSubscriptionManager {
             kind: 'events.reconnected',
             timestamp: Date.now(),
           } as SubscriptionEvent);
-          client.subscribe('$aws/things/+/shadow/update/accepted');
+          client.subscribe(credential.topics.status);
         }
       });
 

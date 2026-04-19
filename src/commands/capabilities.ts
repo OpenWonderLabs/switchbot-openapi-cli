@@ -1,7 +1,6 @@
 import { Command } from 'commander';
 import { getEffectiveCatalog } from '../devices/catalog.js';
 import { printJson } from '../utils/output.js';
-import { getMqttConfig } from '../mqtt/credential.js';
 
 const IDENTITY = {
   product: 'SwitchBot',
@@ -75,11 +74,10 @@ export function registerCapabilitiesCommand(program: Command): void {
           },
           mqtt: {
             mode: 'consumer',
-            envVars: ['SWITCHBOT_MQTT_HOST', 'SWITCHBOT_MQTT_USERNAME', 'SWITCHBOT_MQTT_PASSWORD', 'SWITCHBOT_MQTT_PORT'],
+            authSource: 'SWITCHBOT_TOKEN + SWITCHBOT_SECRET (auto-provisioned via POST /v1.1/iot/credential)',
             cliCmd: 'events mqtt-tail',
             mcpResource: 'switchbot://events',
-            protocol: 'MQTTS (TLS, default port 8883)',
-            configured: getMqttConfig() !== null,
+            protocol: 'MQTTS with TLS client certificates (AWS IoT)',
           },
           plan: {
             schemaCmd: 'plan schema',

@@ -1,61 +1,57 @@
 import type { IClientOptions } from 'mqtt';
 import { connect } from 'mqtt';
 import type { MqttClient } from 'mqtt';
+import type { MqttCredential } from './credential.js';
 
 export type MqttState = 'connecting' | 'connected' | 'reconnecting' | 'failed' | 'disabled';
-export type AuthRefreshCallback = () => Promise<{ username: string; password: string }> | { username: string; password: string };
-
-interface MqttClientConfig {
-  host: string;
-  port: number;
-  username: string;
-  password: string;
-  rejectUnauthorized?: boolean;
-}
+export type CredentialRefreshCallback = () => Promise<MqttCredential>;
 
 export class SwitchBotMqttClient {
   private client: MqttClient | null = null;
-  private config: MqttClientConfig;
+  private credential: MqttCredential;
   private state: MqttState = 'connecting';
-  private authRefreshNeeded = false;
+  private credentialExpired = false;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 10;
+  private disconnecting = false;
   private handlers: Set<(state: MqttState) => void> = new Set();
   private messageHandlers: Set<(topic: string, payload: Buffer) => void> = new Set();
-  private authRefreshCallback?: AuthRefreshCallback;
-  private stableTimer: NodeJS.Timeout | null = null;
-  private lastConnectionAttempt = 0;
+  private credentialRefreshCallback?: CredentialRefreshCallback;
 
-  constructor(config: MqttClientConfig, onAuthRefreshNeeded?: AuthRefreshCallback) {
-    this.config = config;
-    this.authRefreshCallback = onAuthRefreshNeeded;
+  constructor(credential: MqttCredential, onCredentialExpired?: CredentialRefreshCallback) {
+    this.credential = credential;
+    this.credentialRefreshCallback = onCredentialExpired;
   }
 
   async connect(): Promise<void> {
-    if (this.client && this.state === 'connected') {
-      return;
-    }
+    if (this.client && this.state === 'connected') return;
 
     this.setState('connecting');
-    this.authRefreshNeeded = false;
+    this.credentialExpired = false;
     this.reconnectAttempts = 0;
 
     try {
+      const { tls, brokerUrl, clientId } = this.credential;
+      // tls.ca/cert/keyBase64 are PEM strings despite the misleading field name
       const options: IClientOptions = {
-        username: this.config.username,
-        password: this.config.password,
+        clientId,
+        ca: tls.caBase64,
+        cert: tls.certBase64,
+        key: tls.keyBase64,
+        rejectUnauthorized: true,
         clean: true,
-        reconnectPeriod: 0, // Manual reconnect control
-        connectTimeout: 10000,
-        rejectUnauthorized: this.config.rejectUnauthorized ?? true,
+        reconnectPeriod: 0,
+        connectTimeout: 30000,
+        keepalive: 60,
+        reschedulePings: true,
       };
 
-      this.client = connect(`mqtts://${this.config.host}:${this.config.port}`, options);
+      this.client = connect(brokerUrl, options);
 
       this.client.on('connect', () => {
         this.reconnectAttempts = 0;
         this.setState('connected');
-        this.authRefreshNeeded = false;
+        this.credentialExpired = false;
       });
 
       this.client.on('message', (topic, payload) => {
@@ -65,21 +61,20 @@ export class SwitchBotMqttClient {
       });
 
       this.client.on('error', (err) => {
-        // Check for auth-related errors
         if (
-          (err instanceof Error &&
-            (err.message.includes('401') ||
-              err.message.includes('Unauthorized') ||
-              err.message.includes('EACCES'))) ||
-          (err as NodeJS.ErrnoException).code === 'EACCES'
+          err instanceof Error &&
+          (err.message.includes('certificate') ||
+            err.message.includes('ECONNRESET') ||
+            err.message.includes('handshake'))
         ) {
-          this.authRefreshNeeded = true;
+          this.credentialExpired = true;
         }
       });
 
       this.client.on('close', () => {
-        this.clearStableTimer();
-        if (this.authRefreshNeeded) {          this.setState('failed');
+        if (this.disconnecting) return;
+        if (this.credentialExpired) {
+          this.setState('failed');
         } else if (this.reconnectAttempts < this.maxReconnectAttempts) {
           this.attemptReconnect();
         } else {
@@ -87,7 +82,6 @@ export class SwitchBotMqttClient {
         }
       });
 
-      // Wait for connection with timeout
       await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => {
           reject(new Error('MQTT connection timeout'));
@@ -123,26 +117,22 @@ export class SwitchBotMqttClient {
     this.reconnectAttempts++;
     this.setState('reconnecting');
 
-    if (this.authRefreshNeeded && this.authRefreshCallback) {
+    if (this.credentialExpired && this.credentialRefreshCallback) {
       try {
-        const refreshed = await this.authRefreshCallback();
-        this.config.username = refreshed.username;
-        this.config.password = refreshed.password;
-        this.authRefreshNeeded = false;
-      } catch (err) {
-        // Auth refresh failed, mark as failed
+        this.credential = await this.credentialRefreshCallback();
+        this.credentialExpired = false;
+      } catch {
         this.setState('failed');
         return;
       }
     }
 
-    // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 30s...
     const delay = Math.min(30000, 1000 * Math.pow(2, this.reconnectAttempts - 1));
     await new Promise((r) => setTimeout(r, delay));
 
     try {
       await this.connect();
-    } catch (err) {
+    } catch {
       if (this.reconnectAttempts < this.maxReconnectAttempts) {
         await this.attemptReconnect();
       } else {
@@ -157,13 +147,6 @@ export class SwitchBotMqttClient {
       for (const handler of this.handlers) {
         handler(newState);
       }
-    }
-  }
-
-  private clearStableTimer(): void {
-    if (this.stableTimer) {
-      clearTimeout(this.stableTimer);
-      this.stableTimer = null;
     }
   }
 
@@ -200,19 +183,14 @@ export class SwitchBotMqttClient {
   }
 
   async disconnect(): Promise<void> {
-    this.clearStableTimer();
+    this.disconnecting = true;
     if (this.client) {
       await new Promise<void>((resolve) => {
-        this.client?.end(false, () => {
-          resolve();
-        });
+        this.client?.end(false, () => resolve());
       });
       this.client = null;
-      this.setState('failed');
     }
-  }
-
-  setAuthRefreshCallback(callback: AuthRefreshCallback): void {
-    this.authRefreshCallback = callback;
+    this.disconnecting = false;
+    this.setState('failed');
   }
 }

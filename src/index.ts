@@ -76,10 +76,6 @@ Environment:
   SWITCHBOT_TOKEN          credential token (takes priority over config file)
   SWITCHBOT_SECRET         credential secret (takes priority over config file)
   NO_COLOR                 disable ANSI colors (auto-respected via chalk)
-  SWITCHBOT_MQTT_HOST      MQTT broker hostname (enables real-time events via 'events mqtt-tail' and 'mcp serve')
-  SWITCHBOT_MQTT_PORT      MQTT broker port (default: 8883, MQTTS/TLS)
-  SWITCHBOT_MQTT_USERNAME  MQTT broker username
-  SWITCHBOT_MQTT_PASSWORD  MQTT broker password
 
 Examples:
   $ switchbot config set-token <token> <secret>

@@ -79,34 +79,25 @@ describe('doctor command', () => {
     expect(cat.detail).toMatch(/\d+ types loaded/);
   });
 
-  it('mqtt check is warn when env vars are missing', async () => {
-    process.env.SWITCHBOT_TOKEN = 't';
-    process.env.SWITCHBOT_SECRET = 's';
-    delete process.env.SWITCHBOT_MQTT_HOST;
-    delete process.env.SWITCHBOT_MQTT_USERNAME;
-    delete process.env.SWITCHBOT_MQTT_PASSWORD;
+  it('mqtt check is warn when REST credentials are missing', async () => {
+    delete process.env.SWITCHBOT_TOKEN;
+    delete process.env.SWITCHBOT_SECRET;
     const res = await runCli(registerDoctorCommand, ['--json', 'doctor']);
     const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
     const mqtt = payload.data.checks.find((c: { name: string }) => c.name === 'mqtt');
     expect(mqtt).toBeDefined();
     expect(mqtt.status).toBe('warn');
-    expect(mqtt.detail).toMatch(/SWITCHBOT_MQTT_HOST/);
+    expect(mqtt.detail).toMatch(/credentials/i);
   });
 
-  it('mqtt check is ok when env vars are set', async () => {
+  it('mqtt check is ok when REST credentials are set', async () => {
     process.env.SWITCHBOT_TOKEN = 't';
     process.env.SWITCHBOT_SECRET = 's';
-    process.env.SWITCHBOT_MQTT_HOST = 'broker.example.com';
-    process.env.SWITCHBOT_MQTT_USERNAME = 'user';
-    process.env.SWITCHBOT_MQTT_PASSWORD = 'pass';
     const res = await runCli(registerDoctorCommand, ['--json', 'doctor']);
     const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
     const mqtt = payload.data.checks.find((c: { name: string }) => c.name === 'mqtt');
     expect(mqtt).toBeDefined();
     expect(mqtt.status).toBe('ok');
-    expect(mqtt.detail).toMatch(/mqtts:\/\/broker\.example\.com/);
-    delete process.env.SWITCHBOT_MQTT_HOST;
-    delete process.env.SWITCHBOT_MQTT_USERNAME;
-    delete process.env.SWITCHBOT_MQTT_PASSWORD;
+    expect(mqtt.detail).toMatch(/auto-provisioned/);
   });
 });
