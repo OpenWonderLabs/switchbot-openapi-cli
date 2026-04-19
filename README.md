@@ -41,11 +41,12 @@ Under the hood every surface shares the same catalog, cache, and HMAC client —
 - [Commands](#commands)
   - [`config`](#config--credential-management)
   - [`devices`](#devices--list-status-control)
+  - [`devices batch`](#devices-batch--bulk-commands)
+  - [`devices watch`](#devices-watch--poll-status)
   - [`scenes`](#scenes--run-manual-scenes)
   - [`webhook`](#webhook--receive-device-events-over-http)
   - [`events`](#events--receive-device-events)
   - [`plan`](#plan--declarative-batch-operations)
-  - [`devices watch`](#devices-watch--poll-status)
   - [`mcp`](#mcp--model-context-protocol-server)
   - [`doctor`](#doctor--self-check)
   - [`quota`](#quota--api-request-counter)
@@ -194,6 +195,7 @@ switchbot devices command ABC123 turnOn --dry-run
 ```bash
 switchbot config set-token <token> <secret>   # Save to ~/.switchbot/config.json
 switchbot config show                          # Print current source + masked secret
+switchbot config list-profiles                 # List saved profiles
 ```
 
 ### `devices` — list, status, control
@@ -302,6 +304,25 @@ switchbot devices meta clear <deviceId>
 ```
 
 Stores local annotations (alias, hidden flag, notes) in `~/.switchbot/device-meta.json`. The alias is used as a display name; `--show-hidden` on `devices list` reveals hidden devices.
+
+#### `devices batch` — bulk commands
+
+```bash
+# Send the same command to every device matching a filter
+switchbot devices batch turnOff --filter 'type=Bot'
+switchbot devices batch setBrightness 50 --filter 'type~=Light,family=Living'
+
+# Explicit device IDs (comma-separated)
+switchbot devices batch turnOn --ids ID1,ID2,ID3
+
+# Pipe device IDs from `devices list`
+switchbot devices list --format=id --filter 'type=Bot' | switchbot devices batch toggle -
+
+# Destructive commands require --yes
+switchbot devices batch unlock --filter 'type=Smart Lock' --yes
+```
+
+Sends the same command to many devices in one run. Uses the same `--filter` expressions as `devices list`. Destructive commands (Smart Lock unlock, Garage Door Opener, etc.) require `--yes` to prevent accidents.
 
 ### `scenes` — run manual scenes
 
@@ -457,7 +478,7 @@ switchbot doctor
 switchbot doctor --json
 ```
 
-Runs 8 local checks (Node version, credentials, profiles, catalog, cache, quota file, clock, MQTT config) and exits 1 if any check fails. `warn` results exit 0. Use this to diagnose connectivity or config issues before running automation.
+Runs 8 local checks (Node version, credentials, profiles, catalog, cache, quota file, clock, MQTT) and exits 1 if any check fails. `warn` results exit 0. The MQTT check reports `ok` when REST credentials are configured (auto-provisioned on first use). Use this to diagnose connectivity or config issues before running automation.
 
 ### `quota` — API request counter
 
@@ -486,6 +507,7 @@ switchbot catalog show              # all 42 built-in types
 switchbot catalog show Bot          # one type
 switchbot catalog diff              # what a local overlay changes vs built-in
 switchbot catalog path              # location of the local overlay file
+switchbot catalog refresh           # reload local overlay (clears in-process cache)
 ```
 
 The built-in catalog ships with the package. Create `~/.switchbot/catalog-overlay.json` to add, extend, or override type definitions without modifying the package.
