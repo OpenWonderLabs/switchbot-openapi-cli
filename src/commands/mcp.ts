@@ -26,6 +26,7 @@ import { todayUsage } from '../utils/quota.js';
 import { describeCache } from '../devices/cache.js';
 import { withRequestContext } from '../lib/request-context.js';
 import { profileFilePath } from '../config.js';
+import { getMqttConfig } from '../mqtt/credential.js';
 import fs from 'node:fs';
 
 /**
@@ -59,7 +60,7 @@ export function createSwitchBotMcpServer(options?: { eventManager?: EventSubscri
       version: '2.0.0',
     },
     {
-      capabilities: { tools: {} },
+      capabilities: { tools: {}, resources: {} },
       instructions:
         `SwitchBot is an IoT smart home brand by Wonderlabs, Inc. This MCP server controls physical devices \
 (Bot, Curtain, Smart Lock, Color Bulb, Meter, Plug, Robot Vacuum, etc.) and IR remotes \
@@ -481,8 +482,33 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
     }
   );
 
-  // TODO: switchbot://events resource (event stream subscription) — to be implemented with resource URIs
-  // For now, event streaming is only accessible via MQTT directly; MCP resource binding coming in Phase E
+  // switchbot://events resource — snapshot of recent shadow events from the ring buffer.
+  // Returns up to 100 recent events. When MQTT is disabled, returns an empty list with a state note.
+  // URI: switchbot://events  (optional query: ?filter=<expression>  ?limit=<n>)
+  if (eventManager) {
+    server.registerResource(
+      'events',
+      'switchbot://events',
+      {
+        title: 'SwitchBot real-time shadow events',
+        description:
+          'Recent device shadow-update events received via MQTT. Returns a JSON snapshot of the ring buffer. ' +
+          'State is "disabled" when MQTT credentials are not configured (set SWITCHBOT_MQTT_HOST / USERNAME / PASSWORD).',
+        mimeType: 'application/json',
+      },
+      (_uri) => {
+        const state = eventManager.getState();
+        const events = state !== 'disabled' ? eventManager.getRecentEvents(100) : [];
+        return {
+          contents: [{
+            uri: 'switchbot://events',
+            mimeType: 'application/json',
+            text: JSON.stringify({ state, count: events.length, events }, null, 2),
+          }],
+        };
+      },
+    );
+  }
 
   return server;
 }
@@ -562,9 +588,18 @@ Inspect locally:
           const { createServer } = await import('node:http');
           const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 
-          // Initialize shared EventSubscriptionManager for event streaming
+          // Initialize shared EventSubscriptionManager for event streaming.
+          // If MQTT creds are present, connect in the background so the HTTP server
+          // starts immediately; /ready reflects the real state.
           const eventManager = new EventSubscriptionManager();
-          let mqttInitialized = false;
+          const mqttConfig = getMqttConfig();
+          if (mqttConfig) {
+            eventManager.initialize(mqttConfig).catch((err: unknown) => {
+              console.error('MQTT initialization failed:', err instanceof Error ? err.message : String(err));
+            });
+          } else {
+            console.error('MQTT disabled: set SWITCHBOT_MQTT_HOST, SWITCHBOT_MQTT_USERNAME, SWITCHBOT_MQTT_PASSWORD to enable real-time events.');
+          }
 
           // Helper: constant-time token comparison
           const tokenMatch = (provided: string | undefined): boolean => {
@@ -604,25 +639,33 @@ Inspect locally:
             }
 
             if (req.url === '/ready' && req.method === 'GET') {
-              const ready = !eventManager || eventManager.getState() !== 'failed';
+              const state = eventManager.getState();
+              const ready = state !== 'failed' && state !== 'disabled';
               const status = ready ? 200 : 503;
+              const body: Record<string, unknown> = { ready, version: '2.0.0', mqtt: state };
+              if (!ready) body.reason = state === 'disabled' ? 'mqtt disabled' : 'mqtt failed';
               res.writeHead(status, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({
-                ready,
-                version: '2.0.0',
-                mqtt: eventManager ? eventManager.getState() : 'idle',
-              }));
+              res.end(JSON.stringify(body));
               return;
             }
 
             if (req.url === '/metrics' && req.method === 'GET') {
+              const mqttState = eventManager.getState();
               const metrics = `# HELP switchbot_mqtt_connected MQTT connection status (0=disconnected, 1=connected)
 # TYPE switchbot_mqtt_connected gauge
-switchbot_mqtt_connected ${eventManager && eventManager.getState() === 'connected' ? 1 : 0}
+switchbot_mqtt_connected ${mqttState === 'connected' ? 1 : 0}
+
+# HELP switchbot_mqtt_state Current MQTT state (1 for the active state, 0 otherwise)
+# TYPE switchbot_mqtt_state gauge
+switchbot_mqtt_state{state="disabled"} ${mqttState === 'disabled' ? 1 : 0}
+switchbot_mqtt_state{state="connecting"} ${mqttState === 'connecting' ? 1 : 0}
+switchbot_mqtt_state{state="connected"} ${mqttState === 'connected' ? 1 : 0}
+switchbot_mqtt_state{state="reconnecting"} ${mqttState === 'reconnecting' ? 1 : 0}
+switchbot_mqtt_state{state="failed"} ${mqttState === 'failed' ? 1 : 0}
 
 # HELP switchbot_mqtt_subscribers Number of active event subscribers
 # TYPE switchbot_mqtt_subscribers gauge
-switchbot_mqtt_subscribers ${eventManager ? eventManager.getSubscriberCount() : 0}
+switchbot_mqtt_subscribers ${eventManager.getSubscriberCount()}
 
 # HELP process_uptime_seconds Process uptime in seconds
 # TYPE process_uptime_seconds gauge

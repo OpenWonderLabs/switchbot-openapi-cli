@@ -241,13 +241,17 @@ export class EventSubscriptionManager {
     return match ? match[1] : null;
   }
 
-  getState(): MqttState | 'idle' {
-    if (!this.mqttClient) return 'idle';
+  getState(): MqttState {
+    if (!this.mqttClient) return 'disabled';
     return this.mqttClient.getState();
   }
 
   getSubscriberCount(): number {
     return this.subscribers.size;
+  }
+
+  getRecentEvents(limit = 100): RawEvent[] {
+    return this.ringBuffer.slice(-limit);
   }
 
   async shutdown(): Promise<void> {

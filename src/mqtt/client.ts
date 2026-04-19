@@ -2,7 +2,7 @@ import type { IClientOptions } from 'mqtt';
 import { connect } from 'mqtt';
 import type { MqttClient } from 'mqtt';
 
-export type MqttState = 'connecting' | 'connected' | 'reconnecting' | 'failed';
+export type MqttState = 'connecting' | 'connected' | 'reconnecting' | 'failed' | 'disabled';
 export type AuthRefreshCallback = () => Promise<{ username: string; password: string }> | { username: string; password: string };
 
 interface MqttClientConfig {
