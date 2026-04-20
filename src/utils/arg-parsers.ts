@@ -14,7 +14,10 @@ export function intArg(
   opts?: { min?: number; max?: number },
 ): (value: string) => string {
   return (value: string) => {
-    if (value.startsWith('-')) {
+    // Flag-like tokens (`--something`, `-x`) are rejected up-front.
+    // Pure negative integers (`-1`, `-42`) fall through to min/max so the
+    // error classifies as a range error rather than "requires a numeric value".
+    if (value.startsWith('-') && !/^-\d+$/.test(value)) {
       throw new InvalidArgumentError(
         `${flagName} requires a numeric value, got "${value}". ` +
           `Did you forget a value? Use ${flagName}=<n> if the value really starts with "-".`,

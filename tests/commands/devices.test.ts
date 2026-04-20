@@ -1829,4 +1829,236 @@ describe('devices command', () => {
       expect(apiMock.__instance.post).toHaveBeenCalledTimes(1);
     });
   });
+
+  // =====================================================================
+  // command — raw-parameter validation (setAll / setPosition / setMode)
+  // =====================================================================
+  describe('command — raw-parameter validation', () => {
+    let tmpDir: string;
+    const AC_ID = 'AC-VAL';
+    const CURTAIN_ID = 'CURTAIN-VAL';
+    const BLIND_ID = 'BLIND-VAL';
+    const RELAY_ID = 'RELAY-VAL';
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sbcli-param-validate-'));
+      vi.spyOn(os, 'homedir').mockReturnValue(tmpDir);
+      updateCacheFromDeviceList({
+        deviceList: [
+          { deviceId: CURTAIN_ID, deviceName: 'Living Curtain', deviceType: 'Curtain' },
+          { deviceId: BLIND_ID, deviceName: 'Bedroom Blind', deviceType: 'Blind Tilt' },
+          { deviceId: RELAY_ID, deviceName: 'Relay', deviceType: 'Relay Switch 2PM' },
+        ],
+        infraredRemoteList: [
+          { deviceId: AC_ID, deviceName: 'Living AC', remoteType: 'Air Conditioner' },
+        ],
+      });
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it('rejects malformed setAll ("on,2,2,30") before POST', async () => {
+      const res = await runCli(registerDevicesCommand, [
+        'devices', 'command', AC_ID, 'setAll', 'on,2,2,30',
+      ]);
+      expect(res.exitCode).toBe(2);
+      expect(res.stderr.join('\n')).toMatch(/temp.*16-30/i);
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
+    });
+
+    it('rejects empty setAll parameter', async () => {
+      const res = await runCli(registerDevicesCommand, [
+        'devices', 'command', AC_ID, 'setAll', '',
+      ]);
+      expect(res.exitCode).toBe(2);
+      expect(res.stderr.join('\n')).toMatch(/requires a parameter/);
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
+    });
+
+    it('rejects JSON-shaped setAll parameter', async () => {
+      const res = await runCli(registerDevicesCommand, [
+        'devices', 'command', AC_ID, 'setAll', '{"temp":30}',
+      ]);
+      expect(res.exitCode).toBe(2);
+      expect(res.stderr.join('\n')).toMatch(/CSV string/);
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
+    });
+
+    it('rejects setAll with wrong field count', async () => {
+      const res = await runCli(registerDevicesCommand, [
+        'devices', 'command', AC_ID, 'setAll', '30',
+      ]);
+      expect(res.exitCode).toBe(2);
+      expect(res.stderr.join('\n')).toMatch(/4 comma-separated/);
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
+    });
+
+    it('accepts valid setAll CSV', async () => {
+      const res = await runCli(registerDevicesCommand, [
+        'devices', 'command', AC_ID, 'setAll', '26,2,2,on',
+      ]);
+      expect(res.exitCode).toBeNull();
+      expect(apiMock.__instance.post).toHaveBeenCalledWith(
+        `/v1.1/devices/${AC_ID}/commands`,
+        { command: 'setAll', parameter: '26,2,2,on', commandType: 'command' }
+      );
+    });
+
+    it('accepts Curtain setPosition single-value form', async () => {
+      const res = await runCli(registerDevicesCommand, [
+        'devices', 'command', CURTAIN_ID, 'setPosition', '50',
+      ]);
+      expect(res.exitCode).toBeNull();
+      expect(apiMock.__instance.post).toHaveBeenCalledWith(
+        `/v1.1/devices/${CURTAIN_ID}/commands`,
+        { command: 'setPosition', parameter: 50, commandType: 'command' }
+      );
+    });
+
+    it('accepts Curtain setPosition tuple form', async () => {
+      const res = await runCli(registerDevicesCommand, [
+        'devices', 'command', CURTAIN_ID, 'setPosition', '0,ff,50',
+      ]);
+      expect(res.exitCode).toBeNull();
+      expect(apiMock.__instance.post).toHaveBeenCalledWith(
+        `/v1.1/devices/${CURTAIN_ID}/commands`,
+        { command: 'setPosition', parameter: '0,ff,50', commandType: 'command' }
+      );
+    });
+
+    it('rejects Blind Tilt setPosition with bad direction', async () => {
+      const res = await runCli(registerDevicesCommand, [
+        'devices', 'command', BLIND_ID, 'setPosition', 'left;50',
+      ]);
+      expect(res.exitCode).toBe(2);
+      expect(res.stderr.join('\n')).toMatch(/up.*down/);
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
+    });
+
+    it('rejects Relay Switch setMode with bad channel', async () => {
+      const res = await runCli(registerDevicesCommand, [
+        'devices', 'command', RELAY_ID, 'setMode', '3;1',
+      ]);
+      expect(res.exitCode).toBe(2);
+      expect(res.stderr.join('\n')).toMatch(/1 or 2/);
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
+    });
+  });
+
+  // =====================================================================
+  // command — case-insensitive command name normalization
+  // =====================================================================
+  describe('command — case normalization', () => {
+    let tmpDir: string;
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sbcli-case-'));
+      vi.spyOn(os, 'homedir').mockReturnValue(tmpDir);
+      updateCacheFromDeviceList({
+        deviceList: [
+          { deviceId: DID, deviceName: 'Living Bot', deviceType: 'Bot' },
+        ],
+        infraredRemoteList: [],
+      });
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it('normalizes "turnon" to "turnOn" and POSTs canonical name', async () => {
+      const res = await runCmd('turnon');
+      expect(res.exitCode).toBeNull();
+      expect(res.stderr.join('\n')).toMatch(/'turnon' normalized to 'turnOn'/);
+      expectPost('turnOn', 'default');
+    });
+
+    it('normalizes "TurnOn" to "turnOn"', async () => {
+      const res = await runCmd('TurnOn');
+      expect(res.exitCode).toBeNull();
+      expect(res.stderr.join('\n')).toMatch(/'TurnOn' normalized to 'turnOn'/);
+      expectPost('turnOn', 'default');
+    });
+
+    it('--json output uses the canonical command name', async () => {
+      const res = await runCmd('turnon', '--json');
+      expect(res.exitCode).toBeNull();
+      const parsed = JSON.parse(res.stdout.join('\n'));
+      expect(parsed.data.command).toBe('turnOn');
+    });
+
+    it('still rejects genuinely unknown commands with exit 2', async () => {
+      const res = await runCmd('foobar');
+      expect(res.exitCode).toBe(2);
+      expect(res.stderr.join('\n')).toMatch(/is not a supported command/);
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
+    });
+  });
+
+  // =====================================================================
+  // command — --name resolver + positional args
+  // =====================================================================
+  describe('command — --name + positional shift', () => {
+    let tmpDir: string;
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sbcli-name-'));
+      vi.spyOn(os, 'homedir').mockReturnValue(tmpDir);
+      updateCacheFromDeviceList({
+        deviceList: [
+          { deviceId: 'AC-FUZZY', deviceName: 'Living Room AC', deviceType: 'Air Conditioner' },
+          { deviceId: 'BOT-FUZZY', deviceName: 'Kitchen Bot', deviceType: 'Bot' },
+        ],
+        infraredRemoteList: [],
+      });
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it('resolves --name + bare command (no parameter)', async () => {
+      const res = await runCli(registerDevicesCommand, [
+        'devices', 'command', '--name', 'Kitchen', 'turnOn',
+      ]);
+      expect(res.exitCode).toBeNull();
+      expect(apiMock.__instance.post).toHaveBeenCalledWith(
+        '/v1.1/devices/BOT-FUZZY/commands',
+        { command: 'turnOn', parameter: 'default', commandType: 'command' }
+      );
+    });
+
+    it('resolves --name + command + parameter (positional shift)', async () => {
+      const res = await runCli(registerDevicesCommand, [
+        'devices', 'command', '--name', 'Living Room', 'setAll', '26,2,2,on',
+      ]);
+      expect(res.exitCode).toBeNull();
+      expect(apiMock.__instance.post).toHaveBeenCalledWith(
+        '/v1.1/devices/AC-FUZZY/commands',
+        { command: 'setAll', parameter: '26,2,2,on', commandType: 'command' }
+      );
+    });
+
+    it('resolves --name + command + color parameter with colons', async () => {
+      updateCacheFromDeviceList({
+        deviceList: [
+          { deviceId: 'BULB-FUZZY', deviceName: 'Desk Lamp', deviceType: 'Color Bulb' },
+        ],
+        infraredRemoteList: [],
+      });
+      const res = await runCli(registerDevicesCommand, [
+        'devices', 'command', '--name', 'Desk', 'setColor', '255:0:0',
+      ]);
+      expect(res.exitCode).toBeNull();
+      expect(apiMock.__instance.post).toHaveBeenCalledWith(
+        '/v1.1/devices/BULB-FUZZY/commands',
+        { command: 'setColor', parameter: '255:0:0', commandType: 'command' }
+      );
+    });
+  });
 });

@@ -278,6 +278,8 @@ Generic parameter shapes (which one applies is decided by the device — see the
 | `<json object>`     | `'{"action":"sweep","param":{"fanLevel":2,"times":1}}'`  |
 | Custom IR button    | `devices command <id> MyButton --type customize`         |
 
+Parameters for `setAll` (Air Conditioner), `setPosition` (Curtain / Blind Tilt), and `setMode` (Relay Switch) are validated client-side before the request — malformed shapes, out-of-range values, and JSON for CSV fields all fail fast with exit 2. Command names are also case-normalized against the catalog (e.g. `turnon` is auto-corrected to `turnOn` with a stderr warning); unknown names still exit 2 with the supported-commands list.
+
 For the complete per-device command reference, see the [SwitchBot API docs](https://github.com/OpenWonderLabs/SwitchBotAPI#send-device-control-commands).
 
 #### `devices expand` — named flags for packed parameters

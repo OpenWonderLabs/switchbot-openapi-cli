@@ -18,6 +18,7 @@ import {
   DeviceNotFoundError,
   type Device,
 } from '../lib/devices.js';
+import { validateParameter } from '../devices/param-validator.js';
 import { registerBatchCommand } from './batch.js';
 import { registerWatchCommand } from './watch.js';
 import { registerExplainCommand } from './explain.js';
@@ -358,19 +359,22 @@ Examples:
 `)
     .action(async (deviceIdArg: string | undefined, cmdArg: string | undefined, parameter: string | undefined, options: { name?: string; type: string; yes?: boolean; idempotencyKey?: string }) => {
       try {
-        // BUG-FIX: When --name is provided, Commander misassigns the first positional
-        // to [deviceId] instead of [cmd]. Detect and shift positionals accordingly.
+        // BUG-FIX: When --name is provided, Commander fills positionals left-to-right
+        // starting at [deviceId]. Shift them back to their semantic slots.
         let cmd: string;
         let effectiveDeviceIdArg: string | undefined;
         if (options.name) {
-          if (deviceIdArg && cmdArg) {
-            throw new UsageError('Provide either a deviceId argument or --name, not both.');
-          }
-          if (!deviceIdArg && !cmdArg) {
+          // `--name "x" <cmd> [parameter]` → Commander binds deviceIdArg=<cmd>, cmdArg=[parameter].
+          if (!deviceIdArg) {
             throw new UsageError('Command name is required (e.g. turnOn, turnOff, setAll).');
           }
-          // --name "x" turnOn  →  deviceIdArg="turnOn", cmdArg=undefined → shift
-          cmd = (deviceIdArg ?? cmdArg) as string;
+          cmd = deviceIdArg;
+          if (cmdArg !== undefined) {
+            if (parameter !== undefined) {
+              throw new UsageError('Too many positional arguments after --name. Expected: --name <query> <cmd> [parameter].');
+            }
+            parameter = cmdArg;
+          }
           effectiveDeviceIdArg = undefined;
         } else {
           if (!cmdArg) {
@@ -410,6 +414,38 @@ Examples:
           }
         }
         process.exit(2);
+      }
+
+      // Case-only mismatch: emit a warning and continue with the canonical name.
+      if (validation.caseNormalizedFrom && validation.normalized) {
+        console.error(
+          `Note: '${validation.caseNormalizedFrom}' normalized to '${validation.normalized}' (case mismatch). Use exact casing to silence this warning.`
+        );
+        cmd = validation.normalized;
+      } else if (validation.normalized) {
+        cmd = validation.normalized;
+      }
+
+      // Raw-parameter validation (runs for known (deviceType, command) pairs only).
+      const cachedForParam = getCachedDevice(deviceId);
+      if (cachedForParam && options.type === 'command') {
+        const paramCheck = validateParameter(cachedForParam.type, cmd, parameter);
+        if (!paramCheck.ok) {
+          if (isJsonMode()) {
+            console.error(JSON.stringify({
+              error: {
+                code: 2,
+                kind: 'usage',
+                message: paramCheck.error,
+                context: { command: cmd, deviceType: cachedForParam.type, deviceId },
+              },
+            }));
+          } else {
+            console.error(`Error: ${paramCheck.error}`);
+          }
+          process.exit(2);
+        }
+        if (paramCheck.normalized !== undefined) parameter = paramCheck.normalized;
       }
 
       const cachedForGuard = getCachedDevice(deviceId);
