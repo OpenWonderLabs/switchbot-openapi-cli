@@ -533,7 +533,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         'Search the built-in device catalog by type name or alias. Returns matching entries with their commands, roles, destructive flags, and status fields. No API call.',
       _meta: { agentSafetyTier: 'read' },
       inputSchema: z.object({
-        query: z.string().describe('Search query (matches type and aliases, case-insensitive). Use empty string to list all.'),
+        query: z.string().describe('Search query (matches type and aliases, case-insensitive). Must be non-empty; use list_catalog_types to enumerate instead.'),
         limit: z.number().int().min(1).max(100).optional().default(20).describe('Max entries returned (default 20)'),
       }).strict(),
       outputSchema: {
@@ -557,6 +557,16 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
       },
     },
     async ({ query, limit }) => {
+      if (query.trim() === '') {
+        return mcpError(
+          'usage',
+          2,
+          'search_catalog requires a non-empty query.',
+          {
+            hint: "Pass a search term like 'Bot' or 'Hub', or call list_catalog_types to enumerate all types without a query.",
+          },
+        );
+      }
       const hits = searchCatalog(query, limit);
       const structured = { results: hits as unknown as Array<Record<string, unknown>>, total: hits.length };
       return {

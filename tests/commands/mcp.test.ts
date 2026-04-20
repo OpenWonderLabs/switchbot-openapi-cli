@@ -287,6 +287,28 @@ describe('mcp server', () => {
     expect(parsed.some((e: { type: string }) => e.type === 'Strip Light')).toBe(true);
   });
 
+  it('search_catalog rejects an empty query with a usage error', async () => {
+    const { client } = await pair();
+    const res = await client.callTool({
+      name: 'search_catalog',
+      arguments: { query: '' },
+    });
+    expect(res.isError).toBe(true);
+    const structured = (res as { structuredContent?: { error?: { kind?: string; message?: string; hint?: string } } }).structuredContent;
+    expect(structured?.error?.kind).toBe('usage');
+    expect(structured?.error?.message).toMatch(/non-empty query/i);
+    expect(structured?.error?.hint).toMatch(/list_catalog_types/);
+  });
+
+  it('search_catalog rejects whitespace-only query', async () => {
+    const { client } = await pair();
+    const res = await client.callTool({
+      name: 'search_catalog',
+      arguments: { query: '   ' },
+    });
+    expect(res.isError).toBe(true);
+  });
+
   it('run_scene POSTs the scene execute endpoint', async () => {
     apiMock.__instance.post.mockResolvedValueOnce({ data: { statusCode: 100, body: {} } });
     const { client } = await pair();
