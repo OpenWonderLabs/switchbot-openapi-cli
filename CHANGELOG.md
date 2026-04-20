@@ -5,6 +5,39 @@ All notable changes to `@switchbot/openapi-cli` are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0] - 2026-04-20
+
+### Added
+
+- **`history aggregate <deviceId>`** — on-demand bucketed statistics
+  (`count / min / max / avg / sum / p50 / p95`) over the append-only JSONL
+  device history. Flags: `--since` / `--from` / `--to`, repeatable
+  `--metric`, `--agg <csv>`, `--bucket <dur>`,
+  `--max-bucket-samples <n>`. Non-numeric samples are skipped; empty
+  metrics are omitted from their bucket.
+- **MCP `aggregate_device_history`** — same contract as the CLI, exposed
+  as a read-tier tool (`_meta.agentSafetyTier: "read"`) with a strict
+  Zod input schema (unknown keys reject with JSON-RPC `-32602`).
+- **Capabilities manifest** — new `history aggregate` entry in
+  `COMMAND_META`; new `aggregate_device_history` entry in
+  `surfaces.mcp.tools`.
+
+### Notes
+
+- Storage format unchanged. Aggregation streams the existing JSONL
+  rotation files via `readline` — zero memory blow-up for large
+  windows, with a hard ceiling of `--max-bucket-samples` × 8 bytes per
+  `(bucket × metric)` for quantile computation.
+- Quantiles use nearest-rank on sorted per-bucket samples; if the cap
+  is reached the result carries `partial: true` and a per-bucket
+  `notes[]` entry. `count / min / max / avg / sum` remain exact.
+
+### Not included (deferred)
+
+- Cross-device aggregation (agents merge locally).
+- Trend / rate-of-change helpers (derivable from bucket series).
+- `--fill-empty` for missing buckets.
+
 ## [2.4.0] - 2026-04-20
 
 Large agent-experience overhaul driven by the OpenClaw + Claude integration
