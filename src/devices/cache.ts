@@ -1,9 +1,30 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { createHash } from 'node:crypto';
 import { getConfigPath } from '../utils/flags.js';
+import { getActiveProfile } from '../lib/request-context.js';
 
-/** GC cutoff for status entries: evict anything older than this. */
+/**
+ * Returns the directory where cache files should be stored.
+ *
+ * - If a profile is active, scopes into a per-profile sub-directory so that
+ *   rotating credentials or switching profiles never serves stale inventory
+ *   from a prior session (Bug #37).
+ * - If no profile is active (unnamed / default), returns `baseDir` unchanged
+ *   so the existing legacy path (~/.switchbot/devices.json) is preserved.
+ *
+ * Only called when `getConfigPath()` returns undefined — the --config-path
+ * override takes full precedence and bypasses this helper entirely.
+ */
+function scopedCacheDir(baseDir: string): string {
+  const profile = getActiveProfile();
+  if (profile === undefined) return baseDir;
+  const hash = createHash('sha256').update(profile).digest('hex').slice(0, 8);
+  const dir = path.join(baseDir, 'cache', hash);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
 const DEFAULT_STATUS_GC_TTL_MS = 24 * 60 * 60 * 1000; // 24 h
 
 export interface CachedDevice {
@@ -48,7 +69,7 @@ function cacheFilePath(): string {
   const override = getConfigPath();
   const dir = override
     ? path.dirname(path.resolve(override))
-    : path.join(os.homedir(), '.switchbot');
+    : scopedCacheDir(path.join(os.homedir(), '.switchbot'));
   return path.join(dir, 'devices.json');
 }
 
@@ -205,7 +226,7 @@ function statusCacheFilePath(): string {
   const override = getConfigPath();
   const dir = override
     ? path.dirname(path.resolve(override))
-    : path.join(os.homedir(), '.switchbot');
+    : scopedCacheDir(path.join(os.homedir(), '.switchbot'));
   return path.join(dir, 'status.json');
 }
 

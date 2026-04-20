@@ -5,7 +5,7 @@ import { resolveDeviceId } from '../../src/utils/name-resolver.js';
 import { updateCacheFromDeviceList, resetListCache } from '../../src/devices/cache.js';
 import { saveDeviceMeta } from '../../src/devices/device-meta.js';
 
-vi.mock('../../src/utils/flags.js', () => ({ getConfigPath: () => undefined }));
+vi.mock('../../src/utils/flags.js', () => ({ getConfigPath: () => undefined, getProfile: () => undefined }));
 
 const sampleBody = {
   deviceList: [
