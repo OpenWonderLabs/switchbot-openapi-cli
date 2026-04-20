@@ -210,8 +210,8 @@ Examples:
     .option('--file <path>', `Path to the audit log (default ${DEFAULT_AUDIT})`, stringArg('--file'))
     .addHelpText('after', `
 See docs/audit-log.md for the audit log format. Exit code:
-  0  every line parses and carries the current auditVersion
-  1  one or more lines are malformed OR the file is missing
+  0  every line parses and carries the current auditVersion, or file is missing (warn)
+  1  one or more lines are malformed or schema drift detected
   2  (usage) — not emitted by this subcommand
 
 Examples:
@@ -221,28 +221,56 @@ Examples:
     .action((options: { file?: string }) => {
       const file = options.file ?? DEFAULT_AUDIT;
       const report = verifyAudit(file);
+
+      // Determine status and exit code
+      let status: 'ok' | 'warn' | 'fail' = 'ok';
+      let exitCode = 0;
+
+      if (report.fileMissing) {
+        status = 'warn';
+      } else if (report.malformedLines > 0 || report.unversionedEntries > 0) {
+        status = 'fail';
+        exitCode = 1;
+      }
+
       if (isJsonMode()) {
-        printJson(report);
+        const output = {
+          status,
+          fileMissing: report.fileMissing === true,
+          parsed: report.parsedLines,
+          malformed: report.malformedLines,
+          unversioned: report.unversionedEntries,
+          message: report.fileMissing
+            ? 'Audit log file not found (fresh install)'
+            : report.malformedLines > 0 || report.unversionedEntries > 0
+              ? 'Audit log has malformed or unversioned entries'
+              : 'Audit log is valid',
+        };
+        printJson(output);
       } else {
-        console.log(`Audit log:       ${report.file}`);
-        console.log(`Parsed lines:    ${report.parsedLines} / ${report.totalLines}`);
-        console.log(`Malformed:       ${report.malformedLines}`);
-        console.log(`Unversioned:     ${report.unversionedEntries}`);
-        const versions = Object.entries(report.versionCounts)
-          .map(([v, n]) => `${v}:${n}`)
-          .join(', ');
-        console.log(`Version counts:  ${versions || '—'}`);
-        if (report.earliest) console.log(`Earliest:        ${report.earliest}`);
-        if (report.latest) console.log(`Latest:          ${report.latest}`);
-        if (report.problems.length > 0) {
-          console.log('\nProblems:');
-          for (const p of report.problems) {
-            console.log(`  line ${p.line}: ${p.reason}${p.preview ? ` — "${p.preview}"` : ''}`);
+        if (report.fileMissing) {
+          console.log(`Audit log:       ${report.file} (missing — fresh install)`);
+          console.log(`Status:          ✓ warn (expected for new accounts)`);
+        } else {
+          console.log(`Audit log:       ${report.file}`);
+          console.log(`Parsed lines:    ${report.parsedLines} / ${report.totalLines}`);
+          console.log(`Malformed:       ${report.malformedLines}`);
+          console.log(`Unversioned:     ${report.unversionedEntries}`);
+          const versions = Object.entries(report.versionCounts)
+            .map(([v, n]) => `${v}:${n}`)
+            .join(', ');
+          console.log(`Version counts:  ${versions || '—'}`);
+          if (report.earliest) console.log(`Earliest:        ${report.earliest}`);
+          if (report.latest) console.log(`Latest:          ${report.latest}`);
+          if (report.problems.length > 0) {
+            console.log('\nProblems:');
+            for (const p of report.problems) {
+              console.log(`  line ${p.line}: ${p.reason}${p.preview ? ` — "${p.preview}"` : ''}`);
+            }
           }
         }
       }
-      const ok = report.malformedLines === 0 && report.problems.length === 0;
-      process.exit(ok ? 0 : 1);
+      process.exit(exitCode);
     });
 
   history

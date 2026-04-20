@@ -72,6 +72,7 @@ export interface VerifyReport {
   problems: Array<{ line: number; reason: string; preview?: string }>;
   earliest?: string;
   latest?: string;
+  fileMissing?: boolean;
 }
 
 export function verifyAudit(file: string): VerifyReport {
@@ -86,7 +87,7 @@ export function verifyAudit(file: string): VerifyReport {
     problems: [],
   };
   if (!fs.existsSync(file)) {
-    report.problems.push({ line: 0, reason: 'audit log file does not exist' });
+    report.fileMissing = true;
     return report;
   }
   const raw = fs.readFileSync(file, 'utf-8');
