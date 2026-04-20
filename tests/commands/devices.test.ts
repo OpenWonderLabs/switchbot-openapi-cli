@@ -884,6 +884,15 @@ describe('devices command', () => {
       await runCmd('setBrightness', '100');
       expectPost('setBrightness', 100);
     });
+    it('setBrightness -1 (negative positional parameter reaches validation)', async () => {
+      // Regression for bug #53: Commander used to swallow "-1" as an unknown
+      // option token. With allowUnknownOption on the `command` subcommand
+      // negative numbers are now treated as the parameter positional and
+      // reach the API (the device then returns 190 for out-of-range values,
+      // but that's a device-layer concern, not a CLI parsing failure).
+      await runCmd('setBrightness', '-1');
+      expectPost('setBrightness', -1);
+    });
     it('setColorTemperature', async () => {
       await runCmd('setColorTemperature', '4000');
       expectPost('setColorTemperature', 4000);
