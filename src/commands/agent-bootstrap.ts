@@ -29,6 +29,7 @@ const QUICK_REFERENCE = {
   safety: ['--dry-run', '--idempotency-key <k>', '--audit-log', '--no-quota'],
   observability: ['doctor --json', 'quota status', 'cache status', 'events mqtt-tail'],
   history: ['history range <id> --since 7d', 'history stats <id>'],
+  meta: ['devices meta set <id> --alias <name>', 'devices meta list', 'devices meta get <id>'],
 };
 
 interface BootstrapOptions {
