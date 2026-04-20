@@ -58,6 +58,15 @@ Example:
 `)
     .action(async (sceneId: string) => {
       try {
+        const sceneList = await fetchScenes();
+        const found = sceneList.find((s) => s.sceneId === sceneId);
+        if (!found) {
+          throw new StructuredUsageError(`scene not found: ${sceneId}`, {
+            error: 'scene_not_found',
+            sceneId,
+            candidates: sceneList.map((s) => ({ sceneId: s.sceneId, sceneName: s.sceneName })),
+          });
+        }
         await executeScene(sceneId);
         if (isJsonMode()) {
           printJson({ ok: true, sceneId });
