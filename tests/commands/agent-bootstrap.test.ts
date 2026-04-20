@@ -66,6 +66,10 @@ describe('agent-bootstrap', () => {
     expect(data.identity).toBeDefined();
     expect(data.safetyTiers).toBeDefined();
     expect(data.quickReference).toBeDefined();
+    expect(Array.isArray(data.nameStrategies)).toBe(true);
+    expect(data.nameStrategies).toEqual([
+      'exact', 'prefix', 'substring', 'fuzzy', 'first', 'require-unique',
+    ]);
     expect(Array.isArray(data.devices)).toBe(true);
     expect((data.devices as unknown[]).length).toBe(1);
     expect(data.catalog).toBeDefined();

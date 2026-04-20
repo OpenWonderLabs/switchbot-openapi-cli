@@ -5,7 +5,7 @@ import { resolveFormat, resolveFields, renderRows } from '../utils/format.js';
 import { findCatalogEntry, getEffectiveCatalog, DeviceCatalogEntry } from '../devices/catalog.js';
 import { getCachedDevice } from '../devices/cache.js';
 import { loadDeviceMeta } from '../devices/device-meta.js';
-import { resolveDeviceId, NameResolveStrategy } from '../utils/name-resolver.js';
+import { resolveDeviceId, NameResolveStrategy, ALL_STRATEGIES } from '../utils/name-resolver.js';
 import {
   fetchDeviceList,
   fetchDeviceStatus,
@@ -217,7 +217,7 @@ Examples:
     .description('Query the real-time status of a specific device')
     .argument('[deviceId]', 'Device ID from "devices list" (or use --name or --ids)')
     .option('--name <query>', 'Resolve device by fuzzy name instead of deviceId', stringArg('--name'))
-    .option('--name-strategy <s>', 'Name match strategy: exact|prefix|substring|fuzzy|first|require-unique (default: fuzzy)', stringArg('--name-strategy'))
+    .option('--name-strategy <s>', `Name match strategy: ${ALL_STRATEGIES.join('|')} (default: fuzzy)`, stringArg('--name-strategy'))
     .option('--name-type <type>', 'Narrow --name by device type (e.g. "Bot", "Color Bulb")', stringArg('--name-type'))
     .option('--name-category <cat>', 'Narrow --name by category: physical|ir', enumArg('--name-category', ['physical', 'ir'] as const))
     .option('--name-room <room>', 'Narrow --name by room name (substring match)', stringArg('--name-room'))
@@ -319,7 +319,7 @@ Examples:
     .argument('[cmd]', 'Command name, e.g. turnOn, turnOff, setColor, setBrightness, setAll, startClean')
     .argument('[parameter]', 'Command parameter. Omit for commands like turnOn/turnOff (defaults to "default"). Format depends on the command (see below).')
     .option('--name <query>', 'Resolve device by fuzzy name instead of deviceId', stringArg('--name'))
-    .option('--name-strategy <s>', 'Name match strategy: exact|prefix|substring|fuzzy|first|require-unique (default for command: require-unique)', stringArg('--name-strategy'))
+    .option('--name-strategy <s>', `Name match strategy: ${ALL_STRATEGIES.join('|')} (default for command: require-unique)`, stringArg('--name-strategy'))
     .option('--name-type <type>', 'Narrow --name by device type (e.g. "Bot", "Color Bulb")', stringArg('--name-type'))
     .option('--name-category <cat>', 'Narrow --name by category: physical|ir', enumArg('--name-category', ['physical', 'ir'] as const))
     .option('--name-room <room>', 'Narrow --name by room name (substring match)', stringArg('--name-room'))
@@ -667,7 +667,7 @@ Examples:
     .description('Describe a device by ID: metadata + supported commands + status fields (1 API call)')
     .argument('[deviceId]', 'Target device ID (or use --name)')
     .option('--name <query>', 'Resolve device by fuzzy name instead of deviceId', stringArg('--name'))
-    .option('--name-strategy <s>', 'Name match strategy: exact|prefix|substring|fuzzy|first|require-unique (default: fuzzy)', stringArg('--name-strategy'))
+    .option('--name-strategy <s>', `Name match strategy: ${ALL_STRATEGIES.join('|')} (default: fuzzy)`, stringArg('--name-strategy'))
     .option('--name-type <type>', 'Narrow --name by device type', stringArg('--name-type'))
     .option('--name-category <cat>', 'Narrow --name by category: physical|ir', enumArg('--name-category', ['physical', 'ir'] as const))
     .option('--name-room <room>', 'Narrow --name by room name (substring match)', stringArg('--name-room'))

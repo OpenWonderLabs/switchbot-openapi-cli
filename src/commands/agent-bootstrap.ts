@@ -4,6 +4,7 @@ import { loadCache } from '../devices/cache.js';
 import { getEffectiveCatalog } from '../devices/catalog.js';
 import { readProfileMeta } from '../config.js';
 import { todayUsage, DAILY_QUOTA } from '../utils/quota.js';
+import { ALL_STRATEGIES } from '../utils/name-resolver.js';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
@@ -123,6 +124,7 @@ Examples:
         identity: IDENTITY,
         quickReference: QUICK_REFERENCE,
         safetyTiers: SAFETY_TIERS,
+        nameStrategies: [...ALL_STRATEGIES],
         profile: meta
           ? {
               label: meta.label ?? null,
