@@ -69,6 +69,7 @@ const COMMAND_META: Record<string, CommandMeta> = {
   'history replay':   { mutating: true,  consumesQuota: true,  idempotencySupported: true,  agentSafetyTier: 'action',      verifiability: 'deviceDependent',  typicalLatencyMs: 1000 },
   'history range':    { mutating: false, consumesQuota: false, idempotencySupported: false, agentSafetyTier: 'read',        verifiability: 'local',            typicalLatencyMs: 50 },
   'history stats':    { mutating: false, consumesQuota: false, idempotencySupported: false, agentSafetyTier: 'read',        verifiability: 'local',            typicalLatencyMs: 20 },
+  'history aggregate': { mutating: false, consumesQuota: false, idempotencySupported: false, agentSafetyTier: 'read',        verifiability: 'local',            typicalLatencyMs: 80 },
   'plan run':         { mutating: true,  consumesQuota: true,  idempotencySupported: true,  agentSafetyTier: 'action',      verifiability: 'deviceDependent',  typicalLatencyMs: 2000 },
   'plan validate':    { mutating: false, consumesQuota: false, idempotencySupported: false, agentSafetyTier: 'read',        verifiability: 'local',            typicalLatencyMs: 10 },
   'plan schema':      { mutating: false, consumesQuota: false, idempotencySupported: false, agentSafetyTier: 'read',        verifiability: 'local',            typicalLatencyMs: 10 },
@@ -109,6 +110,7 @@ const MCP_TOOLS = [
   'account_overview',
   'get_device_history',
   'query_device_history',
+  'aggregate_device_history',
 ];
 
 const IDEMPOTENCY_CONTRACT = {
