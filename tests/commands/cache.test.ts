@@ -191,4 +191,16 @@ describe('cache clear', () => {
     expect(fs.existsSync(statusFile)).toBe(true);
     expect(result.stdout.join('\n')).toMatch(/Cleared:.*list/);
   });
+
+  it('--status + --list together exits 2 (bug #35)', async () => {
+    const result = await runCli(registerCacheCommand, ['cache', 'clear', '--status', '--list']);
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr.join('\n')).toMatch(/mutually exclusive/i);
+  });
+
+  it('--status combined with --key exits 2 (bug #35)', async () => {
+    const result = await runCli(registerCacheCommand, ['cache', 'clear', '--status', '--key', 'status']);
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr.join('\n')).toMatch(/cannot be combined with --key/i);
+  });
 });
