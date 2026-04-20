@@ -3,6 +3,7 @@ import { stringArg } from '../utils/arg-parsers.js';
 import { handleError, isJsonMode, printJson, printTable, UsageError } from '../utils/output.js';
 import {
   loadDeviceMeta,
+  saveDeviceMeta,
   setDeviceMeta,
   clearDeviceMeta,
   getDeviceMeta,
@@ -23,13 +24,35 @@ export function registerDevicesMetaCommand(devices: Command): void {
     .option('--hide', 'Hide this device from "devices list"')
     .option('--show', 'Un-hide this device')
     .option('--notes <text>', 'Freeform notes shown in "devices describe"', stringArg('--notes'))
-    .action((deviceId: string, options: { alias?: string; hide?: boolean; show?: boolean; notes?: string }) => {
+    .option('--force', 'Reassign alias even if it already belongs to another device')
+    .action((deviceId: string, options: { alias?: string; hide?: boolean; show?: boolean; notes?: string; force?: boolean }) => {
       try {
         if (options.hide && options.show) {
           throw new UsageError('--hide and --show cannot be used together.');
         }
         if (!options.alias && !options.hide && !options.show && !options.notes) {
           throw new UsageError('Specify at least one of: --alias, --hide, --show, --notes');
+        }
+
+        // Enforce alias uniqueness across devices
+        if (options.alias !== undefined) {
+          const meta = loadDeviceMeta();
+          const holder = Object.entries(meta.devices).find(
+            ([id, m]) => m.alias === options.alias && id !== deviceId,
+          );
+          if (holder) {
+            if (!options.force) {
+              throw new UsageError(
+                `Alias "${options.alias}" is already assigned to device ${holder[0]}. Use --force to reassign.`,
+              );
+            }
+            // --force: clear the alias from the previous holder
+            meta.devices[holder[0]] = { ...meta.devices[holder[0]], alias: undefined };
+            saveDeviceMeta(meta);
+            if (!isJsonMode()) {
+              console.log(`(reassigned alias from ${holder[0]})`);
+            }
+          }
         }
 
         const patch: Record<string, unknown> = {};

@@ -79,4 +79,29 @@ describe('devices meta', () => {
     const res = await runCli(registerDevicesCommand, ['devices', 'meta', 'get', 'LAMP-1']);
     expect(res.stdout.join('\n')).toContain('No local metadata');
   });
+
+  it('setting alias on device B (without --force) when device A already holds it → exit 2 mentioning device A (bug #41)', async () => {
+    await runCli(registerDevicesCommand, ['devices', 'meta', 'set', 'LAMP-1', '--alias', 'myAlias']);
+    const res = await runCli(registerDevicesCommand, ['devices', 'meta', 'set', 'LAMP-2', '--alias', 'myAlias']);
+    expect(res.exitCode).toBe(2);
+    expect(res.stderr.join('\n')).toContain('LAMP-1');
+  });
+
+  it('--force reassigns alias from device A to device B and clears A (bug #41)', async () => {
+    await runCli(registerDevicesCommand, ['devices', 'meta', 'set', 'LAMP-1', '--alias', 'myAlias']);
+    const res = await runCli(registerDevicesCommand, ['devices', 'meta', 'set', 'LAMP-2', '--alias', 'myAlias', '--force']);
+    expect(res.exitCode).toBeNull();
+    // LAMP-1 should have no alias now
+    const lamp1 = await runCli(registerDevicesCommand, ['devices', 'meta', 'get', 'LAMP-1']);
+    expect(lamp1.stdout.join('\n')).not.toContain('myAlias');
+    // LAMP-2 should hold the alias
+    const lamp2 = await runCli(registerDevicesCommand, ['devices', 'meta', 'get', 'LAMP-2']);
+    expect(lamp2.stdout.join('\n')).toContain('myAlias');
+  });
+
+  it('re-asserting the same alias on the same device is a no-op (no conflict with self, bug #41)', async () => {
+    await runCli(registerDevicesCommand, ['devices', 'meta', 'set', 'LAMP-1', '--alias', 'myAlias']);
+    const res = await runCli(registerDevicesCommand, ['devices', 'meta', 'set', 'LAMP-1', '--alias', 'myAlias']);
+    expect(res.exitCode).toBeNull();
+  });
 });
