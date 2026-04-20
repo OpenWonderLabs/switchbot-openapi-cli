@@ -101,6 +101,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
       title: 'List all devices on the account',
       description:
         'Fetch the complete inventory of physical devices and IR remotes on this SwitchBot account. Refreshes the local metadata cache and groups devices by type. Use this as the bootstrap call to discover available deviceIds. Devices without enableCloudService cannot receive commands via API. IR remotes depend on a Hub for connectivity.',
+      _meta: { agentSafetyTier: 'read' },
       inputSchema: z.object({}).strict(),
       outputSchema: {
         deviceList: z.array(z.object({
@@ -142,6 +143,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
       title: 'Get live status for a device',
       description:
         'Query the real-time status payload for a physical device. IR remotes have no status channel and will error.',
+      _meta: { agentSafetyTier: 'read' },
       inputSchema: z.object({
         deviceId: z.string().describe('Device ID from list_devices'),
       }).strict(),
@@ -172,6 +174,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         'Return device state history recorded from MQTT events (persisted to ~/.switchbot/device-history/). ' +
         'No API call — zero quota cost. Use when you need recent historical readings or want to avoid a live API call. ' +
         'Omit deviceId to list all devices with stored history.',
+      _meta: { agentSafetyTier: 'read' },
       inputSchema: z.object({
         deviceId: z.string().optional().describe('Device MAC address (deviceId). Omit to list all devices with history.'),
         limit: z.number().int().min(1).max(100).optional().describe('Max history entries to return (default 20, max 100)'),
@@ -212,6 +215,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         'Return records from the append-only JSONL history (~/.switchbot/device-history/<deviceId>.jsonl) ' +
         'filtered by a relative duration (since) or absolute ISO-8601 range (from/to). ' +
         'No API call — zero quota cost. Use for trend questions like "how many times did this switch turn on last week".',
+      _meta: { agentSafetyTier: 'read' },
       inputSchema: z.object({
         deviceId: z.string().describe('Device ID to query'),
         since: z.string().optional().describe('Relative window ending now, e.g. "30s", "15m", "1h", "7d". Mutually exclusive with from/to.'),
@@ -256,6 +260,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
       title: 'Send a control command to a device',
       description:
         'Execute a control command on a device (turnOn, setColor, startClean, unlock, openDoor, createKey, etc.). Destructive commands (Smart Lock unlock, Garage Door open, Keypad createKey/deleteKey) require confirm:true to proceed; otherwise rejected. Commands are validated offline against the device catalog. Use idempotencyKey to safely deduplicate retries within 60 seconds.',
+      _meta: { agentSafetyTier: 'action' },
       inputSchema: z.object({
         deviceId: z.string().describe('Device ID from list_devices'),
         command: z.string().describe('Command name, case-sensitive (e.g. turnOn, setColor, unlock)'),
@@ -429,6 +434,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
     {
       title: 'Execute a manual scene',
       description: 'Execute a manual SwitchBot scene by its sceneId (from list_scenes).',
+      _meta: { agentSafetyTier: 'action' },
       inputSchema: z.object({
         sceneId: z.string().describe('Scene ID from list_scenes'),
         dryRun: z
@@ -469,6 +475,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
     {
       title: 'List all manual scenes',
       description: 'Fetch all manual scenes configured in the SwitchBot app.',
+      _meta: { agentSafetyTier: 'read' },
       inputSchema: z.object({}).strict(),
       outputSchema: {
         scenes: z.array(z.object({ sceneId: z.string(), sceneName: z.string() })),
@@ -490,6 +497,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
       title: 'Search the offline device catalog',
       description:
         'Search the built-in device catalog by type name or alias. Returns matching entries with their commands, roles, destructive flags, and status fields. No API call.',
+      _meta: { agentSafetyTier: 'read' },
       inputSchema: z.object({
         query: z.string().describe('Search query (matches type and aliases, case-insensitive). Use empty string to list all.'),
         limit: z.number().int().min(1).max(100).optional().default(20).describe('Max entries returned (default 20)'),
@@ -531,6 +539,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
       title: 'Describe a specific device',
       description:
         'Resolve a deviceId to its metadata + catalog entry + suggested safe actions. Pass live:true to also fetch real-time status values.',
+      _meta: { agentSafetyTier: 'read' },
       inputSchema: z.object({
         deviceId: z.string().describe('Device ID from list_devices'),
         live: z.boolean().optional().default(false).describe('Also fetch live /status values (costs 1 extra API call)'),
@@ -620,6 +629,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
       title: 'Bootstrap account overview',
       description:
         'Get a complete account snapshot: devices, scenes, quota usage, cache status, and MQTT connection state. Use this for cold-start initialization or periodic health checks.',
+      _meta: { agentSafetyTier: 'read' },
       inputSchema: z.object({}).strict(),
       outputSchema: {
         version: z.string(),
