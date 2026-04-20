@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import readline from 'node:readline';
 import type { QueryOptions, HistoryRecord } from './history-query.js';
-import { jsonlFilesForDevice, resolveRange } from './history-query.js';
+import { jsonlFilesForDevice, parseDurationToMs, resolveRange } from './history-query.js';
 
 export type AggFn = 'count' | 'min' | 'max' | 'avg' | 'sum' | 'p50' | 'p95';
 
@@ -61,6 +61,14 @@ export async function aggregateDeviceHistory(
   const aggs: AggFn[] = (opts.aggs && opts.aggs.length > 0) ? opts.aggs : [...DEFAULT_AGGS];
   const needQuantile = aggs.includes('p50') || aggs.includes('p95');
 
+  let bucketMs: number | null = null;
+  if (opts.bucket !== undefined) {
+    bucketMs = parseDurationToMs(opts.bucket);
+    if (bucketMs === null) {
+      throw new Error(`Invalid --bucket "${opts.bucket}". Expected e.g. "15m", "1h", "1d".`);
+    }
+  }
+
   // bucketKey (epoch ms; 0 when no --bucket) → metric name → Acc
   const buckets = new Map<number, Map<string, Acc>>();
 
@@ -74,7 +82,7 @@ export async function aggregateDeviceHistory(
       const tMs = Date.parse(rec.t);
       if (!Number.isFinite(tMs) || tMs < fromMs || tMs > toMs) continue;
 
-      const key = 0; // single-bucket mode; Task 4 introduces bucketMs
+      const key = bucketMs !== null ? Math.floor(tMs / bucketMs) * bucketMs : 0;
       let bkt = buckets.get(key);
       if (!bkt) { bkt = new Map(); buckets.set(key, bkt); }
 

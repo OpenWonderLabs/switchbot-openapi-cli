@@ -50,4 +50,67 @@ describe('aggregateDeviceHistory — single bucket', () => {
     expect(res.partial).toBe(false);
     expect(res.notes).toEqual([]);
   });
+
+  it('buckets by --bucket duration with UTC-aligned boundaries', async () => {
+    const file = path.join(historyDir, 'DEV1.jsonl');
+    writeJsonl(file, [
+      { t: '2026-04-19T10:00:00.000Z', topic: 'status', payload: { temperature: 20 } },
+      { t: '2026-04-19T10:30:00.000Z', topic: 'status', payload: { temperature: 22 } },
+      { t: '2026-04-19T11:00:00.000Z', topic: 'status', payload: { temperature: 24 } },
+      { t: '2026-04-19T11:59:59.999Z', topic: 'status', payload: { temperature: 26 } },
+    ]);
+
+    const res = await aggregateDeviceHistory('DEV1', {
+      from: '2026-04-19T00:00:00.000Z',
+      to: '2026-04-20T00:00:00.000Z',
+      metrics: ['temperature'],
+      aggs: ['count', 'avg'],
+      bucket: '1h',
+    });
+
+    expect(res.buckets.map((b) => b.t)).toEqual([
+      '2026-04-19T10:00:00.000Z',
+      '2026-04-19T11:00:00.000Z',
+    ]);
+    expect(res.buckets[0].metrics.temperature.count).toBe(2);
+    expect(res.buckets[0].metrics.temperature.avg).toBe(21);
+    expect(res.buckets[1].metrics.temperature.count).toBe(2);
+    expect(res.buckets[1].metrics.temperature.avg).toBe(25);
+  });
+
+  it('places a record at HH:59:59.999 in the HH bucket and HH+1:00:00.000 in HH+1', async () => {
+    const file = path.join(historyDir, 'DEV1.jsonl');
+    writeJsonl(file, [
+      { t: '2026-04-19T10:59:59.999Z', topic: 'status', payload: { temperature: 20 } },
+      { t: '2026-04-19T11:00:00.000Z', topic: 'status', payload: { temperature: 40 } },
+    ]);
+
+    const res = await aggregateDeviceHistory('DEV1', {
+      from: '2026-04-19T00:00:00.000Z',
+      to: '2026-04-20T00:00:00.000Z',
+      metrics: ['temperature'],
+      aggs: ['count'],
+      bucket: '1h',
+    });
+
+    expect(res.buckets).toHaveLength(2);
+    expect(res.buckets[0].t).toBe('2026-04-19T10:00:00.000Z');
+    expect(res.buckets[1].t).toBe('2026-04-19T11:00:00.000Z');
+  });
+
+  it('throws UsageError-like for unparseable --bucket', async () => {
+    const file = path.join(historyDir, 'DEV1.jsonl');
+    writeJsonl(file, [
+      { t: '2026-04-19T10:00:00.000Z', topic: 'status', payload: { temperature: 20 } },
+    ]);
+
+    await expect(
+      aggregateDeviceHistory('DEV1', {
+        from: '2026-04-19T00:00:00.000Z',
+        to: '2026-04-20T00:00:00.000Z',
+        metrics: ['temperature'],
+        bucket: 'banana',
+      }),
+    ).rejects.toThrow(/Invalid --bucket/);
+  });
 });
