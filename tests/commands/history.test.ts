@@ -232,3 +232,51 @@ describe('history range / stats (D3)', () => {
     expect(env.data.oldest).toBe('2026-04-10T00:00:00.000Z');
   });
 });
+
+describe('history aggregate (D7)', () => {
+  let tmpHome: string;
+  let historyDir: string;
+
+  beforeEach(() => {
+    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-histcmd-agg-'));
+    historyDir = path.join(tmpHome, '.switchbot', 'device-history');
+    fs.mkdirSync(historyDir, { recursive: true });
+    vi.spyOn(os, 'homedir').mockReturnValue(tmpHome);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    try { fs.rmSync(tmpHome, { recursive: true, force: true }); } catch { /* */ }
+  });
+
+  function seedJsonl(deviceId: string, records: Array<Record<string, unknown>>): void {
+    const line = records.map((r) => JSON.stringify(r)).join('\n') + '\n';
+    fs.writeFileSync(path.join(historyDir, `${deviceId}.jsonl`), line);
+  }
+
+  it('emits the expected --json envelope for a single-bucket aggregation', async () => {
+    seedJsonl('DEV1', [
+      { t: '2026-04-19T10:00:00.000Z', topic: 'sb/DEV1', payload: { temperature: 20 } },
+      { t: '2026-04-19T10:30:00.000Z', topic: 'sb/DEV1', payload: { temperature: 24 } },
+    ]);
+    const res = await runCli(registerHistoryCommand, [
+      '--json', 'history', 'aggregate', 'DEV1',
+      '--from', '2026-04-19T00:00:00.000Z',
+      '--to', '2026-04-20T00:00:00.000Z',
+      '--metric', 'temperature',
+      '--agg', 'count,avg',
+    ]);
+    const parsed = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    expect(parsed.data.buckets[0].metrics.temperature.count).toBe(2);
+    expect(parsed.data.buckets[0].metrics.temperature.avg).toBe(22);
+  });
+
+  it('exits 2 with UsageError when --metric is missing', async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((_code) => { throw new Error('process.exit'); });
+    const res = await runCli(registerHistoryCommand, [
+      'history', 'aggregate', 'DEV1', '--since', '1h',
+    ]);
+    exitSpy.mockRestore();
+    expect(res.exitCode).toBe(2);
+  });
+});

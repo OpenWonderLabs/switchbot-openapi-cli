@@ -10,6 +10,12 @@ import {
   queryDeviceHistoryStats,
   type HistoryRecord,
 } from '../devices/history-query.js';
+import {
+  aggregateDeviceHistory,
+  ALL_AGG_FNS,
+  type AggFn,
+  type AggOptions,
+} from '../devices/history-agg.js';
 
 const DEFAULT_AUDIT = path.join(os.homedir(), '.switchbot', 'audit.log');
 
@@ -237,5 +243,92 @@ Examples:
       }
       const ok = report.malformedLines === 0 && report.problems.length === 0;
       process.exit(ok ? 0 : 1);
+    });
+
+  history
+    .command('aggregate')
+    .description('Aggregate time-ranged device history metrics into buckets')
+    .argument('<deviceId>', 'Device ID to aggregate')
+    .option('--since <duration>', 'Relative window ending now, e.g. "1h", "7d" (mutually exclusive with --from/--to)', stringArg('--since'))
+    .option('--from <iso>', 'Range start (ISO-8601)', stringArg('--from'))
+    .option('--to <iso>', 'Range end (ISO-8601)', stringArg('--to'))
+    .option('--metric <name>', 'Payload field to aggregate (repeat for multiple)', (v: string, acc: string[] = []) => acc.concat(v), [] as string[])
+    .option('--agg <csv>', 'Comma-separated aggregation functions (count,min,max,avg,sum,p50,p95)', stringArg('--agg'))
+    .option('--bucket <duration>', 'Bucket width, e.g. "15m", "1h", "1d"', stringArg('--bucket'))
+    .option('--max-bucket-samples <n>', 'Max samples per bucket for quantiles (1–100000)', intArg('--max-bucket-samples', { min: 1, max: 100_000 }))
+    .action(async (
+      deviceId: string,
+      options: { since?: string; from?: string; to?: string; metric?: string[]; agg?: string; bucket?: string; maxBucketSamples?: string },
+    ) => {
+      const metrics: string[] = options.metric ?? [];
+      if (metrics.length === 0) {
+        handleError(new UsageError('at least one --metric is required.'));
+      }
+
+      if (options.since && (options.from || options.to)) {
+        handleError(new UsageError('--since is mutually exclusive with --from/--to.'));
+      }
+
+      let aggs: AggFn[] | undefined;
+      if (options.agg !== undefined) {
+        const parts = options.agg.split(',').map((s) => s.trim()).filter(Boolean);
+        const unknown = parts.filter((p) => !(ALL_AGG_FNS as readonly string[]).includes(p));
+        if (unknown.length > 0) {
+          handleError(new UsageError(
+            `Unknown aggregation function(s): ${unknown.join(', ')}. Legal values: ${ALL_AGG_FNS.join(', ')}.`,
+          ));
+        }
+        aggs = parts as AggFn[];
+      }
+
+      const aggOpts: AggOptions = {
+        metrics,
+        aggs,
+        since: options.since,
+        from: options.from,
+        to: options.to,
+        bucket: options.bucket,
+        maxBucketSamples: options.maxBucketSamples !== undefined ? Number(options.maxBucketSamples) : undefined,
+      };
+
+      try {
+        const res = await aggregateDeviceHistory(deviceId, aggOpts);
+
+        if (isJsonMode()) {
+          printJson(res);
+          return;
+        }
+
+        if (res.buckets.length === 0) {
+          console.log(`(no history records for ${deviceId} in requested range)`);
+          return;
+        }
+
+        const aggCols = res.aggs;
+        const cols = ['t', ...res.metrics.flatMap((m) => aggCols.map((a) => `${m}.${a}`))];
+        console.log(cols.join('\t'));
+        for (const bkt of res.buckets) {
+          const row = cols.map((col) => {
+            if (col === 't') return bkt.t;
+            const [metric, agg] = col.split('.');
+            const val = (bkt.metrics[metric] as Record<string, unknown> | undefined)?.[agg];
+            return val !== undefined ? String(val) : '\u2014';
+          });
+          console.log(row.join('\t'));
+        }
+
+        if (res.partial) {
+          for (const note of res.notes) {
+            console.error('note: ' + note);
+          }
+        }
+      } catch (err) {
+        if (err instanceof Error) {
+          if (/bucket/i.test(err.message) || /--since/i.test(err.message) || /--from/i.test(err.message) || /--to/i.test(err.message)) {
+            handleError(new UsageError(err.message));
+          }
+        }
+        handleError(err);
+      }
     });
 }
