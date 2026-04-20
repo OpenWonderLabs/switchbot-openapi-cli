@@ -48,7 +48,8 @@ export function durationArg(flagName: string): (value: string) => string {
     const ms = parseDurationToMs(value);
     if (ms === null) {
       throw new InvalidArgumentError(
-        `${flagName} must look like "30s", "1m", "500ms", "1h" (got "${value}")`,
+        `${flagName} must look like "30s", "1m", "500ms", "1h", "7d", "2w" ` +
+          `(supported units: ms, s, m, h, d, w — got "${value}")`,
       );
     }
     return value;

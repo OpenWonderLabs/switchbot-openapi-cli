@@ -54,6 +54,8 @@ describe('durationArg', () => {
     expect(parse('500ms')).toBe('500ms');
     expect(parse('1m')).toBe('1m');
     expect(parse('1h')).toBe('1h');
+    expect(parse('1d')).toBe('1d');
+    expect(parse('2w')).toBe('2w');
     expect(parse('1000')).toBe('1000'); // bare ms
   });
 
@@ -65,6 +67,12 @@ describe('durationArg', () => {
   it('rejects malformed durations', () => {
     expect(() => parse('abc')).toThrow(/must look like/);
     expect(() => parse('devices')).toThrow(/must look like/);
+  });
+
+  it('rejects unsupported units (y, month, week) with helpful hint', () => {
+    expect(() => parse('1y')).toThrow(/ms, s, m, h, d, w/);
+    expect(() => parse('1year')).toThrow(/ms, s, m, h, d, w/);
+    expect(() => parse('1month')).toThrow(/must look like/);
   });
 });
 
