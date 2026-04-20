@@ -132,14 +132,15 @@ describe('devices explain', () => {
     expect(parsed.data.warnings).toHaveLength(0);
   });
 
-  it('--json: device not found emits { error: { code:1, kind:"runtime" } } on stderr', async () => {
+  it('--json: device not found emits { error: { code:1, kind:"runtime" } } on stdout (bug #SYS-1)', async () => {
     devicesMock.describeDevice.mockRejectedValue(new devicesMock.DeviceNotFoundError('MISSING'));
 
     const res = await runExplain('--json', 'MISSING');
 
     expect(res.exitCode).toBe(1);
-    expect(res.stdout).toHaveLength(0);
-    const parsed = JSON.parse(res.stderr[0]);
+    // Non-TTY: stderr stays clean so jq consumers aren't polluted.
+    expect(res.stderr).toHaveLength(0);
+    const parsed = JSON.parse(res.stdout[0]);
     expect(parsed.error.code).toBe(1);
     expect(parsed.error.kind).toBe('runtime');
     expect(parsed.error.message).toContain('MISSING');

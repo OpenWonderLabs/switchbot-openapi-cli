@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { enumArg, stringArg } from '../utils/arg-parsers.js';
-import { printTable, printKeyValue, printJson, isJsonMode, handleError, UsageError } from '../utils/output.js';
+import { printTable, printKeyValue, printJson, isJsonMode, handleError, UsageError, emitJsonError } from '../utils/output.js';
 import { resolveFormat, resolveFields, renderRows } from '../utils/format.js';
 import { findCatalogEntry, getEffectiveCatalog, DeviceCatalogEntry } from '../devices/catalog.js';
 import { getCachedDevice } from '../devices/cache.js';
@@ -477,7 +477,7 @@ Examples:
           const obj: Record<string, unknown> = { code: 2, kind: 'usage', message: err.message };
           if (err.hint) obj.hint = err.hint;
           obj.context = { validationKind: err.kind };
-          console.error(JSON.stringify({ error: obj }));
+          emitJsonError(obj);
         } else {
           console.error(`Error: ${err.message}`);
           if (err.hint) console.error(err.hint);
@@ -512,14 +512,12 @@ Examples:
         const paramCheck = validateParameter(cachedForParam.type, cmd, parameter);
         if (!paramCheck.ok) {
           if (isJsonMode()) {
-            console.error(JSON.stringify({
-              error: {
-                code: 2,
-                kind: 'usage',
-                message: paramCheck.error,
-                context: { command: cmd, deviceType: cachedForParam.type, deviceId },
-              },
-            }));
+            emitJsonError({
+              code: 2,
+              kind: 'usage',
+              message: paramCheck.error,
+              context: { command: cmd, deviceType: cachedForParam.type, deviceId },
+            });
           } else {
             console.error(`Error: ${paramCheck.error}`);
           }
@@ -537,17 +535,15 @@ Examples:
         const typeLabel = cachedForGuard?.type ?? 'unknown';
         const reason = getDestructiveReason(cachedForGuard?.type, cmd, options.type);
         if (isJsonMode()) {
-          console.error(JSON.stringify({
-            error: {
-              code: 2,
-              kind: 'guard',
-              message: `"${cmd}" on ${typeLabel} is destructive and requires --yes.`,
-              hint: reason
-                ? `Re-run with --yes to confirm. Reason: ${reason}`
-                : 'Re-run with --yes to confirm, or --dry-run to preview without sending.',
-              context: { command: cmd, deviceType: typeLabel, deviceId, ...(reason ? { destructiveReason: reason } : {}) },
-            },
-          }));
+          emitJsonError({
+            code: 2,
+            kind: 'guard',
+            message: `"${cmd}" on ${typeLabel} is destructive and requires --yes.`,
+            hint: reason
+              ? `Re-run with --yes to confirm. Reason: ${reason}`
+              : 'Re-run with --yes to confirm, or --dry-run to preview without sending.',
+            context: { command: cmd, deviceType: typeLabel, deviceId, ...(reason ? { destructiveReason: reason } : {}) },
+          });
         } else {
           console.error(
             `Refusing to run destructive command "${cmd}" on ${typeLabel} without --yes.`

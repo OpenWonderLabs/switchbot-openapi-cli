@@ -14,6 +14,26 @@ export function printJson(data: unknown): void {
   console.log(JSON.stringify({ schemaVersion: SCHEMA_VERSION, data }, null, 2));
 }
 
+/**
+ * Emit a structured JSON error envelope on stdout.
+ *
+ * Bug #SYS-1: Under `--json`, both success and error payloads must share
+ * the same output channel (stdout) so a single `cli --json ... | jq` pipe
+ * can decode either shape. Use this helper everywhere that previously
+ * called `console.error(JSON.stringify({ error: ... }))` in --json mode.
+ *
+ * The envelope is always `{ schemaVersion, error }` — callers pass only the
+ * error payload. Also emits a brief human-readable line on stderr when a
+ * TTY is attached, so interactive runs still see the failure.
+ */
+export function emitJsonError(errorPayload: Record<string, unknown>): void {
+  console.log(JSON.stringify({ schemaVersion: SCHEMA_VERSION, error: errorPayload }));
+  if (process.stderr.isTTY) {
+    const msg = typeof errorPayload.message === 'string' ? errorPayload.message : 'Error';
+    console.error(chalk.red(msg));
+  }
+}
+
 function escapeMarkdownCell(s: string): string {
   // Pipes break markdown table layout; backslash-escape them. Collapse
   // newlines into <br> so each row stays on one line.
@@ -256,7 +276,16 @@ export function handleError(error: unknown): never {
   const payload = buildErrorPayload(error);
 
   if (isJsonMode()) {
-    console.error(JSON.stringify({ schemaVersion: SCHEMA_VERSION, error: payload }));
+    // Bug #SYS-1: Under --json, route the structured envelope to stdout so
+    // `cli --json ... | jq` pipelines can decode the error shape exactly
+    // the same way they decode success. Previously it went to stderr, which
+    // silently broke every error-path pipeline. TTY users still get a
+    // terse human-readable line on stderr so interactive runs don't look
+    // like the process simply exited.
+    console.log(JSON.stringify({ schemaVersion: SCHEMA_VERSION, error: payload }));
+    if (process.stderr.isTTY) {
+      console.error(chalk.red(payload.message));
+    }
     process.exit(payload.code === 2 ? 2 : 1);
   }
 

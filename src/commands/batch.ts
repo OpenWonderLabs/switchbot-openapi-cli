@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import type { AxiosInstance } from 'axios';
 import { intArg, enumArg, stringArg } from '../utils/arg-parsers.js';
-import { printJson, isJsonMode, handleError, buildErrorPayload, UsageError, type ErrorPayload } from '../utils/output.js';
+import { printJson, isJsonMode, handleError, buildErrorPayload, UsageError, emitJsonError, type ErrorPayload } from '../utils/output.js';
 import {
   fetchDeviceList,
   executeCommand,
@@ -243,7 +243,7 @@ Examples:
         } catch (error) {
           if (error instanceof FilterSyntaxError) {
             if (isJsonMode()) {
-              console.error(JSON.stringify({ error: { code: 2, kind: 'usage', message: error.message } }));
+              emitJsonError({ code: 2, kind: 'usage', message: error.message });
             } else {
               console.error(`Error: ${error.message}`);
             }
@@ -251,7 +251,7 @@ Examples:
           }
           if (error instanceof Error && error.message.startsWith('No target devices')) {
             if (isJsonMode()) {
-              console.error(JSON.stringify({ error: { code: 2, kind: 'usage', message: error.message } }));
+              emitJsonError({ code: 2, kind: 'usage', message: error.message });
             } else {
               console.error(`Error: ${error.message}`);
             }
@@ -308,15 +308,13 @@ Examples:
         if (blockedForDestructive.length > 0 && !options.yes) {
           if (isJsonMode()) {
             const deviceIds = blockedForDestructive.map((b) => b.deviceId);
-            console.error(JSON.stringify({
-              error: {
-                code: 2,
-                kind: 'guard',
-                message: `Destructive command "${cmd}" requires --yes to run on ${blockedForDestructive.length} device(s).`,
-                hint: 'Re-issue the call with --yes to proceed.',
-                context: { command: cmd, deviceIds },
-              },
-            }));
+            emitJsonError({
+              code: 2,
+              kind: 'guard',
+              message: `Destructive command "${cmd}" requires --yes to run on ${blockedForDestructive.length} device(s).`,
+              hint: 'Re-issue the call with --yes to proceed.',
+              context: { command: cmd, deviceIds },
+            });
           } else {
             console.error(
               `Refusing to run destructive command "${cmd}" on ${blockedForDestructive.length} device(s) without --yes:`

@@ -1860,7 +1860,9 @@ describe('devices command', () => {
         '--json', 'devices', 'command', LOCK_ID, 'unlock',
       ]);
       expect(res.exitCode).toBe(2);
-      const parsed = JSON.parse(res.stderr.join('\n'));
+      // Bug #SYS-1: --json errors now go to stdout so piped consumers can
+      // decode them the same way as success envelopes.
+      const parsed = JSON.parse(res.stdout.join('\n'));
       expect(parsed.error.kind).toBe('guard');
       expect(parsed.error.code).toBe(2);
       expect(parsed.error.context.deviceId).toBe(LOCK_ID);

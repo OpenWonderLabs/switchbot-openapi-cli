@@ -142,7 +142,8 @@ describe('scenes command', () => {
       const res = await runCli(registerScenesCommand, ['scenes', 'execute', 'BOGUS-ID', '--json']);
       expect(res.exitCode).toBe(2);
       expect(apiMock.__instance.post).not.toHaveBeenCalled();
-      const out = res.stderr.join('\n');
+      // Bug #SYS-1: --json errors now emit on stdout so piped consumers see them.
+      const out = res.stdout.join('\n');
       const parsed = JSON.parse(out);
       expect(parsed.error?.context?.error).toBe('scene_not_found');
       expect(parsed.error?.context?.sceneId).toBe('BOGUS-ID');
@@ -179,7 +180,8 @@ describe('scenes command', () => {
       });
       const res = await runCli(registerScenesCommand, ['scenes', 'describe', 'MISSING', '--json']);
       expect(res.exitCode).toBe(2);
-      const out = res.stderr.join('\n');
+      // Bug #SYS-1: --json errors now emit on stdout so piped consumers see them.
+      const out = res.stdout.join('\n');
       const parsed = JSON.parse(out);
       expect(parsed.error?.context?.error).toBe('scene_not_found');
       expect(parsed.error?.context?.sceneId).toBe('MISSING');

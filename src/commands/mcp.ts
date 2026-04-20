@@ -4,7 +4,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
 import { intArg, stringArg } from '../utils/arg-parsers.js';
-import { handleError, isJsonMode, buildErrorPayload, type ErrorPayload, type ErrorSubKind } from '../utils/output.js';
+import { handleError, isJsonMode, buildErrorPayload, emitJsonError, type ErrorPayload, type ErrorSubKind } from '../utils/output.js';
 import { VERSION } from '../version.js';
 import {
   fetchDeviceList,
@@ -851,7 +851,7 @@ Inspect locally:
           if (!Number.isFinite(port) || port < 1 || port > 65535) {
             const msg = `Invalid --port "${options.port}". Must be 1-65535.`;
             if (isJsonMode()) {
-              console.error(JSON.stringify({ error: { code: 2, kind: 'usage', message: msg } }));
+              emitJsonError({ code: 2, kind: 'usage', message: msg });
             } else {
               console.error(msg);
             }
@@ -868,7 +868,7 @@ Inspect locally:
           if (!isLocalhost && !authToken) {
             const msg = 'Refusing to listen on 0.0.0.0 without --auth-token. Pass --auth-token <token> or bind to localhost (default).';
             if (isJsonMode()) {
-              console.error(JSON.stringify({ error: { code: 2, kind: 'usage', message: msg } }));
+              emitJsonError({ code: 2, kind: 'usage', message: msg });
             } else {
               console.error(msg);
             }
