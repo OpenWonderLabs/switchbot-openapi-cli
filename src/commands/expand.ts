@@ -6,90 +6,12 @@ import { executeCommand, isDestructiveCommand, getDestructiveReason } from '../l
 import { isDryRun } from '../utils/flags.js';
 import { resolveDeviceId } from '../utils/name-resolver.js';
 import { DryRunSignal } from '../api/client.js';
-
-// ---- Mapping tables --------------------------------------------------------
-
-const AC_MODE_MAP: Record<string, number> = { auto: 1, cool: 2, dry: 3, fan: 4, heat: 5 };
-const AC_FAN_MAP: Record<string, number>  = { auto: 1, low: 2, mid: 3, high: 4 };
-const CURTAIN_MODE_MAP: Record<string, string> = { default: 'ff', performance: '0', silent: '1' };
-const RELAY_MODE_MAP: Record<string, number> = { toggle: 0, edge: 1, detached: 2, momentary: 3 };
-const BLIND_DIRECTION = new Set(['up', 'down']);
-
-// ---- Translators -----------------------------------------------------------
-
-function buildAcSetAll(opts: {
-  temp?: string; mode?: string; fan?: string; power?: string;
-}): string {
-  if (!opts.temp) throw new UsageError('--temp is required for setAll (e.g. --temp 26)');
-  if (!opts.mode) throw new UsageError('--mode is required for setAll (auto|cool|dry|fan|heat)');
-  if (!opts.fan)  throw new UsageError('--fan is required for setAll (auto|low|mid|high)');
-  if (!opts.power) throw new UsageError('--power is required for setAll (on|off)');
-
-  const temp = parseInt(opts.temp, 10);
-  if (!Number.isFinite(temp) || temp < 16 || temp > 30) {
-    throw new UsageError(`--temp must be an integer between 16 and 30 (got "${opts.temp}")`);
-  }
-  const modeInt = AC_MODE_MAP[opts.mode.toLowerCase()];
-  if (modeInt === undefined) {
-    throw new UsageError(`--mode must be one of: auto, cool, dry, fan, heat (got "${opts.mode}")`);
-  }
-  const fanInt = AC_FAN_MAP[opts.fan.toLowerCase()];
-  if (fanInt === undefined) {
-    throw new UsageError(`--fan must be one of: auto, low, mid, high (got "${opts.fan}")`);
-  }
-  const power = opts.power.toLowerCase();
-  if (power !== 'on' && power !== 'off') {
-    throw new UsageError(`--power must be "on" or "off" (got "${opts.power}")`);
-  }
-  return `${temp},${modeInt},${fanInt},${power}`;
-}
-
-function buildCurtainSetPosition(opts: {
-  position?: string; mode?: string;
-}): string {
-  if (!opts.position) throw new UsageError('--position is required (0-100)');
-  const pos = parseInt(opts.position, 10);
-  if (!Number.isFinite(pos) || pos < 0 || pos > 100) {
-    throw new UsageError(`--position must be an integer between 0 and 100 (got "${opts.position}")`);
-  }
-  const modeStr = opts.mode ? CURTAIN_MODE_MAP[opts.mode.toLowerCase()] : 'ff';
-  if (modeStr === undefined) {
-    throw new UsageError(`--mode must be one of: default, performance, silent (got "${opts.mode}")`);
-  }
-  return `0,${modeStr},${pos}`;
-}
-
-function buildBlindTiltSetPosition(opts: {
-  direction?: string; angle?: string;
-}): string {
-  if (!opts.direction) throw new UsageError('--direction is required (up|down)');
-  if (!opts.angle)     throw new UsageError('--angle is required (0-100)');
-  const dir = opts.direction.toLowerCase();
-  if (!BLIND_DIRECTION.has(dir)) {
-    throw new UsageError(`--direction must be "up" or "down" (got "${opts.direction}")`);
-  }
-  const angle = parseInt(opts.angle, 10);
-  if (!Number.isFinite(angle) || angle < 0 || angle > 100) {
-    throw new UsageError(`--angle must be an integer between 0 and 100 (got "${opts.angle}")`);
-  }
-  return `${dir};${angle}`;
-}
-
-function buildRelaySetMode(opts: {
-  channel?: string; mode?: string;
-}): string {
-  if (!opts.channel) throw new UsageError('--channel is required (1 or 2)');
-  if (!opts.mode)    throw new UsageError('--mode is required (toggle|edge|detached|momentary)');
-  const ch = parseInt(opts.channel, 10);
-  if (ch !== 1 && ch !== 2) {
-    throw new UsageError(`--channel must be 1 or 2 (got "${opts.channel}")`);
-  }
-  const modeInt = RELAY_MODE_MAP[opts.mode.toLowerCase()];
-  if (modeInt === undefined) {
-    throw new UsageError(`--mode must be one of: toggle, edge, detached, momentary (got "${opts.mode}")`);
-  }
-  return `${ch};${modeInt}`;
-}
+import {
+  buildAcSetAll,
+  buildCurtainSetPosition,
+  buildBlindTiltSetPosition,
+  buildRelaySetMode,
+} from '../devices/param-validator.js';
 
 // ---- Registration ----------------------------------------------------------
 

@@ -206,15 +206,17 @@ export async function executeCommand(
 /**
  * Validate a command against the locally-cached device → catalog mapping.
  * Returns `{ ok: true }` when validation passes or is skipped (unknown device,
- * custom IR button, etc.); returns `{ ok: false, error }` when the caller
- * should refuse the call.
+ * custom IR button, etc.). On a case-only mismatch the canonical command name
+ * is returned via `normalized` along with a `caseNormalizedFrom` field so the
+ * caller can emit a warning and continue with the canonical name.
+ * Returns `{ ok: false, error }` only when the caller should refuse the call.
  */
 export function validateCommand(
   deviceId: string,
   cmd: string,
   parameter: string | undefined,
   commandType: string
-): { ok: true } | { ok: false; error: CommandValidationError } {
+): { ok: true; normalized?: string; caseNormalizedFrom?: string } | { ok: false; error: CommandValidationError } {
   if (commandType === 'customize') return { ok: true };
 
   const cached = getCachedDevice(deviceId);
@@ -226,22 +228,32 @@ export function validateCommand(
   const builtinCommands = match.commands.filter((c) => c.commandType !== 'customize');
   if (builtinCommands.length === 0) return { ok: true };
 
-  const spec = builtinCommands.find((c) => c.command === cmd);
+  let spec = builtinCommands.find((c) => c.command === cmd);
+  let caseNormalizedFrom: string | undefined;
+  let normalizedCmd = cmd;
+
   if (!spec) {
     const unique = [...new Set(builtinCommands.map((c) => c.command))];
     const caseMatch = unique.find((c) => c.toLowerCase() === cmd.toLowerCase());
-    const hint = caseMatch
-      ? `Did you mean "${caseMatch}"? Supported commands: ${unique.join(', ')}`
-      : `Supported commands: ${unique.join(', ')}`;
-    return {
-      ok: false,
-      error: new CommandValidationError(
-        `"${cmd}" is not a supported command for ${cached.name} (${cached.type}).`,
-        'unknown-command',
-        hint
-      ),
-    };
+    if (caseMatch) {
+      // Case-only mismatch: normalize and continue.
+      caseNormalizedFrom = cmd;
+      normalizedCmd = caseMatch;
+      spec = builtinCommands.find((c) => c.command === caseMatch);
+    } else {
+      const hint = `Supported commands: ${unique.join(', ')}`;
+      return {
+        ok: false,
+        error: new CommandValidationError(
+          `"${cmd}" is not a supported command for ${cached.name} (${cached.type}).`,
+          'unknown-command',
+          hint
+        ),
+      };
+    }
   }
+
+  if (!spec) return { ok: true, normalized: normalizedCmd, caseNormalizedFrom };
 
   const noParamExpected = spec.parameter === '—';
   const userProvidedParam = parameter !== undefined && parameter !== 'default';
@@ -249,9 +261,9 @@ export function validateCommand(
     return {
       ok: false,
       error: new CommandValidationError(
-        `"${cmd}" takes no parameter, but one was provided: "${parameter}".`,
+        `"${normalizedCmd}" takes no parameter, but one was provided: "${parameter}".`,
         'unexpected-parameter',
-        `Try: switchbot devices command ${deviceId} ${cmd}`
+        `Try: switchbot devices command ${deviceId} ${normalizedCmd}`
       ),
     };
   }
@@ -263,16 +275,16 @@ export function validateCommand(
     return {
       ok: false,
       error: new CommandValidationError(
-        `"${cmd}" requires a parameter (${spec.parameter}).`,
+        `"${normalizedCmd}" requires a parameter (${spec.parameter}).`,
         'missing-parameter',
         example
-          ? `Example: switchbot devices command <deviceId> ${cmd} "${example}"`
+          ? `Example: switchbot devices command <deviceId> ${normalizedCmd} "${example}"`
           : `See: switchbot devices commands ${cached.type}`,
       ),
     };
   }
 
-  return { ok: true };
+  return { ok: true, normalized: normalizedCmd, caseNormalizedFrom };
 }
 
 /**

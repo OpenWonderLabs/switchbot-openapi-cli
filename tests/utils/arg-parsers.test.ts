@@ -11,11 +11,13 @@ describe('intArg', () => {
     expect(parse('0')).toBe('0');
   });
 
-  it('rejects values starting with "-" (tokens that look like flags)', () => {
-    expect(() => parse('-5')).toThrow(InvalidArgumentError);
-    expect(() => parse('-5')).toThrow(/requires a numeric value/);
+  it('rejects flag-like tokens but not pure negative integers', () => {
+    // Bare negative integers fall through to min/max so the error classifies
+    // as a range error instead of "requires a numeric value".
+    expect(parse('-5')).toBe('-5');
     expect(() => parse('--help')).toThrow(InvalidArgumentError);
     expect(() => parse('--help')).toThrow(/requires a numeric value/);
+    expect(() => parse('-x')).toThrow(/requires a numeric value/);
   });
 
   it('rejects non-numeric strings', () => {
@@ -29,6 +31,12 @@ describe('intArg', () => {
     expect(bounded('8080')).toBe('8080');
     expect(() => bounded('0')).toThrow(/>= 1/);
     expect(() => bounded('70000')).toThrow(/<= 65535/);
+  });
+
+  it('reports negative values as a range error (not flag-like) when min is set', () => {
+    const bounded = intArg('--max', { min: 1 });
+    expect(() => bounded('-1')).toThrow(/>= 1/);
+    expect(() => bounded('-100')).toThrow(/>= 1/);
   });
 
   it('rejects values that look like subcommand names', () => {
