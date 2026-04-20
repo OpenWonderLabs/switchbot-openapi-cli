@@ -4,7 +4,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
 import { intArg, stringArg } from '../utils/arg-parsers.js';
-import { handleError, isJsonMode, buildErrorPayload } from '../utils/output.js';
+import { handleError, isJsonMode, buildErrorPayload, type ErrorPayload, type ErrorSubKind } from '../utils/output.js';
 import { VERSION } from '../version.js';
 import {
   fetchDeviceList,
@@ -54,8 +54,8 @@ function mcpError(
     hint?: string;
     retryable?: boolean;
     context?: Record<string, unknown>;
-    subKind?: string;
-    errorClass?: string;
+    subKind?: ErrorSubKind;
+    errorClass?: NonNullable<ErrorPayload['errorClass']>;
     transient?: boolean;
     retryAfterMs?: number;
   },
