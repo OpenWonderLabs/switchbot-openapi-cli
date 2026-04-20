@@ -30,3 +30,48 @@ jobs:
             exit 1
           fi
       - run: npm test
+
+  offline-smoke:
+    name: Offline size budgets
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Seed device-cache fixture
+        run: |
+          mkdir -p "$HOME/.switchbot"
+          cat > "$HOME/.switchbot/devices.json" <<'JSON'
+          {
+            "lastUpdated": "2026-04-20T00:00:00.000Z",
+            "devices": {
+              "BOT001":    { "type": "Bot",           "name": "Test Bot",   "category": "physical" },
+              "METER001":  { "type": "Meter",         "name": "Test Meter", "category": "physical" },
+              "STRIP001":  { "type": "Strip Light 3", "name": "Test Strip", "category": "physical" },
+              "IRTV001":   { "type": "TV",            "name": "Test TV",    "category": "ir" }
+            }
+          }
+          JSON
+      - name: agent-bootstrap --compact must stay under 20 KB
+        run: |
+          OUT=$(node dist/index.js agent-bootstrap --compact)
+          BYTES=$(printf '%s' "$OUT" | wc -c)
+          echo "agent-bootstrap --compact = $BYTES bytes"
+          if [ "$BYTES" -ge 20000 ]; then
+            echo "FAIL: budget is 20000, got $BYTES"
+            exit 1
+          fi
+      - name: schema export --compact --used must stay under 15 KB
+        run: |
+          OUT=$(node dist/index.js schema export --compact --used)
+          BYTES=$(printf '%s' "$OUT" | wc -c)
+          echo "schema export --compact --used = $BYTES bytes"
+          if [ "$BYTES" -ge 15000 ]; then
+            echo "FAIL: budget is 15000, got $BYTES"
+            exit 1
+          fi
