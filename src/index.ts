@@ -18,6 +18,7 @@ import { registerSchemaCommand } from './commands/schema.js';
 import { registerHistoryCommand } from './commands/history.js';
 import { registerPlanCommand } from './commands/plan.js';
 import { registerCapabilitiesCommand } from './commands/capabilities.js';
+import { registerAgentBootstrapCommand } from './commands/agent-bootstrap.js';
 
 const require = createRequire(import.meta.url);
 const { version: pkgVersion } = require('../package.json') as { version: string };
@@ -29,7 +30,7 @@ const program = new Command();
 const TOP_LEVEL_COMMANDS = [
   'config', 'devices', 'scenes', 'webhook', 'completion', 'mcp',
   'quota', 'catalog', 'cache', 'events', 'doctor', 'schema',
-  'history', 'plan', 'capabilities',
+  'history', 'plan', 'capabilities', 'agent-bootstrap',
 ] as const;
 
 const cacheModeArg = (value: string): string => {
@@ -51,8 +52,9 @@ program
   .description('Command-line tool for SwitchBot API v1.1')
   .version(pkgVersion)
   .option('--json', 'Output raw JSON response (disables tables; useful for pipes/scripts)')
-  .option('--format <type>', 'Output format: table (default), json, jsonl, tsv, yaml, id', enumArg('--format', ['table', 'json', 'jsonl', 'tsv', 'yaml', 'id']))
+  .option('--format <type>', 'Output format: table (default), json, jsonl, tsv, yaml, id, markdown', enumArg('--format', ['table', 'json', 'jsonl', 'tsv', 'yaml', 'id', 'markdown']))
   .option('--fields <csv>', 'Comma-separated list of columns to include (e.g. --fields=id,name,type)', stringArg('--fields', { disallow: TOP_LEVEL_COMMANDS }))
+  .option('--table-style <style>', 'Table rendering style: unicode (default on TTY), ascii (default on pipes), simple, markdown', enumArg('--table-style', ['unicode', 'ascii', 'simple', 'markdown']))
   .option('-v, --verbose', 'Log HTTP request/response details to stderr')
   .option('--dry-run', 'Print mutating requests without sending them (GETs still execute)')
   .option('--timeout <ms>', 'HTTP request timeout in milliseconds (default: 30000)', intArg('--timeout', { min: 1 }))
@@ -84,6 +86,7 @@ registerSchemaCommand(program);
 registerHistoryCommand(program);
 registerPlanCommand(program);
 registerCapabilitiesCommand(program);
+registerAgentBootstrapCommand(program);
 
 program.addHelpText('after', `
 Credentials:
@@ -141,6 +144,14 @@ function applyExitOverride(cmd: Command): void {
   cmd.commands.forEach(applyExitOverride);
 }
 applyExitOverride(program);
+
+// Enable "did you mean" suggestions across every subcommand, not just the root.
+// Without this, `switchbot devices lst` fails without suggesting `list`.
+function enableSuggestions(cmd: Command): void {
+  cmd.showSuggestionAfterError(true);
+  cmd.commands.forEach(enableSuggestions);
+}
+enableSuggestions(program);
 
 try {
   await program.parseAsync();

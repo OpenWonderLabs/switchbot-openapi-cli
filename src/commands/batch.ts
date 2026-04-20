@@ -14,9 +14,16 @@ import { isDryRun } from '../utils/flags.js';
 import { DryRunSignal } from '../api/client.js';
 import { getCachedTypeMap } from '../devices/cache.js';
 
+interface BatchStepTiming {
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  replayed?: boolean;
+}
+
 interface BatchResult {
-  succeeded: Array<{ deviceId: string; result: unknown }>;
-  failed: Array<{ deviceId: string; error: ErrorPayload }>;
+  succeeded: Array<{ deviceId: string; result: unknown } & BatchStepTiming>;
+  failed: Array<{ deviceId: string; error: ErrorPayload } & BatchStepTiming>;
   summary: {
     total: number;
     ok: number;
@@ -25,16 +32,23 @@ interface BatchResult {
     durationMs: number;
     dryRun?: boolean;
     schemaVersion?: string;
+    maxConcurrent?: number;
+    staggerMs?: number;
   };
 }
 
 const DEFAULT_CONCURRENCY = 5;
 const COMMAND_TYPES = ['command', 'customize'] as const;
 
-/** Run `task(x)` for every element with at most `concurrency` running at once. */
+/**
+ * Run `task(x)` for every element with at most `concurrency` running at once.
+ * `staggerMs`: when > 0, delay each task start by this fixed interval (replaces
+ * the default 20-60ms jitter). Useful for rate-limited endpoints.
+ */
 async function runPool<T, R>(
   items: T[],
   concurrency: number,
+  staggerMs: number,
   task: (item: T) => Promise<R>
 ): Promise<R[]> {
   const results: R[] = new Array(items.length);
@@ -48,9 +62,10 @@ async function runPool<T, R>(
         while (cursor < items.length) {
           const idx = cursor++;
           results[idx] = await task(items[idx]);
-          // Tiny jitter between starts so we don't hammer the endpoint in a
-          // perfectly aligned burst. Keeps the default concurrency=5 polite.
-          await new Promise((r) => setTimeout(r, 20 + Math.random() * 40));
+          // Fixed stagger wins over random jitter when set; else keep the
+          // default polite spacing so we don't hammer the endpoint.
+          const delay = staggerMs > 0 ? staggerMs : 20 + Math.random() * 40;
+          await new Promise((r) => setTimeout(r, delay));
         }
       })()
     );
@@ -125,6 +140,9 @@ export function registerBatchCommand(devices: Command): void {
     .option('--filter <expr>', 'Target devices matching a filter, e.g. type=Bot,family=Home', stringArg('--filter'))
     .option('--ids <csv>', 'Explicit comma-separated list of deviceIds', stringArg('--ids'))
     .option('--concurrency <n>', 'Max parallel in-flight requests (default 5)', intArg('--concurrency', { min: 1 }), '5')
+    .option('--max-concurrent <n>', 'Alias for --concurrency; takes priority when set', intArg('--max-concurrent', { min: 1 }))
+    .option('--stagger <ms>', 'Fixed delay between task starts in ms (default 0 = random 20-60ms jitter)', intArg('--stagger', { min: 0 }), '0')
+    .option('--plan', 'With --dry-run: emit a plan JSON document instead of executing anything')
     .option('--yes', 'Allow destructive commands (Smart Lock unlock, garage open, ...)')
     .option('--type <commandType>', '"command" (default) or "customize" for user-defined IR buttons', enumArg('--type', COMMAND_TYPES), 'command')
     .option('--stdin', 'Read deviceIds from stdin, one per line (same as trailing "-")')
@@ -145,7 +163,16 @@ Supported keys:  type, family, room, category  (category: physical | ir)
 
 Output:
   Human mode:  one status line per device, summary at the end.
-  --json:      {succeeded[], failed[{deviceId,error}], summary:{total,ok,failed,skipped,durationMs}}
+  --json:      {succeeded[], failed[{deviceId,error}], summary:{total,ok,failed,skipped,durationMs,maxConcurrent,staggerMs}}
+  Each step includes startedAt / finishedAt / durationMs / replayed (when cached).
+
+Concurrency & pacing:
+  --max-concurrent <n>   Upper bound on in-flight requests (alias for --concurrency).
+  --stagger <ms>         Fixed delay between task starts; default 0 uses random 20-60ms jitter.
+
+Planning:
+  --dry-run --plan       Print the plan JSON without executing anything. Useful
+                         for agents that want to show the user what will run.
 
 Safety:
   Destructive commands (Smart Lock unlock, Garage Door Opener turnOn/turnOff,
@@ -167,6 +194,9 @@ Examples:
           filter?: string;
           ids?: string;
           concurrency: string;
+          maxConcurrent?: string;
+          stagger: string;
+          plan?: boolean;
           yes?: boolean;
           type: string;
           stdin?: boolean;
@@ -265,11 +295,51 @@ Examples:
           }
         }
 
-        const concurrency = Math.max(1, Number.parseInt(options.concurrency, 10) || DEFAULT_CONCURRENCY);
+        const maxConcurrentRaw = options.maxConcurrent ?? options.concurrency;
+        const concurrency = Math.max(1, Number.parseInt(maxConcurrentRaw, 10) || DEFAULT_CONCURRENCY);
+        const staggerMs = Math.max(0, Number.parseInt(options.stagger, 10) || 0);
         const dryRun = isDryRun();
+
+        // --dry-run --plan: emit a plan document and return without executing.
+        if (dryRun && options.plan) {
+          const steps = resolved.ids.map((id) => ({
+            deviceId: id,
+            command: cmd,
+            parameter: parsedParam,
+            type: effectiveType,
+            idempotencyKey: options.idempotencyKeyPrefix
+              ? `${options.idempotencyKeyPrefix}-${id}`
+              : undefined,
+          }));
+          const planDoc = {
+            schemaVersion: '1.1',
+            dryRun: true,
+            plan: {
+              command: cmd,
+              parameter: parsedParam,
+              type: effectiveType,
+              maxConcurrent: concurrency,
+              staggerMs,
+              stepCount: steps.length,
+              steps,
+            },
+          };
+          if (isJsonMode()) {
+            printJson(planDoc);
+          } else {
+            console.log(
+              `Plan: ${steps.length} step(s), command=${cmd}, maxConcurrent=${concurrency}, staggerMs=${staggerMs}`
+            );
+            for (const s of steps) console.log(`  → ${s.deviceId} ${s.type} ${s.command}`);
+          }
+          return;
+        }
+
         const startedAt = Date.now();
 
-        const outcomes = await runPool(resolved.ids, concurrency, async (id) => {
+        const outcomes = await runPool(resolved.ids, concurrency, staggerMs, async (id) => {
+          const stepStart = Date.now();
+          const startedIso = new Date(stepStart).toISOString();
           try {
             const idempotencyKey = options.idempotencyKeyPrefix
               ? `${options.idempotencyKeyPrefix}-${id}`
@@ -277,21 +347,46 @@ Examples:
             const result = await executeCommand(id, cmd, parsedParam, effectiveType, getClient(), {
               idempotencyKey,
             });
+            const finishedIso = new Date().toISOString();
+            const durationMs = Date.now() - stepStart;
+            const replayed =
+              typeof result === 'object' && result !== null && (result as { replayed?: boolean }).replayed === true;
             if (!isJsonMode()) {
-              console.log(`✓ ${id}: ${cmd}`);
+              console.log(`✓ ${id}: ${cmd}${replayed ? ' (replayed)' : ''}`);
             }
-            return { ok: true as const, deviceId: id, result };
+            return {
+              ok: true as const,
+              deviceId: id,
+              result,
+              startedAt: startedIso,
+              finishedAt: finishedIso,
+              durationMs,
+              replayed,
+            };
           } catch (err) {
             // --dry-run uses DryRunSignal to short-circuit; surface that as a
             // "skipped" outcome, not a failure.
             if (err instanceof DryRunSignal) {
-              return { ok: 'dry-run' as const, deviceId: id };
+              return {
+                ok: 'dry-run' as const,
+                deviceId: id,
+                startedAt: startedIso,
+                finishedAt: new Date().toISOString(),
+                durationMs: Date.now() - stepStart,
+              };
             }
             const errorPayload = buildErrorPayload(err);
             if (!isJsonMode()) {
               console.error(`✗ ${id}: ${errorPayload.message}`);
             }
-            return { ok: false as const, deviceId: id, error: errorPayload };
+            return {
+              ok: false as const,
+              deviceId: id,
+              error: errorPayload,
+              startedAt: startedIso,
+              finishedAt: new Date().toISOString(),
+              durationMs: Date.now() - stepStart,
+            };
           }
         });
 
@@ -299,20 +394,43 @@ Examples:
           ok: true;
           deviceId: string;
           result: unknown;
+          startedAt: string;
+          finishedAt: string;
+          durationMs: number;
+          replayed: boolean;
         }>;
         const failed = outcomes.filter((o) => o.ok === false) as Array<{
           ok: false;
           deviceId: string;
           error: ErrorPayload;
+          startedAt: string;
+          finishedAt: string;
+          durationMs: number;
         }>;
         const dryRunned = outcomes.filter((o) => o.ok === 'dry-run') as Array<{
           ok: 'dry-run';
           deviceId: string;
+          startedAt: string;
+          finishedAt: string;
+          durationMs: number;
         }>;
 
         const result: BatchResult = {
-          succeeded: succeeded.map((s) => ({ deviceId: s.deviceId, result: s.result })),
-          failed: failed.map((f) => ({ deviceId: f.deviceId, error: f.error })),
+          succeeded: succeeded.map((s) => ({
+            deviceId: s.deviceId,
+            result: s.result,
+            startedAt: s.startedAt,
+            finishedAt: s.finishedAt,
+            durationMs: s.durationMs,
+            replayed: s.replayed,
+          })),
+          failed: failed.map((f) => ({
+            deviceId: f.deviceId,
+            error: f.error,
+            startedAt: f.startedAt,
+            finishedAt: f.finishedAt,
+            durationMs: f.durationMs,
+          })),
           summary: {
             total: resolved.ids.length,
             ok: succeeded.length,
@@ -320,6 +438,8 @@ Examples:
             skipped: dryRunned.length,
             durationMs: Date.now() - startedAt,
             schemaVersion: '1.1',
+            maxConcurrent: concurrency,
+            staggerMs,
             ...(dryRun ? { dryRun: true } : {}),
           },
         };

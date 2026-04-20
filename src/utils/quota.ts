@@ -233,3 +233,21 @@ export function todayUsage(now: Date = new Date()): {
     endpoints: { ...bucket.endpoints },
   };
 }
+
+/**
+ * Check whether today's call count is at or over the given cap. Returns the
+ * current counter either way so callers can render a helpful refusal message.
+ * Undefined cap → returns { over: false } without loading anything.
+ */
+export function checkDailyCap(
+  dailyCap: number | undefined,
+  now: Date = new Date(),
+): { over: boolean; total: number; cap?: number; date: string } {
+  const date = today(now);
+  if (!dailyCap || dailyCap <= 0) {
+    return { over: false, total: 0, date };
+  }
+  const data = loadQuota();
+  const total = data.days[date]?.total ?? 0;
+  return { over: total >= dailyCap, total, cap: dailyCap, date };
+}

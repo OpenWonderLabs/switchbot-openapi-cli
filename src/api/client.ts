@@ -15,7 +15,20 @@ import {
   isQuotaDisabled,
 } from '../utils/flags.js';
 import { nextRetryDelayMs, sleep } from '../utils/retry.js';
-import { recordRequest } from '../utils/quota.js';
+import { recordRequest, checkDailyCap } from '../utils/quota.js';
+import { readProfileMeta } from '../config.js';
+import { getActiveProfile } from '../lib/request-context.js';
+import { redactHeaders, warnOnceIfUnsafe } from '../utils/redact.js';
+
+class DailyCapExceededError extends Error {
+  constructor(public readonly cap: number, public readonly total: number, public readonly profile?: string) {
+    super(
+      `Local daily cap reached: ${total}/${cap} SwitchBot API calls used today${profile ? ` for profile "${profile}"` : ''}. ` +
+      `Raise with: switchbot ${profile ? `--profile ${profile} ` : ''}config set-token --daily-cap <N>`,
+    );
+    this.name = 'DailyCapExceededError';
+  }
+}
 
 const API_ERROR_MESSAGES: Record<number, string> = {
   151: 'Device type does not support this command',
@@ -43,6 +56,9 @@ export function createClient(): AxiosInstance {
   const maxRetries = getRetryOn429();
   const backoff = getBackoffStrategy();
   const quotaEnabled = !isQuotaDisabled();
+  const profile = getActiveProfile();
+  const profileMeta = readProfileMeta(profile);
+  const dailyCap = profileMeta?.limits?.dailyCap;
 
   const client = axios.create({
     baseURL: 'https://api.switch-bot.com',
@@ -51,6 +67,13 @@ export function createClient(): AxiosInstance {
 
   // Inject auth headers; optionally log the request; short-circuit on --dry-run.
   client.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+    // Pre-flight cap check: refuse the call before it touches the network.
+    if (dailyCap) {
+      const check = checkDailyCap(dailyCap);
+      if (check.over) {
+        throw new DailyCapExceededError(dailyCap, check.total, profile);
+      }
+    }
     const authHeaders = buildAuthHeaders(token, secret);
     Object.assign(config.headers, authHeaders);
 
@@ -58,7 +81,13 @@ export function createClient(): AxiosInstance {
     const url = `${config.baseURL ?? ''}${config.url ?? ''}`;
 
     if (verbose) {
+      warnOnceIfUnsafe();
       process.stderr.write(chalk.grey(`[verbose] ${method} ${url}\n`));
+      const { safe, redactedCount } = redactHeaders(config.headers as unknown as Record<string, unknown>);
+      process.stderr.write(chalk.grey(`[verbose] headers: ${JSON.stringify(safe)}\n`));
+      if (redactedCount > 0) {
+        process.stderr.write(chalk.grey(`[verbose] 🔒 ${redactedCount} sensitive header(s) redacted.\n`));
+      }
       if (config.data !== undefined) {
         process.stderr.write(chalk.grey(`[verbose] body: ${JSON.stringify(config.data)}\n`));
       }

@@ -5,6 +5,7 @@ export interface MqttSinkEvent {
   deviceType: string;
   payload: unknown;
   text: string;
+  eventId?: string;
 }
 
 export interface Sink {

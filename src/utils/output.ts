@@ -2,7 +2,7 @@ import Table from 'cli-table3';
 import chalk from 'chalk';
 import { ApiError, DryRunSignal } from '../api/client.js';
 
-import { getFormat } from './flags.js';
+import { getFormat, getTableStyle, type TableStyle } from './flags.js';
 
 export const SCHEMA_VERSION = '1.1';
 
@@ -14,34 +14,108 @@ export function printJson(data: unknown): void {
   console.log(JSON.stringify({ schemaVersion: SCHEMA_VERSION, data }, null, 2));
 }
 
+function escapeMarkdownCell(s: string): string {
+  // Pipes break markdown table layout; backslash-escape them. Collapse
+  // newlines into <br> so each row stays on one line.
+  return s.replace(/\|/g, '\\|').replace(/\r?\n/g, '<br>');
+}
+
+function formatCell(cell: string | number | boolean | null | undefined, style: TableStyle): string {
+  if (cell === null || cell === undefined) return style === 'markdown' ? '—' : chalk.grey('—');
+  if (typeof cell === 'boolean') {
+    if (style === 'markdown') return cell ? 'Yes' : 'No';
+    return cell ? chalk.green('✓') : chalk.red('✗');
+  }
+  return String(cell);
+}
+
+function renderMarkdownTable(headers: string[], rows: (string | number | boolean | null | undefined)[][]): string {
+  const head = `| ${headers.map(escapeMarkdownCell).join(' | ')} |`;
+  const sep = `| ${headers.map(() => '---').join(' | ')} |`;
+  const body = rows.map(
+    (r) =>
+      `| ${r
+        .map((c) => escapeMarkdownCell(formatCell(c, 'markdown')))
+        .join(' | ')} |`,
+  );
+  return [head, sep, ...body].join('\n');
+}
+
+function renderSimpleTable(headers: string[], rows: (string | number | boolean | null | undefined)[][]): string {
+  const widths = headers.map((h, i) =>
+    Math.max(h.length, ...rows.map((r) => String(formatCell(r[i], 'simple')).length)),
+  );
+  const fmt = (cells: string[]) => cells.map((c, i) => c.padEnd(widths[i])).join('  ').trimEnd();
+  return [
+    fmt(headers),
+    ...rows.map((r) => fmt(r.map((c) => String(formatCell(c, 'simple'))))),
+  ].join('\n');
+}
+
+const ASCII_BORDER_CHARS = {
+  top: '-', 'top-mid': '+', 'top-left': '+', 'top-right': '+',
+  bottom: '-', 'bottom-mid': '+', 'bottom-left': '+', 'bottom-right': '+',
+  left: '|', 'left-mid': '+', mid: '-', 'mid-mid': '+',
+  right: '|', 'right-mid': '+', middle: '|',
+};
+
 export function printTable(headers: string[], rows: (string | number | boolean | null | undefined)[][]): void {
-  const table = new Table({
-    head: headers.map((h) => chalk.cyan(h)),
-    style: { border: ['grey'] },
-  });
+  const style = getTableStyle();
+  if (style === 'markdown') {
+    console.log(renderMarkdownTable(headers, rows));
+    return;
+  }
+  if (style === 'simple') {
+    console.log(renderSimpleTable(headers, rows));
+    return;
+  }
+
+  const tableOpts: ConstructorParameters<typeof Table>[0] = {
+    head: headers.map((h) => (style === 'ascii' ? h : chalk.cyan(h))),
+    style: style === 'ascii' ? { border: [], head: [] } : { border: ['grey'] },
+  };
+  if (style === 'ascii') {
+    tableOpts.chars = ASCII_BORDER_CHARS;
+  }
+  const table = new Table(tableOpts);
 
   for (const row of rows) {
-    table.push(row.map((cell) => {
-      if (cell === null || cell === undefined) return chalk.grey('—');
-      if (typeof cell === 'boolean') return cell ? chalk.green('✓') : chalk.red('✗');
-      return String(cell);
-    }));
+    table.push(row.map((cell) => formatCell(cell, style)));
   }
 
   console.log(table.toString());
 }
 
 export function printKeyValue(data: Record<string, unknown>): void {
-  const table = new Table({
-    style: { border: ['grey'] },
-  });
+  const style = getTableStyle();
+  if (style === 'markdown') {
+    const entries = Object.entries(data).filter(([, v]) => v !== null && v !== undefined);
+    const rows = entries.map(([k, v]) => [k, typeof v === 'object' ? JSON.stringify(v) : String(v)]);
+    console.log(renderMarkdownTable(['Key', 'Value'], rows));
+    return;
+  }
+  if (style === 'simple') {
+    for (const [key, value] of Object.entries(data)) {
+      if (value === null || value === undefined) continue;
+      const displayValue = typeof value === 'object' ? JSON.stringify(value) : String(value);
+      console.log(`${key}  ${displayValue}`);
+    }
+    return;
+  }
+
+  const tableOpts: ConstructorParameters<typeof Table>[0] = {
+    style: style === 'ascii' ? { border: [], head: [] } : { border: ['grey'] },
+  };
+  if (style === 'ascii') {
+    tableOpts.chars = ASCII_BORDER_CHARS;
+  }
+  const table = new Table(tableOpts);
 
   for (const [key, value] of Object.entries(data)) {
     if (value === null || value === undefined) continue;
-    const displayValue = typeof value === 'object'
-      ? JSON.stringify(value)
-      : String(value);
-    table.push({ [chalk.cyan(key)]: displayValue });
+    const displayValue = typeof value === 'object' ? JSON.stringify(value) : String(value);
+    const keyLabel = style === 'ascii' ? key : chalk.cyan(key);
+    table.push({ [keyLabel]: displayValue });
   }
 
   console.log(table.toString());
@@ -65,7 +139,7 @@ export type ErrorSubKind =
 
 export interface ErrorPayload {
   code: number;
-  kind: 'usage' | 'api' | 'runtime';
+  kind: 'usage' | 'api' | 'runtime' | 'guard';
   subKind?: ErrorSubKind;
   message: string;
   hint?: string;
@@ -112,6 +186,35 @@ export function buildErrorPayload(error: unknown): ErrorPayload {
   if (error instanceof UsageError) {
     return { code: 2, kind: 'usage', message: error.message, errorClass: 'usage', transient: false };
   }
+  // Idempotency conflict → exit 2 with kind:guard so scripts can react.
+  if (error instanceof Error && error.name === 'IdempotencyConflictError') {
+    return {
+      code: 2,
+      kind: 'guard',
+      message: error.message,
+      errorClass: 'guard',
+      transient: false,
+      context: {
+        existingShape: (error as { existingShape?: string }).existingShape,
+        newShape: (error as { newShape?: string }).newShape,
+      },
+    };
+  }
+  // Local daily-cap refusal → exit 2 (usage-style refusal before touching net).
+  if (error instanceof Error && error.name === 'DailyCapExceededError') {
+    return {
+      code: 2,
+      kind: 'guard',
+      message: error.message,
+      errorClass: 'guard',
+      transient: false,
+      context: {
+        cap: (error as { cap?: number }).cap,
+        total: (error as { total?: number }).total,
+        profile: (error as { profile?: string }).profile,
+      },
+    };
+  }
   const code = error instanceof ApiError ? error.code : 1;
   const kind: ErrorPayload['kind'] = error instanceof ApiError ? 'api' : 'runtime';
   const message = error instanceof Error ? error.message : 'An unknown error occurred';
@@ -155,6 +258,11 @@ export function handleError(error: unknown): never {
   if (payload.kind === 'usage') {
     console.error(payload.message);
     process.exit(2);
+  }
+
+  if (payload.kind === 'guard') {
+    console.error(chalk.yellow(`Guard: ${payload.message}`));
+    process.exit(payload.code === 2 ? 2 : 1);
   }
 
   if (error instanceof ApiError) {

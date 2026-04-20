@@ -18,18 +18,20 @@ is a best-effort mirror of the SwitchBot 10,000/day limit — it does not
 include requests made outside this CLI (mobile app, other scripts).
 
 Subcommands:
-  status   Show today's usage and the last 7 days
+  status   Show today's usage and the last 7 days (alias: show)
   reset    Delete the local counter file
 
 Examples:
   $ switchbot quota status
+  $ switchbot quota show            # alias of 'status'
   $ switchbot quota status --json
   $ switchbot quota reset
 `);
 
   quota
     .command('status')
-    .description("Show today's usage and the last 7 days")
+    .alias('show')
+    .description("Show today's usage and the last 7 days (alias: show)")
     .action(() => {
       const usage = todayUsage();
       const history = loadQuota();

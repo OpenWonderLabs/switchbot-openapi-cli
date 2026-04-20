@@ -5,7 +5,7 @@ import { resolveFormat, resolveFields, renderRows } from '../utils/format.js';
 import { findCatalogEntry, getEffectiveCatalog, DeviceCatalogEntry } from '../devices/catalog.js';
 import { getCachedDevice } from '../devices/cache.js';
 import { loadDeviceMeta } from '../devices/device-meta.js';
-import { resolveDeviceId } from '../utils/name-resolver.js';
+import { resolveDeviceId, NameResolveStrategy } from '../utils/name-resolver.js';
 import {
   fetchDeviceList,
   fetchDeviceStatus,
@@ -216,6 +216,10 @@ Examples:
     .description('Query the real-time status of a specific device')
     .argument('[deviceId]', 'Device ID from "devices list" (or use --name or --ids)')
     .option('--name <query>', 'Resolve device by fuzzy name instead of deviceId', stringArg('--name'))
+    .option('--name-strategy <s>', 'Name match strategy: exact|prefix|substring|fuzzy|first|require-unique (default: fuzzy)', stringArg('--name-strategy'))
+    .option('--name-type <type>', 'Narrow --name by device type (e.g. "Bot", "Color Bulb")', stringArg('--name-type'))
+    .option('--name-category <cat>', 'Narrow --name by category: physical|ir', enumArg('--name-category', ['physical', 'ir'] as const))
+    .option('--name-room <room>', 'Narrow --name by room name (substring match)', stringArg('--name-room'))
     .option('--ids <list>', 'Comma-separated device IDs for batch status (incompatible with --name)', stringArg('--ids'))
     .addHelpText('after', `
 Status fields vary by device type. To discover them without a live call:
@@ -235,7 +239,7 @@ Examples:
   $ switchbot devices status --ids ABC123,DEF456,GHI789
   $ switchbot devices status --ids ABC123,DEF456 --fields power,battery
 `)
-    .action(async (deviceIdArg: string | undefined, options: { name?: string; ids?: string }) => {
+    .action(async (deviceIdArg: string | undefined, options: { name?: string; nameStrategy?: string; nameType?: string; nameCategory?: 'physical' | 'ir'; nameRoom?: string; ids?: string }) => {
       try {
         // Batch mode: --ids id1,id2,id3
         if (options.ids) {
@@ -275,7 +279,12 @@ Examples:
           return;
         }
 
-        const deviceId = resolveDeviceId(deviceIdArg, options.name);
+        const deviceId = resolveDeviceId(deviceIdArg, options.name, {
+          strategy: (options.nameStrategy as NameResolveStrategy | undefined) ?? 'fuzzy',
+          type: options.nameType,
+          category: options.nameCategory,
+          room: options.nameRoom,
+        });
         const body = await fetchDeviceStatus(deviceId);
         const fetchedAt = new Date().toISOString();
         const fmt = resolveFormat();
@@ -309,6 +318,10 @@ Examples:
     .argument('[cmd]', 'Command name, e.g. turnOn, turnOff, setColor, setBrightness, setAll, startClean')
     .argument('[parameter]', 'Command parameter. Omit for commands like turnOn/turnOff (defaults to "default"). Format depends on the command (see below).')
     .option('--name <query>', 'Resolve device by fuzzy name instead of deviceId', stringArg('--name'))
+    .option('--name-strategy <s>', 'Name match strategy: exact|prefix|substring|fuzzy|first|require-unique (default for command: require-unique)', stringArg('--name-strategy'))
+    .option('--name-type <type>', 'Narrow --name by device type (e.g. "Bot", "Color Bulb")', stringArg('--name-type'))
+    .option('--name-category <cat>', 'Narrow --name by category: physical|ir', enumArg('--name-category', ['physical', 'ir'] as const))
+    .option('--name-room <room>', 'Narrow --name by room name (substring match)', stringArg('--name-room'))
     .option('--type <commandType>', 'Command type: "command" for built-in commands (default), "customize" for user-defined IR buttons', enumArg('--type', COMMAND_TYPES), 'command')
     .option('--yes', 'Confirm a destructive command (Smart Lock unlock, Garage open, …). --dry-run is always allowed without --yes.')
     .option('--idempotency-key <key>', 'Idempotency key for deduplication (60s window; same key replays cached result)', stringArg('--idempotency-key'))
@@ -357,7 +370,7 @@ Examples:
   $ switchbot devices command ABC123 "MyButton" --type customize
   $ switchbot devices command <lockId> unlock --yes
 `)
-    .action(async (deviceIdArg: string | undefined, cmdArg: string | undefined, parameter: string | undefined, options: { name?: string; type: string; yes?: boolean; idempotencyKey?: string }) => {
+    .action(async (deviceIdArg: string | undefined, cmdArg: string | undefined, parameter: string | undefined, options: { name?: string; nameStrategy?: string; nameType?: string; nameCategory?: 'physical' | 'ir'; nameRoom?: string; type: string; yes?: boolean; idempotencyKey?: string }) => {
       try {
         // BUG-FIX: When --name is provided, Commander fills positionals left-to-right
         // starting at [deviceId]. Shift them back to their semantic slots.
@@ -384,7 +397,13 @@ Examples:
           effectiveDeviceIdArg = deviceIdArg;
         }
 
-        const deviceId = resolveDeviceId(effectiveDeviceIdArg, options.name);
+        const deviceId = resolveDeviceId(effectiveDeviceIdArg, options.name, {
+          // Mutating command → default require-unique (never silently pick between ambiguous matches).
+          strategy: (options.nameStrategy as NameResolveStrategy | undefined) ?? 'require-unique',
+          type: options.nameType,
+          category: options.nameCategory,
+          room: options.nameRoom,
+        });
         if (!getCachedDevice(deviceId)) {
           console.error(
             `Note: device ${deviceId} is not in the local cache — run 'switchbot devices list' first to enable command validation.`,
@@ -505,10 +524,20 @@ Examples:
         );
 
         const isIr = getCachedDevice(deviceId)?.category === 'ir';
+        const verification = isIr
+          ? {
+              verifiable: false,
+              reason: 'IR transmission is unidirectional; no receipt acknowledgment is possible.',
+              suggestedFollowup: 'Confirm visible change manually or via a paired state sensor.',
+            }
+          : null;
 
         if (isJsonMode()) {
           const result: Record<string, unknown> = { ok: true, command: cmd, deviceId };
-          if (isIr) result.subKind = 'ir-no-feedback';
+          if (isIr) {
+            result.subKind = 'ir-no-feedback';
+            result.verification = verification;
+          }
           if (body && typeof body === 'object' && Object.keys(body as object).length > 0) {
             Object.assign(result, body);
           }
@@ -518,6 +547,7 @@ Examples:
 
         if (isIr) {
           console.log(`→ IR signal sent: ${cmd} (no feedback — fire-and-forget)`);
+          console.error('⚠ IR (unverifiable) — no receipt acknowledgment. Confirm state manually.');
         } else {
           console.log(`✓ Command sent: ${cmd}`);
           if (body && typeof body === 'object' && Object.keys(body as object).length > 0) {
@@ -618,6 +648,10 @@ Examples:
     .description('Describe a device by ID: metadata + supported commands + status fields (1 API call)')
     .argument('[deviceId]', 'Target device ID (or use --name)')
     .option('--name <query>', 'Resolve device by fuzzy name instead of deviceId', stringArg('--name'))
+    .option('--name-strategy <s>', 'Name match strategy: exact|prefix|substring|fuzzy|first|require-unique (default: fuzzy)', stringArg('--name-strategy'))
+    .option('--name-type <type>', 'Narrow --name by device type', stringArg('--name-type'))
+    .option('--name-category <cat>', 'Narrow --name by category: physical|ir', enumArg('--name-category', ['physical', 'ir'] as const))
+    .option('--name-room <room>', 'Narrow --name by room name (substring match)', stringArg('--name-room'))
     .option('--live', 'Also fetch live status values and merge them into capabilities (costs 1 extra API call)')
     .addHelpText('after', `
 Makes a GET /v1.1/devices call to look up the device's type, then prints its
@@ -647,9 +681,14 @@ Examples:
   $ switchbot devices describe ABC123DEF456 --json
   $ switchbot devices describe <lockId> --json | jq '.capabilities.commands[] | select(.destructive)'
 `)
-    .action(async (deviceIdArg: string | undefined, options: { name?: string; live?: boolean }) => {
+    .action(async (deviceIdArg: string | undefined, options: { name?: string; nameStrategy?: string; nameType?: string; nameCategory?: 'physical' | 'ir'; nameRoom?: string; live?: boolean }) => {
       try {
-        const deviceId = resolveDeviceId(deviceIdArg, options.name);
+        const deviceId = resolveDeviceId(deviceIdArg, options.name, {
+          strategy: (options.nameStrategy as NameResolveStrategy | undefined) ?? 'fuzzy',
+          type: options.nameType,
+          category: options.nameCategory,
+          room: options.nameRoom,
+        });
         const result = await describeDevice(deviceId, options);
         const { device, isPhysical, typeName, controlType, catalog, capabilities, source, suggestedActions: picks } = result;
 

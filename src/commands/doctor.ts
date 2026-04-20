@@ -4,14 +4,16 @@ import os from 'node:os';
 import path from 'node:path';
 import { printJson, isJsonMode } from '../utils/output.js';
 import { getEffectiveCatalog } from '../devices/catalog.js';
-import { configFilePath, listProfiles } from '../config.js';
+import { configFilePath, listProfiles, readProfileMeta } from '../config.js';
 import { describeCache } from '../devices/cache.js';
 
 interface Check {
   name: string;
   status: 'ok' | 'warn' | 'fail';
-  detail: string;
+  detail: string | Record<string, unknown>;
 }
+
+export const DOCTOR_SCHEMA_VERSION = 1;
 
 async function checkCredentials(): Promise<Check> {
   const envOk = Boolean(process.env.SWITCHBOT_TOKEN && process.env.SWITCHBOT_SECRET);
@@ -46,22 +48,96 @@ function checkProfiles(): Check {
     return { name: 'profiles', status: 'ok', detail: 'no profile dir (default profile only)' };
   }
   const profiles = listProfiles();
+  if (profiles.length === 0) {
+    return { name: 'profiles', status: 'ok', detail: 'profile dir empty' };
+  }
+  const labelled = profiles.map((p) => {
+    const meta = readProfileMeta(p);
+    if (meta?.label) return `${p} (${meta.label})`;
+    return p;
+  });
   return {
     name: 'profiles',
     status: 'ok',
-    detail: profiles.length ? `found ${profiles.length}: ${profiles.join(', ')}` : 'profile dir empty',
+    detail: `found ${profiles.length}: ${labelled.join(', ')}`,
   };
 }
 
-function checkClockSkew(): Check {
-  const now = Date.now();
-  const drift = now - Math.floor(now / 1000) * 1000;
-  // HMAC signing uses ms timestamps — we can't detect remote skew without a
-  // round-trip, but we can flag if the local clock has NTP issues via the
-  // classic "jumps back" pattern. Best-effort: just report local time.
-  const iso = new Date().toISOString();
-  return { name: 'clock', status: 'ok', detail: `local time ${iso} (drift check needs API round-trip)` };
-  void drift;
+async function checkClockSkew(): Promise<Check> {
+  // Real probe: HEAD the SwitchBot API endpoint and compare the server's Date
+  // header against local time. No auth required for the Date header — the API
+  // returns 401 but still stamps the response. Gracefully degrades to
+  // probeSource:'none' if offline / no network reachable.
+  //
+  // Under vitest, only run the probe if fetch has been stubbed (detected via
+  // vi.fn marker) — otherwise skip network I/O to keep unrelated tests fast.
+  const underVitest = Boolean(process.env.VITEST);
+  const fetchFn = globalThis.fetch as unknown as { mock?: unknown } | undefined;
+  const fetchIsMocked = Boolean(fetchFn && typeof fetchFn === 'function' && 'mock' in fetchFn);
+  if (underVitest && !fetchIsMocked) {
+    return {
+      name: 'clock',
+      status: 'warn',
+      detail: { probeSource: 'none', skewMs: null, message: 'skipped: test environment' },
+    };
+  }
+
+  const localBefore = Date.now();
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 2500);
+  try {
+    const res = await fetch('https://api.switch-bot.com/v1.1/devices', {
+      method: 'HEAD',
+      signal: ctrl.signal,
+    });
+    const localAfter = Date.now();
+    const dateHeader = res.headers.get('date');
+    if (!dateHeader) {
+      return {
+        name: 'clock',
+        status: 'warn',
+        detail: { probeSource: 'api', skewMs: null, message: 'server returned no Date header' },
+      };
+    }
+    const serverMs = Date.parse(dateHeader);
+    if (!Number.isFinite(serverMs)) {
+      return {
+        name: 'clock',
+        status: 'warn',
+        detail: { probeSource: 'api', skewMs: null, message: `unparseable Date header: ${dateHeader}` },
+      };
+    }
+    // Split the round-trip in half to estimate the local instant that matches
+    // the server's Date header. HTTP Date resolution is 1s, so treat anything
+    // under 2000ms as ok, 2000–60000ms as warn, beyond that as fail (HMAC
+    // auth rejects requests with skew > 5 minutes anyway).
+    const midpoint = (localBefore + localAfter) / 2;
+    const skewMs = Math.round(midpoint - serverMs);
+    const absSkew = Math.abs(skewMs);
+    const status: 'ok' | 'warn' | 'fail' = absSkew < 2000 ? 'ok' : absSkew < 60_000 ? 'warn' : 'fail';
+    return {
+      name: 'clock',
+      status,
+      detail: {
+        probeSource: 'api',
+        skewMs,
+        localIso: new Date(midpoint).toISOString(),
+        serverIso: new Date(serverMs).toISOString(),
+      },
+    };
+  } catch (err) {
+    return {
+      name: 'clock',
+      status: 'warn',
+      detail: {
+        probeSource: 'none',
+        skewMs: null,
+        message: `probe failed: ${err instanceof Error ? err.message : String(err)}`,
+      },
+    };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function checkCatalog(): Check {
@@ -164,7 +240,7 @@ Examples:
         checkCatalog(),
         checkCache(),
         checkQuotaFile(),
-        checkClockSkew(),
+        await checkClockSkew(),
         checkMqtt(),
       ];
       const summary = {
@@ -173,13 +249,27 @@ Examples:
         fail: checks.filter((c) => c.status === 'fail').length,
       };
       const overallFail = summary.fail > 0;
+      const overall: 'ok' | 'warn' | 'fail' = overallFail ? 'fail' : summary.warn > 0 ? 'warn' : 'ok';
 
       if (isJsonMode()) {
-        printJson({ overall: overallFail ? 'fail' : summary.warn > 0 ? 'warn' : 'ok', summary, checks });
+        // Stable contract (locked as doctor.schemaVersion=1):
+        //   { ok: boolean, overall: 'ok'|'warn'|'fail', generatedAt, schemaVersion,
+        //     summary: { ok, warn, fail }, checks: [{ name, status, detail }] }
+        // `ok` is an alias of (overall === 'ok') — agents prefer the boolean,
+        // humans prefer the string; both are provided.
+        printJson({
+          ok: overall === 'ok',
+          overall,
+          generatedAt: new Date().toISOString(),
+          schemaVersion: DOCTOR_SCHEMA_VERSION,
+          summary,
+          checks,
+        });
       } else {
         for (const c of checks) {
           const icon = c.status === 'ok' ? '✓' : c.status === 'warn' ? '!' : '✗';
-          console.log(`${icon} ${c.name.padEnd(12)} ${c.detail}`);
+          const detailStr = typeof c.detail === 'string' ? c.detail : JSON.stringify(c.detail);
+          console.log(`${icon} ${c.name.padEnd(12)} ${detailStr}`);
         }
         console.log('');
         console.log(`${summary.ok} ok, ${summary.warn} warn, ${summary.fail} fail`);

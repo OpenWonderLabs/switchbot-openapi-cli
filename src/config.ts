@@ -7,6 +7,16 @@ import { getActiveProfile } from './lib/request-context.js';
 export interface SwitchBotConfig {
   token: string;
   secret: string;
+  label?: string;
+  description?: string;
+  limits?: { dailyCap?: number };
+  defaults?: { flags?: string[] };
+}
+
+function sanitizeOptionalString(v: unknown): string | undefined {
+  if (typeof v !== 'string') return undefined;
+  const trimmed = v.trim();
+  return trimmed ? trimmed : undefined;
 }
 
 /**
@@ -92,14 +102,72 @@ export function tryLoadConfig(): SwitchBotConfig | null {
   }
 }
 
-export function saveConfig(token: string, secret: string): void {
+export function saveConfig(token: string, secret: string, extras?: Partial<SwitchBotConfig>): void {
   const file = configFilePath();
   const dir = path.dirname(file);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  const cfg: SwitchBotConfig = { token, secret };
+
+  // Merge with existing file so label/limits/defaults aren't dropped when the
+  // user just rotates the token.
+  let existing: Partial<SwitchBotConfig> = {};
+  if (fs.existsSync(file)) {
+    try {
+      existing = JSON.parse(fs.readFileSync(file, 'utf-8')) as Partial<SwitchBotConfig>;
+    } catch {
+      existing = {};
+    }
+  }
+
+  const cfg: SwitchBotConfig = {
+    token,
+    secret,
+    ...(existing.label ? { label: existing.label } : {}),
+    ...(existing.description ? { description: existing.description } : {}),
+    ...(existing.limits ? { limits: existing.limits } : {}),
+    ...(existing.defaults ? { defaults: existing.defaults } : {}),
+  };
+  if (extras) {
+    const label = sanitizeOptionalString(extras.label);
+    const description = sanitizeOptionalString(extras.description);
+    if (label !== undefined) cfg.label = label;
+    if (description !== undefined) cfg.description = description;
+    if (extras.limits) cfg.limits = { ...(cfg.limits ?? {}), ...extras.limits };
+    if (extras.defaults) cfg.defaults = { ...(cfg.defaults ?? {}), ...extras.defaults };
+  }
+
   fs.writeFileSync(file, JSON.stringify(cfg, null, 2), { mode: 0o600 });
+}
+
+/**
+ * Read a profile's metadata (label / description / limits / defaults) without
+ * exposing the token/secret. Returns null when the file is missing or invalid.
+ */
+export function readProfileMeta(profile?: string): {
+  label?: string;
+  description?: string;
+  limits?: { dailyCap?: number };
+  defaults?: { flags?: string[] };
+  path: string;
+} | null {
+  const file = profile
+    ? profileFilePath(profile)
+    : path.join(os.homedir(), '.switchbot', 'config.json');
+  if (!fs.existsSync(file)) return null;
+  try {
+    const raw = fs.readFileSync(file, 'utf-8');
+    const cfg = JSON.parse(raw) as SwitchBotConfig;
+    return {
+      label: cfg.label,
+      description: cfg.description,
+      limits: cfg.limits,
+      defaults: cfg.defaults,
+      path: file,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export function showConfig(): void {
@@ -123,8 +191,12 @@ export function showConfig(): void {
     const raw = fs.readFileSync(file, 'utf-8');
     const cfg = JSON.parse(raw) as SwitchBotConfig;
     console.log(`Credential source: ${file}`);
+    if (cfg.label) console.log(`label : ${cfg.label}`);
+    if (cfg.description) console.log(`desc  : ${cfg.description}`);
     console.log(`token : ${maskCredential(cfg.token)}`);
     console.log(`secret: ${maskSecret(cfg.secret)}`);
+    if (cfg.limits?.dailyCap) console.log(`limits: dailyCap=${cfg.limits.dailyCap}`);
+    if (cfg.defaults?.flags?.length) console.log(`defaults: ${cfg.defaults.flags.join(' ')}`);
   } catch {
     console.error('Failed to read config file');
   }
