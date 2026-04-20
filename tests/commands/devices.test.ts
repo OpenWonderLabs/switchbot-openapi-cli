@@ -449,6 +449,39 @@ describe('devices command', () => {
       expect(out.data.deviceList).toHaveLength(3);
       expect(out.data.infraredRemoteList).toHaveLength(0);
     });
+
+    it('--filter name~Kitchen uses substring match (bug #39)', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list', '--filter', 'name~Kitchen', '--json']);
+      const out = JSON.parse(res.stdout.join('\n'));
+      expect(out.data.deviceList).toHaveLength(1);
+      expect(out.data.deviceList[0].deviceId).toBe('BLE-001');
+    });
+
+    it('--filter type=/regex/ uses case-insensitive regex (bug #39)', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list', '--filter', 'type=/^Strip.*/', '--json']);
+      const out = JSON.parse(res.stdout.join('\n'));
+      expect(out.data.deviceList).toHaveLength(1);
+      expect(out.data.deviceList[0].deviceId).toBe('NOHUB-1');
+    });
+
+    it('--filter with invalid regex exits 2 with UsageError (bug #39)', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list', '--filter', 'name=/[unterminated/']);
+      expect(res.exitCode).toBe(2);
+      expect(res.stderr.join('\n')).toMatch(/Invalid regex/i);
+    });
+
+    it('--filter combines AND clauses across ops (bug #39)', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, [
+        'devices', 'list', '--filter', 'category=physical,name~Lamp', '--json',
+      ]);
+      const out = JSON.parse(res.stdout.join('\n'));
+      expect(out.data.deviceList).toHaveLength(1);
+      expect(out.data.deviceList[0].deviceId).toBe('ABC123');
+    });
   });
 
   // =====================================================================

@@ -88,10 +88,12 @@ Examples:
   $ switchbot devices list --filter type="Air Conditioner"
   $ switchbot devices list --filter category=ir
   $ switchbot devices list --filter name=living,category=physical
+  $ switchbot devices list --filter 'name~living'              # explicit substring
+  $ switchbot devices list --filter 'type=/Air.*/'             # regex (case-insensitive)
 `)
     .option('--wide', 'Show all columns (controlType, family, roomID, room, hub, cloud)')
     .option('--show-hidden', 'Include devices hidden via "devices meta set --hide"')
-    .option('--filter <expr>', 'Filter devices: "type=X", "name=X", "category=physical|ir", "room=X" (comma-separated key=value pairs)', stringArg('--filter'))
+    .option('--filter <expr>', 'Filter devices: comma-separated clauses. Each clause is "key=value" (substring; exact for category), "key~value" (explicit substring), or "key=/regex/" (case-insensitive regex). Supported keys: type, name, category, room.', stringArg('--filter'))
     .action(async (options: { wide?: boolean; showHidden?: boolean; filter?: string }) => {
       try {
         const body = await fetchDeviceList();
@@ -101,34 +103,86 @@ Examples:
 
         const hubLocation = buildHubLocationMap(deviceList);
 
-        // Parse --filter into a simple predicate map
-        interface ListFilter { type?: string; name?: string; category?: string; room?: string; }
-        let listFilter: ListFilter | null = null;
+        // Parse --filter into a list of clauses. Each comma-separated pair is
+        // one of three shapes:
+        //   key=value      — current behavior (substring; exact for category)
+        //   key~value      — explicit case-insensitive substring
+        //   key=/pattern/  — case-insensitive regex
+        interface FilterClause {
+          key: 'type' | 'name' | 'category' | 'room';
+          op: 'eq' | 'sub' | 'regex';
+          raw: string;
+          regex?: RegExp;
+        }
+        const SUPPORTED_KEYS = ['type', 'name', 'category', 'room'] as const;
+        let listClauses: FilterClause[] | null = null;
         if (options.filter) {
-          listFilter = {};
+          listClauses = [];
           for (const pair of options.filter.split(',')) {
-            const eq = pair.indexOf('=');
-            if (eq === -1) throw new UsageError(`Invalid --filter pair "${pair.trim()}". Expected key=value.`);
-            const k = pair.slice(0, eq).trim();
-            const v = pair.slice(eq + 1).trim();
-            if (!['type', 'name', 'category', 'room'].includes(k)) {
-              throw new UsageError(`Unknown --filter key "${k}". Supported: type, name, category, room.`);
+            const trimmed = pair.trim();
+            if (!trimmed) continue;
+            const regexMatch = /^([^=~]+)=\/(.*)\/$/.exec(trimmed);
+            const tildeIdx = trimmed.indexOf('~');
+            const eqIdx = trimmed.indexOf('=');
+            let key: string;
+            let op: 'eq' | 'sub' | 'regex';
+            let raw: string;
+            let regex: RegExp | undefined;
+            if (regexMatch) {
+              key = regexMatch[1].trim();
+              op = 'regex';
+              raw = regexMatch[2];
+              try {
+                regex = new RegExp(raw, 'i');
+              } catch (err) {
+                throw new UsageError(
+                  `Invalid regex in --filter "${trimmed}": ${(err as Error).message}`,
+                );
+              }
+            } else if (tildeIdx !== -1 && (eqIdx === -1 || tildeIdx < eqIdx)) {
+              key = trimmed.slice(0, tildeIdx).trim();
+              op = 'sub';
+              raw = trimmed.slice(tildeIdx + 1).trim().toLowerCase();
+            } else if (eqIdx !== -1) {
+              key = trimmed.slice(0, eqIdx).trim();
+              op = 'eq';
+              raw = trimmed.slice(eqIdx + 1).trim().toLowerCase();
+            } else {
+              throw new UsageError(
+                `Invalid --filter pair "${trimmed}". Expected key=value, key~value, or key=/regex/.`,
+              );
             }
-            (listFilter as Record<string, string>)[k] = v.toLowerCase();
+            if (!(SUPPORTED_KEYS as readonly string[]).includes(key)) {
+              throw new UsageError(
+                `Unknown --filter key "${key}". Supported: ${SUPPORTED_KEYS.join(', ')}.`,
+              );
+            }
+            listClauses.push({ key: key as FilterClause['key'], op, raw, regex });
           }
         }
 
         const matchesFilter = (entry: { type: string; name: string; category: 'physical' | 'ir'; room: string }) => {
-          if (!listFilter) return true;
-          if (listFilter.type && !entry.type.toLowerCase().includes(listFilter.type)) return false;
-          if (listFilter.name && !entry.name.toLowerCase().includes(listFilter.name)) return false;
-          if (listFilter.category && entry.category !== listFilter.category) return false;
-          if (listFilter.room && !entry.room.toLowerCase().includes(listFilter.room)) return false;
+          if (!listClauses || listClauses.length === 0) return true;
+          for (const c of listClauses) {
+            const fieldVal = (entry as Record<string, string>)[c.key] ?? '';
+            const lower = fieldVal.toLowerCase();
+            let ok: boolean;
+            if (c.op === 'regex') {
+              ok = c.regex!.test(fieldVal);
+            } else if (c.op === 'sub') {
+              ok = lower.includes(c.raw);
+            } else if (c.key === 'category') {
+              ok = lower === c.raw;
+            } else {
+              ok = lower.includes(c.raw);
+            }
+            if (!ok) return false;
+          }
           return true;
         };
 
         if (fmt === 'json' && process.argv.includes('--json')) {
-          if (listFilter) {
+          if (listClauses) {
             const filteredDeviceList = deviceList.filter((d) =>
               matchesFilter({ type: d.deviceType || '', name: d.deviceName, category: 'physical', room: d.roomName || '' })
             );
@@ -187,7 +241,7 @@ Examples:
         }
 
         if (rows.length === 0 && fmt === 'table') {
-          console.log(listFilter ? 'No devices matched the filter.' : 'No devices found');
+          console.log(listClauses ? 'No devices matched the filter.' : 'No devices found');
           return;
         }
 
@@ -200,7 +254,7 @@ Examples:
         };
         renderRows(wideHeaders, rows, fmt, userFields ?? defaultFields, DEVICE_LIST_ALIASES);
         if (fmt === 'table') {
-          const totalLabel = listFilter
+          const totalLabel = listClauses
             ? `${rows.length} match(es) (${deviceList.length} physical + ${infraredRemoteList.length} IR before filter)`
             : `${deviceList.length} physical device(s), ${infraredRemoteList.length} IR remote device(s)`;
           console.log(`\nTotal: ${totalLabel}`);
