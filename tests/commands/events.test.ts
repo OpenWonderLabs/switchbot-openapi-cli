@@ -6,6 +6,7 @@ import path from 'node:path';
 import { once } from 'node:events';
 import { AddressInfo } from 'node:net';
 import { startReceiver, registerEventsCommand } from '../../src/commands/events.js';
+import type { FilterClause } from '../../src/utils/filter.js';
 import { deviceHistoryStore } from '../../src/mcp/device-history.js';
 import { runCli } from '../helpers/cli.js';
 
@@ -178,10 +179,11 @@ describe('events tail receiver', () => {
   it('marks events as unmatched when deviceId filter does not match', async () => {
     const port = await pickPort();
     const received: Array<{ matched: boolean }> = [];
+    const filter: FilterClause[] = [{ key: 'deviceId', op: 'eq', raw: 'BOT1' }];
     const server = startReceiver(
       port,
       '/',
-      { deviceId: 'BOT1' },
+      filter,
       (ev) => received.push(ev as { matched: boolean }),
     );
     await postJson(port, '/', { context: { deviceMac: 'BOT2', deviceType: 'Bot' } });
@@ -195,10 +197,11 @@ describe('events tail receiver', () => {
   it('type filter matches on context.deviceType', async () => {
     const port = await pickPort();
     const received: Array<{ matched: boolean }> = [];
+    const filter: FilterClause[] = [{ key: 'type', op: 'eq', raw: 'WoMeter' }];
     const server = startReceiver(
       port,
       '/',
-      { type: 'WoMeter' },
+      filter,
       (ev) => received.push(ev as { matched: boolean }),
     );
     await postJson(port, '/', { context: { deviceMac: 'X1', deviceType: 'Bot' } });

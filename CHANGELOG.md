@@ -18,6 +18,30 @@ arrived shortly after and is folded into the same patch so consumers of
 (`#SYS-1`, `#SYS-3`) are contract bugs that break agent pipelines and could
 not wait.
 
+This version also contains one **breaking change** — the `--filter` grammar
+is now unified across `devices list`, `devices batch`, and
+`events tail` / `mqtt-tail`. `devices batch` and `events tail` keys that
+used to require exact matches are now substrings. See
+**Changed (BREAKING)** below for the migration.
+
+### Changed (BREAKING)
+
+- **`--filter` grammar unified across three surfaces** — `devices list`,
+  `devices batch`, and `events tail` / `mqtt-tail` now share one DSL:
+  `key=value` (case-insensitive substring; exact only for `category`),
+  `key~value` (explicit case-insensitive substring), and
+  `key=/pattern/` (case-insensitive regex; invalid regex returns a usage
+  error). Each command still exposes its own key set — see README
+  §"Filter expressions — per-command reference". (bug #39)
+  - **Breaking**: `devices batch --filter 'type=Bot'` previously required
+    an exact match and now treats `Bot` as a substring (matches `Bot Plus`
+    too). Pair `=` with a more specific value, or filter post-hoc, if
+    exact match was load-bearing.
+  - **Breaking**: `devices batch --filter 'type~=...'` (the `~=` spelling)
+    is removed. Use `~` instead: `type~Light`.
+  - **Breaking**: `events tail --filter 'deviceId=ABC'` is now a substring
+    match (previously exact).
+
 ### Fixed (correctness & safety)
 
 - **`devices command --dry-run --json` no longer emits empty stdout** —
@@ -121,10 +145,6 @@ not wait.
 - **`devices batch --idempotency-key`** accepted as alias for
   `--idempotency-key-prefix`. Still uses prefix semantics internally
   (auto-appends `-<deviceId>` per step). (bug #30)
-- **`--filter` DSL accepts three operators** — `key=value` (legacy
-  exact/substring), `key~value` (case-insensitive substring), and
-  `key=/pattern/` (case-insensitive regex; invalid regex returns a
-  usage error). (bug #39)
 
 ### Added (Round 2/3 features)
 

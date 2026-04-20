@@ -221,7 +221,7 @@ switchbot devices list --filter category=physical
 switchbot devices list --filter type=Bot
 switchbot devices list --filter name=living,category=physical
 
-# Filter operators: = (legacy exact/substring), ~ (case-insensitive substring),
+# Filter operators: = (substring; exact for `category`), ~ (substring),
 # =/regex/ (case-insensitive regex). Clauses are AND-ed.
 switchbot devices list --filter 'name~living'
 switchbot devices list --filter 'type=/Hub.*/'
@@ -260,6 +260,21 @@ switchbot devices commands Bot
 switchbot devices commands "Smart Lock"
 switchbot devices commands curtain      # Case-insensitive, substring match
 ```
+
+#### Filter expressions — per-command reference
+
+Three commands accept `--filter`. They share one three-operator grammar,
+but each exposes its own key set:
+
+| Command                             | Operators                                                                                     | Supported keys                        |
+|-------------------------------------|-----------------------------------------------------------------------------------------------|---------------------------------------|
+| `devices list`                      | `=` (substring; **exact** for `category`), `~` (substring), `=/regex/` (case-insensitive regex) | `type`, `name`, `category`, `room`    |
+| `devices batch`                     | same                                                                                          | `type`, `family`, `room`, `category`  |
+| `events tail` / `events mqtt-tail`  | same (tail only; mqtt-tail uses `--topic` instead)                                            | `deviceId`, `type`                    |
+
+Clauses are comma-separated and AND-ed. No OR across clauses — use regex
+alternation (`=/A|B/`) for that. `category` is the one key that stays exact
+under `=` to preserve `category=physical` / `category=ir` semantics.
 
 #### Parameter formats
 
@@ -341,7 +356,7 @@ Stores local annotations (alias, hidden flag, notes) in `~/.switchbot/device-met
 ```bash
 # Send the same command to every device matching a filter
 switchbot devices batch turnOff --filter 'type=Bot'
-switchbot devices batch setBrightness 50 --filter 'type~=Light,family=Living'
+switchbot devices batch setBrightness 50 --filter 'type~Light,family=Living'
 
 # Explicit device IDs (comma-separated)
 switchbot devices batch turnOn --ids ID1,ID2,ID3
@@ -359,7 +374,7 @@ switchbot devices batch turnOn --ids ID1,ID2 --skip-offline
 switchbot devices batch turnOn --ids ID1,ID2 --idempotency-key morning-lights
 ```
 
-Sends the same command to many devices in one run. Uses the same `--filter` expressions as `devices list`. Destructive commands (Smart Lock unlock, Garage Door Opener, etc.) require `--yes` to prevent accidents.
+Sends the same command to many devices in one run. Filter grammar matches `devices list` (`=` substring, `~` substring, `=/regex/` regex — clauses AND-ed); supported keys here are `type`, `family`, `room`, `category`. Destructive commands (Smart Lock unlock, Garage Door Opener, etc.) require `--yes` to prevent accidents.
 
 `--skip-offline` reads from the local status cache only (no new API calls);
 skipped devices appear under `summary.skipped` with `skippedReason:'offline'`.
@@ -421,7 +436,7 @@ Output (one JSON line per matched event):
 { "t": "2024-01-01T12:00:00.000Z", "remote": "1.2.3.4:54321", "path": "/", "body": {...}, "matched": true }
 ```
 
-Filter keys: `deviceId=<id>`, `type=<deviceType>` (comma-separated for AND logic).
+Filter keys: `deviceId`, `type`. Operators: `=` (substring), `~` (substring), `=/regex/` (case-insensitive regex). Clauses comma-separated and AND-ed.
 
 #### `events mqtt-tail` — real-time MQTT stream
 

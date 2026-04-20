@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { printJson, isJsonMode, handleError, UsageError } from '../utils/output.js';
 import { intArg, stringArg, durationArg } from '../utils/arg-parsers.js';
 import { parseDurationToMs } from '../utils/flags.js';
+import { parseFilterExpr, matchClause, FilterSyntaxError, type FilterClause } from '../utils/filter.js';
 import { SwitchBotMqttClient } from '../mqtt/client.js';
 import { fetchMqttCredential } from '../mqtt/credential.js';
 import { tryLoadConfig } from '../config.js';
@@ -41,54 +42,47 @@ interface EventRecord {
 
 function matchFilter(
   body: unknown,
-  filter: { deviceId?: string; type?: string } | null,
+  clauses: FilterClause[] | null,
 ): boolean {
-  if (!filter) return true;
+  if (!clauses || clauses.length === 0) return true;
   if (!body || typeof body !== 'object') return false;
   const b = body as Record<string, unknown>;
   const ctx = (b.context ?? b) as Record<string, unknown>;
-  if (filter.deviceId && ctx.deviceMac !== filter.deviceId && ctx.deviceId !== filter.deviceId) {
-    return false;
-  }
-  if (filter.type && ctx.deviceType !== filter.type) {
-    return false;
+  for (const c of clauses) {
+    let candidate: string;
+    if (c.key === 'deviceId') {
+      const mac = ctx.deviceMac;
+      const id = ctx.deviceId;
+      candidate = String(
+        typeof mac === 'string' && mac ? mac : typeof id === 'string' ? id : '',
+      );
+    } else {
+      const t = ctx.deviceType;
+      candidate = typeof t === 'string' ? t : '';
+    }
+    if (!matchClause(candidate, c)) return false;
   }
   return true;
 }
 
-function parseFilter(flag: string | undefined): { deviceId?: string; type?: string } | null {
+const EVENT_FILTER_KEYS = ['deviceId', 'type'] as const;
+
+function parseFilter(flag: string | undefined): FilterClause[] | null {
   if (!flag) return null;
-  const allowed = new Set(['deviceId', 'type']);
-  const out: { deviceId?: string; type?: string } = {};
-  for (const pair of flag.split(',')) {
-    const eq = pair.indexOf('=');
-    if (eq === -1 || eq === 0) {
-      throw new UsageError(
-        `Invalid --filter pair "${pair.trim()}". Expected "key=value". Supported keys: deviceId, type.`
-      );
+  try {
+    return parseFilterExpr(flag, EVENT_FILTER_KEYS);
+  } catch (e) {
+    if (e instanceof FilterSyntaxError) {
+      throw new UsageError(e.message);
     }
-    const k = pair.slice(0, eq).trim();
-    const v = pair.slice(eq + 1).trim();
-    if (!v) {
-      throw new UsageError(
-        `Empty value for --filter key "${k}". Expected "key=value". Supported keys: deviceId, type.`
-      );
-    }
-    if (!allowed.has(k)) {
-      throw new UsageError(
-        `Unknown --filter key "${k}". Supported keys: deviceId, type.`
-      );
-    }
-    if (k === 'deviceId') out.deviceId = v;
-    else if (k === 'type') out.type = v;
+    throw e;
   }
-  return out;
 }
 
 export function startReceiver(
   port: number,
   pathMatch: string,
-  filter: { deviceId?: string; type?: string } | null,
+  filter: FilterClause[] | null,
   onEvent: (ev: EventRecord) => void,
 ): http.Server {
   const server = http.createServer((req, res) => {
@@ -155,7 +149,7 @@ export function registerEventsCommand(program: Command): void {
     .description('Run a local HTTP receiver and print incoming webhook events as JSONL')
     .option('--port <n>', `Local port to listen on (default ${DEFAULT_PORT})`, intArg('--port', { min: 1, max: 65535 }), String(DEFAULT_PORT))
     .option('--path <p>', `HTTP path to match (default "${DEFAULT_PATH}"; use "*" for all paths)`, stringArg('--path'), DEFAULT_PATH)
-    .option('--filter <expr>', 'Filter events, e.g. "deviceId=ABC123" or "type=Bot" (comma-separated)', stringArg('--filter'))
+    .option('--filter <expr>', 'Filter events by deviceId / type. Grammar: "key=value" (substring), "key~value" (substring), "key=/regex/" (regex). Comma-separated clauses are AND-ed.', stringArg('--filter'))
     .option('--max <n>', 'Stop after N matching events (default: run until Ctrl-C)', intArg('--max', { min: 1 }))
     .option('--for <dur>', 'Stop after elapsed time (e.g. "5m", "30s"). Combines with --max: first limit wins.', durationArg('--for'))
     .addHelpText(
@@ -172,14 +166,20 @@ Output (JSONL, one event per line):
   { "t": "<ISO>", "remote": "<ip:port>", "path": "/",
     "body": <parsed JSON or raw string>, "matched": true }
 
-Filter grammar: comma-separated "key=value" pairs. Supported keys:
-  deviceId=<id>    match by context.deviceMac / context.deviceId
-  type=<type>      match by context.deviceType (e.g. "Bot", "WoMeter")
+Filter grammar: comma-separated clauses (AND-ed). Each clause is one of
+  key=value     — case-insensitive substring
+  key~value     — explicit case-insensitive substring
+  key=/regex/   — case-insensitive regex
+
+Supported keys:
+  deviceId    match by context.deviceMac / context.deviceId
+  type        match by context.deviceType (e.g. "Bot", "WoMeter")
 
 Examples:
   $ switchbot events tail --port 3000
   $ switchbot events tail --port 3000 --filter deviceId=ABC123
-  $ switchbot events tail --filter 'type=WoMeter' --max 5 --json
+  $ switchbot events tail --filter 'type~Meter' --max 5 --json
+  $ switchbot events tail --filter 'type=/Bot|Meter/'
 `,
     )
     .action(async (options: { port: string; path: string; filter?: string; max?: string; for?: string }) => {
