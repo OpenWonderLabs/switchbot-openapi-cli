@@ -5,6 +5,110 @@ All notable changes to `@switchbot/openapi-cli` are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.1] - 2026-04-20
+
+Round-2 smoke-test response: 13 bugs closed (7 🔴 correctness / safety, 6 🟡
+UX). Source: `switchbot-cli-v2.5.0-round2-report.md`. Two items the report
+flagged as bugs were found to be working as designed (false positives); two
+were feature requests and deferred to 2.6.0 — see *Not included* below.
+
+### Fixed (correctness & safety)
+
+- **`devices command --dry-run --json` no longer emits empty stdout** —
+  the single-device write path was hitting `handleError`'s silent
+  `DryRunSignal` exit before the JSON serializer ran. Now mirrors the MCP
+  `send_command {dryRun:true}` shape:
+  `{schemaVersion:"1.1", data:{dryRun:true, wouldSend:{deviceId,command,parameter,commandType}}}`.
+  Batch and plan dry-run paths were already correct. (bug #36)
+- **MCP tool-call errors preserve structure** — `send_command` /
+  `describe_device` / `run_scene` were letting `ApiError`s escape to the
+  SDK's generic `createToolError`, collapsing `{code, subKind, transient,
+  hint, retryAfterMs, errorClass}` to a plain-text string. Errors now
+  return `structuredContent.error` alongside `isError:true` so agents can
+  branch on `subKind` instead of parsing English. Also narrowed the
+  `mcpError()` option types so `subKind` / `errorClass` are compile-time
+  checked. (bug #38)
+- **`devices batch` propagates `verification` + `subKind` for IR devices** —
+  a batch over IR remotes was emitting zero unverifiability signal, the
+  exact contract 2.4.0 was released to establish. `succeeded[]` entries
+  now include `subKind:'ir-no-feedback'` and the verification object for
+  IR devices, plus `summary.unverifiableCount`. (bug #28)
+- **Device & status cache scoped per profile** — `devices.json` and
+  `status.json` lived at a fixed disk path, so rotating credentials or
+  switching profiles served the *prior* session's inventory. Cache files
+  now live under `~/.switchbot/cache/<sha256(profile):8>/` when a profile
+  is active; unnamed/default profile keeps the legacy `~/.switchbot/`
+  path (backwards compatible). A follow-up fix also keys the in-memory
+  hot cache (`_listCache` / `_statusCache`) by profile so `mcp serve`
+  request-scoped profile switches do not leak either. (bug #37)
+- **API code 190 reclassified `device-internal-error`** — 190 fires for
+  invalid deviceIds, unsupported parameters, AND non-device endpoints
+  like `webhook query` with no webhook configured. The `device-busy`
+  subKind and device-specific hint were misleading for webhook. Renamed
+  subKind + rewrote hint to cover all three causes. (bug #27)
+- **API code 3005 mapped to `command-not-supported`** — 3005 "invalid
+  value" is the API's catch-all for model-specific command rejections
+  (e.g., Fan `lowSpeed/middleSpeed/highSpeed` on stock IR remotes that
+  only work under `--type customize`). Now returns a useful subKind + hint
+  pointing to `devices commands <type>` and `--type customize`. (bug #29)
+- **`scenes execute` pre-validates sceneId** — `scenes execute <bogus>`
+  returned `ok:true` because the API does not validate sceneIds.
+  `scenes describe` already guarded against this via `scene_not_found` —
+  port the same check so agents do not silently burn quota. (bug #31)
+- **`devices meta set --alias` enforces uniqueness** — nothing stopped
+  two devices from carrying the same alias; `--name <dup-alias>` behavior
+  was undefined. Reject duplicate aliases with a clear error naming the
+  existing holder; `--force` reassigns (clears the old holder's alias)
+  with a log line. (bug #41)
+
+### Fixed (UX & docs)
+
+- **`--fields id` / `--fields name` aliases restored on `devices list`** —
+  the 2.5.0 alias-map refactor dropped the short forms that 2.4.0
+  accepted, breaking scripts. `id → deviceId` is back alongside
+  `name → deviceName`. (bug #22)
+- **`cache clear --status` and `--list` shorthand aliases** — the old
+  `--key status` form still works, but the shorter flags no longer
+  error with `unknown option`. Using them with `--key` or together
+  raises `UsageError`. (bug #35)
+- **`history aggregate --metric` marked `requiredOption`** — help text
+  said `(default: [])` implying optional; the command actually required
+  at least one metric and threw a custom error. Now Commander enforces
+  it and `--help` says `required`. (bug #42)
+- **`plan validate` help text clarifies scope** — now says "structural
+  only; does not verify device or scene existence" and points to
+  `plan run --dry-run` for semantic checks. (bug #32)
+- **`cache` help text documents TTL behavior** — the cache TTL is computed
+  from the `lastUpdated` field *inside* the JSON, not file mtime.
+  Operators who `touch`ed cache files to force a refresh were surprised.
+  One-line note added to `cache show --help`. (bug #34)
+- **`devices meta` surfaced in agent-bootstrap and capabilities** — the
+  local metadata system was completely undiscoverable in 2.5.0. `meta set
+  / get / list / clear` now appear in `capabilities` with correct safety
+  tiers, and `agent-bootstrap`'s `quickReference` gains a `meta` entry.
+  (bug #40)
+- **`~/.switchbot/device-history/<id>.json` companion file documented** —
+  the 100-entry ring buffer read by MCP `get_device_history` had no docs,
+  while only the append-only `.jsonl` was mentioned. `docs/agent-guide.md`
+  now describes both files and `__control.jsonl`. (bug #43)
+
+### Not included (response to report)
+
+- **Report bug #19 (MCP strict schema not enforced) — false positive.**
+  All 11 MCP tools already have `.strict()` on their Zod input schemas
+  and the SDK enforces it via `safeParseAsync` → JSON-RPC `-32602`.
+  Could not reproduce the reported behavior; the existing test suite
+  exercises the full JSON-RPC path.
+- **Report bug #30 (`devices batch --idempotency-key`) — working as
+  designed.** Batch intentionally uses `--idempotency-key-prefix` and
+  auto-appends `-<deviceId>` per step so each step has a distinct key.
+  A single `--idempotency-key` across a batch would cause only the first
+  step to execute and the rest to be replayed.
+- **Deferred to 2.6.0:** `devices batch --skip-offline` (bug #33 — a
+  preflight status refresh + short-circuit; feature request, not a
+  correctness bug) and `--filter` DSL expansion with substring/regex
+  (bug #39 — current `key=value` exact match is documented behavior).
+
 ## [2.5.0] - 2026-04-20
 
 ### Added
