@@ -112,7 +112,7 @@ export interface CacheMode {
 const DEFAULT_LIST_TTL_MS = 60 * 60 * 1000;
 
 function parseDurationToMs(v: string): number | null {
-  const m = /^(\d+)(ms|s|m|h)?$/.exec(v.trim().toLowerCase());
+  const m = /^(\d+)(ms|s|m|h|d|w)?$/.exec(v.trim().toLowerCase());
   if (!m) return null;
   const n = Number(m[1]);
   if (!Number.isFinite(n) || n < 0) return null;
@@ -122,6 +122,8 @@ function parseDurationToMs(v: string): number | null {
     case 's': return n * 1000;
     case 'm': return n * 60 * 1000;
     case 'h': return n * 60 * 60 * 1000;
+    case 'd': return n * 24 * 60 * 60 * 1000;
+    case 'w': return n * 7 * 24 * 60 * 60 * 1000;
     default: return null;
   }
 }

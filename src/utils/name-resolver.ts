@@ -29,9 +29,9 @@ export type NameResolveResult =
   | { ok: false; ambiguous: true; candidates: NameMatch[] }
   | { ok: false; ambiguous: false };
 
-const ALL_STRATEGIES: NameResolveStrategy[] = [
+export const ALL_STRATEGIES: readonly NameResolveStrategy[] = [
   'exact', 'prefix', 'substring', 'fuzzy', 'first', 'require-unique',
-];
+] as const;
 
 export function isValidStrategy(s: string): s is NameResolveStrategy {
   return (ALL_STRATEGIES as string[]).includes(s);

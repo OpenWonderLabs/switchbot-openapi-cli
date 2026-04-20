@@ -5,6 +5,203 @@ All notable changes to `@switchbot/openapi-cli` are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.1] - 2026-04-20
+
+Round-2 + Round-3 smoke-test response: 24 bugs closed across three groups —
+Round-2 correctness (13), Round-2 leftovers (3), and Round-3 contract & DX
+(8). Sources: `switchbot-cli-v2.5.0-round2-report.md` and
+`switchbot-cli-v2.5.0-round3-report.md`.
+
+The release was cut initially against the Round-2 report; the Round-3 report
+arrived shortly after and is folded into the same patch so consumers of
+2.5.1 get the full fix set in one version bump. The two Round-3 🔴 items
+(`#SYS-1`, `#SYS-3`) are contract bugs that break agent pipelines and could
+not wait.
+
+This version also contains one **breaking change** — the `--filter` grammar
+is now unified across `devices list`, `devices batch`, and
+`events tail` / `mqtt-tail`. `devices batch` and `events tail` keys that
+used to require exact matches are now substrings. See
+**Changed (BREAKING)** below for the migration.
+
+### Changed (BREAKING)
+
+- **`--filter` grammar unified across three surfaces** — `devices list`,
+  `devices batch`, and `events tail` / `mqtt-tail` now share one DSL:
+  `key=value` (case-insensitive substring; exact only for `category`),
+  `key~value` (explicit case-insensitive substring), and
+  `key=/pattern/` (case-insensitive regex; invalid regex returns a usage
+  error). Each command still exposes its own key set — see README
+  §"Filter expressions — per-command reference". (bug #39)
+  - **Breaking**: `devices batch --filter 'type=Bot'` previously required
+    an exact match and now treats `Bot` as a substring (matches `Bot Plus`
+    too). Pair `=` with a more specific value, or filter post-hoc, if
+    exact match was load-bearing.
+  - **Breaking**: `devices batch --filter 'type~=...'` (the `~=` spelling)
+    is removed. Use `~` instead: `type~Light`.
+  - **Breaking**: `events tail --filter 'deviceId=ABC'` is now a substring
+    match (previously exact).
+
+### Fixed (correctness & safety)
+
+- **`devices command --dry-run --json` no longer emits empty stdout** —
+  the single-device write path was hitting `handleError`'s silent
+  `DryRunSignal` exit before the JSON serializer ran. Now mirrors the MCP
+  `send_command {dryRun:true}` shape:
+  `{schemaVersion:"1.1", data:{dryRun:true, wouldSend:{deviceId,command,parameter,commandType}}}`.
+  Batch and plan dry-run paths were already correct. (bug #36)
+- **MCP tool-call errors preserve structure** — `send_command` /
+  `describe_device` / `run_scene` were letting `ApiError`s escape to the
+  SDK's generic `createToolError`, collapsing `{code, subKind, transient,
+  hint, retryAfterMs, errorClass}` to a plain-text string. Errors now
+  return `structuredContent.error` alongside `isError:true` so agents can
+  branch on `subKind` instead of parsing English. Also narrowed the
+  `mcpError()` option types so `subKind` / `errorClass` are compile-time
+  checked. (bug #38)
+- **`devices batch` propagates `verification` + `subKind` for IR devices** —
+  a batch over IR remotes was emitting zero unverifiability signal, the
+  exact contract 2.4.0 was released to establish. `succeeded[]` entries
+  now include `subKind:'ir-no-feedback'` and the verification object for
+  IR devices, plus `summary.unverifiableCount`. (bug #28)
+- **Device & status cache scoped per profile** — `devices.json` and
+  `status.json` lived at a fixed disk path, so rotating credentials or
+  switching profiles served the *prior* session's inventory. Cache files
+  now live under `~/.switchbot/cache/<sha256(profile):8>/` when a profile
+  is active; unnamed/default profile keeps the legacy `~/.switchbot/`
+  path (backwards compatible). A follow-up fix also keys the in-memory
+  hot cache (`_listCache` / `_statusCache`) by profile so `mcp serve`
+  request-scoped profile switches do not leak either. (bug #37)
+- **API code 190 reclassified `device-internal-error`** — 190 fires for
+  invalid deviceIds, unsupported parameters, AND non-device endpoints
+  like `webhook query` with no webhook configured. The `device-busy`
+  subKind and device-specific hint were misleading for webhook. Renamed
+  subKind + rewrote hint to cover all three causes. (bug #27)
+- **API code 3005 mapped to `command-not-supported`** — 3005 "invalid
+  value" is the API's catch-all for model-specific command rejections
+  (e.g., Fan `lowSpeed/middleSpeed/highSpeed` on stock IR remotes that
+  only work under `--type customize`). Now returns a useful subKind + hint
+  pointing to `devices commands <type>` and `--type customize`. (bug #29)
+- **`scenes execute` pre-validates sceneId** — `scenes execute <bogus>`
+  returned `ok:true` because the API does not validate sceneIds.
+  `scenes describe` already guarded against this via `scene_not_found` —
+  port the same check so agents do not silently burn quota. (bug #31)
+- **`devices meta set --alias` enforces uniqueness** — nothing stopped
+  two devices from carrying the same alias; `--name <dup-alias>` behavior
+  was undefined. Reject duplicate aliases with a clear error naming the
+  existing holder; `--force` reassigns (clears the old holder's alias)
+  with a log line. (bug #41)
+
+### Fixed (UX & docs)
+
+- **`--fields id` / `--fields name` aliases restored on `devices list`** —
+  the 2.5.0 alias-map refactor dropped the short forms that 2.4.0
+  accepted, breaking scripts. `id → deviceId` is back alongside
+  `name → deviceName`. (bug #22)
+- **`cache clear --status` and `--list` shorthand aliases** — the old
+  `--key status` form still works, but the shorter flags no longer
+  error with `unknown option`. Using them with `--key` or together
+  raises `UsageError`. (bug #35)
+- **`history aggregate --metric` marked `requiredOption`** — help text
+  said `(default: [])` implying optional; the command actually required
+  at least one metric and threw a custom error. Now Commander enforces
+  it and `--help` says `required`. (bug #42)
+- **`plan validate` help text clarifies scope** — now says "structural
+  only; does not verify device or scene existence" and points to
+  `plan run --dry-run` for semantic checks. (bug #32)
+- **`cache` help text documents TTL behavior** — the cache TTL is computed
+  from the `lastUpdated` field *inside* the JSON, not file mtime.
+  Operators who `touch`ed cache files to force a refresh were surprised.
+  One-line note added to `cache show --help`. (bug #34)
+- **`devices meta` surfaced in agent-bootstrap and capabilities** — the
+  local metadata system was completely undiscoverable in 2.5.0. `meta set
+  / get / list / clear` now appear in `capabilities` with correct safety
+  tiers, and `agent-bootstrap`'s `quickReference` gains a `meta` entry.
+  (bug #40)
+- **`~/.switchbot/device-history/<id>.json` companion file documented** —
+  the 100-entry ring buffer read by MCP `get_device_history` had no docs,
+  while only the append-only `.jsonl` was mentioned. `docs/agent-guide.md`
+  now describes both files and `__control.jsonl`. (bug #43)
+
+### Fixed (Round 3 contract bugs — 🔴)
+
+- **`--json` errors now emit on stdout instead of stderr** — piped
+  consumers (`cli --json ... | jq`) could not decode failure envelopes
+  because `handleError` wrote them to stderr. The JSON envelope
+  `{schemaVersion, error:{...}}` now lands on stdout for both success
+  and failure; TTY users still get a colored human-readable summary on
+  stderr, non-TTY invocations get silence on stderr. 15+ bespoke JSON
+  error sites across `batch`, `config`, `devices`, `expand`, `history`,
+  `mcp`, and `format` were consolidated through a new `emitJsonError`
+  helper. (bug #SYS-1)
+- **MCP `send_command { dryRun:true }` validates deviceId against the
+  local cache** — dryRun previously accepted any string and echoed back
+  a plausible-looking preview, defeating the whole point of a
+  validation surface. Unknown IDs now return `subKind:'device-not-found'`
+  with a hint to run `list_devices` first. Happy path unchanged for
+  cached IDs. (bug #SYS-3)
+
+### Fixed (Round 2 leftovers)
+
+- **`devices batch --idempotency-key`** accepted as alias for
+  `--idempotency-key-prefix`. Still uses prefix semantics internally
+  (auto-appends `-<deviceId>` per step). (bug #30)
+
+### Added (Round 2/3 features)
+
+- **`devices batch --skip-offline`** (default off) skips devices whose
+  cached status is offline, with each skip recorded under
+  `summary.skipped` with `skippedReason:'offline'`. Reads the local
+  status cache only — no new API calls. Off by default preserves 2.5.0
+  behavior. (bug #33)
+- **`--for <duration>` alias** on `devices watch`, `events tail`, and
+  `events mqtt-tail` — stops after elapsed time instead of tick/event
+  count. Accepts the same duration grammar as `--since` (ms/s/m/h/d/w).
+  When both `--for` and `--max` are set, the first limit to hit wins.
+  (bug #52)
+- **Duration parser accepts `d` (days) and `w` (weeks)** in addition
+  to `ms/s/m/h`. Unsupported units like `1y` / `1month` now produce a
+  usage error that lists the supported unit set. (bug #54)
+- **`events mqtt-tail --json` emits a `__session_start` envelope**
+  immediately on invocation (before the broker connect), so downstream
+  tools can distinguish "connecting" from "never connected" and get an
+  eventId to correlate with subsequent `__connect` / `__disconnect`
+  events. (bug #56)
+
+### Polish (Round 3 DX)
+
+- **`--name-strategy` help + `agent-bootstrap` list all six
+  strategies** — `exact`, `prefix`, `substring`, `fuzzy`, `first`,
+  `require-unique`. `ALL_STRATEGIES` in `name-resolver.ts` is the
+  single source of truth; help text is generated from it. (bug #51)
+- **MCP `search_catalog` rejects empty queries** with a usage error
+  pointing to `list_catalog_types` for enumeration. Silent
+  "return everything" behavior was surprising and agent-hostile.
+  (bug #57)
+- **Negative positional parameters reach the validation layer** —
+  `setBrightness -1` was being swallowed by Commander as "unknown
+  option `-1`". `devices command` now uses `.passThroughOptions()` so
+  negative numeric positionals are forwarded to the command-specific
+  validator, where they can be accepted or range-rejected as
+  appropriate. (bug #53)
+
+### Not included (response to reports)
+
+- **Report bug #19 (MCP strict schema not enforced) — false positive.**
+  All 11 MCP tools already have `.strict()` on their Zod input schemas
+  and the SDK enforces it via `safeParseAsync` → JSON-RPC `-32602`.
+  Could not reproduce the reported behavior; the existing test suite
+  exercises the full JSON-RPC path.
+- **Deferred to 2.6.0:**
+  - Report bug #58 (parallel `devices status` outlier) — needs
+    profiling to separate CLI-side latency from API-side, and the fix
+    likely involves a concurrency knob rather than a single flip.
+  - Report bug #55 (`devices watch --json` rewording) — already works
+    via the global `--json` flag; pure doc rewording scheduled with
+    other doc sweeps.
+  - MCP / CLI naming alignment (`live` vs `includeStatus`, `metric` vs
+    `metrics`) flagged in Round-3 §4.
+  - `devices meta import/export` (Round-2 #40 follow-up).
+
 ## [2.5.0] - 2026-04-20
 
 ### Added

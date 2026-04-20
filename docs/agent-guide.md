@@ -89,6 +89,18 @@ Reads `~/.switchbot/device-history/<deviceId>.json` written by `events mqtt-tail
 
 **Workflow**: run `switchbot events mqtt-tail` in the background (e.g. with pm2) to keep the history files fresh; then call `get_device_history` from any MCP session without consuming REST quota.
 
+#### Device-history directory layout
+
+After `events mqtt-tail` runs on a device, `~/.switchbot/device-history/` contains up to three companion files per device:
+
+| File | Description |
+|------|-------------|
+| `<deviceId>.jsonl` | Append-only, authoritative event log. Source of truth for `history range` and `history aggregate`. Rotated at ~50 MB (up to 3 segments). |
+| `<deviceId>.json` | Latest 100-entry ring buffer. Written on every MQTT event. Read by MCP `get_device_history` for fast, zero-quota retrieval. |
+| `__control.jsonl` | MQTT connection lifecycle events (heartbeat, connect, disconnect). Not a device log; used for diagnostics. |
+
+The `.json` file is **not** the source of truth for historical queries — use `.jsonl` (via `history range` or `history aggregate`) when you need a complete, time-bounded record. The `.json` file is optimised for "what is the latest state?" lookups.
+
 ### MCP resource: `switchbot://events`
 
 Read-only snapshot of recent MQTT shadow-update events from the ring buffer. Returns `{state, count, events[]}`.

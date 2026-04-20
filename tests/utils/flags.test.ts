@@ -4,6 +4,7 @@ import {
   isDryRun,
   getTimeout,
   getConfigPath,
+  parseDurationToMs,
 } from '../../src/utils/flags.js';
 
 describe('utils/flags', () => {
@@ -79,6 +80,34 @@ describe('utils/flags', () => {
     it('returns undefined when --config is at the very end with no value', () => {
       process.argv.push('--config');
       expect(getConfigPath()).toBeUndefined();
+    });
+  });
+
+  describe('parseDurationToMs', () => {
+    it('accepts ms / s / m / h units', () => {
+      expect(parseDurationToMs('500ms')).toBe(500);
+      expect(parseDurationToMs('30s')).toBe(30_000);
+      expect(parseDurationToMs('5m')).toBe(5 * 60_000);
+      expect(parseDurationToMs('2h')).toBe(2 * 60 * 60_000);
+    });
+
+    it('accepts d (days) and w (weeks) units', () => {
+      expect(parseDurationToMs('1d')).toBe(24 * 60 * 60_000);
+      expect(parseDurationToMs('7d')).toBe(7 * 24 * 60 * 60_000);
+      expect(parseDurationToMs('1w')).toBe(7 * 24 * 60 * 60_000);
+      expect(parseDurationToMs('2w')).toBe(14 * 24 * 60 * 60_000);
+    });
+
+    it('treats bare numbers as milliseconds', () => {
+      expect(parseDurationToMs('1000')).toBe(1000);
+    });
+
+    it('rejects unsupported units and malformed values', () => {
+      expect(parseDurationToMs('1y')).toBeNull();
+      expect(parseDurationToMs('1year')).toBeNull();
+      expect(parseDurationToMs('1month')).toBeNull();
+      expect(parseDurationToMs('abc')).toBeNull();
+      expect(parseDurationToMs('')).toBeNull();
     });
   });
 });

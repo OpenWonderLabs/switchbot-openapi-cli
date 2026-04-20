@@ -14,6 +14,26 @@ export function printJson(data: unknown): void {
   console.log(JSON.stringify({ schemaVersion: SCHEMA_VERSION, data }, null, 2));
 }
 
+/**
+ * Emit a structured JSON error envelope on stdout.
+ *
+ * Bug #SYS-1: Under `--json`, both success and error payloads must share
+ * the same output channel (stdout) so a single `cli --json ... | jq` pipe
+ * can decode either shape. Use this helper everywhere that previously
+ * called `console.error(JSON.stringify({ error: ... }))` in --json mode.
+ *
+ * The envelope is always `{ schemaVersion, error }` — callers pass only the
+ * error payload. Also emits a brief human-readable line on stderr when a
+ * TTY is attached, so interactive runs still see the failure.
+ */
+export function emitJsonError(errorPayload: Record<string, unknown>): void {
+  console.log(JSON.stringify({ schemaVersion: SCHEMA_VERSION, error: errorPayload }));
+  if (process.stderr.isTTY) {
+    const msg = typeof errorPayload.message === 'string' ? errorPayload.message : 'Error';
+    console.error(chalk.red(msg));
+  }
+}
+
 function escapeMarkdownCell(s: string): string {
   // Pipes break markdown table layout; backslash-escape them. Collapse
   // newlines into <br> so each row stays on one line.
@@ -138,7 +158,7 @@ export type ErrorSubKind =
   | 'command-not-supported'
   | 'auth-failed'
   | 'quota-exceeded'
-  | 'device-busy'
+  | 'device-internal-error'
   | 'unknown-api-error';
 
 export interface ErrorPayload {
@@ -151,7 +171,7 @@ export interface ErrorPayload {
   context?: Record<string, unknown>;
   retryAfterMs?: number;
   transient?: boolean;
-  errorClass?: 'network' | 'api' | 'device-offline' | 'device-busy' | 'guard' | 'usage';
+  errorClass?: 'network' | 'api' | 'device-offline' | 'device-internal-error' | 'guard' | 'usage';
 }
 
 export class StructuredUsageError extends Error {
@@ -164,11 +184,12 @@ export class StructuredUsageError extends Error {
 function classifyApiError(code: number): ErrorSubKind {
   switch (code) {
     case 151:
-    case 160: return 'command-not-supported';
+    case 160:
+    case 3005: return 'command-not-supported';
     case 152: return 'device-not-found';
     case 161:
     case 171: return 'device-offline';
-    case 190: return 'device-busy';
+    case 190: return 'device-internal-error';
     case 401: return 'auth-failed';
     case 429: return 'quota-exceeded';
     default:  return 'unknown-api-error';
@@ -255,7 +276,16 @@ export function handleError(error: unknown): never {
   const payload = buildErrorPayload(error);
 
   if (isJsonMode()) {
-    console.error(JSON.stringify({ schemaVersion: SCHEMA_VERSION, error: payload }));
+    // Bug #SYS-1: Under --json, route the structured envelope to stdout so
+    // `cli --json ... | jq` pipelines can decode the error shape exactly
+    // the same way they decode success. Previously it went to stderr, which
+    // silently broke every error-path pipeline. TTY users still get a
+    // terse human-readable line on stderr so interactive runs don't look
+    // like the process simply exited.
+    console.log(JSON.stringify({ schemaVersion: SCHEMA_VERSION, error: payload }));
+    if (process.stderr.isTTY) {
+      console.error(chalk.red(payload.message));
+    }
     process.exit(payload.code === 2 ? 2 : 1);
   }
 
@@ -291,11 +321,13 @@ function errorHint(code: number): string | null {
     case 171:
       return 'The Hub itself is offline — check its power and Wi-Fi.';
     case 190:
-      return "Often means the deviceId is wrong or the command/parameter is invalid for this device. Double-check with 'switchbot devices list' and 'switchbot devices describe <deviceId>'. Use --verbose to see the raw API response.";
+      return 'SwitchBot API code 190 is a generic internal error. Common causes: invalid deviceId, unsupported command/parameter, or the endpoint does not apply (e.g., "webhook query" with no webhook configured). Verify with --verbose.';
     case 401:
       return "Re-run 'switchbot config set-token <token> <secret>', or verify SWITCHBOT_TOKEN / SWITCHBOT_SECRET.";
     case 429:
       return 'Daily quota is 10,000 requests/account — retry after midnight UTC.';
+    case 3005:
+      return "SwitchBot rejected the command as invalid for this specific device model. For IR remotes, this often means the command works only on --type customize (user-learned buttons). Try 'switchbot devices commands <type>' or check the device's capabilities.";
     default:
       return null;
   }

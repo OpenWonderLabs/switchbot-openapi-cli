@@ -40,6 +40,11 @@ const COMMAND_META: Record<string, CommandMeta> = {
   'devices types':    { mutating: false, consumesQuota: false, idempotencySupported: false, agentSafetyTier: 'read',        verifiability: 'local',            typicalLatencyMs: 20 },
   'devices commands': { mutating: false, consumesQuota: false, idempotencySupported: false, agentSafetyTier: 'read',        verifiability: 'local',            typicalLatencyMs: 20 },
   'devices watch':    { mutating: false, consumesQuota: true,  idempotencySupported: false, agentSafetyTier: 'read',        verifiability: 'local',            typicalLatencyMs: 500 },
+  // devices meta (local metadata — no quota, no API call)
+  'devices meta set':   { mutating: true,  consumesQuota: false, idempotencySupported: false, agentSafetyTier: 'action',    verifiability: 'local',            typicalLatencyMs: 5 },
+  'devices meta get':   { mutating: false, consumesQuota: false, idempotencySupported: false, agentSafetyTier: 'read',      verifiability: 'local',            typicalLatencyMs: 5 },
+  'devices meta list':  { mutating: false, consumesQuota: false, idempotencySupported: false, agentSafetyTier: 'read',      verifiability: 'local',            typicalLatencyMs: 5 },
+  'devices meta clear': { mutating: true,  consumesQuota: false, idempotencySupported: false, agentSafetyTier: 'action',    verifiability: 'local',            typicalLatencyMs: 5 },
   // devices: actions
   'devices command':  { mutating: true,  consumesQuota: true,  idempotencySupported: true,  agentSafetyTier: 'action',      verifiability: 'deviceDependent',  typicalLatencyMs: 800 },
   'devices batch':    { mutating: true,  consumesQuota: true,  idempotencySupported: true,  agentSafetyTier: 'action',      verifiability: 'deviceDependent',  typicalLatencyMs: 1200 },

@@ -1,7 +1,30 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { createHash } from 'node:crypto';
 import { getConfigPath } from '../utils/flags.js';
+import { getActiveProfile } from '../lib/request-context.js';
+
+/**
+ * Returns the directory where cache files should be stored.
+ *
+ * - If a profile is active, scopes into a per-profile sub-directory so that
+ *   rotating credentials or switching profiles never serves stale inventory
+ *   from a prior session (Bug #37).
+ * - If no profile is active (unnamed / default), returns `baseDir` unchanged
+ *   so the existing legacy path (~/.switchbot/devices.json) is preserved.
+ *
+ * Only called when `getConfigPath()` returns undefined — the --config-path
+ * override takes full precedence and bypasses this helper entirely.
+ */
+function scopedCacheDir(baseDir: string): string {
+  const profile = getActiveProfile();
+  if (profile === undefined) return baseDir;
+  const hash = createHash('sha256').update(profile).digest('hex').slice(0, 8);
+  const dir = path.join(baseDir, 'cache', hash);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
 
 /** GC cutoff for status entries: evict anything older than this. */
 const DEFAULT_STATUS_GC_TTL_MS = 24 * 60 * 60 * 1000; // 24 h
@@ -48,42 +71,50 @@ function cacheFilePath(): string {
   const override = getConfigPath();
   const dir = override
     ? path.dirname(path.resolve(override))
-    : path.join(os.homedir(), '.switchbot');
+    : scopedCacheDir(path.join(os.homedir(), '.switchbot'));
   return path.join(dir, 'devices.json');
 }
 
-// In-memory hot-cache: undefined = not yet loaded, null = loaded but empty.
-let _listCache: DeviceCache | null | undefined = undefined;
-let _statusCache: StatusCache | undefined = undefined;
+// In-memory hot-cache keyed by active profile (or '__default__' for no profile).
+// Using Maps instead of module-level singletons ensures that mcp serve, which
+// rotates profiles per request via withRequestContext, never leaks inventory
+// across profiles within the same process (Bug #37).
+const _listCacheByProfile = new Map<string, DeviceCache | null>();
+const _statusCacheByProfile = new Map<string, StatusCache>();
+
+function cacheKey(): string {
+  return getActiveProfile() ?? '__default__';
+}
 
 /** Force the next loadCache() call to re-read from disk. Used in tests. */
 export function resetListCache(): void {
-  _listCache = undefined;
+  _listCacheByProfile.clear();
 }
 
 /** Force the next loadStatusCache() call to re-read from disk. Used in tests. */
 export function resetStatusCache(): void {
-  _statusCache = undefined;
+  _statusCacheByProfile.clear();
 }
 
 export function loadCache(): DeviceCache | null {
-  if (_listCache !== undefined) return _listCache;
+  const key = cacheKey();
+  if (_listCacheByProfile.has(key)) return _listCacheByProfile.get(key)!;
   const file = cacheFilePath();
   if (!fs.existsSync(file)) {
-    _listCache = null;
+    _listCacheByProfile.set(key, null);
     return null;
   }
   try {
     const raw = fs.readFileSync(file, 'utf-8');
     const cache = JSON.parse(raw) as DeviceCache;
     if (!cache || typeof cache.devices !== 'object' || cache.devices === null) {
-      _listCache = null;
+      _listCacheByProfile.set(key, null);
       return null;
     }
-    _listCache = cache;
+    _listCacheByProfile.set(key, cache);
     return cache;
   } catch {
-    _listCache = null;
+    _listCacheByProfile.set(key, null);
     return null;
   }
 }
@@ -152,7 +183,7 @@ export function updateCacheFromDeviceList(body: DeviceListBodyShape): void {
     const dir = path.dirname(file);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(file, JSON.stringify(cache, null, 2), { mode: 0o600 });
-    _listCache = cache;
+    _listCacheByProfile.set(cacheKey(), cache);
   } catch {
     // Cache write failures must not break the command that triggered them.
   }
@@ -161,7 +192,7 @@ export function updateCacheFromDeviceList(body: DeviceListBodyShape): void {
 export function clearCache(): void {
   const file = cacheFilePath();
   if (fs.existsSync(file)) fs.unlinkSync(file);
-  _listCache = null;
+  _listCacheByProfile.set(cacheKey(), null);
 }
 
 // ---- Device list freshness -------------------------------------------------
@@ -205,34 +236,38 @@ function statusCacheFilePath(): string {
   const override = getConfigPath();
   const dir = override
     ? path.dirname(path.resolve(override))
-    : path.join(os.homedir(), '.switchbot');
+    : scopedCacheDir(path.join(os.homedir(), '.switchbot'));
   return path.join(dir, 'status.json');
 }
 
 export function loadStatusCache(): StatusCache {
-  if (_statusCache !== undefined) return _statusCache;
+  const key = cacheKey();
+  if (_statusCacheByProfile.has(key)) return _statusCacheByProfile.get(key)!;
   const file = statusCacheFilePath();
   if (!fs.existsSync(file)) {
-    _statusCache = { entries: {} };
-    return _statusCache;
+    const empty = { entries: {} };
+    _statusCacheByProfile.set(key, empty);
+    return empty;
   }
   try {
     const raw = fs.readFileSync(file, 'utf-8');
     const parsed = JSON.parse(raw) as StatusCache;
     if (!parsed || typeof parsed.entries !== 'object' || parsed.entries === null) {
-      _statusCache = { entries: {} };
-      return _statusCache;
+      const empty = { entries: {} };
+      _statusCacheByProfile.set(key, empty);
+      return empty;
     }
-    _statusCache = parsed;
+    _statusCacheByProfile.set(key, parsed);
     return parsed;
   } catch {
-    _statusCache = { entries: {} };
-    return _statusCache;
+    const empty = { entries: {} };
+    _statusCacheByProfile.set(key, empty);
+    return empty;
   }
 }
 
 function saveStatusCache(cache: StatusCache): void {
-  _statusCache = cache;
+  _statusCacheByProfile.set(cacheKey(), cache);
   try {
     const file = statusCacheFilePath();
     const dir = path.dirname(file);
@@ -287,7 +322,7 @@ export function setCachedStatus(
 export function clearStatusCache(): void {
   const file = statusCacheFilePath();
   if (fs.existsSync(file)) fs.unlinkSync(file);
-  _statusCache = { entries: {} };
+  _statusCacheByProfile.set(cacheKey(), { entries: {} });
 }
 
 /** Summary for `switchbot cache show`. */

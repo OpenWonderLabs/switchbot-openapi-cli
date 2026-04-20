@@ -17,9 +17,21 @@ const apiMock = vi.hoisted(() => {
 vi.mock('../../src/api/client.js', () => ({
   createClient: apiMock.createClient,
   ApiError: class ApiError extends Error {
-    constructor(message: string, public readonly code: number) {
+    public readonly retryable: boolean;
+    public readonly hint?: string;
+    public readonly retryAfterMs?: number;
+    public readonly transient: boolean;
+    constructor(
+      message: string,
+      public readonly code: number,
+      meta: { retryable?: boolean; hint?: string; retryAfterMs?: number; transient?: boolean } = {}
+    ) {
       super(message);
       this.name = 'ApiError';
+      this.retryable = meta.retryable ?? false;
+      this.hint = meta.hint;
+      this.retryAfterMs = meta.retryAfterMs;
+      this.transient = meta.transient ?? false;
     }
   },
   DryRunSignal: class DryRunSignal extends Error {
@@ -60,6 +72,7 @@ vi.mock('../../src/devices/cache.js', () => ({
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createSwitchBotMcpServer } from '../../src/commands/mcp.js';
+import { ApiError } from '../../src/api/client.js';
 
 /** Connect a fresh server + client pair and return both. */
 async function pair() {
@@ -182,6 +195,42 @@ describe('mcp server', () => {
     expect(apiMock.__instance.post).toHaveBeenCalledTimes(1);
   });
 
+  it('send_command dryRun rejects unknown deviceId against local cache (bug #SYS-3)', async () => {
+    // Cache is empty — no devices known.
+    const { client } = await pair();
+
+    const res = await client.callTool({
+      name: 'send_command',
+      arguments: { deviceId: 'DEADBEEF', command: 'turnOff', dryRun: true },
+    });
+
+    expect(res.isError).toBe(true);
+    const structured = res.structuredContent as { error?: { kind?: string; subKind?: string; context?: { deviceId?: string } } };
+    expect(structured.error?.kind).toBe('usage');
+    expect(structured.error?.subKind).toBe('device-not-found');
+    expect(structured.error?.context?.deviceId).toBe('DEADBEEF');
+    // Dry-run must not hit the network even for preflight.
+    expect(apiMock.__instance.post).not.toHaveBeenCalled();
+    expect(apiMock.__instance.get).not.toHaveBeenCalled();
+  });
+
+  it('send_command dryRun succeeds when deviceId is cached (bug #SYS-3 happy path)', async () => {
+    cacheMock.map.set('BULB1', { type: 'Color Bulb', name: 'Desk Lamp', category: 'physical' });
+    const { client } = await pair();
+
+    const res = await client.callTool({
+      name: 'send_command',
+      arguments: { deviceId: 'BULB1', command: 'turnOff', dryRun: true },
+    });
+
+    expect(res.isError).toBeFalsy();
+    const structured = res.structuredContent as { ok?: boolean; dryRun?: boolean; wouldSend?: { deviceId?: string; command?: string } };
+    expect(structured.ok).toBe(true);
+    expect(structured.dryRun).toBe(true);
+    expect(structured.wouldSend?.deviceId).toBe('BULB1');
+    expect(structured.wouldSend?.command).toBe('turnOff');
+  });
+
   it('list_devices returns the raw API body and refreshes the cache', async () => {
     const body = { deviceList: [], infraredRemoteList: [] };
     apiMock.__instance.get.mockResolvedValueOnce({ data: { statusCode: 100, body } });
@@ -272,6 +321,28 @@ describe('mcp server', () => {
     const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
     expect(Array.isArray(parsed)).toBe(true);
     expect(parsed.some((e: { type: string }) => e.type === 'Strip Light')).toBe(true);
+  });
+
+  it('search_catalog rejects an empty query with a usage error', async () => {
+    const { client } = await pair();
+    const res = await client.callTool({
+      name: 'search_catalog',
+      arguments: { query: '' },
+    });
+    expect(res.isError).toBe(true);
+    const structured = (res as { structuredContent?: { error?: { kind?: string; message?: string; hint?: string } } }).structuredContent;
+    expect(structured?.error?.kind).toBe('usage');
+    expect(structured?.error?.message).toMatch(/non-empty query/i);
+    expect(structured?.error?.hint).toMatch(/list_catalog_types/);
+  });
+
+  it('search_catalog rejects whitespace-only query', async () => {
+    const { client } = await pair();
+    const res = await client.callTool({
+      name: 'search_catalog',
+      arguments: { query: '   ' },
+    });
+    expect(res.isError).toBe(true);
   });
 
   it('run_scene POSTs the scene execute endpoint', async () => {
@@ -392,5 +463,74 @@ describe('mcp server', () => {
       vi.restoreAllMocks();
       fs.rmSync(tmpHome, { recursive: true, force: true });
     }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Bug #38: structured error metadata preserved in MCP tool responses
+  // ---------------------------------------------------------------------------
+
+  it('send_command preserves structured error metadata on ApiError (code 161 device-offline)', async () => {
+    cacheMock.map.set('BLE1', { type: 'Bot', name: 'BLE Bot', category: 'physical' });
+    // Mock the POST to throw a device-offline ApiError
+    apiMock.__instance.post.mockRejectedValueOnce(
+      new ApiError('Device offline (check Wi-Fi / Bluetooth connection)', 161, { transient: false })
+    );
+    const { client } = await pair();
+
+    const res = await client.callTool({
+      name: 'send_command',
+      arguments: { deviceId: 'BLE1', command: 'turnOn' },
+    });
+
+    expect(res.isError).toBe(true);
+    const sc = (res as { structuredContent?: unknown }).structuredContent as
+      | { error?: { code?: number; subKind?: string; transient?: boolean; hint?: string } }
+      | undefined;
+    expect(sc?.error?.code).toBe(161);
+    expect(sc?.error?.subKind).toBe('device-offline');
+    expect(sc?.error?.transient).toBe(false);
+    expect(sc?.error?.hint).toMatch(/Hub/);
+    // content[0].text must still be a JSON string (backwards compat)
+    const text = (res.content as Array<{ type: string; text: string }>)[0].text;
+    expect(() => JSON.parse(text)).not.toThrow();
+  });
+
+  it('describe_device preserves structured error metadata on ApiError (code 401 auth-failed)', async () => {
+    // Mock the GET (fetchDeviceList inside describeDevice) to throw auth error
+    apiMock.__instance.get.mockRejectedValueOnce(
+      new ApiError('Authentication failed', 401, { transient: false, retryable: false })
+    );
+    const { client } = await pair();
+
+    const res = await client.callTool({
+      name: 'describe_device',
+      arguments: { deviceId: 'ANY1' },
+    });
+
+    expect(res.isError).toBe(true);
+    const sc = (res as { structuredContent?: unknown }).structuredContent as
+      | { error?: { subKind?: string; errorClass?: string } }
+      | undefined;
+    expect(sc?.error?.subKind).toBe('auth-failed');
+    expect(sc?.error?.errorClass).toBe('api');
+  });
+
+  it('run_scene preserves structured error metadata on ApiError (code 190 device-internal-error)', async () => {
+    // Mock the POST (executeScene) to throw device-internal-error ApiError
+    apiMock.__instance.post.mockRejectedValueOnce(
+      new ApiError('Device internal error', 190, { transient: false })
+    );
+    const { client } = await pair();
+
+    const res = await client.callTool({
+      name: 'run_scene',
+      arguments: { sceneId: 'SCENE1' },
+    });
+
+    expect(res.isError).toBe(true);
+    const sc = (res as { structuredContent?: unknown }).structuredContent as
+      | { error?: { subKind?: string } }
+      | undefined;
+    expect(sc?.error?.subKind).toBe('device-internal-error');
   });
 });

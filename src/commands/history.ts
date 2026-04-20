@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import path from 'node:path';
 import os from 'node:os';
 import { intArg, stringArg } from '../utils/arg-parsers.js';
-import { printJson, isJsonMode, handleError, UsageError } from '../utils/output.js';
+import { printJson, isJsonMode, handleError, UsageError, emitJsonError } from '../utils/output.js';
 import { readAudit, verifyAudit, type AuditEntry } from '../utils/audit.js';
 import { executeCommand } from '../lib/devices.js';
 import {
@@ -88,7 +88,7 @@ Examples:
       if (!Number.isInteger(idx) || idx < 1 || idx > entries.length) {
         const msg = `Invalid index ${indexArg}. Log has ${entries.length} entries.`;
         if (isJsonMode()) {
-          console.error(JSON.stringify({ error: { code: 2, kind: 'usage', message: msg } }));
+          emitJsonError({ code: 2, kind: 'usage', message: msg });
         } else {
           console.error(msg);
         }
@@ -98,7 +98,7 @@ Examples:
       if (entry.kind !== 'command') {
         const msg = `Entry ${idx} is not a command (kind=${entry.kind}).`;
         if (isJsonMode()) {
-          console.error(JSON.stringify({ error: { code: 2, kind: 'usage', message: msg } }));
+          emitJsonError({ code: 2, kind: 'usage', message: msg });
         } else {
           console.error(msg);
         }
@@ -280,7 +280,7 @@ Examples:
     .option('--since <duration>', 'Relative window ending now, e.g. "1h", "7d" (mutually exclusive with --from/--to)', stringArg('--since'))
     .option('--from <iso>', 'Range start (ISO-8601)', stringArg('--from'))
     .option('--to <iso>', 'Range end (ISO-8601)', stringArg('--to'))
-    .option('--metric <name>', 'Payload field to aggregate (repeat for multiple)', (v: string, acc: string[] = []) => acc.concat(v), [] as string[])
+    .requiredOption('--metric <name>', 'Payload field to aggregate (repeat for multiple; required)', (v: string, acc: string[] = []) => acc.concat(v))
     .option('--agg <csv>', 'Comma-separated aggregation functions (count,min,max,avg,sum,p50,p95)', stringArg('--agg'))
     .option('--bucket <duration>', 'Bucket width, e.g. "15m", "1h", "1d"', stringArg('--bucket'))
     .option('--max-bucket-samples <n>', 'Max samples per bucket for quantiles (1–100000)', intArg('--max-bucket-samples', { min: 1, max: 100_000 }))
@@ -289,9 +289,6 @@ Examples:
       options: { since?: string; from?: string; to?: string; metric?: string[]; agg?: string; bucket?: string; maxBucketSamples?: string },
     ) => {
       const metrics: string[] = options.metric ?? [];
-      if (metrics.length === 0) {
-        handleError(new UsageError('at least one --metric is required.'));
-      }
 
       if (options.since && (options.from || options.to)) {
         handleError(new UsageError('--since is mutually exclusive with --from/--to.'));

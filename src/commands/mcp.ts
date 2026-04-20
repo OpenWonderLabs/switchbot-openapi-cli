@@ -4,7 +4,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
 import { intArg, stringArg } from '../utils/arg-parsers.js';
-import { handleError, isJsonMode } from '../utils/output.js';
+import { handleError, isJsonMode, buildErrorPayload, emitJsonError, type ErrorPayload, type ErrorSubKind } from '../utils/output.js';
 import { VERSION } from '../version.js';
 import {
   fetchDeviceList,
@@ -50,16 +50,46 @@ function mcpError(
   kind: McpErrorKind,
   code: number,
   message: string,
-  options?: { hint?: string; retryable?: boolean; context?: Record<string, unknown> },
+  options?: {
+    hint?: string;
+    retryable?: boolean;
+    context?: Record<string, unknown>;
+    subKind?: ErrorSubKind;
+    errorClass?: NonNullable<ErrorPayload['errorClass']>;
+    transient?: boolean;
+    retryAfterMs?: number;
+  },
 ) {
   const obj: Record<string, unknown> = { code, kind, message };
   if (options?.hint) obj.hint = options.hint;
   if (options?.retryable) obj.retryable = true;
   if (options?.context) obj.context = options.context;
+  if (options?.subKind !== undefined) obj.subKind = options.subKind;
+  if (options?.errorClass !== undefined) obj.errorClass = options.errorClass;
+  if (options?.transient !== undefined) obj.transient = options.transient;
+  if (options?.retryAfterMs !== undefined) obj.retryAfterMs = options.retryAfterMs;
   return {
     isError: true as const,
     content: [{ type: 'text' as const, text: JSON.stringify({ error: obj }, null, 2) }],
+    structuredContent: { error: obj },
   };
+}
+
+/**
+ * Convert any thrown error into a structured MCP tool-error response,
+ * preserving all ErrorPayload fields (subKind, transient, hint, etc.).
+ */
+function apiErrorToMcpError(err: unknown) {
+  const payload = buildErrorPayload(err);
+  return mcpError(payload.kind, payload.code, payload.message, {
+    hint: payload.hint,
+    retryable: payload.retryable,
+    context: payload.context,
+    subKind: payload.subKind,
+    errorClass: payload.errorClass,
+    transient: payload.transient,
+    retryAfterMs: payload.retryAfterMs,
+  });
 }
 
 export function createSwitchBotMcpServer(options?: { eventManager?: EventSubscriptionManager }): McpServer {
@@ -316,8 +346,19 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
     async ({ deviceId, command, parameter, commandType, confirm, idempotencyKey, dryRun }) => {
       const effectiveType = commandType ?? 'command';
 
-      // dryRun early-return — no API call, no validation against live device list
+      // dryRun early-return — no API call. We still preflight the deviceId
+      // against the local cache so fabricated IDs don't silently pass
+      // validation (bug #SYS-3). Dry-run is meant to catch bad inputs; a
+      // dry-run that accepts anything is worse than no dry-run at all.
       if (dryRun) {
+        const cached = getCachedDevice(deviceId);
+        if (!cached) {
+          return mcpError('usage', 2, `Device "${deviceId}" not found in local cache.`, {
+            subKind: 'device-not-found',
+            hint: "Run 'list_devices' first to warm the cache, then retry with dryRun:true.",
+            context: { deviceId },
+          });
+        }
         const wouldSend = {
           deviceId,
           command,
@@ -400,7 +441,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
             },
           });
         }
-        throw err;
+        return apiErrorToMcpError(err);
       }
       const isIr = getCachedDevice(deviceId)?.category === 'ir';
       const structured: {
@@ -460,7 +501,11 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
           structuredContent: structured,
         };
       }
-      await executeScene(sceneId);
+      try {
+        await executeScene(sceneId);
+      } catch (err) {
+        return apiErrorToMcpError(err);
+      }
       const structured = { ok: true as const, sceneId };
       return {
         content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
@@ -499,7 +544,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         'Search the built-in device catalog by type name or alias. Returns matching entries with their commands, roles, destructive flags, and status fields. No API call.',
       _meta: { agentSafetyTier: 'read' },
       inputSchema: z.object({
-        query: z.string().describe('Search query (matches type and aliases, case-insensitive). Use empty string to list all.'),
+        query: z.string().describe('Search query (matches type and aliases, case-insensitive). Must be non-empty; use list_catalog_types to enumerate instead.'),
         limit: z.number().int().min(1).max(100).optional().default(20).describe('Max entries returned (default 20)'),
       }).strict(),
       outputSchema: {
@@ -523,6 +568,16 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
       },
     },
     async ({ query, limit }) => {
+      if (query.trim() === '') {
+        return mcpError(
+          'usage',
+          2,
+          'search_catalog requires a non-empty query.',
+          {
+            hint: "Pass a search term like 'Bot' or 'Hub', or call list_catalog_types to enumerate all types without a query.",
+          },
+        );
+      }
       const hits = searchCatalog(query, limit);
       const structured = { results: hits as unknown as Array<Record<string, unknown>>, total: hits.length };
       return {
@@ -578,7 +633,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
             context: { deviceId },
           });
         }
-        throw err;
+        return apiErrorToMcpError(err);
       }
     }
   );
@@ -807,7 +862,7 @@ Inspect locally:
           if (!Number.isFinite(port) || port < 1 || port > 65535) {
             const msg = `Invalid --port "${options.port}". Must be 1-65535.`;
             if (isJsonMode()) {
-              console.error(JSON.stringify({ error: { code: 2, kind: 'usage', message: msg } }));
+              emitJsonError({ code: 2, kind: 'usage', message: msg });
             } else {
               console.error(msg);
             }
@@ -824,7 +879,7 @@ Inspect locally:
           if (!isLocalhost && !authToken) {
             const msg = 'Refusing to listen on 0.0.0.0 without --auth-token. Pass --auth-token <token> or bind to localhost (default).';
             if (isJsonMode()) {
-              console.error(JSON.stringify({ error: { code: 2, kind: 'usage', message: msg } }));
+              emitJsonError({ code: 2, kind: 'usage', message: msg });
             } else {
               console.error(msg);
             }

@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import type { AxiosInstance } from 'axios';
 import { intArg, enumArg, stringArg } from '../utils/arg-parsers.js';
-import { printJson, isJsonMode, handleError, buildErrorPayload, type ErrorPayload } from '../utils/output.js';
+import { printJson, isJsonMode, handleError, buildErrorPayload, UsageError, emitJsonError, type ErrorPayload } from '../utils/output.js';
 import {
   fetchDeviceList,
   executeCommand,
@@ -12,7 +12,7 @@ import { createClient } from '../api/client.js';
 import { parseFilter, applyFilter, FilterSyntaxError } from '../utils/filter.js';
 import { isDryRun } from '../utils/flags.js';
 import { DryRunSignal } from '../api/client.js';
-import { getCachedTypeMap } from '../devices/cache.js';
+import { getCachedTypeMap, getCachedDevice, loadStatusCache } from '../devices/cache.js';
 
 interface BatchStepTiming {
   startedAt: string;
@@ -22,14 +22,25 @@ interface BatchStepTiming {
 }
 
 interface BatchResult {
-  succeeded: Array<{ deviceId: string; result: unknown } & BatchStepTiming>;
+  succeeded: Array<{
+    deviceId: string;
+    result: unknown;
+    subKind?: 'ir-no-feedback';
+    verification?: {
+      verifiable: false;
+      reason: string;
+      suggestedFollowup: string;
+    };
+  } & BatchStepTiming>;
   failed: Array<{ deviceId: string; error: ErrorPayload } & BatchStepTiming>;
+  skipped?: Array<{ deviceId: string; reason: 'offline' }>;
   summary: {
     total: number;
     ok: number;
     failed: number;
     skipped: number;
     durationMs: number;
+    unverifiableCount: number;
     dryRun?: boolean;
     schemaVersion?: string;
     maxConcurrent?: number;
@@ -147,6 +158,8 @@ export function registerBatchCommand(devices: Command): void {
     .option('--type <commandType>', '"command" (default) or "customize" for user-defined IR buttons', enumArg('--type', COMMAND_TYPES), 'command')
     .option('--stdin', 'Read deviceIds from stdin, one per line (same as trailing "-")')
     .option('--idempotency-key-prefix <prefix>', 'Client-supplied prefix for idempotency keys (key per device: <prefix>-<deviceId>). process-local 60s window; cache is per Node process (MCP session, batch run, plan run). Independent CLI invocations do not share cache.', stringArg('--idempotency-key-prefix'))
+    .option('--idempotency-key <prefix>', 'Alias for --idempotency-key-prefix.', stringArg('--idempotency-key'))
+    .option('--skip-offline', 'Skip devices whose cached status is offline (no API call; cache miss → send as usual).')
     .addHelpText('after', `
 Targets are resolved in this priority order:
   1. --ids when present       (explicit deviceIds)
@@ -201,12 +214,22 @@ Examples:
           type: string;
           stdin?: boolean;
           idempotencyKeyPrefix?: string;
+          idempotencyKey?: string;
+          skipOffline?: boolean;
         },
         commandObj: Command
       ) => {
         // Trailing "-" sentinel selects stdin mode.
         const extra = commandObj.args ?? [];
         const readStdin = Boolean(options.stdin) || extra.includes('-');
+        // Accept --idempotency-key as alias; reject when both forms are supplied.
+        if (options.idempotencyKey !== undefined && options.idempotencyKeyPrefix !== undefined) {
+          handleError(new UsageError('Use either --idempotency-key or --idempotency-key-prefix, not both.'));
+          return;
+        }
+        if (options.idempotencyKey !== undefined && options.idempotencyKeyPrefix === undefined) {
+          options.idempotencyKeyPrefix = options.idempotencyKey;
+        }
         let client: AxiosInstance | undefined;
         const getClient = (): AxiosInstance => (client ??= createClient());
 
@@ -220,7 +243,7 @@ Examples:
         } catch (error) {
           if (error instanceof FilterSyntaxError) {
             if (isJsonMode()) {
-              console.error(JSON.stringify({ error: { code: 2, kind: 'usage', message: error.message } }));
+              emitJsonError({ code: 2, kind: 'usage', message: error.message });
             } else {
               console.error(`Error: ${error.message}`);
             }
@@ -228,7 +251,7 @@ Examples:
           }
           if (error instanceof Error && error.message.startsWith('No target devices')) {
             if (isJsonMode()) {
-              console.error(JSON.stringify({ error: { code: 2, kind: 'usage', message: error.message } }));
+              emitJsonError({ code: 2, kind: 'usage', message: error.message });
             } else {
               console.error(`Error: ${error.message}`);
             }
@@ -241,7 +264,7 @@ Examples:
           const out: BatchResult = {
             succeeded: [],
             failed: [],
-            summary: { total: 0, ok: 0, failed: 0, skipped: 0, durationMs: 0 },
+            summary: { total: 0, ok: 0, failed: 0, skipped: 0, durationMs: 0, unverifiableCount: 0 },
           };
           if (isJsonMode()) printJson(out);
           else console.log('No devices matched — nothing to do.');
@@ -251,6 +274,24 @@ Examples:
         const effectiveType = (options.type === 'customize' ? 'customize' : 'command') as
           | 'command'
           | 'customize';
+
+        // --skip-offline: preflight using the status cache (no network). Cache
+        // miss = send as usual; only definite "offline" cached entries skip.
+        const preSkipped: Array<{ deviceId: string; reason: 'offline' }> = [];
+        if (options.skipOffline && resolved.ids.length > 0) {
+          const statusCache = loadStatusCache();
+          const kept: string[] = [];
+          for (const id of resolved.ids) {
+            const entry = statusCache.entries[id];
+            const online = entry?.body?.onlineStatus;
+            if (online === 'offline') {
+              preSkipped.push({ deviceId: id, reason: 'offline' });
+            } else {
+              kept.push(id);
+            }
+          }
+          resolved = { ...resolved, ids: kept };
+        }
 
         // Pre-flight: identify destructive targets before spending API calls.
         const blockedForDestructive: Array<{ deviceId: string; reason: string }> = [];
@@ -267,15 +308,13 @@ Examples:
         if (blockedForDestructive.length > 0 && !options.yes) {
           if (isJsonMode()) {
             const deviceIds = blockedForDestructive.map((b) => b.deviceId);
-            console.error(JSON.stringify({
-              error: {
-                code: 2,
-                kind: 'guard',
-                message: `Destructive command "${cmd}" requires --yes to run on ${blockedForDestructive.length} device(s).`,
-                hint: 'Re-issue the call with --yes to proceed.',
-                context: { command: cmd, deviceIds },
-              },
-            }));
+            emitJsonError({
+              code: 2,
+              kind: 'guard',
+              message: `Destructive command "${cmd}" requires --yes to run on ${blockedForDestructive.length} device(s).`,
+              hint: 'Re-issue the call with --yes to proceed.',
+              context: { command: cmd, deviceIds },
+            });
           } else {
             console.error(
               `Refusing to run destructive command "${cmd}" on ${blockedForDestructive.length} device(s) without --yes:`
@@ -416,14 +455,26 @@ Examples:
         }>;
 
         const result: BatchResult = {
-          succeeded: succeeded.map((s) => ({
-            deviceId: s.deviceId,
-            result: s.result,
-            startedAt: s.startedAt,
-            finishedAt: s.finishedAt,
-            durationMs: s.durationMs,
-            replayed: s.replayed,
-          })),
+          succeeded: succeeded.map((s) => {
+            const isIr = getCachedDevice(s.deviceId)?.category === 'ir';
+            const entry: BatchResult['succeeded'][number] = {
+              deviceId: s.deviceId,
+              result: s.result,
+              startedAt: s.startedAt,
+              finishedAt: s.finishedAt,
+              durationMs: s.durationMs,
+              replayed: s.replayed,
+            };
+            if (isIr) {
+              entry.subKind = 'ir-no-feedback';
+              entry.verification = {
+                verifiable: false,
+                reason: 'IR transmission is unidirectional; no receipt acknowledgment is possible.',
+                suggestedFollowup: 'Confirm visible change manually or via a paired state sensor.',
+              };
+            }
+            return entry;
+          }),
           failed: failed.map((f) => ({
             deviceId: f.deviceId,
             error: f.error,
@@ -431,12 +482,14 @@ Examples:
             finishedAt: f.finishedAt,
             durationMs: f.durationMs,
           })),
+          ...(preSkipped.length > 0 ? { skipped: preSkipped } : {}),
           summary: {
-            total: resolved.ids.length,
+            total: resolved.ids.length + preSkipped.length,
             ok: succeeded.length,
             failed: failed.length,
-            skipped: dryRunned.length,
+            skipped: dryRunned.length + preSkipped.length,
             durationMs: Date.now() - startedAt,
+            unverifiableCount: succeeded.filter((s) => getCachedDevice(s.deviceId)?.category === 'ir').length,
             schemaVersion: '1.1',
             maxConcurrent: concurrency,
             staggerMs,

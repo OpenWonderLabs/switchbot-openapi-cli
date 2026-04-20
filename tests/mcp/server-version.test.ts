@@ -13,7 +13,6 @@ describe('mcp server version', () => {
 
     // Verify the VERSION constant matches
     expect(VERSION).toBe(expectedVersion);
-    expect(VERSION).toBe('2.5.0');
   });
 });
 

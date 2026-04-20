@@ -4,6 +4,7 @@ import { loadCache } from '../devices/cache.js';
 import { getEffectiveCatalog } from '../devices/catalog.js';
 import { readProfileMeta } from '../config.js';
 import { todayUsage, DAILY_QUOTA } from '../utils/quota.js';
+import { ALL_STRATEGIES } from '../utils/name-resolver.js';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
@@ -29,6 +30,7 @@ const QUICK_REFERENCE = {
   safety: ['--dry-run', '--idempotency-key <k>', '--audit-log', '--no-quota'],
   observability: ['doctor --json', 'quota status', 'cache status', 'events mqtt-tail'],
   history: ['history range <id> --since 7d', 'history stats <id>'],
+  meta: ['devices meta set <id> --alias <name>', 'devices meta list', 'devices meta get <id>'],
 };
 
 interface BootstrapOptions {
@@ -122,6 +124,7 @@ Examples:
         identity: IDENTITY,
         quickReference: QUICK_REFERENCE,
         safetyTiers: SAFETY_TIERS,
+        nameStrategies: [...ALL_STRATEGIES],
         profile: meta
           ? {
               label: meta.label ?? null,

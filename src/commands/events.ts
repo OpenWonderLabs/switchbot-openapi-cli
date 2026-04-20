@@ -2,7 +2,9 @@ import { Command } from 'commander';
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { printJson, isJsonMode, handleError, UsageError } from '../utils/output.js';
-import { intArg, stringArg } from '../utils/arg-parsers.js';
+import { intArg, stringArg, durationArg } from '../utils/arg-parsers.js';
+import { parseDurationToMs } from '../utils/flags.js';
+import { parseFilterExpr, matchClause, FilterSyntaxError, type FilterClause } from '../utils/filter.js';
 import { SwitchBotMqttClient } from '../mqtt/client.js';
 import { fetchMqttCredential } from '../mqtt/credential.js';
 import { tryLoadConfig } from '../config.js';
@@ -40,54 +42,47 @@ interface EventRecord {
 
 function matchFilter(
   body: unknown,
-  filter: { deviceId?: string; type?: string } | null,
+  clauses: FilterClause[] | null,
 ): boolean {
-  if (!filter) return true;
+  if (!clauses || clauses.length === 0) return true;
   if (!body || typeof body !== 'object') return false;
   const b = body as Record<string, unknown>;
   const ctx = (b.context ?? b) as Record<string, unknown>;
-  if (filter.deviceId && ctx.deviceMac !== filter.deviceId && ctx.deviceId !== filter.deviceId) {
-    return false;
-  }
-  if (filter.type && ctx.deviceType !== filter.type) {
-    return false;
+  for (const c of clauses) {
+    let candidate: string;
+    if (c.key === 'deviceId') {
+      const mac = ctx.deviceMac;
+      const id = ctx.deviceId;
+      candidate = String(
+        typeof mac === 'string' && mac ? mac : typeof id === 'string' ? id : '',
+      );
+    } else {
+      const t = ctx.deviceType;
+      candidate = typeof t === 'string' ? t : '';
+    }
+    if (!matchClause(candidate, c)) return false;
   }
   return true;
 }
 
-function parseFilter(flag: string | undefined): { deviceId?: string; type?: string } | null {
+const EVENT_FILTER_KEYS = ['deviceId', 'type'] as const;
+
+function parseFilter(flag: string | undefined): FilterClause[] | null {
   if (!flag) return null;
-  const allowed = new Set(['deviceId', 'type']);
-  const out: { deviceId?: string; type?: string } = {};
-  for (const pair of flag.split(',')) {
-    const eq = pair.indexOf('=');
-    if (eq === -1 || eq === 0) {
-      throw new UsageError(
-        `Invalid --filter pair "${pair.trim()}". Expected "key=value". Supported keys: deviceId, type.`
-      );
+  try {
+    return parseFilterExpr(flag, EVENT_FILTER_KEYS);
+  } catch (e) {
+    if (e instanceof FilterSyntaxError) {
+      throw new UsageError(e.message);
     }
-    const k = pair.slice(0, eq).trim();
-    const v = pair.slice(eq + 1).trim();
-    if (!v) {
-      throw new UsageError(
-        `Empty value for --filter key "${k}". Expected "key=value". Supported keys: deviceId, type.`
-      );
-    }
-    if (!allowed.has(k)) {
-      throw new UsageError(
-        `Unknown --filter key "${k}". Supported keys: deviceId, type.`
-      );
-    }
-    if (k === 'deviceId') out.deviceId = v;
-    else if (k === 'type') out.type = v;
+    throw e;
   }
-  return out;
 }
 
 export function startReceiver(
   port: number,
   pathMatch: string,
-  filter: { deviceId?: string; type?: string } | null,
+  filter: FilterClause[] | null,
   onEvent: (ev: EventRecord) => void,
 ): http.Server {
   const server = http.createServer((req, res) => {
@@ -154,8 +149,9 @@ export function registerEventsCommand(program: Command): void {
     .description('Run a local HTTP receiver and print incoming webhook events as JSONL')
     .option('--port <n>', `Local port to listen on (default ${DEFAULT_PORT})`, intArg('--port', { min: 1, max: 65535 }), String(DEFAULT_PORT))
     .option('--path <p>', `HTTP path to match (default "${DEFAULT_PATH}"; use "*" for all paths)`, stringArg('--path'), DEFAULT_PATH)
-    .option('--filter <expr>', 'Filter events, e.g. "deviceId=ABC123" or "type=Bot" (comma-separated)', stringArg('--filter'))
+    .option('--filter <expr>', 'Filter events by deviceId / type. Grammar: "key=value" (substring), "key~value" (substring), "key=/regex/" (regex). Comma-separated clauses are AND-ed.', stringArg('--filter'))
     .option('--max <n>', 'Stop after N matching events (default: run until Ctrl-C)', intArg('--max', { min: 1 }))
+    .option('--for <dur>', 'Stop after elapsed time (e.g. "5m", "30s"). Combines with --max: first limit wins.', durationArg('--for'))
     .addHelpText(
       'after',
       `
@@ -170,17 +166,23 @@ Output (JSONL, one event per line):
   { "t": "<ISO>", "remote": "<ip:port>", "path": "/",
     "body": <parsed JSON or raw string>, "matched": true }
 
-Filter grammar: comma-separated "key=value" pairs. Supported keys:
-  deviceId=<id>    match by context.deviceMac / context.deviceId
-  type=<type>      match by context.deviceType (e.g. "Bot", "WoMeter")
+Filter grammar: comma-separated clauses (AND-ed). Each clause is one of
+  key=value     — case-insensitive substring
+  key~value     — explicit case-insensitive substring
+  key=/regex/   — case-insensitive regex
+
+Supported keys:
+  deviceId    match by context.deviceMac / context.deviceId
+  type        match by context.deviceType (e.g. "Bot", "WoMeter")
 
 Examples:
   $ switchbot events tail --port 3000
   $ switchbot events tail --port 3000 --filter deviceId=ABC123
-  $ switchbot events tail --filter 'type=WoMeter' --max 5 --json
+  $ switchbot events tail --filter 'type~Meter' --max 5 --json
+  $ switchbot events tail --filter 'type=/Bot|Meter/'
 `,
     )
-    .action(async (options: { port: string; path: string; filter?: string; max?: string }) => {
+    .action(async (options: { port: string; path: string; filter?: string; max?: string; for?: string }) => {
       try {
         const port = Number(options.port);
         if (!Number.isInteger(port) || port <= 0 || port > 65535) {
@@ -190,10 +192,14 @@ Examples:
         if (maxMatched !== null && (!Number.isFinite(maxMatched) || maxMatched < 1)) {
           throw new UsageError(`Invalid --max "${options.max}". Must be a positive integer.`);
         }
+        const forMs = options.for ? parseDurationToMs(options.for) : null;
         const filter = parseFilter(options.filter);
 
         let matchedCount = 0;
         const ac = new AbortController();
+        const forTimer = forMs !== null && forMs > 0
+          ? setTimeout(() => ac.abort(), forMs)
+          : null;
         await new Promise<void>((resolve, reject) => {
           let server: http.Server | null = null;
           try {
@@ -220,6 +226,7 @@ Examples:
           if (!isJsonMode()) console.error(startMsg);
 
           const cleanup = () => {
+            if (forTimer) clearTimeout(forTimer);
             server?.close();
             resolve();
           };
@@ -237,6 +244,7 @@ Examples:
     .description('Subscribe to SwitchBot MQTT shadow events and stream them as JSONL')
     .option('--topic <pattern>', 'MQTT topic filter (default: SwitchBot shadow topic from credential)', stringArg('--topic'))
     .option('--max <n>', 'Stop after N events (default: run until Ctrl-C)', intArg('--max', { min: 1 }))
+    .option('--for <dur>', 'Stop after elapsed time (e.g. "5m", "30s"). Combines with --max: first limit wins.', durationArg('--for'))
     .option(
       '--sink <type>',
       'Output sink: stdout (default), file, webhook, openclaw, telegram, homeassistant (repeatable)',
@@ -265,6 +273,7 @@ Output (JSONL, one event per line):
   { "t": "<ISO>", "eventId": "<uuid>", "topic": "<mqtt-topic>", "payload": <parsed JSON or raw string> }
 
 Control records (interleaved, no "payload" field — use type-prefix to filter):
+  { "type": "__session_start", "at": "<ISO>", "eventId": "<uuid>", "state": "connecting" }  before credential fetch (JSON mode only)
   { "type": "__connect",     "at": "<ISO>", "eventId": "<uuid>" }   first successful connect
   { "type": "__reconnect",   "at": "<ISO>", "eventId": "<uuid>" }   connect after a disconnect
   { "type": "__disconnect",  "at": "<ISO>", "eventId": "<uuid>" }   reconnecting or failed
@@ -300,6 +309,7 @@ Examples:
     .action(async (options: {
       topic?: string;
       max?: string;
+      for?: string;
       sink: string[];
       sinkFile?: string;
       webhookUrl?: string;
@@ -318,6 +328,7 @@ Examples:
         if (maxEvents !== null && (!Number.isInteger(maxEvents) || maxEvents < 1)) {
           throw new UsageError(`Invalid --max "${options.max}". Must be a positive integer.`);
         }
+        const forMs = options.for ? parseDurationToMs(options.for) : null;
 
         const loaded = tryLoadConfig();
         if (!loaded) {
@@ -376,11 +387,25 @@ Examples:
         if (!isJsonMode()) {
           console.error('Fetching MQTT credentials from SwitchBot service…');
         }
+        // Emit a __session_start envelope immediately (before any credential
+        // fetch) so JSON consumers can distinguish "connecting" from "never
+        // connected" even when mqtt-tail exits before the broker connects.
+        if (isJsonMode()) {
+          printJson({
+            type: '__session_start',
+            at: new Date().toISOString(),
+            eventId: crypto.randomUUID(),
+            state: 'connecting',
+          });
+        }
         const credential = await fetchMqttCredential(loaded.token, loaded.secret);
         const topic = options.topic ?? credential.topics.status;
 
         let eventCount = 0;
         const ac = new AbortController();
+        const forTimer = forMs !== null && forMs > 0
+          ? setTimeout(() => ac.abort(), forMs)
+          : null;
         const client = new SwitchBotMqttClient(
           credential,
           () => fetchMqttCredential(loaded.token, loaded.secret),
@@ -472,6 +497,7 @@ Examples:
 
         await new Promise<void>((resolve) => {
           const cleanup = () => {
+            if (forTimer) clearTimeout(forTimer);
             process.removeListener('SIGINT', cleanup);
             process.removeListener('SIGTERM', cleanup);
             unsub();

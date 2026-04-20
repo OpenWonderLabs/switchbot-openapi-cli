@@ -1,4 +1,4 @@
-import { printTable, printJson, isJsonMode, UsageError } from './output.js';
+import { printTable, printJson, isJsonMode, UsageError, emitJsonError } from './output.js';
 import { getFormat, getFields } from './flags.js';
 import { dump as yamlDump } from 'js-yaml';
 
@@ -18,7 +18,7 @@ export function parseFormat(flag: string | undefined): OutputFormat {
     default: {
       const msg = `Unknown --format "${flag}". Expected: table, json, jsonl, tsv, yaml, id, markdown.`;
       if (isJsonMode()) {
-        console.error(JSON.stringify({ error: { code: 2, kind: 'usage', message: msg } }));
+        emitJsonError({ code: 2, kind: 'usage', message: msg });
       } else {
         console.error(msg);
       }

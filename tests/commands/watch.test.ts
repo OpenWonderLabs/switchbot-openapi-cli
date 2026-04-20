@@ -106,6 +106,19 @@ describe('devices watch', () => {
     expect(res.stderr.join('\n')).toMatch(/--max/);
   });
 
+  it('--for stops the loop after elapsed time', async () => {
+    cacheMock.map.set('BOT1', { type: 'Bot', name: 'Kitchen', category: 'physical' });
+    apiMock.__instance.get.mockResolvedValue({
+      data: { statusCode: 100, body: { power: 'on', battery: 90 } },
+    });
+    const res = await runCli(registerDevicesCommand, [
+      '--json', 'devices', 'watch', 'BOT1', '--interval', '1s', '--for', '200ms',
+    ]);
+    // --for triggers AbortController.abort() after 200ms; the loop exits
+    // cleanly with exit code null (no unhandled throw).
+    expect(res.exitCode).toBeNull();
+  }, 3000);
+
   it('emits one JSONL event per device on first tick with from:null (--max=1)', async () => {
     cacheMock.map.set('BOT1', { type: 'Bot', name: 'Kitchen', category: 'physical' });
     apiMock.__instance.get.mockResolvedValueOnce({

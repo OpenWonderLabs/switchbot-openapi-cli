@@ -251,8 +251,13 @@ Workflow:
 
   plan
     .command('validate')
-    .description('Validate a plan file (or stdin) against the schema')
+    .description('Validate a plan file (or stdin) against the schema (structural only; does not verify device or scene existence)')
     .argument('[file]', 'Path to plan.json, or "-" / omit to read stdin')
+    .addHelpText('after', `
+To check semantic validity (e.g., that deviceIds and sceneIds actually exist),
+use 'plan run --dry-run' which exercises name resolution and device lookup
+against the live API without executing any mutations.
+`)
     .action(async (file: string | undefined) => {
       let raw: unknown;
       try {

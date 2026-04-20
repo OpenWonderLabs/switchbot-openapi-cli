@@ -28,6 +28,7 @@ vi.mock('../../src/api/client.js', () => ({
 // Cache: keep deterministic across tests.
 const cacheMock = vi.hoisted(() => ({
   map: new Map<string, { type: string; name: string; category: 'physical' | 'ir' }>(),
+  statusMap: new Map<string, { fetchedAt: string; body: Record<string, unknown> }>(),
   getCachedDevice: vi.fn((id: string) => cacheMock.map.get(id) ?? null),
   getCachedTypeMap: vi.fn((ids?: Iterable<string>) => {
     const out = new Map<string, string>();
@@ -39,6 +40,7 @@ const cacheMock = vi.hoisted(() => ({
     return out;
   }),
   updateCacheFromDeviceList: vi.fn(),
+  loadStatusCache: vi.fn(() => ({ entries: Object.fromEntries(cacheMock.statusMap) })),
 }));
 vi.mock('../../src/devices/cache.js', () => ({
   getCachedDevice: cacheMock.getCachedDevice,
@@ -52,7 +54,7 @@ vi.mock('../../src/devices/cache.js', () => ({
   setCachedStatus: vi.fn(),
   clearStatusCache: vi.fn(),
   resetStatusCache: vi.fn(),
-  loadStatusCache: vi.fn(() => ({ entries: {} })),
+  loadStatusCache: cacheMock.loadStatusCache,
   describeCache: vi.fn(() => ({
     list: { path: '', exists: false },
     status: { path: '', exists: false, entryCount: 0 },
@@ -116,6 +118,7 @@ describe('devices batch', () => {
     apiMock.__instance.post.mockReset();
     apiMock.createClient.mockClear();
     cacheMock.map.clear();
+    cacheMock.statusMap.clear();
     cacheMock.getCachedDevice.mockClear();
     cacheMock.getCachedTypeMap.mockClear();
     flagsMock.dryRun = false;
@@ -400,5 +403,158 @@ describe('devices batch', () => {
     expect(parsed.data.plan.staggerMs).toBe(250);
     expect(parsed.data.plan.stepCount).toBe(2);
     expect(parsed.data.plan.steps.map((s: { deviceId: string }) => s.deviceId).sort()).toEqual(['BOT1', 'BOT2']);
+  });
+
+  it('--idempotency-key alias sets the same prefix as --idempotency-key-prefix', async () => {
+    flagsMock.dryRun = true;
+    apiMock.__instance.get.mockResolvedValue({ data: { statusCode: 100, body: DEVICE_LIST_BODY } });
+
+    const result = await runCli(registerDevicesCommand, [
+      '--json',
+      'devices',
+      'batch',
+      'turnOn',
+      '--filter',
+      'type=Bot',
+      '--plan',
+      '--idempotency-key',
+      'foo',
+    ]);
+
+    expect(result.exitCode).toBeNull();
+    const parsed = JSON.parse(result.stdout[0]);
+    const keys = parsed.data.plan.steps.map((s: { idempotencyKey?: string }) => s.idempotencyKey).sort();
+    expect(keys).toEqual(['foo-BOT1', 'foo-BOT2']);
+  });
+
+  it('rejects when both --idempotency-key and --idempotency-key-prefix are supplied', async () => {
+    flagsMock.dryRun = true;
+    apiMock.__instance.get.mockResolvedValue({ data: { statusCode: 100, body: DEVICE_LIST_BODY } });
+
+    const result = await runCli(registerDevicesCommand, [
+      'devices',
+      'batch',
+      'turnOn',
+      '--filter',
+      'type=Bot',
+      '--plan',
+      '--idempotency-key',
+      'foo',
+      '--idempotency-key-prefix',
+      'bar',
+    ]);
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr.join('\n')).toMatch(/either --idempotency-key or --idempotency-key-prefix/);
+  });
+
+  it('--skip-offline skips devices whose cached status is offline', async () => {
+    cacheMock.map.set('BOT1', { type: 'Bot', name: 'Kitchen', category: 'physical' });
+    cacheMock.map.set('BOT2', { type: 'Bot', name: 'Office', category: 'physical' });
+    cacheMock.statusMap.set('BOT2', {
+      fetchedAt: new Date().toISOString(),
+      body: { onlineStatus: 'offline', power: 'off' },
+    });
+    apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body: {} } });
+
+    const result = await runCli(registerDevicesCommand, [
+      '--json',
+      'devices',
+      'batch',
+      'turnOn',
+      '--ids',
+      'BOT1,BOT2',
+      '--skip-offline',
+    ]);
+
+    expect(result.exitCode).toBeNull();
+    expect(apiMock.__instance.post).toHaveBeenCalledTimes(1);
+    const parsed = JSON.parse(result.stdout[0]);
+    expect(parsed.data.summary.ok).toBe(1);
+    expect(parsed.data.summary.total).toBe(2);
+    expect(parsed.data.summary.skipped).toBe(1);
+    expect(parsed.data.skipped).toEqual([{ deviceId: 'BOT2', reason: 'offline' }]);
+    expect(parsed.data.succeeded[0].deviceId).toBe('BOT1');
+  });
+
+  it('without --skip-offline, offline-cached devices are still sent', async () => {
+    cacheMock.map.set('BOT1', { type: 'Bot', name: 'Kitchen', category: 'physical' });
+    cacheMock.map.set('BOT2', { type: 'Bot', name: 'Office', category: 'physical' });
+    cacheMock.statusMap.set('BOT2', {
+      fetchedAt: new Date().toISOString(),
+      body: { onlineStatus: 'offline', power: 'off' },
+    });
+    apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body: {} } });
+
+    const result = await runCli(registerDevicesCommand, [
+      '--json',
+      'devices',
+      'batch',
+      'turnOn',
+      '--ids',
+      'BOT1,BOT2',
+    ]);
+
+    expect(result.exitCode).toBeNull();
+    expect(apiMock.__instance.post).toHaveBeenCalledTimes(2);
+    const parsed = JSON.parse(result.stdout[0]);
+    expect(parsed.data.skipped).toBeUndefined();
+  });
+
+  it('bug28: batch over IR devices attaches subKind + verification and sets summary.unverifiableCount', async () => {
+    cacheMock.map.set('IR1', { type: 'Air Conditioner', name: 'Living Room AC', category: 'ir' });
+    cacheMock.map.set('IR2', { type: 'Air Conditioner', name: 'Bedroom AC', category: 'ir' });
+    apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body: {} } });
+
+    const result = await runCli(registerDevicesCommand, [
+      '--json',
+      'devices',
+      'batch',
+      'turnOff',
+      '--ids',
+      'IR1,IR2',
+    ]);
+
+    expect(result.exitCode).toBeNull();
+    const parsed = JSON.parse(result.stdout[0]);
+    expect(parsed.data.summary.ok).toBe(2);
+    expect(parsed.data.summary.unverifiableCount).toBe(2);
+
+    for (const s of parsed.data.succeeded) {
+      expect(s.subKind).toBe('ir-no-feedback');
+      expect(s.verification).toBeDefined();
+      expect(s.verification.verifiable).toBe(false);
+      expect(s.verification.reason).toBe(
+        'IR transmission is unidirectional; no receipt acknowledgment is possible.'
+      );
+      expect(s.verification.suggestedFollowup).toBe(
+        'Confirm visible change manually or via a paired state sensor.'
+      );
+    }
+  });
+
+  it('bug28: batch over physical devices does NOT attach subKind/verification and unverifiableCount is 0', async () => {
+    cacheMock.map.set('BOT1', { type: 'Bot', name: 'Kitchen', category: 'physical' });
+    cacheMock.map.set('BOT2', { type: 'Bot', name: 'Office', category: 'physical' });
+    apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body: {} } });
+
+    const result = await runCli(registerDevicesCommand, [
+      '--json',
+      'devices',
+      'batch',
+      'turnOn',
+      '--ids',
+      'BOT1,BOT2',
+    ]);
+
+    expect(result.exitCode).toBeNull();
+    const parsed = JSON.parse(result.stdout[0]);
+    expect(parsed.data.summary.ok).toBe(2);
+    expect(parsed.data.summary.unverifiableCount).toBe(0);
+
+    for (const s of parsed.data.succeeded) {
+      expect(s.subKind).toBeUndefined();
+      expect(s.verification).toBeUndefined();
+    }
   });
 });

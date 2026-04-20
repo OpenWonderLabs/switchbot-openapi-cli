@@ -199,7 +199,7 @@ describe('handleError', () => {
     expect(() => handleError(new ApiError('x', 190))).toThrow('__exit');
     const joined = errSpy.mock.calls.map((c) => String(c[0])).join('\n');
     expect(joined).toContain('Hint:');
-    expect(joined).toMatch(/devices list|devices describe/);
+    expect(joined).toMatch(/generic internal error/);
   });
 
   it('does not print a hint for unknown/unmapped codes', async () => {
@@ -231,77 +231,83 @@ describe('handleError', () => {
 
   describe('--json mode', () => {
     let originalArgv: string[];
+    let originalIsTTY: boolean | undefined;
     beforeEach(() => {
       originalArgv = process.argv;
       process.argv = ['node', 'cli', '--json', 'devices', 'status', 'X'];
+      originalIsTTY = process.stderr.isTTY;
+      // Force non-TTY so the human-readable stderr mirror is suppressed and
+      // the structured JSON envelope is the only output we assert on.
+      (process.stderr as { isTTY?: boolean }).isTTY = false;
     });
     afterEach(() => {
       process.argv = originalArgv;
+      (process.stderr as { isTTY?: boolean }).isTTY = originalIsTTY;
     });
 
-    it('outputs structured JSON error to stderr for ApiError', async () => {
+    it('outputs structured JSON error to stdout for ApiError (bug #SYS-1)', async () => {
       const { ApiError } = await import('../../src/api/client.js');
-      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
       vi.spyOn(process, 'exit').mockImplementation(() => {
         throw new Error('__exit');
       });
 
       expect(() => handleError(new ApiError('bad device', 190))).toThrow('__exit');
-      const raw = errSpy.mock.calls[0][0];
+      const raw = logSpy.mock.calls[0][0];
       const parsed = JSON.parse(raw);
       expect(parsed.schemaVersion).toBe('1.1');
       expect(parsed.error.code).toBe(190);
       expect(parsed.error.message).toBe('bad device');
-      expect(parsed.error.hint).toMatch(/devices/);
+      expect(parsed.error.hint).toMatch(/generic internal error/);
     });
 
     it('marks 429 errors as retryable when ApiError.retryable is true', async () => {
       const { ApiError } = await import('../../src/api/client.js');
-      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
       vi.spyOn(process, 'exit').mockImplementation(() => {
         throw new Error('__exit');
       });
 
       // Simulate what client.ts creates: retryable: true set explicitly.
       expect(() => handleError(new ApiError('rate limited', 429, { retryable: true, hint: 'check quota' }))).toThrow('__exit');
-      const parsed = JSON.parse(errSpy.mock.calls[0][0]);
+      const parsed = JSON.parse(logSpy.mock.calls[0][0]);
       expect(parsed.error.retryable).toBe(true);
       expect(parsed.error.hint).toBe('check quota');
     });
 
     it('prefers ApiError.hint over errorHint fallback when both exist', async () => {
       const { ApiError } = await import('../../src/api/client.js');
-      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
       vi.spyOn(process, 'exit').mockImplementation(() => {
         throw new Error('__exit');
       });
 
       // code 429 has an errorHint, but the explicit hint should win.
       expect(() => handleError(new ApiError('over limit', 429, { retryable: true, hint: 'custom hint from client' }))).toThrow('__exit');
-      const parsed = JSON.parse(errSpy.mock.calls[0][0]);
+      const parsed = JSON.parse(logSpy.mock.calls[0][0]);
       expect(parsed.error.hint).toBe('custom hint from client');
     });
 
     it('does NOT set retryable when ApiError.retryable is false', async () => {
       const { ApiError } = await import('../../src/api/client.js');
-      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
       vi.spyOn(process, 'exit').mockImplementation(() => {
         throw new Error('__exit');
       });
 
       expect(() => handleError(new ApiError('auth failed', 401, { retryable: false }))).toThrow('__exit');
-      const parsed = JSON.parse(errSpy.mock.calls[0][0]);
+      const parsed = JSON.parse(logSpy.mock.calls[0][0]);
       expect(parsed.error.retryable).toBeUndefined();
     });
 
     it('outputs structured JSON error for generic Error', () => {
-      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
       vi.spyOn(process, 'exit').mockImplementation(() => {
         throw new Error('__exit');
       });
 
       expect(() => handleError(new Error('kaboom'))).toThrow('__exit');
-      const parsed = JSON.parse(errSpy.mock.calls[0][0]);
+      const parsed = JSON.parse(logSpy.mock.calls[0][0]);
       expect(parsed.error.code).toBe(1);
       expect(parsed.error.message).toBe('kaboom');
     });
@@ -348,5 +354,74 @@ describe('buildErrorPayload', () => {
     const p = buildErrorPayload(new ApiError('not found', 152));
     expect(p.hint).toContain('deviceId');
     expect(p.transient).toBe(false);
+  });
+
+  it('ApiError code 190 → subKind device-internal-error (bug #27)', async () => {
+    const { ApiError } = await import('../../src/api/client.js');
+    const p = buildErrorPayload(new ApiError('internal error', 190));
+    expect(p.subKind).toBe('device-internal-error');
+    expect(p.hint).toMatch(/generic internal error/);
+  });
+
+  it('ApiError code 3005 → subKind command-not-supported with --type customize hint (bug #29)', async () => {
+    const { ApiError } = await import('../../src/api/client.js');
+    const p = buildErrorPayload(new ApiError('invalid value', 3005, { transient: false }));
+    expect(p.subKind).toBe('command-not-supported');
+    expect(p.hint).toMatch(/--type customize/);
+  });
+});
+
+describe('handleError under --json (bug #SYS-1)', () => {
+  const originalArgv = process.argv;
+  const originalIsTTY = process.stderr.isTTY;
+  beforeEach(() => {
+    process.argv = ['node', 'test', '--json'];
+  });
+  afterEach(() => {
+    process.argv = originalArgv;
+    (process.stderr as { isTTY?: boolean }).isTTY = originalIsTTY;
+    vi.restoreAllMocks();
+  });
+
+  it('routes the structured error envelope to stdout, not stderr', () => {
+    (process.stderr as { isTTY?: boolean }).isTTY = false;
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(process, 'exit').mockImplementation((() => {
+      throw new Error('__exit');
+    }) as never);
+
+    expect(() => handleError(new Error('boom'))).toThrow('__exit');
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    const payload = JSON.parse(String(logSpy.mock.calls[0][0]));
+    expect(payload.schemaVersion).toBe(SCHEMA_VERSION);
+    expect(payload.error.message).toBe('boom');
+    expect(payload.error.kind).toBe('runtime');
+    // In non-TTY mode, stderr stays clean so `cli --json | jq` is unpolluted.
+    expect(errSpy).not.toHaveBeenCalled();
+  });
+
+  it('emits a human-readable one-liner on stderr when stderr is a TTY', () => {
+    (process.stderr as { isTTY?: boolean }).isTTY = true;
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(process, 'exit').mockImplementation((() => {
+      throw new Error('__exit');
+    }) as never);
+
+    expect(() => handleError(new Error('ttys eek'))).toThrow('__exit');
+    expect(errSpy).toHaveBeenCalled();
+    expect(String(errSpy.mock.calls[0][0])).toContain('ttys eek');
+  });
+
+  it('preserves exit code 2 for usage errors under --json', () => {
+    (process.stderr as { isTTY?: boolean }).isTTY = false;
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {
+      throw new Error('__exit');
+    }) as never);
+
+    expect(() => handleError(new UsageError('bad input'))).toThrow('__exit');
+    expect(exitSpy).toHaveBeenCalledWith(2);
   });
 });

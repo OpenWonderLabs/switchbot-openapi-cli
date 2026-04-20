@@ -19,6 +19,12 @@ function makeProgram(): Command {
   const describe = devices.command('describe').description('Show full device info');
   describe.argument('<id>', 'Device ID');
   describe.option('--json', 'JSON output');
+  // devices meta subcommands (bug #40)
+  const meta = devices.command('meta').description('Manage local device metadata');
+  meta.command('set').description('Set metadata for a device');
+  meta.command('get').description('Get metadata for a device');
+  meta.command('list').description('List all device metadata');
+  meta.command('clear').description('Clear metadata for a device');
 
   const history = p.command('history').description('Device history and aggregation');
   history.command('aggregate').description('Aggregate device history');
@@ -223,5 +229,14 @@ describe('capabilities B3/B4', () => {
     const out = await runCapabilitiesWith([]);
     const mcp = (out.surfaces as Record<string, { tools: string[] }>).mcp;
     expect(mcp.tools).toContain('aggregate_device_history');
+  });
+
+  it('devices meta set appears in compact capabilities output (bug #40)', async () => {
+    const out = await runCapabilitiesWith(['--compact']);
+    const cmds = out.commands as Array<{ name: string; agentSafetyTier: string; mutating: boolean }>;
+    const metaSet = cmds.find((c) => c.name === 'devices meta set');
+    expect(metaSet).toBeDefined();
+    expect(metaSet!.agentSafetyTier).toBe('action');
+    expect(metaSet!.mutating).toBe(true);
   });
 });

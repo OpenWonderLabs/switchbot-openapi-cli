@@ -1,11 +1,11 @@
 import { Command } from 'commander';
 import { enumArg, stringArg } from '../utils/arg-parsers.js';
-import { printTable, printKeyValue, printJson, isJsonMode, handleError, UsageError } from '../utils/output.js';
+import { printTable, printKeyValue, printJson, isJsonMode, handleError, UsageError, emitJsonError } from '../utils/output.js';
 import { resolveFormat, resolveFields, renderRows } from '../utils/format.js';
 import { findCatalogEntry, getEffectiveCatalog, DeviceCatalogEntry } from '../devices/catalog.js';
 import { getCachedDevice } from '../devices/cache.js';
 import { loadDeviceMeta } from '../devices/device-meta.js';
-import { resolveDeviceId, NameResolveStrategy } from '../utils/name-resolver.js';
+import { resolveDeviceId, NameResolveStrategy, ALL_STRATEGIES } from '../utils/name-resolver.js';
 import {
   fetchDeviceList,
   fetchDeviceStatus,
@@ -25,6 +25,7 @@ import { registerExplainCommand } from './explain.js';
 import { registerExpandCommand } from './expand.js';
 import { registerDevicesMetaCommand } from './device-meta.js';
 import { isDryRun } from '../utils/flags.js';
+import { DryRunSignal } from '../api/client.js';
 
 export function registerDevicesCommand(program: Command): void {
   const COMMAND_TYPES = ['command', 'customize'] as const;
@@ -87,10 +88,12 @@ Examples:
   $ switchbot devices list --filter type="Air Conditioner"
   $ switchbot devices list --filter category=ir
   $ switchbot devices list --filter name=living,category=physical
+  $ switchbot devices list --filter 'name~living'              # explicit substring
+  $ switchbot devices list --filter 'type=/Air.*/'             # regex (case-insensitive)
 `)
     .option('--wide', 'Show all columns (controlType, family, roomID, room, hub, cloud)')
     .option('--show-hidden', 'Include devices hidden via "devices meta set --hide"')
-    .option('--filter <expr>', 'Filter devices: "type=X", "name=X", "category=physical|ir", "room=X" (comma-separated key=value pairs)', stringArg('--filter'))
+    .option('--filter <expr>', 'Filter devices: comma-separated clauses. Each clause is "key=value" (substring; exact for category), "key~value" (explicit substring), or "key=/regex/" (case-insensitive regex). Supported keys: type, name, category, room.', stringArg('--filter'))
     .action(async (options: { wide?: boolean; showHidden?: boolean; filter?: string }) => {
       try {
         const body = await fetchDeviceList();
@@ -100,34 +103,86 @@ Examples:
 
         const hubLocation = buildHubLocationMap(deviceList);
 
-        // Parse --filter into a simple predicate map
-        interface ListFilter { type?: string; name?: string; category?: string; room?: string; }
-        let listFilter: ListFilter | null = null;
+        // Parse --filter into a list of clauses. Each comma-separated pair is
+        // one of three shapes:
+        //   key=value      — current behavior (substring; exact for category)
+        //   key~value      — explicit case-insensitive substring
+        //   key=/pattern/  — case-insensitive regex
+        interface FilterClause {
+          key: 'type' | 'name' | 'category' | 'room';
+          op: 'eq' | 'sub' | 'regex';
+          raw: string;
+          regex?: RegExp;
+        }
+        const SUPPORTED_KEYS = ['type', 'name', 'category', 'room'] as const;
+        let listClauses: FilterClause[] | null = null;
         if (options.filter) {
-          listFilter = {};
+          listClauses = [];
           for (const pair of options.filter.split(',')) {
-            const eq = pair.indexOf('=');
-            if (eq === -1) throw new UsageError(`Invalid --filter pair "${pair.trim()}". Expected key=value.`);
-            const k = pair.slice(0, eq).trim();
-            const v = pair.slice(eq + 1).trim();
-            if (!['type', 'name', 'category', 'room'].includes(k)) {
-              throw new UsageError(`Unknown --filter key "${k}". Supported: type, name, category, room.`);
+            const trimmed = pair.trim();
+            if (!trimmed) continue;
+            const regexMatch = /^([^=~]+)=\/(.*)\/$/.exec(trimmed);
+            const tildeIdx = trimmed.indexOf('~');
+            const eqIdx = trimmed.indexOf('=');
+            let key: string;
+            let op: 'eq' | 'sub' | 'regex';
+            let raw: string;
+            let regex: RegExp | undefined;
+            if (regexMatch) {
+              key = regexMatch[1].trim();
+              op = 'regex';
+              raw = regexMatch[2];
+              try {
+                regex = new RegExp(raw, 'i');
+              } catch (err) {
+                throw new UsageError(
+                  `Invalid regex in --filter "${trimmed}": ${(err as Error).message}`,
+                );
+              }
+            } else if (tildeIdx !== -1 && (eqIdx === -1 || tildeIdx < eqIdx)) {
+              key = trimmed.slice(0, tildeIdx).trim();
+              op = 'sub';
+              raw = trimmed.slice(tildeIdx + 1).trim().toLowerCase();
+            } else if (eqIdx !== -1) {
+              key = trimmed.slice(0, eqIdx).trim();
+              op = 'eq';
+              raw = trimmed.slice(eqIdx + 1).trim().toLowerCase();
+            } else {
+              throw new UsageError(
+                `Invalid --filter pair "${trimmed}". Expected key=value, key~value, or key=/regex/.`,
+              );
             }
-            (listFilter as Record<string, string>)[k] = v.toLowerCase();
+            if (!(SUPPORTED_KEYS as readonly string[]).includes(key)) {
+              throw new UsageError(
+                `Unknown --filter key "${key}". Supported: ${SUPPORTED_KEYS.join(', ')}.`,
+              );
+            }
+            listClauses.push({ key: key as FilterClause['key'], op, raw, regex });
           }
         }
 
         const matchesFilter = (entry: { type: string; name: string; category: 'physical' | 'ir'; room: string }) => {
-          if (!listFilter) return true;
-          if (listFilter.type && !entry.type.toLowerCase().includes(listFilter.type)) return false;
-          if (listFilter.name && !entry.name.toLowerCase().includes(listFilter.name)) return false;
-          if (listFilter.category && entry.category !== listFilter.category) return false;
-          if (listFilter.room && !entry.room.toLowerCase().includes(listFilter.room)) return false;
+          if (!listClauses || listClauses.length === 0) return true;
+          for (const c of listClauses) {
+            const fieldVal = (entry as Record<string, string>)[c.key] ?? '';
+            const lower = fieldVal.toLowerCase();
+            let ok: boolean;
+            if (c.op === 'regex') {
+              ok = c.regex!.test(fieldVal);
+            } else if (c.op === 'sub') {
+              ok = lower.includes(c.raw);
+            } else if (c.key === 'category') {
+              ok = lower === c.raw;
+            } else {
+              ok = lower.includes(c.raw);
+            }
+            if (!ok) return false;
+          }
           return true;
         };
 
         if (fmt === 'json' && process.argv.includes('--json')) {
-          if (listFilter) {
+          if (listClauses) {
             const filteredDeviceList = deviceList.filter((d) =>
               matchesFilter({ type: d.deviceType || '', name: d.deviceName, category: 'physical', room: d.roomName || '' })
             );
@@ -186,20 +241,20 @@ Examples:
         }
 
         if (rows.length === 0 && fmt === 'table') {
-          console.log(listFilter ? 'No devices matched the filter.' : 'No devices found');
+          console.log(listClauses ? 'No devices matched the filter.' : 'No devices found');
           return;
         }
 
         const defaultFields = options.wide ? undefined : narrowHeaders;
         // Accept API field names and short aliases alongside canonical column names
         const DEVICE_LIST_ALIASES: Record<string, string> = {
-          name: 'deviceName', deviceType: 'type', type: 'type',
+          id: 'deviceId', name: 'deviceName', deviceType: 'type', type: 'type',
           roomName: 'room', familyName: 'family',
           hubDeviceId: 'hub', enableCloudService: 'cloud',
         };
         renderRows(wideHeaders, rows, fmt, userFields ?? defaultFields, DEVICE_LIST_ALIASES);
         if (fmt === 'table') {
-          const totalLabel = listFilter
+          const totalLabel = listClauses
             ? `${rows.length} match(es) (${deviceList.length} physical + ${infraredRemoteList.length} IR before filter)`
             : `${deviceList.length} physical device(s), ${infraredRemoteList.length} IR remote device(s)`;
           console.log(`\nTotal: ${totalLabel}`);
@@ -216,7 +271,7 @@ Examples:
     .description('Query the real-time status of a specific device')
     .argument('[deviceId]', 'Device ID from "devices list" (or use --name or --ids)')
     .option('--name <query>', 'Resolve device by fuzzy name instead of deviceId', stringArg('--name'))
-    .option('--name-strategy <s>', 'Name match strategy: exact|prefix|substring|fuzzy|first|require-unique (default: fuzzy)', stringArg('--name-strategy'))
+    .option('--name-strategy <s>', `Name match strategy: ${ALL_STRATEGIES.join('|')} (default: fuzzy)`, stringArg('--name-strategy'))
     .option('--name-type <type>', 'Narrow --name by device type (e.g. "Bot", "Color Bulb")', stringArg('--name-type'))
     .option('--name-category <cat>', 'Narrow --name by category: physical|ir', enumArg('--name-category', ['physical', 'ir'] as const))
     .option('--name-room <room>', 'Narrow --name by room name (substring match)', stringArg('--name-room'))
@@ -316,9 +371,10 @@ Examples:
     .description('Send a control command to a device')
     .argument('[deviceId]', 'Target device ID (or use --name)')
     .argument('[cmd]', 'Command name, e.g. turnOn, turnOff, setColor, setBrightness, setAll, startClean')
-    .argument('[parameter]', 'Command parameter. Omit for commands like turnOn/turnOff (defaults to "default"). Format depends on the command (see below).')
+    .argument('[parameter]', 'Command parameter. Omit for commands like turnOn/turnOff (defaults to "default"). Format depends on the command (see below). Negative numbers like -1 are accepted as-is (use `--` before them only if Commander mis-parses in your shell).')
+    .allowUnknownOption()
     .option('--name <query>', 'Resolve device by fuzzy name instead of deviceId', stringArg('--name'))
-    .option('--name-strategy <s>', 'Name match strategy: exact|prefix|substring|fuzzy|first|require-unique (default for command: require-unique)', stringArg('--name-strategy'))
+    .option('--name-strategy <s>', `Name match strategy: ${ALL_STRATEGIES.join('|')} (default for command: require-unique)`, stringArg('--name-strategy'))
     .option('--name-type <type>', 'Narrow --name by device type (e.g. "Bot", "Color Bulb")', stringArg('--name-type'))
     .option('--name-category <cat>', 'Narrow --name by category: physical|ir', enumArg('--name-category', ['physical', 'ir'] as const))
     .option('--name-room <room>', 'Narrow --name by room name (substring match)', stringArg('--name-room'))
@@ -371,6 +427,10 @@ Examples:
   $ switchbot devices command <lockId> unlock --yes
 `)
     .action(async (deviceIdArg: string | undefined, cmdArg: string | undefined, parameter: string | undefined, options: { name?: string; nameStrategy?: string; nameType?: string; nameCategory?: 'physical' | 'ir'; nameRoom?: string; type: string; yes?: boolean; idempotencyKey?: string }) => {
+      // Declared outside try so the DryRunSignal catch branch can reference them.
+      let _deviceId: string | undefined;
+      let _cmd: string | undefined;
+      let _parsedParam: unknown;
       try {
         // BUG-FIX: When --name is provided, Commander fills positionals left-to-right
         // starting at [deviceId]. Shift them back to their semantic slots.
@@ -404,6 +464,7 @@ Examples:
           category: options.nameCategory,
           room: options.nameRoom,
         });
+        _deviceId = deviceId;
         if (!getCachedDevice(deviceId)) {
           console.error(
             `Note: device ${deviceId} is not in the local cache — run 'switchbot devices list' first to enable command validation.`,
@@ -416,7 +477,7 @@ Examples:
           const obj: Record<string, unknown> = { code: 2, kind: 'usage', message: err.message };
           if (err.hint) obj.hint = err.hint;
           obj.context = { validationKind: err.kind };
-          console.error(JSON.stringify({ error: obj }));
+          emitJsonError(obj);
         } else {
           console.error(`Error: ${err.message}`);
           if (err.hint) console.error(err.hint);
@@ -451,14 +512,12 @@ Examples:
         const paramCheck = validateParameter(cachedForParam.type, cmd, parameter);
         if (!paramCheck.ok) {
           if (isJsonMode()) {
-            console.error(JSON.stringify({
-              error: {
-                code: 2,
-                kind: 'usage',
-                message: paramCheck.error,
-                context: { command: cmd, deviceType: cachedForParam.type, deviceId },
-              },
-            }));
+            emitJsonError({
+              code: 2,
+              kind: 'usage',
+              message: paramCheck.error,
+              context: { command: cmd, deviceType: cachedForParam.type, deviceId },
+            });
           } else {
             console.error(`Error: ${paramCheck.error}`);
           }
@@ -476,17 +535,15 @@ Examples:
         const typeLabel = cachedForGuard?.type ?? 'unknown';
         const reason = getDestructiveReason(cachedForGuard?.type, cmd, options.type);
         if (isJsonMode()) {
-          console.error(JSON.stringify({
-            error: {
-              code: 2,
-              kind: 'guard',
-              message: `"${cmd}" on ${typeLabel} is destructive and requires --yes.`,
-              hint: reason
-                ? `Re-run with --yes to confirm. Reason: ${reason}`
-                : 'Re-run with --yes to confirm, or --dry-run to preview without sending.',
-              context: { command: cmd, deviceType: typeLabel, deviceId, ...(reason ? { destructiveReason: reason } : {}) },
-            },
-          }));
+          emitJsonError({
+            code: 2,
+            kind: 'guard',
+            message: `"${cmd}" on ${typeLabel} is destructive and requires --yes.`,
+            hint: reason
+              ? `Re-run with --yes to confirm. Reason: ${reason}`
+              : 'Re-run with --yes to confirm, or --dry-run to preview without sending.',
+            context: { command: cmd, deviceType: typeLabel, deviceId, ...(reason ? { destructiveReason: reason } : {}) },
+          });
         } else {
           console.error(
             `Refusing to run destructive command "${cmd}" on ${typeLabel} without --yes.`
@@ -513,6 +570,9 @@ Examples:
             // keep as string
           }
         }
+        // Capture for DryRunSignal catch branch (which runs after executeCommand throws).
+        _cmd = cmd;
+        _parsedParam = parsedParam;
 
         const body = await executeCommand(
           deviceId,
@@ -558,6 +618,16 @@ Examples:
         // Re-throw mock process.exit signals (Vitest intercepts process.exit as thrown
         // Error('__exit__')) so they aren't double-handled and the exit code is preserved.
         if (error instanceof Error && error.message === '__exit__') throw error;
+        if (error instanceof DryRunSignal) {
+          const commandType = (options.type ?? 'command') as string;
+          const wouldSend = { deviceId: _deviceId, command: _cmd, parameter: _parsedParam, commandType };
+          if (isJsonMode()) {
+            printJson({ dryRun: true, wouldSend });
+          } else {
+            console.log(`[dry-run] Would POST devices/${_deviceId}/commands with ${JSON.stringify({ command: _cmd, parameter: _parsedParam, commandType })}`);
+          }
+          return;
+        }
         handleError(error);
       }
     });
@@ -648,7 +718,7 @@ Examples:
     .description('Describe a device by ID: metadata + supported commands + status fields (1 API call)')
     .argument('[deviceId]', 'Target device ID (or use --name)')
     .option('--name <query>', 'Resolve device by fuzzy name instead of deviceId', stringArg('--name'))
-    .option('--name-strategy <s>', 'Name match strategy: exact|prefix|substring|fuzzy|first|require-unique (default: fuzzy)', stringArg('--name-strategy'))
+    .option('--name-strategy <s>', `Name match strategy: ${ALL_STRATEGIES.join('|')} (default: fuzzy)`, stringArg('--name-strategy'))
     .option('--name-type <type>', 'Narrow --name by device type', stringArg('--name-type'))
     .option('--name-category <cat>', 'Narrow --name by category: physical|ir', enumArg('--name-category', ['physical', 'ir'] as const))
     .option('--name-room <room>', 'Narrow --name by room name (substring match)', stringArg('--name-room'))
@@ -757,8 +827,19 @@ Examples:
         }
       } catch (error) {
         if (error instanceof DeviceNotFoundError) {
-          console.error(error.message);
-          console.error(`Try 'switchbot devices list' to see the full list.`);
+          const message = `${error.message} Try 'switchbot devices list' to see the full list.`;
+          if (isJsonMode()) {
+            emitJsonError({
+              code: 1,
+              kind: 'runtime',
+              message,
+              errorClass: 'runtime',
+              transient: false,
+            });
+          } else {
+            console.error(error.message);
+            console.error(`Try 'switchbot devices list' to see the full list.`);
+          }
           process.exit(1);
         }
         handleError(error);

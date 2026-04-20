@@ -110,6 +110,9 @@ describe('scenes command', () => {
 
   describe('execute', () => {
     it('POSTs to the scene execute endpoint and prints success', async () => {
+      apiMock.__instance.get.mockResolvedValue({
+        data: { body: [{ sceneId: 'SCENE-1', sceneName: 'Morning' }] },
+      });
       apiMock.__instance.post.mockResolvedValue({ data: {} });
       const res = await runCli(registerScenesCommand, ['scenes', 'execute', 'SCENE-1']);
       expect(apiMock.__instance.post).toHaveBeenCalledWith('/v1.1/scenes/SCENE-1/execute');
@@ -117,6 +120,9 @@ describe('scenes command', () => {
     });
 
     it('exits 1 when execution fails', async () => {
+      apiMock.__instance.get.mockResolvedValue({
+        data: { body: [{ sceneId: 'missing', sceneName: 'X' }] },
+      });
       apiMock.__instance.post.mockRejectedValue(new Error('not found'));
       const res = await runCli(registerScenesCommand, ['scenes', 'execute', 'missing']);
       expect(res.exitCode).toBe(1);
@@ -127,6 +133,20 @@ describe('scenes command', () => {
       const res = await runCli(registerScenesCommand, ['scenes', 'execute']);
       expect(apiMock.__instance.post).not.toHaveBeenCalled();
       expect(res.stderr.join('\n').toLowerCase()).toContain('missing required');
+    });
+
+    it('exits 2 with scene_not_found and never calls executeScene for bogus sceneId (bug #31)', async () => {
+      apiMock.__instance.get.mockResolvedValue({
+        data: { body: [{ sceneId: 'S1', sceneName: 'Good Morning' }] },
+      });
+      const res = await runCli(registerScenesCommand, ['scenes', 'execute', 'BOGUS-ID', '--json']);
+      expect(res.exitCode).toBe(2);
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
+      // Bug #SYS-1: --json errors now emit on stdout so piped consumers see them.
+      const out = res.stdout.join('\n');
+      const parsed = JSON.parse(out);
+      expect(parsed.error?.context?.error).toBe('scene_not_found');
+      expect(parsed.error?.context?.sceneId).toBe('BOGUS-ID');
     });
   });
 
@@ -160,7 +180,8 @@ describe('scenes command', () => {
       });
       const res = await runCli(registerScenesCommand, ['scenes', 'describe', 'MISSING', '--json']);
       expect(res.exitCode).toBe(2);
-      const out = res.stderr.join('\n');
+      // Bug #SYS-1: --json errors now emit on stdout so piped consumers see them.
+      const out = res.stdout.join('\n');
       const parsed = JSON.parse(out);
       expect(parsed.error?.context?.error).toBe('scene_not_found');
       expect(parsed.error?.context?.sceneId).toBe('MISSING');

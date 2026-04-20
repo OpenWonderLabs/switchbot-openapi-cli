@@ -374,6 +374,16 @@ describe('devices command', () => {
       expect(lines[1]).not.toContain('Living Lamp');
     });
 
+    it('--fields id,name aliases resolve to deviceId/deviceName columns (bug #22)', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list', '--format', 'tsv', '--fields', 'id,name']);
+      const lines = res.stdout.join('\n').split('\n');
+      // Header row must show the resolved canonical column names
+      expect(lines[0]).toBe('deviceId\tdeviceName');
+      // Data rows must contain the device id and name values
+      expect(lines[1]).toBe('ABC123\tLiving Lamp');
+    });
+
     it('--format=id outputs one deviceId per line', async () => {
       apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
       const res = await runCli(registerDevicesCommand, ['devices', 'list', '--format', 'id']);
@@ -438,6 +448,39 @@ describe('devices command', () => {
       const out = JSON.parse(res.stdout.join('\n'));
       expect(out.data.deviceList).toHaveLength(3);
       expect(out.data.infraredRemoteList).toHaveLength(0);
+    });
+
+    it('--filter name~Kitchen uses substring match (bug #39)', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list', '--filter', 'name~Kitchen', '--json']);
+      const out = JSON.parse(res.stdout.join('\n'));
+      expect(out.data.deviceList).toHaveLength(1);
+      expect(out.data.deviceList[0].deviceId).toBe('BLE-001');
+    });
+
+    it('--filter type=/regex/ uses case-insensitive regex (bug #39)', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list', '--filter', 'type=/^Strip.*/', '--json']);
+      const out = JSON.parse(res.stdout.join('\n'));
+      expect(out.data.deviceList).toHaveLength(1);
+      expect(out.data.deviceList[0].deviceId).toBe('NOHUB-1');
+    });
+
+    it('--filter with invalid regex exits 2 with UsageError (bug #39)', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list', '--filter', 'name=/[unterminated/']);
+      expect(res.exitCode).toBe(2);
+      expect(res.stderr.join('\n')).toMatch(/Invalid regex/i);
+    });
+
+    it('--filter combines AND clauses across ops (bug #39)', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, [
+        'devices', 'list', '--filter', 'category=physical,name~Lamp', '--json',
+      ]);
+      const out = JSON.parse(res.stdout.join('\n'));
+      expect(out.data.deviceList).toHaveLength(1);
+      expect(out.data.deviceList[0].deviceId).toBe('ABC123');
     });
   });
 
@@ -873,6 +916,15 @@ describe('devices command', () => {
     it('setBrightness 100 (max)', async () => {
       await runCmd('setBrightness', '100');
       expectPost('setBrightness', 100);
+    });
+    it('setBrightness -1 (negative positional parameter reaches validation)', async () => {
+      // Regression for bug #53: Commander used to swallow "-1" as an unknown
+      // option token. With allowUnknownOption on the `command` subcommand
+      // negative numbers are now treated as the parameter positional and
+      // reach the API (the device then returns 190 for out-of-range values,
+      // but that's a device-layer concern, not a CLI parsing failure).
+      await runCmd('setBrightness', '-1');
+      expectPost('setBrightness', -1);
     });
     it('setColorTemperature', async () => {
       await runCmd('setColorTemperature', '4000');
@@ -1808,7 +1860,9 @@ describe('devices command', () => {
         '--json', 'devices', 'command', LOCK_ID, 'unlock',
       ]);
       expect(res.exitCode).toBe(2);
-      const parsed = JSON.parse(res.stderr.join('\n'));
+      // Bug #SYS-1: --json errors now go to stdout so piped consumers can
+      // decode them the same way as success envelopes.
+      const parsed = JSON.parse(res.stdout.join('\n'));
       expect(parsed.error.kind).toBe('guard');
       expect(parsed.error.code).toBe(2);
       expect(parsed.error.context.deviceId).toBe(LOCK_ID);
@@ -2059,6 +2113,49 @@ describe('devices command', () => {
         '/v1.1/devices/BULB-FUZZY/commands',
         { command: 'setColor', parameter: '255:0:0', commandType: 'command' }
       );
+    });
+  });
+
+  // =====================================================================
+  // command — dry-run structured output (bug #36)
+  // =====================================================================
+  describe('command — dry-run output', () => {
+    const DRY_ID = 'DRY-DEV-1';
+
+    beforeEach(() => {
+      // Make post throw DryRunSignal (simulates --dry-run interceptor)
+      apiMock.__instance.post.mockImplementation(async () => {
+        throw new apiMock.DryRunSignal('POST', `/v1.1/devices/${DRY_ID}/commands`);
+      });
+    });
+
+    it('emits structured JSON with dryRun:true when --dry-run --json', async () => {
+      const res = await runCli(registerDevicesCommand, [
+        '--dry-run', '--json', 'devices', 'command', DRY_ID, 'turnOff',
+      ]);
+      expect(res.exitCode).toBeNull();
+      // post was called (and threw DryRunSignal — that's the mechanism), but the API
+      // result was never used; we verify the structured output instead.
+      expect(apiMock.__instance.post).toHaveBeenCalledTimes(1);
+      // stdout must have valid JSON
+      const out = res.stdout.join('\n');
+      expect(out).toBeTruthy();
+      const parsed = JSON.parse(out);
+      expect(parsed.schemaVersion).toBe('1.1');
+      expect(parsed.data.dryRun).toBe(true);
+      expect(parsed.data.wouldSend.deviceId).toBe(DRY_ID);
+      expect(parsed.data.wouldSend.command).toBe('turnOff');
+      expect(parsed.data.wouldSend.commandType).toBe('command');
+    });
+
+    it('emits human-readable dry-run message to stdout when --dry-run (no --json)', async () => {
+      const res = await runCli(registerDevicesCommand, [
+        '--dry-run', 'devices', 'command', DRY_ID, 'turnOn',
+      ]);
+      expect(res.exitCode).toBeNull();
+      const out = res.stdout.join('\n');
+      expect(out).toMatch(/dry-run/i);
+      expect(out).toContain(DRY_ID);
     });
   });
 });

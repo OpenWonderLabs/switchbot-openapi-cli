@@ -163,4 +163,44 @@ describe('cache clear', () => {
     expect(result.exitCode).toBeNull();
     expect(result.stdout.join('\n')).toMatch(/Cleared/);
   });
+
+  it('--status shorthand clears only status cache (bug #35)', async () => {
+    updateCacheFromDeviceList(SAMPLE_BODY);
+    setCachedStatus('BOT1', { power: 'on' });
+
+    const listFile = path.join(tmpHome, '.switchbot', 'devices.json');
+    const statusFile = path.join(tmpHome, '.switchbot', 'status.json');
+
+    const result = await runCli(registerCacheCommand, ['cache', 'clear', '--status']);
+    expect(result.exitCode).toBeNull();
+    expect(fs.existsSync(listFile)).toBe(true);
+    expect(fs.existsSync(statusFile)).toBe(false);
+    expect(result.stdout.join('\n')).toMatch(/Cleared:.*status/);
+  });
+
+  it('--list shorthand clears only list cache (bug #35)', async () => {
+    updateCacheFromDeviceList(SAMPLE_BODY);
+    setCachedStatus('BOT1', { power: 'on' });
+
+    const listFile = path.join(tmpHome, '.switchbot', 'devices.json');
+    const statusFile = path.join(tmpHome, '.switchbot', 'status.json');
+
+    const result = await runCli(registerCacheCommand, ['cache', 'clear', '--list']);
+    expect(result.exitCode).toBeNull();
+    expect(fs.existsSync(listFile)).toBe(false);
+    expect(fs.existsSync(statusFile)).toBe(true);
+    expect(result.stdout.join('\n')).toMatch(/Cleared:.*list/);
+  });
+
+  it('--status + --list together exits 2 (bug #35)', async () => {
+    const result = await runCli(registerCacheCommand, ['cache', 'clear', '--status', '--list']);
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr.join('\n')).toMatch(/mutually exclusive/i);
+  });
+
+  it('--status combined with --key exits 2 (bug #35)', async () => {
+    const result = await runCli(registerCacheCommand, ['cache', 'clear', '--status', '--key', 'status']);
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr.join('\n')).toMatch(/cannot be combined with --key/i);
+  });
 });

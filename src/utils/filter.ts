@@ -2,12 +2,21 @@ import type { Device, InfraredDevice } from '../lib/devices.js';
 
 /**
  * A parsed filter clause. Each clause is an (op, key, value) triple that runs
- * against a candidate device. All clauses from a single expression are AND-ed.
+ * against a candidate string. All clauses from a single expression are AND-ed.
+ *
+ * Three operators (shared across `devices list`, `devices batch`,
+ * `events tail` / `mqtt-tail`):
+ *   key=value      — case-insensitive substring (exact for `category`)
+ *   key~value      — explicit case-insensitive substring
+ *   key=/pattern/  — case-insensitive regex
  */
+export type FilterOp = 'eq' | 'sub' | 'regex';
+
 export interface FilterClause {
-  key: 'type' | 'family' | 'room' | 'category';
-  op: '=' | '~=';
-  value: string;
+  key: string;
+  op: FilterOp;
+  raw: string;
+  regex?: RegExp;
 }
 
 export class FilterSyntaxError extends Error {
@@ -17,47 +26,126 @@ export class FilterSyntaxError extends Error {
   }
 }
 
-const VALID_KEYS: FilterClause['key'][] = ['type', 'family', 'room', 'category'];
-
 /**
- * Parse a filter expression like "type=Bot,family=Home" into discrete clauses.
+ * Parse a comma-separated filter expression into discrete clauses.
  *
- * Grammar:
- *   expr    := clause ("," clause)*
- *   clause  := KEY OP VALUE
- *   KEY     := type | family | room | category
- *   OP      := "=" | "~="
- *   VALUE   := any non-empty string (no comma — split at the clause boundary)
+ * Grammar (per clause, recognition order):
+ *   1. key=/pattern/   → regex (case-insensitive); invalid regex throws.
+ *   2. key~value       → substring (case-insensitive).
+ *   3. key=value       → 'eq' op (substring; caller decides whether to treat
+ *                        as exact for specific keys via matchClause's
+ *                        `exactKeys` option).
  *
- * Whitespace around keys / values is trimmed. Empty expressions return [].
+ * `allowedKeys` is command-specific: `devices list` uses
+ * {type,name,category,room}; `devices batch` uses {type,family,room,category};
+ * `events tail` uses {deviceId,type}.
  */
-export function parseFilter(expr: string | undefined): FilterClause[] {
+export function parseFilterExpr(
+  expr: string | undefined,
+  allowedKeys: readonly string[],
+): FilterClause[] {
   if (!expr) return [];
   const parts = expr.split(',').map((p) => p.trim()).filter((p) => p.length > 0);
   const clauses: FilterClause[] = [];
 
   for (const part of parts) {
-    const m = /^([a-zA-Z_]+)\s*(~=|=)\s*(.+)$/.exec(part);
-    if (!m) {
+    const regexMatch = /^([^=~]+)=\/(.*)\/$/.exec(part);
+    const tildeIdx = part.indexOf('~');
+    const eqIdx = part.indexOf('=');
+
+    let key: string;
+    let op: FilterOp;
+    let raw: string;
+    let regex: RegExp | undefined;
+
+    if (regexMatch) {
+      key = regexMatch[1].trim();
+      op = 'regex';
+      raw = regexMatch[2];
+      try {
+        regex = new RegExp(raw, 'i');
+      } catch (err) {
+        throw new FilterSyntaxError(
+          `Invalid regex in --filter "${part}": ${(err as Error).message}`,
+        );
+      }
+    } else if (tildeIdx !== -1 && (eqIdx === -1 || tildeIdx < eqIdx)) {
+      key = part.slice(0, tildeIdx).trim();
+      op = 'sub';
+      raw = part.slice(tildeIdx + 1).trim();
+      if (raw.startsWith('=')) {
+        throw new FilterSyntaxError(
+          `Invalid filter clause "${part}" — "~=" is no longer supported. Use "${key}~${raw.slice(1)}" instead.`,
+        );
+      }
+    } else if (eqIdx !== -1) {
+      key = part.slice(0, eqIdx).trim();
+      op = 'eq';
+      raw = part.slice(eqIdx + 1).trim();
+    } else {
       throw new FilterSyntaxError(
-        `Invalid filter clause "${part}" — expected "<key>=<value>" or "<key>~=<pattern>"`
+        `Invalid filter clause "${part}" — expected "<key>=<value>", "<key>~<value>", or "<key>=/<regex>/"`,
       );
     }
-    const key = m[1] as FilterClause['key'];
-    const op = m[2] as FilterClause['op'];
-    const value = m[3].trim();
-    if (!VALID_KEYS.includes(key)) {
-      throw new FilterSyntaxError(
-        `Unknown filter key "${key}" — supported: ${VALID_KEYS.join(', ')}`
-      );
+
+    if (!key) {
+      throw new FilterSyntaxError(`Empty key in filter clause "${part}"`);
     }
-    if (!value) {
+    if (!raw) {
       throw new FilterSyntaxError(`Empty value for filter clause "${part}"`);
     }
-    clauses.push({ key, op, value });
+    if (!allowedKeys.includes(key)) {
+      throw new FilterSyntaxError(
+        `Unknown filter key "${key}" — supported: ${allowedKeys.join(', ')}`,
+      );
+    }
+
+    clauses.push({ key, op, raw, regex });
   }
 
   return clauses;
+}
+
+/**
+ * Match a single candidate string against a clause.
+ *
+ * - `regex` → RegExp.test against the candidate (case-insensitive by construction).
+ * - `sub`   → case-insensitive substring.
+ * - `eq`    → case-insensitive substring, except for keys listed in
+ *             `exactKeys`, which get case-insensitive exact comparison.
+ *             Default `exactKeys` is `['category']` to preserve the existing
+ *             list/batch behavior for that key.
+ */
+export function matchClause(
+  candidate: string | undefined,
+  clause: FilterClause,
+  options?: { exactKeys?: readonly string[] },
+): boolean {
+  if (candidate === undefined) return false;
+  if (clause.op === 'regex') {
+    return clause.regex!.test(candidate);
+  }
+  const cLower = candidate.toLowerCase();
+  const vLower = clause.raw.toLowerCase();
+  if (clause.op === 'sub') {
+    return cLower.includes(vLower);
+  }
+  const exactKeys = options?.exactKeys ?? ['category'];
+  if (exactKeys.includes(clause.key)) {
+    return cLower === vLower;
+  }
+  return cLower.includes(vLower);
+}
+
+const BATCH_KEYS = ['type', 'family', 'room', 'category'] as const;
+
+/**
+ * Back-compat narrow signature: parses with the batch key set. Callers that
+ * need a different key set (list, events tail) should call parseFilterExpr
+ * directly.
+ */
+export function parseFilter(expr: string | undefined): FilterClause[] {
+  return parseFilterExpr(expr, BATCH_KEYS);
 }
 
 interface FilterableDevice {
@@ -72,7 +160,7 @@ interface FilterableDevice {
 function toFilterable(
   d: Device | InfraredDevice,
   isPhysical: boolean,
-  hubLocation?: Map<string, { family?: string; room?: string }>
+  hubLocation?: Map<string, { family?: string; room?: string }>,
 ): FilterableDevice {
   if (isPhysical) {
     const p = d as Device;
@@ -95,35 +183,30 @@ function toFilterable(
   };
 }
 
-function matches(d: FilterableDevice, clause: FilterClause): boolean {
-  const candidate: string | undefined =
-    clause.key === 'type'
-      ? d.type
-      : clause.key === 'family'
-        ? d.family
-        : clause.key === 'room'
-          ? d.room
-          : d.category;
-  if (candidate === undefined) return false;
-
-  if (clause.op === '=') return candidate.toLowerCase() === clause.value.toLowerCase();
-
-  // '~=' — case-insensitive substring match on the candidate.
-  return candidate.toLowerCase().includes(clause.value.toLowerCase());
+function candidateFor(d: FilterableDevice, key: string): string | undefined {
+  switch (key) {
+    case 'type':
+      return d.type;
+    case 'family':
+      return d.family;
+    case 'room':
+      return d.room;
+    case 'category':
+      return d.category;
+    default:
+      return undefined;
+  }
 }
 
 /**
  * Apply the parsed clauses to a mixed list of physical devices + IR remotes.
- * Returns the deviceIds of the entries that satisfy every clause.
- *
- * `hubLocation` (optional) allows family/room filters to match IR remotes by
- * the Hub-inherited location.
+ * Returns the filterable entries that satisfy every clause.
  */
 export function applyFilter(
   clauses: FilterClause[],
   deviceList: Device[],
   infraredRemoteList: InfraredDevice[],
-  hubLocation?: Map<string, { family?: string; room?: string }>
+  hubLocation?: Map<string, { family?: string; room?: string }>,
 ): FilterableDevice[] {
   const candidates: FilterableDevice[] = [
     ...deviceList.map((d) => toFilterable(d, true)),
@@ -131,5 +214,7 @@ export function applyFilter(
   ];
 
   if (clauses.length === 0) return candidates;
-  return candidates.filter((c) => clauses.every((clause) => matches(c, clause)));
+  return candidates.filter((c) =>
+    clauses.every((clause) => matchClause(candidateFor(c, clause.key), clause)),
+  );
 }

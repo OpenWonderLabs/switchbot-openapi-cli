@@ -81,6 +81,7 @@ export function registerWatchCommand(devices: Command): void {
       '30s',
     )
     .option('--max <n>', 'Stop after N ticks (default: run until Ctrl-C)', intArg('--max', { min: 1 }))
+    .option('--for <dur>', 'Stop after elapsed time (e.g. "5m", "30s"). Combines with --max: first limit wins.', durationArg('--for'))
     .option('--include-unchanged', 'Emit a tick even when no field changed')
     .addHelpText(
       'after',
@@ -106,6 +107,7 @@ Examples:
           name?: string;
           interval: string;
           max?: string;
+          for?: string;
           includeUnchanged?: boolean;
         },
       ) => {
@@ -133,12 +135,17 @@ Examples:
             maxTicks = Math.floor(n);
           }
 
+          const forMs = options.for ? parseDurationToMs(options.for) : null;
+
           const fields: string[] | null = getFields() ?? null;
 
           const ac = new AbortController();
           const onSig = () => ac.abort();
           process.on('SIGINT', onSig);
           process.on('SIGTERM', onSig);
+          const forTimer = forMs !== null && forMs > 0
+            ? setTimeout(() => ac.abort(), forMs)
+            : null;
 
           try {
           const prev = new Map<string, Record<string, unknown>>();
@@ -196,6 +203,7 @@ Examples:
           } catch (err) {
             handleError(err);
           } finally {
+            if (forTimer) clearTimeout(forTimer);
             process.off('SIGINT', onSig);
             process.off('SIGTERM', onSig);
           }

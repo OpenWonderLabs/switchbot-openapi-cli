@@ -53,6 +53,10 @@ Examples:
     .command('show')
     .alias('status')
     .description('Summarize the cache files (paths, ages, entry counts)')
+    .addHelpText('after', `
+Cache TTL is computed from the 'lastUpdated' field inside the JSON, not the file mtime.
+touch does not invalidate; use 'cache clear' to force a refresh.
+`)
     .action(() => {
       const summary = describeCache();
       if (isJsonMode()) {
@@ -92,9 +96,20 @@ Examples:
     .command('clear')
     .description('Delete cache files')
     .option('--key <which>', 'Which cache to clear: "list" | "status" | "all" (default)', enumArg('--key', CACHE_KEYS), 'all')
-    .action((options: { key: string }) => {
+    .option('--status', 'Shorthand for --key status')
+    .option('--list', 'Shorthand for --key list')
+    .action((options: { key: string; status?: boolean; list?: boolean }) => {
       try {
-        const key = options.key;
+        if (options.status && options.list) {
+          throw new UsageError('--status and --list are mutually exclusive.');
+        }
+        if ((options.status || options.list) && options.key !== 'all') {
+          throw new UsageError('--status / --list cannot be combined with --key.');
+        }
+        let key = options.key;
+        if (options.status) key = 'status';
+        if (options.list) key = 'list';
+
         if (!['list', 'status', 'all'].includes(key)) {
           throw new UsageError(`Unknown --key "${key}". Expected: list, status, all.`);
         }
