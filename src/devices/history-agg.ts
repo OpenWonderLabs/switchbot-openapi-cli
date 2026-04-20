@@ -69,6 +69,13 @@ export async function aggregateDeviceHistory(
     }
   }
 
+  const sampleCap = Math.max(
+    1,
+    Math.min(opts.maxBucketSamples ?? DEFAULT_SAMPLE_CAP, MAX_SAMPLE_CAP),
+  );
+  let partial = false;
+  const notes: string[] = [];
+
   // bucketKey (epoch ms; 0 when no --bucket) → metric name → Acc
   const buckets = new Map<number, Map<string, Acc>>();
 
@@ -105,11 +112,22 @@ export async function aggregateDeviceHistory(
         acc.max = Math.max(acc.max, v);
         acc.sum += v;
         acc.count += 1;
+        if (acc.samples) {
+          if (acc.samples.length < sampleCap) {
+            acc.samples.push(v);
+          } else if (!acc.sampleCapHit) {
+            acc.sampleCapHit = true;
+            partial = true;
+            notes.push(
+              `bucket ${new Date(key).toISOString()} metric ${metric}: sample cap ${sampleCap} reached, quantiles approximate`,
+            );
+          }
+        }
       }
     }
   }
 
-  return finalize(deviceId, opts, aggs, buckets, false, [], fromMs, toMs);
+  return finalize(deviceId, opts, aggs, buckets, partial, notes, fromMs, toMs);
 }
 
 function finalize(

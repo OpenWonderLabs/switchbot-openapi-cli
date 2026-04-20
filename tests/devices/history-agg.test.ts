@@ -113,4 +113,58 @@ describe('aggregateDeviceHistory — single bucket', () => {
       }),
     ).rejects.toThrow(/Invalid --bucket/);
   });
+
+  it('computes p50 and p95 via nearest-rank on sorted samples', async () => {
+    const file = path.join(historyDir, 'DEV1.jsonl');
+    // 100 samples uniformly 1..100
+    const records = [];
+    for (let i = 1; i <= 100; i++) {
+      records.push({
+        t: `2026-04-19T10:${String(Math.floor((i - 1) / 2)).padStart(2, '0')}:${String((i - 1) % 2 * 30).padStart(2, '0')}.000Z`,
+        topic: 'status',
+        payload: { v: i },
+      });
+    }
+    writeJsonl(file, records);
+
+    const res = await aggregateDeviceHistory('DEV1', {
+      from: '2026-04-19T00:00:00.000Z',
+      to: '2026-04-20T00:00:00.000Z',
+      metrics: ['v'],
+      aggs: ['p50', 'p95'],
+    });
+
+    expect(res.buckets).toHaveLength(1);
+    // Nearest-rank on 1..100: p50 → index floor(0.5*99)=49 → 50; p95 → floor(0.95*99)=94 → 95
+    expect(res.buckets[0].metrics.v.p50).toBe(50);
+    expect(res.buckets[0].metrics.v.p95).toBe(95);
+  });
+
+  it('flips partial:true and appends a note when sample cap is hit', async () => {
+    const file = path.join(historyDir, 'DEV1.jsonl');
+    const records = [];
+    // 5 samples, cap=3 → cap hit on the 4th
+    for (let i = 0; i < 5; i++) {
+      records.push({
+        t: `2026-04-19T10:00:0${i}.000Z`,
+        topic: 'status',
+        payload: { v: i + 1 },
+      });
+    }
+    writeJsonl(file, records);
+
+    const res = await aggregateDeviceHistory('DEV1', {
+      from: '2026-04-19T00:00:00.000Z',
+      to: '2026-04-20T00:00:00.000Z',
+      metrics: ['v'],
+      aggs: ['count', 'p95'],
+      maxBucketSamples: 3,
+    });
+
+    expect(res.partial).toBe(true);
+    expect(res.notes.length).toBe(1);
+    expect(res.notes[0]).toMatch(/sample cap 3 reached/);
+    // count is still exact (all 5 samples folded in)
+    expect(res.buckets[0].metrics.v.count).toBe(5);
+  });
 });
