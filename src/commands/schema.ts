@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { enumArg, stringArg } from '../utils/arg-parsers.js';
 import { printJson } from '../utils/output.js';
 import { getEffectiveCatalog, type CommandSpec, type DeviceCatalogEntry } from '../devices/catalog.js';
 
@@ -47,6 +48,8 @@ function toSchemaCommand(c: CommandSpec) {
 }
 
 export function registerSchemaCommand(program: Command): void {
+  const ROLES = ['lighting', 'security', 'sensor', 'climate', 'media', 'cleaning', 'curtain', 'fan', 'power', 'hub', 'other'] as const;
+  const CATEGORIES = ['physical', 'ir'] as const;
   const schema = program
     .command('schema')
     .description('Export the device catalog as structured JSON (for agent prompts / tooling)');
@@ -54,9 +57,9 @@ export function registerSchemaCommand(program: Command): void {
   schema
     .command('export')
     .description('Print the full catalog as structured JSON (one object per type)')
-    .option('--type <type>', 'Restrict to a single device type (e.g. "Strip Light")')
-    .option('--role <role>', 'Restrict to a functional role: lighting, security, sensor, climate, media, cleaning, curtain, fan, power, hub, other')
-    .option('--category <cat>', 'Restrict to "physical" or "ir"')
+    .option('--type <type>', 'Restrict to a single device type (e.g. "Strip Light")', stringArg('--type'))
+    .option('--role <role>', 'Restrict to a functional role: lighting, security, sensor, climate, media, cleaning, curtain, fan, power, hub, other', enumArg('--role', ROLES))
+    .option('--category <cat>', 'Restrict to "physical" or "ir"', enumArg('--category', CATEGORIES))
     .addHelpText('after', `
 Output is always JSON (this command ignores --format). The output is a
 catalog export — not a formal JSON Schema standard document — suitable for

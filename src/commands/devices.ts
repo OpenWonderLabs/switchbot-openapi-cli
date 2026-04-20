@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { enumArg, stringArg } from '../utils/arg-parsers.js';
 import { printTable, printKeyValue, printJson, isJsonMode, handleError, UsageError } from '../utils/output.js';
 import { resolveFormat, resolveFields, renderRows } from '../utils/format.js';
 import { findCatalogEntry, getEffectiveCatalog, DeviceCatalogEntry } from '../devices/catalog.js';
@@ -25,6 +26,7 @@ import { registerDevicesMetaCommand } from './device-meta.js';
 import { isDryRun } from '../utils/flags.js';
 
 export function registerDevicesCommand(program: Command): void {
+  const COMMAND_TYPES = ['command', 'customize'] as const;
   const devices = program
     .command('devices')
     .description('Manage and control SwitchBot devices')
@@ -87,7 +89,7 @@ Examples:
 `)
     .option('--wide', 'Show all columns (controlType, family, roomID, room, hub, cloud)')
     .option('--show-hidden', 'Include devices hidden via "devices meta set --hide"')
-    .option('--filter <expr>', 'Filter devices: "type=X", "name=X", "category=physical|ir", "room=X" (comma-separated key=value pairs)')
+    .option('--filter <expr>', 'Filter devices: "type=X", "name=X", "category=physical|ir", "room=X" (comma-separated key=value pairs)', stringArg('--filter'))
     .action(async (options: { wide?: boolean; showHidden?: boolean; filter?: string }) => {
       try {
         const body = await fetchDeviceList();
@@ -212,8 +214,8 @@ Examples:
     .command('status')
     .description('Query the real-time status of a specific device')
     .argument('[deviceId]', 'Device ID from "devices list" (or use --name or --ids)')
-    .option('--name <query>', 'Resolve device by fuzzy name instead of deviceId')
-    .option('--ids <list>', 'Comma-separated device IDs for batch status (incompatible with --name)')
+    .option('--name <query>', 'Resolve device by fuzzy name instead of deviceId', stringArg('--name'))
+    .option('--ids <list>', 'Comma-separated device IDs for batch status (incompatible with --name)', stringArg('--ids'))
     .addHelpText('after', `
 Status fields vary by device type. To discover them without a live call:
 
@@ -305,10 +307,10 @@ Examples:
     .argument('[deviceId]', 'Target device ID (or use --name)')
     .argument('[cmd]', 'Command name, e.g. turnOn, turnOff, setColor, setBrightness, setAll, startClean')
     .argument('[parameter]', 'Command parameter. Omit for commands like turnOn/turnOff (defaults to "default"). Format depends on the command (see below).')
-    .option('--name <query>', 'Resolve device by fuzzy name instead of deviceId')
-    .option('--type <commandType>', 'Command type: "command" for built-in commands (default), "customize" for user-defined IR buttons', 'command')
+    .option('--name <query>', 'Resolve device by fuzzy name instead of deviceId', stringArg('--name'))
+    .option('--type <commandType>', 'Command type: "command" for built-in commands (default), "customize" for user-defined IR buttons', enumArg('--type', COMMAND_TYPES), 'command')
     .option('--yes', 'Confirm a destructive command (Smart Lock unlock, Garage open, …). --dry-run is always allowed without --yes.')
-    .option('--idempotency-key <key>', 'Idempotency key for deduplication (60s window; same key replays cached result)')
+    .option('--idempotency-key <key>', 'Idempotency key for deduplication (60s window; same key replays cached result)', stringArg('--idempotency-key'))
     .addHelpText('after', `
 ────────────────────────────────────────────────────────────────────────
 For the full list of commands a specific device supports — and their
@@ -579,7 +581,7 @@ Examples:
     .command('describe')
     .description('Describe a device by ID: metadata + supported commands + status fields (1 API call)')
     .argument('[deviceId]', 'Target device ID (or use --name)')
-    .option('--name <query>', 'Resolve device by fuzzy name instead of deviceId')
+    .option('--name <query>', 'Resolve device by fuzzy name instead of deviceId', stringArg('--name'))
     .option('--live', 'Also fetch live status values and merge them into capabilities (costs 1 extra API call)')
     .addHelpText('after', `
 Makes a GET /v1.1/devices call to look up the device's type, then prints its

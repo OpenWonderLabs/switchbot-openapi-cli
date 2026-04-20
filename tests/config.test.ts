@@ -151,7 +151,8 @@ describe('config', () => {
       showConfig();
       const output = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
       expect(output).toContain('Credential source: environment variables');
-      expect(output).toContain('token : env-token');
+      expect(output).toMatch(/token : env-\*+oken/);
+      expect(output).not.toContain('env-token');
       expect(output).toContain('ab****gh');
       expect(output).not.toContain('abcdefgh');
     });
@@ -164,7 +165,8 @@ describe('config', () => {
       showConfig();
       const output = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
       expect(output).toContain(`Credential source: ${CONFIG_FILE}`);
-      expect(output).toContain('token : file-token');
+      expect(output).toMatch(/token : file\*+oken/);
+      expect(output).not.toContain('file-token');
       expect(output).toMatch(/secret: lo\*+ue/);
     });
 

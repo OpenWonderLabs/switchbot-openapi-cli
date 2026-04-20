@@ -50,6 +50,14 @@ describe('history command', () => {
   }
 
   describe('show', () => {
+    it('exits 2 when --file swallows "--help"', async () => {
+      const res = await runCli(registerHistoryCommand, [
+        'history', 'show', '--file', '--help',
+      ]);
+      expect(res.exitCode).toBe(2);
+      expect(res.stderr.join('\n')).toMatch(/--file .* looks like another option/i);
+    });
+
     it('prints (no entries) when the log does not exist', async () => {
       const res = await runCli(registerHistoryCommand, [
         'history', 'show', '--file', auditFile,

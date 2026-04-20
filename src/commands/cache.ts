@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { enumArg } from '../utils/arg-parsers.js';
 import { printJson, isJsonMode, handleError, UsageError } from '../utils/output.js';
 import {
   clearCache,
@@ -19,6 +20,7 @@ function formatAge(ms?: number): string {
 }
 
 export function registerCacheCommand(program: Command): void {
+  const CACHE_KEYS = ['list', 'status', 'all'] as const;
   const cache = program
     .command('cache')
     .description('Inspect and manage the local SwitchBot CLI caches')
@@ -88,7 +90,7 @@ Examples:
   cache
     .command('clear')
     .description('Delete cache files')
-    .option('--key <which>', 'Which cache to clear: "list" | "status" | "all" (default)', 'all')
+    .option('--key <which>', 'Which cache to clear: "list" | "status" | "all" (default)', enumArg('--key', CACHE_KEYS), 'all')
     .action((options: { key: string }) => {
       try {
         const key = options.key;

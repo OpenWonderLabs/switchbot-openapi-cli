@@ -3,6 +3,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
+import { intArg, stringArg } from '../utils/arg-parsers.js';
 import { handleError, isJsonMode } from '../utils/output.js';
 import {
   fetchDeviceList,
@@ -595,11 +596,11 @@ Inspect locally:
   mcp
     .command('serve')
     .description('Start the MCP server on stdio (default) or HTTP (--port)')
-    .option('--port <n>', 'Listen on HTTP instead of stdio (Streamable HTTP transport)')
-    .option('--bind <host>', 'IP address to bind (default 127.0.0.1; use 0.0.0.0 to accept external connections)', '127.0.0.1')
-    .option('--auth-token <token>', 'Bearer token for HTTP requests (required for --bind 0.0.0.0; falls back to SWITCHBOT_MCP_TOKEN env var)')
-    .option('--cors-origin <url>', 'Allowed CORS origin(s) for HTTP (repeatable)')
-    .option('--rate-limit <n>', 'Max requests per minute per profile (default 60)', '60')
+    .option('--port <n>', 'Listen on HTTP instead of stdio (Streamable HTTP transport)', intArg('--port', { min: 1, max: 65535 }))
+    .option('--bind <host>', 'IP address to bind (default 127.0.0.1; use 0.0.0.0 to accept external connections)', stringArg('--bind'), '127.0.0.1')
+    .option('--auth-token <token>', 'Bearer token for HTTP requests (required for --bind 0.0.0.0; falls back to SWITCHBOT_MCP_TOKEN env var)', stringArg('--auth-token'))
+    .option('--cors-origin <url>', 'Allowed CORS origin(s) for HTTP (repeatable)', stringArg('--cors-origin'))
+    .option('--rate-limit <n>', 'Max requests per minute per profile (default 60)', intArg('--rate-limit', { min: 1 }), '60')
     .action(async (options: { port?: string; bind?: string; authToken?: string; corsOrigin?: string | string[]; rateLimit?: string }) => {
       try {
         if (options.port) {

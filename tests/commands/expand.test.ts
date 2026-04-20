@@ -108,7 +108,7 @@ describe('devices expand', () => {
       '--temp', '99', '--mode', 'cool', '--fan', 'low', '--power', 'on',
     ]);
     expect(res.exitCode).toBe(2);
-    expect(res.stderr.join('\n')).toContain('16 and 30');
+    expect(res.stderr.join('\n')).toMatch(/--temp.*(<= 30|between 16 and 30)/i);
   });
 
   it('AC: rejects unknown mode', async () => {
@@ -181,7 +181,7 @@ describe('devices expand', () => {
       '--channel', '3', '--mode', 'edge',
     ]);
     expect(res.exitCode).toBe(2);
-    expect(res.stderr.join('\n')).toContain('1 or 2');
+    expect(res.stderr.join('\n')).toMatch(/--channel.*(<= 2|1 or 2)/i);
   });
 
   it('dry-run does not send the command', async () => {
