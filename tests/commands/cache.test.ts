@@ -137,7 +137,7 @@ describe('cache clear', () => {
   it('rejects unknown --key with exit 2', async () => {
     const result = await runCli(registerCacheCommand, ['cache', 'clear', '--key', 'bogus']);
     expect(result.exitCode).toBe(2);
-    expect(result.stderr.join('\n')).toMatch(/Unknown --key/);
+    expect(result.stderr.join('\n')).toMatch(/--key.*must be one of/i);
   });
 
   it('--json reports which caches were cleared', async () => {

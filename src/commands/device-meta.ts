@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { stringArg } from '../utils/arg-parsers.js';
 import { handleError, isJsonMode, printJson, printTable, UsageError } from '../utils/output.js';
 import {
   loadDeviceMeta,
@@ -18,10 +19,10 @@ export function registerDevicesMetaCommand(devices: Command): void {
     .command('set')
     .description('Set local metadata for a device (alias, hide/show, notes)')
     .argument('<deviceId>', 'Target device ID')
-    .option('--alias <name>', 'Local alias for the device (used with --name flag)')
+    .option('--alias <name>', 'Local alias for the device (used with --name flag)', stringArg('--alias'))
     .option('--hide', 'Hide this device from "devices list"')
     .option('--show', 'Un-hide this device')
-    .option('--notes <text>', 'Freeform notes shown in "devices describe"')
+    .option('--notes <text>', 'Freeform notes shown in "devices describe"', stringArg('--notes'))
     .action((deviceId: string, options: { alias?: string; hide?: boolean; show?: boolean; notes?: string }) => {
       try {
         if (options.hide && options.show) {

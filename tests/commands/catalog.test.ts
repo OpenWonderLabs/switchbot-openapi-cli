@@ -125,7 +125,7 @@ describe('catalog show', () => {
       'bogus',
     ]);
     expect(exitCode).toBe(2);
-    expect(stderr.join('\n')).toContain('Unknown --source');
+    expect(stderr.join('\n')).toMatch(/--source.*must be one of/i);
   });
 
   it('exits 2 when the type does not exist', async () => {

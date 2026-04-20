@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { stringArg } from '../utils/arg-parsers.js';
 import { saveConfig, showConfig, listProfiles } from '../config.js';
 import { isJsonMode, printJson } from '../utils/output.js';
 import chalk from 'chalk';
@@ -50,9 +51,9 @@ Obtain your token/secret from the SwitchBot mobile app:
     .description('Save token and secret (mode 0600). Use --profile to target a named profile.')
     .argument('[token]', 'API token; omit when using --from-env-file / --from-op')
     .argument('[secret]', 'API client secret; omit when using --from-env-file / --from-op')
-    .option('--from-env-file <path>', 'Read SWITCHBOT_TOKEN and SWITCHBOT_SECRET from a dotenv file')
-    .option('--from-op <tokenRef>', 'Read token via 1Password CLI (op read). Pair with --op-secret <ref>')
-    .option('--op-secret <secretRef>', '1Password reference for the secret, used with --from-op')
+    .option('--from-env-file <path>', 'Read SWITCHBOT_TOKEN and SWITCHBOT_SECRET from a dotenv file', stringArg('--from-env-file'))
+    .option('--from-op <tokenRef>', 'Read token via 1Password CLI (op read). Pair with --op-secret <ref>', stringArg('--from-op'))
+    .option('--op-secret <secretRef>', '1Password reference for the secret, used with --from-op', stringArg('--op-secret'))
     .addHelpText('after', `
 Examples:
   $ switchbot config set-token <token> <secret>

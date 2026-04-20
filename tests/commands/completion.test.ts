@@ -24,6 +24,9 @@ describe('completion command', () => {
     const out = written.join('');
     expect(out).toContain('_switchbot_completion');
     expect(out).toContain('complete -F _switchbot_completion switchbot');
+    expect(out).toContain('mcp quota catalog cache events doctor schema history plan capabilities');
+    expect(out).toContain('--profile');
+    expect(out).toContain('--audit-log-path');
   });
 
   it('prints a zsh completion script', async () => {
@@ -40,6 +43,9 @@ describe('completion command', () => {
     const out = written.join('');
     expect(out).toContain('complete -c switchbot');
     expect(out).toContain('__fish_use_subcommand');
+    expect(out).toContain("-a 'events'");
+    expect(out).toContain('-l profile');
+    expect(out).toContain('-l audit-log-path');
   });
 
   it('prints a powershell completion script', async () => {
@@ -48,6 +54,9 @@ describe('completion command', () => {
     const out = written.join('');
     expect(out).toContain('Register-ArgumentCompleter');
     expect(out).toContain('switchbot');
+    expect(out).toContain("'events'");
+    expect(out).toContain("'--profile'");
+    expect(out).toContain("'--audit-log-path'");
   });
 
   it('accepts "pwsh" as an alias for powershell', async () => {

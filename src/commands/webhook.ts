@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { stringArg } from '../utils/arg-parsers.js';
 import { createClient } from '../api/client.js';
 import { printKeyValue, printJson, isJsonMode, handleError, UsageError } from '../utils/output.js';
 import chalk from 'chalk';
@@ -68,7 +69,7 @@ Example:
   webhook
     .command('query')
     .description('Query webhook configuration')
-    .option('--details <url>', 'Query detailed configuration (enable/deviceList/timestamps) for a specific URL')
+    .option('--details <url>', 'Query detailed configuration (enable/deviceList/timestamps) for a specific URL', stringArg('--details'))
     .addHelpText('after', `
 Without --details, lists all configured webhook URLs.
 With --details, prints enable/deviceList/createTime/lastUpdateTime for the given URL.

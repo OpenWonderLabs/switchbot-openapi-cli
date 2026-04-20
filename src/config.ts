@@ -108,7 +108,7 @@ export function showConfig(): void {
 
   if (envToken && envSecret) {
     console.log('Credential source: environment variables');
-    console.log(`token : ${envToken}`);
+    console.log(`token : ${maskCredential(envToken)}`);
     console.log(`secret: ${maskSecret(envSecret)}`);
     return;
   }
@@ -123,11 +123,16 @@ export function showConfig(): void {
     const raw = fs.readFileSync(file, 'utf-8');
     const cfg = JSON.parse(raw) as SwitchBotConfig;
     console.log(`Credential source: ${file}`);
-    console.log(`token : ${cfg.token}`);
+    console.log(`token : ${maskCredential(cfg.token)}`);
     console.log(`secret: ${maskSecret(cfg.secret)}`);
   } catch {
     console.error('Failed to read config file');
   }
+}
+
+function maskCredential(token: string): string {
+  if (token.length <= 8) return '*'.repeat(Math.max(4, token.length));
+  return token.slice(0, 4) + '*'.repeat(token.length - 8) + token.slice(-4);
 }
 
 function maskSecret(secret: string): string {

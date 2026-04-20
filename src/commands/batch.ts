@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import type { AxiosInstance } from 'axios';
+import { intArg, enumArg, stringArg } from '../utils/arg-parsers.js';
 import { printJson, isJsonMode, handleError, buildErrorPayload, type ErrorPayload } from '../utils/output.js';
 import {
   fetchDeviceList,
@@ -28,6 +29,7 @@ interface BatchResult {
 }
 
 const DEFAULT_CONCURRENCY = 5;
+const COMMAND_TYPES = ['command', 'customize'] as const;
 
 /** Run `task(x)` for every element with at most `concurrency` running at once. */
 async function runPool<T, R>(
@@ -120,13 +122,13 @@ export function registerBatchCommand(devices: Command): void {
     .description('Send the same command to many devices in one run (filter- or stdin-driven)')
     .argument('<command>', 'Command name, e.g. turnOn, turnOff, setBrightness')
     .argument('[parameter]', 'Command parameter (same rules as `devices command`; omit for no-arg)')
-    .option('--filter <expr>', 'Target devices matching a filter, e.g. type=Bot,family=Home')
-    .option('--ids <csv>', 'Explicit comma-separated list of deviceIds')
-    .option('--concurrency <n>', 'Max parallel in-flight requests (default 5)', '5')
+    .option('--filter <expr>', 'Target devices matching a filter, e.g. type=Bot,family=Home', stringArg('--filter'))
+    .option('--ids <csv>', 'Explicit comma-separated list of deviceIds', stringArg('--ids'))
+    .option('--concurrency <n>', 'Max parallel in-flight requests (default 5)', intArg('--concurrency', { min: 1 }), '5')
     .option('--yes', 'Allow destructive commands (Smart Lock unlock, garage open, ...)')
-    .option('--type <commandType>', '"command" (default) or "customize" for user-defined IR buttons', 'command')
+    .option('--type <commandType>', '"command" (default) or "customize" for user-defined IR buttons', enumArg('--type', COMMAND_TYPES), 'command')
     .option('--stdin', 'Read deviceIds from stdin, one per line (same as trailing "-")')
-    .option('--idempotency-key-prefix <prefix>', 'Prefix for idempotency keys (key per device: <prefix>-<deviceId>)')
+    .option('--idempotency-key-prefix <prefix>', 'Prefix for idempotency keys (key per device: <prefix>-<deviceId>)', stringArg('--idempotency-key-prefix'))
     .addHelpText('after', `
 Targets are resolved in this priority order:
   1. --ids when present       (explicit deviceIds)

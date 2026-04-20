@@ -103,7 +103,7 @@ describe('devices watch', () => {
       'devices', 'watch', 'BOT1', '--interval', '5s', '--max', '0',
     ]);
     expect(res.exitCode).toBe(2);
-    expect(res.stderr.join('\n')).toMatch(/Invalid --max/);
+    expect(res.stderr.join('\n')).toMatch(/--max/);
   });
 
   it('emits one JSONL event per device on first tick with from:null (--max=1)', async () => {
@@ -236,5 +236,13 @@ describe('devices watch', () => {
     ]);
     expect(res.exitCode).toBe(2);
     expect(res.stderr.join('\n')).toMatch(/deviceId.*--name|--name.*deviceId/i);
+  });
+
+  it('exits 2 when --interval swallows a subcommand name (token-swallow regression)', async () => {
+    const res = await runCli(registerDevicesCommand, [
+      'devices', 'watch', 'BOT1', '--interval', 'devices',
+    ]);
+    expect(res.exitCode).toBe(2);
+    expect(res.stderr.join('\n')).toMatch(/--interval.*(duration|look like)/i);
   });
 });

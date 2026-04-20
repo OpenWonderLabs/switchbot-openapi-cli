@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import http from 'node:http';
 import { printJson, isJsonMode, handleError, UsageError } from '../utils/output.js';
+import { intArg, stringArg } from '../utils/arg-parsers.js';
 import { SwitchBotMqttClient } from '../mqtt/client.js';
 import { fetchMqttCredential } from '../mqtt/credential.js';
 import { tryLoadConfig } from '../config.js';
@@ -141,10 +142,10 @@ export function registerEventsCommand(program: Command): void {
   events
     .command('tail')
     .description('Run a local HTTP receiver and print incoming webhook events as JSONL')
-    .option('--port <n>', `Local port to listen on (default ${DEFAULT_PORT})`, String(DEFAULT_PORT))
-    .option('--path <p>', `HTTP path to match (default "${DEFAULT_PATH}"; use "*" for all paths)`, DEFAULT_PATH)
-    .option('--filter <expr>', 'Filter events, e.g. "deviceId=ABC123" or "type=Bot" (comma-separated)')
-    .option('--max <n>', 'Stop after N matching events (default: run until Ctrl-C)')
+    .option('--port <n>', `Local port to listen on (default ${DEFAULT_PORT})`, intArg('--port', { min: 1, max: 65535 }), String(DEFAULT_PORT))
+    .option('--path <p>', `HTTP path to match (default "${DEFAULT_PATH}"; use "*" for all paths)`, stringArg('--path'), DEFAULT_PATH)
+    .option('--filter <expr>', 'Filter events, e.g. "deviceId=ABC123" or "type=Bot" (comma-separated)', stringArg('--filter'))
+    .option('--max <n>', 'Stop after N matching events (default: run until Ctrl-C)', intArg('--max', { min: 1 }))
     .addHelpText(
       'after',
       `
@@ -224,25 +225,25 @@ Examples:
   events
     .command('mqtt-tail')
     .description('Subscribe to SwitchBot MQTT shadow events and stream them as JSONL')
-    .option('--topic <pattern>', 'MQTT topic filter (default: SwitchBot shadow topic from credential)')
-    .option('--max <n>', 'Stop after N events (default: run until Ctrl-C)')
+    .option('--topic <pattern>', 'MQTT topic filter (default: SwitchBot shadow topic from credential)', stringArg('--topic'))
+    .option('--max <n>', 'Stop after N events (default: run until Ctrl-C)', intArg('--max', { min: 1 }))
     .option(
       '--sink <type>',
       'Output sink: stdout (default), file, webhook, openclaw, telegram, homeassistant (repeatable)',
       (val: string, prev: string[]) => [...prev, val],
       [] as string[],
     )
-    .option('--sink-file <path>', 'File path for file sink')
-    .option('--webhook-url <url>', 'Webhook URL for webhook sink')
-    .option('--openclaw-url <url>', 'OpenClaw gateway URL (default: http://localhost:18789)')
-    .option('--openclaw-token <token>', 'Bearer token for OpenClaw (or env OPENCLAW_TOKEN)')
-    .option('--openclaw-model <id>', 'OpenClaw agent model ID to route events to')
-    .option('--telegram-token <token>', 'Telegram bot token (or env TELEGRAM_TOKEN)')
-    .option('--telegram-chat <id>', 'Telegram chat/channel ID to send messages to')
-    .option('--ha-url <url>', 'Home Assistant base URL (e.g. http://homeassistant.local:8123)')
-    .option('--ha-token <token>', 'HA long-lived access token (for REST event API)')
-    .option('--ha-webhook-id <id>', 'HA webhook ID (no auth; takes priority over --ha-token)')
-    .option('--ha-event-type <type>', 'HA event type for REST API (default: switchbot_event)')
+    .option('--sink-file <path>', 'File path for file sink', stringArg('--sink-file'))
+    .option('--webhook-url <url>', 'Webhook URL for webhook sink', stringArg('--webhook-url'))
+    .option('--openclaw-url <url>', 'OpenClaw gateway URL (default: http://localhost:18789)', stringArg('--openclaw-url'))
+    .option('--openclaw-token <token>', 'Bearer token for OpenClaw (or env OPENCLAW_TOKEN)', stringArg('--openclaw-token'))
+    .option('--openclaw-model <id>', 'OpenClaw agent model ID to route events to', stringArg('--openclaw-model'))
+    .option('--telegram-token <token>', 'Telegram bot token (or env TELEGRAM_TOKEN)', stringArg('--telegram-token'))
+    .option('--telegram-chat <id>', 'Telegram chat/channel ID to send messages to', stringArg('--telegram-chat'))
+    .option('--ha-url <url>', 'Home Assistant base URL (e.g. http://homeassistant.local:8123)', stringArg('--ha-url'))
+    .option('--ha-token <token>', 'HA long-lived access token (for REST event API)', stringArg('--ha-token'))
+    .option('--ha-webhook-id <id>', 'HA webhook ID (no auth; takes priority over --ha-token)', stringArg('--ha-webhook-id'))
+    .option('--ha-event-type <type>', 'HA event type for REST API (default: switchbot_event)', stringArg('--ha-event-type'))
     .addHelpText(
       'after',
       `
@@ -396,9 +397,19 @@ Examples:
           }
         });
 
+        let mqttFailed = false;
         const unsubState = client.onStateChange((state) => {
           if (!isJsonMode()) {
             console.error(`[${new Date().toLocaleTimeString()}] MQTT state: ${state}`);
+          }
+          if (state === 'failed') {
+            mqttFailed = true;
+            if (!isJsonMode()) {
+              console.error(
+                'MQTT connection failed permanently (credential expired or reconnect exhausted) — exiting.',
+              );
+            }
+            ac.abort();
           }
         });
 
@@ -422,6 +433,11 @@ Examples:
           process.once('SIGTERM', cleanup);
           ac.signal.addEventListener('abort', cleanup, { once: true });
         });
+
+        if (mqttFailed) {
+          // Surface as a runtime error so supervisors (pm2, systemd) can restart.
+          process.exit(1);
+        }
       } catch (error) {
         handleError(error);
       }

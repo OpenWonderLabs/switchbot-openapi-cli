@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { enumArg } from '../utils/arg-parsers.js';
 import { printTable, printJson, isJsonMode, handleError, UsageError } from '../utils/output.js';
 import { resolveFormat, resolveFields, renderRows } from '../utils/format.js';
 import {
@@ -12,6 +13,7 @@ import {
 } from '../devices/catalog.js';
 
 export function registerCatalogCommand(program: Command): void {
+  const SOURCES = ['built-in', 'overlay', 'effective'] as const;
   const catalog = program
     .command('catalog')
     .description('Inspect the built-in device catalog and any local overlay')
@@ -76,7 +78,7 @@ Examples:
     .command('show')
     .description("Show the effective catalog (or one entry). Defaults to 'effective' source.")
     .argument('[type...]', 'Optional device type/alias (case-insensitive, partial match)')
-    .option('--source <source>', 'Which catalog to show: built-in | overlay | effective (default)', 'effective')
+    .option('--source <source>', 'Which catalog to show: built-in | overlay | effective (default)', enumArg('--source', SOURCES), 'effective')
     .action((typeParts: string[], options: { source: string }) => {
       try {
         const source = options.source;

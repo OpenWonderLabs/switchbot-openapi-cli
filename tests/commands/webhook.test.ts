@@ -109,6 +109,12 @@ describe('webhook command', () => {
   });
 
   describe('query --details', () => {
+    it('exits 2 when --details swallows "--help"', async () => {
+      const res = await runCli(registerWebhookCommand, ['webhook', 'query', '--details', '--help']);
+      expect(res.exitCode).toBe(2);
+      expect(res.stderr.join('\n')).toMatch(/--details .* looks like another option/i);
+    });
+
     it('POSTs queryDetails with the URL and prints key-value rows', async () => {
       apiMock.__instance.post.mockResolvedValue({
         data: {

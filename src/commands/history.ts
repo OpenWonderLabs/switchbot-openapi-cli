@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import path from 'node:path';
 import os from 'node:os';
+import { intArg, stringArg } from '../utils/arg-parsers.js';
 import { printJson, isJsonMode, handleError } from '../utils/output.js';
 import { readAudit, type AuditEntry } from '../utils/audit.js';
 import { executeCommand } from '../lib/devices.js';
@@ -25,8 +26,8 @@ Examples:
   history
     .command('show')
     .description('Print recent audit entries')
-    .option('--file <path>', `Path to the audit log (default ${DEFAULT_AUDIT})`)
-    .option('--limit <n>', 'Show only the last N entries')
+    .option('--file <path>', `Path to the audit log (default ${DEFAULT_AUDIT})`, stringArg('--file'))
+    .option('--limit <n>', 'Show only the last N entries', intArg('--limit', { min: 1 }))
     .action((options: { file?: string; limit?: string }) => {
       const file = options.file ?? DEFAULT_AUDIT;
       const entries = readAudit(file);
@@ -59,7 +60,7 @@ Examples:
     .command('replay')
     .description('Re-run a recorded command by its 1-indexed position')
     .argument('<index>', 'Entry index (1 = oldest; as shown by "history show")')
-    .option('--file <path>', `Path to the audit log (default ${DEFAULT_AUDIT})`)
+    .option('--file <path>', `Path to the audit log (default ${DEFAULT_AUDIT})`, stringArg('--file'))
     .addHelpText('after', `
 Dry-run-honouring: pass --dry-run on the parent command to preview without
 sending the actual call. Errors from the recorded entry are NOT replayed —

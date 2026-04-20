@@ -20,9 +20,26 @@ export async function runCli(
 ): Promise<RunResult> {
   const program = new Command();
   program.exitOverride();
+  // Mirror the global options declared on the real root program so subcommand
+  // tests can use `--dry-run`, `--verbose`, etc. without Commander rejecting
+  // them as unknown-option before the action runs. Values here do not need
+  // argParser validation — the tests don't exercise those paths.
   program.option('--json', 'Output results in JSON format');
   program.option('--format <type>', 'Output format');
   program.option('--fields <csv>', 'Column filter');
+  program.option('-v, --verbose');
+  program.option('--dry-run');
+  program.option('--timeout <ms>');
+  program.option('--retry-on-429 <n>');
+  program.option('--backoff <strategy>');
+  program.option('--no-retry');
+  program.option('--no-quota');
+  program.option('--cache <mode>');
+  program.option('--no-cache');
+  program.option('--config <path>');
+  program.option('--profile <name>');
+  program.option('--audit-log');
+  program.option('--audit-log-path <path>');
   program.configureOutput({
     writeOut: (str) => stdout.push(stripTrailingNewline(str)),
     writeErr: (str) => stderr.push(stripTrailingNewline(str)),
@@ -61,7 +78,16 @@ export async function runCli(
       (typeof errAsCommander.exitCode === 'number' && typeof errAsCommander.code === 'string');
     if (!isInternalExit && !isCommanderExit) throw err;
     if (isCommanderExit && exitCode === null) {
-      exitCode = errAsCommander.exitCode ?? 1;
+      // Mirror production exitOverride in src/index.ts: non-help/version
+      // Commander errors surface as usage errors (exit 2).
+      if (
+        errAsCommander.code === 'commander.helpDisplayed' ||
+        errAsCommander.code === 'commander.version'
+      ) {
+        exitCode = 0;
+      } else {
+        exitCode = 2;
+      }
     }
   } finally {
     process.argv = originalArgv;

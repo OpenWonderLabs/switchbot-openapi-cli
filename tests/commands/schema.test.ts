@@ -66,10 +66,16 @@ describe('schema export', () => {
     }
   });
 
-  it('--role returns empty types[] for an unknown role', async () => {
+  it('--role rejects an unknown role with exit 2', async () => {
     const res = await runCli(registerSchemaCommand, ['schema', 'export', '--role', 'nonexistent']);
-    const parsed = JSON.parse(res.stdout.join('')).data;
-    expect(parsed.types).toEqual([]);
+    expect(res.exitCode).toBe(2);
+    expect(res.stderr.join('\n')).toMatch(/--role .* must be one of/i);
+  });
+
+  it('exits 2 when --role swallows "--help"', async () => {
+    const res = await runCli(registerSchemaCommand, ['schema', 'export', '--role', '--help']);
+    expect(res.exitCode).toBe(2);
+    expect(res.stderr.join('\n')).toMatch(/--role .* must be one of/i);
   });
 
   it('schema export includes description on every type', async () => {

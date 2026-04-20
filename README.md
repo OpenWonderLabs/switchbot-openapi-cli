@@ -177,6 +177,8 @@ switchbot --help
 switchbot devices command --help
 ```
 
+> **Tip — required-value flags and subcommands.** Flags like `--profile`, `--timeout`, `--max`, and `--interval` take a value. If you omit it, Commander will happily consume the next token — including a subcommand name. Since v2.2.1 the CLI rejects that eagerly (exit 2 with a clear error), but if you ever hit `unknown command 'list'` after something like `switchbot --profile list`, use the `--flag=value` form: `switchbot --profile=home devices list`.
+
 ### `--dry-run`
 
 Intercepts every non-GET request: the CLI prints the URL/body it would have
@@ -206,6 +208,7 @@ switchbot config list-profiles                 # List saved profiles
 # Default columns (4): deviceId, deviceName, type, category
 # Pass --wide for the full 10-column operator view
 switchbot devices list
+switchbot devices ls              # short alias for 'list'
 switchbot devices list --wide
 switchbot devices list --json | jq '.deviceList[].deviceId'
 

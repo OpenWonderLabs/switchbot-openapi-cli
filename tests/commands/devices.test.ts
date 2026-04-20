@@ -145,6 +145,13 @@ describe('devices command', () => {
       expect(out).toContain('1 IR remote');
     });
 
+    it('accepts the "ls" alias and behaves like "list"', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'ls']);
+      expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/devices');
+      expect(res.stdout.join('\n')).toContain('ABC123');
+    });
+
     it('shows family and room columns with --wide', async () => {
       apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
       const res = await runCli(registerDevicesCommand, ['devices', 'list', '--wide']);
@@ -625,6 +632,24 @@ describe('devices command', () => {
       const res = await runCmd('turnOn');
       expect(res.exitCode).toBe(1);
       expect(res.stderr.join('\n')).toContain('Device offline');
+    });
+
+    it('prints a soft cache-miss hint when the device is not in the local cache', async () => {
+      const res = await runCmd('turnOn');
+      expect(res.stderr.join('\n')).toMatch(
+        /not in the local cache.*switchbot devices list/i,
+      );
+    });
+
+    it('does not print the cache-miss hint when the device is in the local cache', async () => {
+      updateCacheFromDeviceList({
+        deviceList: [
+          { deviceId: DID, deviceName: 'Cached Bot', deviceType: 'Bot', hubDeviceId: 'HUB-1', enableCloudService: true },
+        ],
+        infraredRemoteList: [],
+      });
+      const res = await runCmd('turnOn');
+      expect(res.stderr.join('\n')).not.toMatch(/not in the local cache/i);
     });
   });
 

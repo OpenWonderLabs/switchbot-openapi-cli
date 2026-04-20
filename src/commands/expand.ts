@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { intArg, stringArg } from '../utils/arg-parsers.js';
 import { handleError, isJsonMode, printJson, UsageError } from '../utils/output.js';
 import { getCachedDevice } from '../devices/cache.js';
 import { executeCommand, isDestructiveCommand, getDestructiveReason } from '../lib/devices.js';
@@ -98,15 +99,15 @@ export function registerExpandCommand(devices: Command): void {
     .description('Send a command with semantic flags instead of raw positional parameters')
     .argument('[deviceId]', 'Target device ID from "devices list" (or use --name)')
     .argument('[command]', 'Command name: setAll (AC), setPosition (Curtain/Blind Tilt), setMode (Relay Switch 2)')
-    .option('--name <query>', 'Resolve device by fuzzy name instead of deviceId')
-    .option('--temp <celsius>', 'AC setAll: temperature in Celsius (16-30)')
-    .option('--mode <mode>', 'AC: auto|cool|dry|fan|heat  Curtain: default|performance|silent  Relay: toggle|edge|detached|momentary')
-    .option('--fan <speed>', 'AC setAll: fan speed auto|low|mid|high')
-    .option('--power <state>', 'AC setAll: on|off')
-    .option('--position <percent>', 'Curtain setPosition: 0-100 (0=open, 100=closed)')
-    .option('--direction <dir>', 'Blind Tilt setPosition: up|down')
-    .option('--angle <percent>', 'Blind Tilt setPosition: 0-100 (0=closed, 100=open)')
-    .option('--channel <n>', 'Relay Switch 2 setMode: channel 1 or 2')
+    .option('--name <query>', 'Resolve device by fuzzy name instead of deviceId', stringArg('--name'))
+    .option('--temp <celsius>', 'AC setAll: temperature in Celsius (16-30)', intArg('--temp', { min: 16, max: 30 }))
+    .option('--mode <mode>', 'AC: auto|cool|dry|fan|heat  Curtain: default|performance|silent  Relay: toggle|edge|detached|momentary', stringArg('--mode'))
+    .option('--fan <speed>', 'AC setAll: fan speed auto|low|mid|high', stringArg('--fan'))
+    .option('--power <state>', 'AC setAll: on|off', stringArg('--power'))
+    .option('--position <percent>', 'Curtain setPosition: 0-100 (0=open, 100=closed)', intArg('--position', { min: 0, max: 100 }))
+    .option('--direction <dir>', 'Blind Tilt setPosition: up|down', stringArg('--direction'))
+    .option('--angle <percent>', 'Blind Tilt setPosition: 0-100 (0=closed, 100=open)', intArg('--angle', { min: 0, max: 100 }))
+    .option('--channel <n>', 'Relay Switch 2 setMode: channel 1 or 2', intArg('--channel', { min: 1, max: 2 }))
     .option('--yes', 'Confirm destructive commands')
     .addHelpText('after', `
 Translates semantic flags into the wire parameter format, then sends the command.
