@@ -402,6 +402,49 @@ describe('devices batch', () => {
     expect(parsed.data.plan.steps.map((s: { deviceId: string }) => s.deviceId).sort()).toEqual(['BOT1', 'BOT2']);
   });
 
+  it('--idempotency-key alias sets the same prefix as --idempotency-key-prefix', async () => {
+    flagsMock.dryRun = true;
+    apiMock.__instance.get.mockResolvedValue({ data: { statusCode: 100, body: DEVICE_LIST_BODY } });
+
+    const result = await runCli(registerDevicesCommand, [
+      '--json',
+      'devices',
+      'batch',
+      'turnOn',
+      '--filter',
+      'type=Bot',
+      '--plan',
+      '--idempotency-key',
+      'foo',
+    ]);
+
+    expect(result.exitCode).toBeNull();
+    const parsed = JSON.parse(result.stdout[0]);
+    const keys = parsed.data.plan.steps.map((s: { idempotencyKey?: string }) => s.idempotencyKey).sort();
+    expect(keys).toEqual(['foo-BOT1', 'foo-BOT2']);
+  });
+
+  it('rejects when both --idempotency-key and --idempotency-key-prefix are supplied', async () => {
+    flagsMock.dryRun = true;
+    apiMock.__instance.get.mockResolvedValue({ data: { statusCode: 100, body: DEVICE_LIST_BODY } });
+
+    const result = await runCli(registerDevicesCommand, [
+      'devices',
+      'batch',
+      'turnOn',
+      '--filter',
+      'type=Bot',
+      '--plan',
+      '--idempotency-key',
+      'foo',
+      '--idempotency-key-prefix',
+      'bar',
+    ]);
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr.join('\n')).toMatch(/either --idempotency-key or --idempotency-key-prefix/);
+  });
+
   it('bug28: batch over IR devices attaches subKind + verification and sets summary.unverifiableCount', async () => {
     cacheMock.map.set('IR1', { type: 'Air Conditioner', name: 'Living Room AC', category: 'ir' });
     cacheMock.map.set('IR2', { type: 'Air Conditioner', name: 'Bedroom AC', category: 'ir' });

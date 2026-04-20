@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import type { AxiosInstance } from 'axios';
 import { intArg, enumArg, stringArg } from '../utils/arg-parsers.js';
-import { printJson, isJsonMode, handleError, buildErrorPayload, type ErrorPayload } from '../utils/output.js';
+import { printJson, isJsonMode, handleError, buildErrorPayload, UsageError, type ErrorPayload } from '../utils/output.js';
 import {
   fetchDeviceList,
   executeCommand,
@@ -157,6 +157,7 @@ export function registerBatchCommand(devices: Command): void {
     .option('--type <commandType>', '"command" (default) or "customize" for user-defined IR buttons', enumArg('--type', COMMAND_TYPES), 'command')
     .option('--stdin', 'Read deviceIds from stdin, one per line (same as trailing "-")')
     .option('--idempotency-key-prefix <prefix>', 'Client-supplied prefix for idempotency keys (key per device: <prefix>-<deviceId>). process-local 60s window; cache is per Node process (MCP session, batch run, plan run). Independent CLI invocations do not share cache.', stringArg('--idempotency-key-prefix'))
+    .option('--idempotency-key <prefix>', 'Alias for --idempotency-key-prefix.', stringArg('--idempotency-key'))
     .addHelpText('after', `
 Targets are resolved in this priority order:
   1. --ids when present       (explicit deviceIds)
@@ -211,12 +212,21 @@ Examples:
           type: string;
           stdin?: boolean;
           idempotencyKeyPrefix?: string;
+          idempotencyKey?: string;
         },
         commandObj: Command
       ) => {
         // Trailing "-" sentinel selects stdin mode.
         const extra = commandObj.args ?? [];
         const readStdin = Boolean(options.stdin) || extra.includes('-');
+        // Accept --idempotency-key as alias; reject when both forms are supplied.
+        if (options.idempotencyKey !== undefined && options.idempotencyKeyPrefix !== undefined) {
+          handleError(new UsageError('Use either --idempotency-key or --idempotency-key-prefix, not both.'));
+          return;
+        }
+        if (options.idempotencyKey !== undefined && options.idempotencyKeyPrefix === undefined) {
+          options.idempotencyKeyPrefix = options.idempotencyKey;
+        }
         let client: AxiosInstance | undefined;
         const getClient = (): AxiosInstance => (client ??= createClient());
 
