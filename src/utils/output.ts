@@ -59,8 +59,12 @@ const ASCII_BORDER_CHARS = {
   right: '|', 'right-mid': '+', middle: '|',
 };
 
-export function printTable(headers: string[], rows: (string | number | boolean | null | undefined)[][]): void {
-  const style = getTableStyle();
+export function printTable(
+  headers: string[],
+  rows: (string | number | boolean | null | undefined)[][],
+  styleOverride?: TableStyle,
+): void {
+  const style = styleOverride ?? getTableStyle();
   if (style === 'markdown') {
     console.log(renderMarkdownTable(headers, rows));
     return;
