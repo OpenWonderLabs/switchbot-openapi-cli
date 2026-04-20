@@ -346,8 +346,19 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
     async ({ deviceId, command, parameter, commandType, confirm, idempotencyKey, dryRun }) => {
       const effectiveType = commandType ?? 'command';
 
-      // dryRun early-return — no API call, no validation against live device list
+      // dryRun early-return — no API call. We still preflight the deviceId
+      // against the local cache so fabricated IDs don't silently pass
+      // validation (bug #SYS-3). Dry-run is meant to catch bad inputs; a
+      // dry-run that accepts anything is worse than no dry-run at all.
       if (dryRun) {
+        const cached = getCachedDevice(deviceId);
+        if (!cached) {
+          return mcpError('usage', 2, `Device "${deviceId}" not found in local cache.`, {
+            subKind: 'device-not-found',
+            hint: "Run 'list_devices' first to warm the cache, then retry with dryRun:true.",
+            context: { deviceId },
+          });
+        }
         const wouldSend = {
           deviceId,
           command,

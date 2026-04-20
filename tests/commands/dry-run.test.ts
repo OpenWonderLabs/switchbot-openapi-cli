@@ -105,6 +105,7 @@ describe('dryRun support on mutating tools', () => {
   });
 
   it('send_command dryRun:true with parameter and commandType mirrors the full request shape', async () => {
+    cacheMock.map.set('IR1', { type: 'IR TV', name: 'Living Room', category: 'ir' });
     const { client } = await pair();
 
     const res = await client.callTool({

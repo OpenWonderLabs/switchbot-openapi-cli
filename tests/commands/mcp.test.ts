@@ -195,6 +195,42 @@ describe('mcp server', () => {
     expect(apiMock.__instance.post).toHaveBeenCalledTimes(1);
   });
 
+  it('send_command dryRun rejects unknown deviceId against local cache (bug #SYS-3)', async () => {
+    // Cache is empty — no devices known.
+    const { client } = await pair();
+
+    const res = await client.callTool({
+      name: 'send_command',
+      arguments: { deviceId: 'DEADBEEF', command: 'turnOff', dryRun: true },
+    });
+
+    expect(res.isError).toBe(true);
+    const structured = res.structuredContent as { error?: { kind?: string; subKind?: string; context?: { deviceId?: string } } };
+    expect(structured.error?.kind).toBe('usage');
+    expect(structured.error?.subKind).toBe('device-not-found');
+    expect(structured.error?.context?.deviceId).toBe('DEADBEEF');
+    // Dry-run must not hit the network even for preflight.
+    expect(apiMock.__instance.post).not.toHaveBeenCalled();
+    expect(apiMock.__instance.get).not.toHaveBeenCalled();
+  });
+
+  it('send_command dryRun succeeds when deviceId is cached (bug #SYS-3 happy path)', async () => {
+    cacheMock.map.set('BULB1', { type: 'Color Bulb', name: 'Desk Lamp', category: 'physical' });
+    const { client } = await pair();
+
+    const res = await client.callTool({
+      name: 'send_command',
+      arguments: { deviceId: 'BULB1', command: 'turnOff', dryRun: true },
+    });
+
+    expect(res.isError).toBeFalsy();
+    const structured = res.structuredContent as { ok?: boolean; dryRun?: boolean; wouldSend?: { deviceId?: string; command?: string } };
+    expect(structured.ok).toBe(true);
+    expect(structured.dryRun).toBe(true);
+    expect(structured.wouldSend?.deviceId).toBe('BULB1');
+    expect(structured.wouldSend?.command).toBe('turnOff');
+  });
+
   it('list_devices returns the raw API body and refreshes the cache', async () => {
     const body = { deviceList: [], infraredRemoteList: [] };
     apiMock.__instance.get.mockResolvedValueOnce({ data: { statusCode: 100, body } });
