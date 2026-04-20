@@ -401,4 +401,61 @@ describe('devices batch', () => {
     expect(parsed.data.plan.stepCount).toBe(2);
     expect(parsed.data.plan.steps.map((s: { deviceId: string }) => s.deviceId).sort()).toEqual(['BOT1', 'BOT2']);
   });
+
+  it('bug28: batch over IR devices attaches subKind + verification and sets summary.unverifiableCount', async () => {
+    cacheMock.map.set('IR1', { type: 'Air Conditioner', name: 'Living Room AC', category: 'ir' });
+    cacheMock.map.set('IR2', { type: 'Air Conditioner', name: 'Bedroom AC', category: 'ir' });
+    apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body: {} } });
+
+    const result = await runCli(registerDevicesCommand, [
+      '--json',
+      'devices',
+      'batch',
+      'turnOff',
+      '--ids',
+      'IR1,IR2',
+    ]);
+
+    expect(result.exitCode).toBeNull();
+    const parsed = JSON.parse(result.stdout[0]);
+    expect(parsed.data.summary.ok).toBe(2);
+    expect(parsed.data.summary.unverifiableCount).toBe(2);
+
+    for (const s of parsed.data.succeeded) {
+      expect(s.subKind).toBe('ir-no-feedback');
+      expect(s.verification).toBeDefined();
+      expect(s.verification.verifiable).toBe(false);
+      expect(s.verification.reason).toBe(
+        'IR transmission is unidirectional; no receipt acknowledgment is possible.'
+      );
+      expect(s.verification.suggestedFollowup).toBe(
+        'Confirm visible change manually or via a paired state sensor.'
+      );
+    }
+  });
+
+  it('bug28: batch over physical devices does NOT attach subKind/verification and unverifiableCount is 0', async () => {
+    cacheMock.map.set('BOT1', { type: 'Bot', name: 'Kitchen', category: 'physical' });
+    cacheMock.map.set('BOT2', { type: 'Bot', name: 'Office', category: 'physical' });
+    apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body: {} } });
+
+    const result = await runCli(registerDevicesCommand, [
+      '--json',
+      'devices',
+      'batch',
+      'turnOn',
+      '--ids',
+      'BOT1,BOT2',
+    ]);
+
+    expect(result.exitCode).toBeNull();
+    const parsed = JSON.parse(result.stdout[0]);
+    expect(parsed.data.summary.ok).toBe(2);
+    expect(parsed.data.summary.unverifiableCount).toBe(0);
+
+    for (const s of parsed.data.succeeded) {
+      expect(s.subKind).toBeUndefined();
+      expect(s.verification).toBeUndefined();
+    }
+  });
 });

@@ -12,7 +12,7 @@ import { createClient } from '../api/client.js';
 import { parseFilter, applyFilter, FilterSyntaxError } from '../utils/filter.js';
 import { isDryRun } from '../utils/flags.js';
 import { DryRunSignal } from '../api/client.js';
-import { getCachedTypeMap } from '../devices/cache.js';
+import { getCachedTypeMap, getCachedDevice } from '../devices/cache.js';
 
 interface BatchStepTiming {
   startedAt: string;
@@ -22,7 +22,16 @@ interface BatchStepTiming {
 }
 
 interface BatchResult {
-  succeeded: Array<{ deviceId: string; result: unknown } & BatchStepTiming>;
+  succeeded: Array<{
+    deviceId: string;
+    result: unknown;
+    subKind?: 'ir-no-feedback';
+    verification?: {
+      verifiable: false;
+      reason: string;
+      suggestedFollowup: string;
+    };
+  } & BatchStepTiming>;
   failed: Array<{ deviceId: string; error: ErrorPayload } & BatchStepTiming>;
   summary: {
     total: number;
@@ -30,6 +39,7 @@ interface BatchResult {
     failed: number;
     skipped: number;
     durationMs: number;
+    unverifiableCount: number;
     dryRun?: boolean;
     schemaVersion?: string;
     maxConcurrent?: number;
@@ -241,7 +251,7 @@ Examples:
           const out: BatchResult = {
             succeeded: [],
             failed: [],
-            summary: { total: 0, ok: 0, failed: 0, skipped: 0, durationMs: 0 },
+            summary: { total: 0, ok: 0, failed: 0, skipped: 0, durationMs: 0, unverifiableCount: 0 },
           };
           if (isJsonMode()) printJson(out);
           else console.log('No devices matched — nothing to do.');
@@ -416,14 +426,26 @@ Examples:
         }>;
 
         const result: BatchResult = {
-          succeeded: succeeded.map((s) => ({
-            deviceId: s.deviceId,
-            result: s.result,
-            startedAt: s.startedAt,
-            finishedAt: s.finishedAt,
-            durationMs: s.durationMs,
-            replayed: s.replayed,
-          })),
+          succeeded: succeeded.map((s) => {
+            const isIr = getCachedDevice(s.deviceId)?.category === 'ir';
+            const entry: BatchResult['succeeded'][number] = {
+              deviceId: s.deviceId,
+              result: s.result,
+              startedAt: s.startedAt,
+              finishedAt: s.finishedAt,
+              durationMs: s.durationMs,
+              replayed: s.replayed,
+            };
+            if (isIr) {
+              entry.subKind = 'ir-no-feedback';
+              entry.verification = {
+                verifiable: false,
+                reason: 'IR transmission is unidirectional; no receipt acknowledgment is possible.',
+                suggestedFollowup: 'Confirm visible change manually or via a paired state sensor.',
+              };
+            }
+            return entry;
+          }),
           failed: failed.map((f) => ({
             deviceId: f.deviceId,
             error: f.error,
@@ -437,6 +459,7 @@ Examples:
             failed: failed.length,
             skipped: dryRunned.length,
             durationMs: Date.now() - startedAt,
+            unverifiableCount: succeeded.filter((s) => getCachedDevice(s.deviceId)?.category === 'ir').length,
             schemaVersion: '1.1',
             maxConcurrent: concurrency,
             staggerMs,
