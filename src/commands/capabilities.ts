@@ -46,6 +46,7 @@ const COMMAND_META: Record<string, CommandMeta> = {
   // scenes
   'scenes list':      { mutating: false, consumesQuota: true,  idempotencySupported: false, agentSafetyTier: 'read',        verifiability: 'local',            typicalLatencyMs: 500 },
   'scenes execute':   { mutating: true,  consumesQuota: true,  idempotencySupported: false, agentSafetyTier: 'action',      verifiability: 'deviceDependent',  typicalLatencyMs: 1500 },
+  'scenes describe':  { mutating: false, consumesQuota: true,  idempotencySupported: false, agentSafetyTier: 'read',        verifiability: 'local',            typicalLatencyMs: 500 },
   // webhook
   'webhook setup':    { mutating: true,  consumesQuota: true,  idempotencySupported: false, agentSafetyTier: 'action',      verifiability: 'local',            typicalLatencyMs: 500 },
   'webhook query':    { mutating: false, consumesQuota: true,  idempotencySupported: false, agentSafetyTier: 'read',        verifiability: 'local',            typicalLatencyMs: 500 },

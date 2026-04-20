@@ -324,7 +324,7 @@ Examples:
     .option('--name-room <room>', 'Narrow --name by room name (substring match)', stringArg('--name-room'))
     .option('--type <commandType>', 'Command type: "command" for built-in commands (default), "customize" for user-defined IR buttons', enumArg('--type', COMMAND_TYPES), 'command')
     .option('--yes', 'Confirm a destructive command (Smart Lock unlock, Garage open, …). --dry-run is always allowed without --yes.')
-    .option('--idempotency-key <key>', 'Idempotency key for deduplication (60s window; same key replays cached result)', stringArg('--idempotency-key'))
+    .option('--idempotency-key <key>', 'Client-supplied key to dedupe retries. process-local 60s window; cache is per Node process (MCP session, batch run, plan run). Independent CLI invocations do not share cache.', stringArg('--idempotency-key'))
     .addHelpText('after', `
 ────────────────────────────────────────────────────────────────────────
 For the full list of commands a specific device supports — and their

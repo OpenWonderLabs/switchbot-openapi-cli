@@ -755,15 +755,18 @@ export function registerMcpCommand(program: Command): void {
     .command('mcp')
     .description('Run as a Model Context Protocol server so AI agents can call SwitchBot tools')
     .addHelpText('after', `
-The MCP server exposes eight tools:
-  - list_devices          fetch all physical + IR devices
-  - get_device_status     live status for a physical device
-  - send_command          control a device (destructive commands need confirm:true)
-  - list_scenes           list all manual scenes
-  - run_scene             execute a manual scene
-  - search_catalog        offline catalog search by type/alias
-  - describe_device       metadata + commands + (optionally) live status for one device
-  - account_overview      single cold-start snapshot: devices + scenes + quota + cache + MQTT state
+The MCP server exposes eleven tools:
+  - list_devices            fetch all physical + IR devices
+  - get_device_status       live status for a physical device
+  - send_command            control a device (destructive commands need confirm:true)
+  - list_scenes             list all manual scenes
+  - run_scene               execute a manual scene
+  - search_catalog          offline catalog search by type/alias
+  - describe_device         metadata + commands + (optionally) live status for one device
+  - account_overview        single cold-start snapshot: devices + scenes + quota + cache + MQTT state
+  - get_device_history      fetch raw JSONL history records for a device
+  - query_device_history    filter + page history records with field/time predicates
+  - aggregate_device_history compute count/min/max/avg/sum/p50/p95 over history records
 
 Resource (read-only):
   - switchbot://events    snapshot of recent MQTT shadow events from the ring buffer

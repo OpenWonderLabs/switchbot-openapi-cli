@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { printJson, isJsonMode, handleError } from '../utils/output.js';
+import { printJson, isJsonMode, handleError, StructuredUsageError } from '../utils/output.js';
 import { resolveFormat, resolveFields, renderRows } from '../utils/format.js';
 import { fetchScenes, executeScene } from '../lib/scenes.js';
 
@@ -63,6 +63,47 @@ Example:
           printJson({ ok: true, sceneId });
         } else {
           console.log(`✓ Scene executed: ${sceneId}`);
+        }
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  // switchbot scenes describe <sceneId>
+  scenes
+    .command('describe')
+    .description('Show metadata for a scene by its ID (SwitchBot API v1.1 does not expose step detail)')
+    .argument('<sceneId>', 'Scene ID from "scenes list"')
+    .addHelpText('after', `
+Note: SwitchBot API v1.1 does not return scene step detail. Only the scene name is available.
+
+Example:
+  $ switchbot scenes describe T12345678
+`)
+    .action(async (sceneId: string) => {
+      try {
+        const sceneList = await fetchScenes();
+        const found = sceneList.find((s) => s.sceneId === sceneId);
+        if (!found) {
+          throw new StructuredUsageError(`scene not found: ${sceneId}`, {
+            error: 'scene_not_found',
+            sceneId,
+            candidates: sceneList.map((s) => ({ sceneId: s.sceneId, sceneName: s.sceneName })),
+          });
+        }
+        const result = {
+          sceneId: found.sceneId,
+          sceneName: found.sceneName,
+          stepCount: null,
+          note: 'SwitchBot API v1.1 does not expose scene steps — displayed name only',
+        };
+        if (isJsonMode()) {
+          printJson(result);
+        } else {
+          console.log(`sceneId:   ${result.sceneId}`);
+          console.log(`sceneName: ${result.sceneName}`);
+          console.log(`stepCount: (not available)`);
+          console.log(`note:      ${result.note}`);
         }
       } catch (error) {
         handleError(error);

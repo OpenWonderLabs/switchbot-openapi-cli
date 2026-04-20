@@ -146,7 +146,7 @@ export function registerBatchCommand(devices: Command): void {
     .option('--yes', 'Allow destructive commands (Smart Lock unlock, garage open, ...)')
     .option('--type <commandType>', '"command" (default) or "customize" for user-defined IR buttons', enumArg('--type', COMMAND_TYPES), 'command')
     .option('--stdin', 'Read deviceIds from stdin, one per line (same as trailing "-")')
-    .option('--idempotency-key-prefix <prefix>', 'Prefix for idempotency keys (key per device: <prefix>-<deviceId>)', stringArg('--idempotency-key-prefix'))
+    .option('--idempotency-key-prefix <prefix>', 'Client-supplied prefix for idempotency keys (key per device: <prefix>-<deviceId>). process-local 60s window; cache is per Node process (MCP session, batch run, plan run). Independent CLI invocations do not share cache.', stringArg('--idempotency-key-prefix'))
     .addHelpText('after', `
 Targets are resolved in this priority order:
   1. --ids when present       (explicit deviceIds)
