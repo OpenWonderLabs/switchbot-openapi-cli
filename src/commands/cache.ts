@@ -53,6 +53,10 @@ Examples:
     .command('show')
     .alias('status')
     .description('Summarize the cache files (paths, ages, entry counts)')
+    .addHelpText('after', `
+Cache TTL is computed from the 'lastUpdated' field inside the JSON, not the file mtime.
+touch does not invalidate; use 'cache clear' to force a refresh.
+`)
     .action(() => {
       const summary = describeCache();
       if (isJsonMode()) {
