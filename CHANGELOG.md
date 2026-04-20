@@ -21,6 +21,61 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Capabilities manifest** — new `history aggregate` entry in
   `COMMAND_META`; new `aggregate_device_history` entry in
   `surfaces.mcp.tools`.
+- **`scenes describe <sceneId>`** — returns `{sceneId, sceneName,
+  stepCount:null, note}`; SwitchBot API v1.1 does not expose scene
+  steps. Unknown sceneId returns structured `scene_not_found` with a
+  candidate list. (bug #17)
+- **`--no-color` flag + `NO_COLOR` env var** — honors the standard
+  https://no-color.org/ contract; disables chalk colors globally before
+  any subcommand runs. (bug #12)
+- **`--format markdown`** — accepted as an alias for `--format table`
+  with `--table-style markdown` forced at render time, independent of
+  the user's `--table-style` flag. (bug #8)
+- **`cache status`** — alias for `cache show`, matching the `quota`
+  subcommand's status/show parity. (bug #9)
+
+### Fixed (security & correctness — v2.4.0 report)
+
+- **MCP strict input schemas on all 11 tools** — unknown keys now
+  reject with JSON-RPC `-32602`. Fixes the v2.4.0 hole where
+  `send_command {dryRun:true}` silently fired the command anyway —
+  particularly dangerous for Smart Lock / Garage. (bug #4)
+- **MCP `dryRun` on mutating tools** — `send_command` and `run_scene`
+  accept `dryRun:true`; when set, no API call is made and the response
+  is `{ok:true, dryRun:true, wouldSend:{...}}`. (bug #4)
+- **MCP `serverInfo.version`** — wired to `package.json#version`; was
+  hardcoded `"2.0.0"` despite the CLI reporting the real version
+  everywhere else. (bug #5)
+- **MCP `_meta.agentSafetyTier`** — every tool now emits its tier
+  (`read` / `action` / `destructive`). Release notes already claimed
+  this but no tool was actually emitting it. (bug #6)
+- **`--name` require-unique + exact-match** — exact-name short-circuit
+  in `name-resolver` was returning the exact hit even when substring
+  matches existed, defeating the write-path `require-unique` default.
+  Exact hits now enter the candidate list under `require-unique` and
+  go through the ambiguity check like any other match. (bug #1)
+- **`history verify` on missing audit.log** — exits 0 with `status:"warn"`
+  and `fileMissing:true` rather than exit 1. Malformed/unversioned
+  content still exits 1 as before. (bug #11)
+- **`events mqtt-tail` control events** — `__connect` / `__reconnect` /
+  `__disconnect` / `__heartbeat` now append to
+  `~/.switchbot/device-history/__control.jsonl` alongside per-device
+  files, honoring the v2.4.0 "every event is persisted" claim. (bug #10)
+
+### Changed (docs)
+
+- `--idempotency-key` help text on `devices command`, `devices batch`,
+  `plan run`, `history replay` now explicitly mentions the process-local
+  60s scope — independent CLI invocations do NOT share the cache. (bug #14)
+- `mcp --help` now says "eleven tools" and lists all 11 names. (bug #15)
+- New `docs/verbose-redaction.md` — documents the nine masked headers
+  (`authorization`, `token`, `sign`, `nonce`, `x-api-key`, `cookie`,
+  `set-cookie`, `x-auth-token`, `t`) and the `--trace-unsafe` opt-out. (bug #16)
+- `plan schema` now includes `agentNotes.deviceNameStrategy` declaring
+  that plan steps using `deviceName` resolve with `require-unique`. (bug #18)
+- `agent-bootstrap` `hints` field carries JSDoc + `schema export`
+  declares it in `cliAddedFields` — empty array means "no hints",
+  never null. (bug #13)
 
 ### Notes
 
@@ -31,12 +86,22 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Quantiles use nearest-rank on sorted per-bucket samples; if the cap
   is reached the result carries `partial: true` and a per-bucket
   `notes[]` entry. `count / min / max / avg / sum` remain exact.
+- All bug-fix items bundled into 2.5.0 rather than shipping a separate
+  2.4.1. Source of bug numbers: the v2.4.0 smoke-test report at
+  `D:/servicdata/openclaw/workspace/switchbot-cli-v2.4.0-report.md`.
 
 ### Not included (deferred)
 
 - Cross-device aggregation (agents merge locally).
 - Trend / rate-of-change helpers (derivable from bucket series).
 - `--fill-empty` for missing buckets.
+- Disk-persisted idempotency cache for cross-invocation replay
+  (report bug #2). Process-local is the documented 2.4.0 contract;
+  the `--help` text now states this plainly — no code change. Revisit
+  only if a concrete use case forces it.
+- `capabilities --types` / `--fields` / `--used` (report bug #7).
+  `schema export` already offers these for the agent bootstrap path;
+  `capabilities --compact --surface <s>` covers the payload-size story.
 
 ## [2.4.0] - 2026-04-20
 
