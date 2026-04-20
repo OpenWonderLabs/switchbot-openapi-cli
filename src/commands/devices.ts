@@ -827,8 +827,19 @@ Examples:
         }
       } catch (error) {
         if (error instanceof DeviceNotFoundError) {
-          console.error(error.message);
-          console.error(`Try 'switchbot devices list' to see the full list.`);
+          const message = `${error.message} Try 'switchbot devices list' to see the full list.`;
+          if (isJsonMode()) {
+            emitJsonError({
+              code: 1,
+              kind: 'runtime',
+              message,
+              errorClass: 'runtime',
+              transient: false,
+            });
+          } else {
+            console.error(error.message);
+            console.error(`Try 'switchbot devices list' to see the full list.`);
+          }
           process.exit(1);
         }
         handleError(error);
