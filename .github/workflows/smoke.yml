@@ -57,34 +57,27 @@ jobs:
           jq -e '.data.verification.verifiable == false' /tmp/ir.json
           echo "PASS: data.verification.verifiable == false"
 
-      - name: Idempotency replay + conflict (destructive — real device toggle)
+      - name: Idempotency flag accepted (destructive — single real toggle)
         if: ${{ inputs.physical_device_id != '' }}
         env:
           SWITCHBOT_TOKEN: ${{ secrets.SWITCHBOT_TOKEN }}
           SWITCHBOT_SECRET: ${{ secrets.SWITCHBOT_SECRET }}
           DEV: ${{ inputs.physical_device_id }}
+        # The idempotency cache is process-local (see capabilities.idempotencyContract.scope).
+        # Replay + conflict assertions only hold inside a single long-lived process — MCP
+        # server, `devices batch`, `plan run`, `history replay`. That behavior is covered by
+        # unit tests (tests/lib/idempotency.test.ts). Here in smoke we only verify the
+        # --idempotency-key flag is accepted end-to-end against the real API and that a
+        # first call succeeds without a stray `replayed:true` on a cold process.
         run: |
           KEY=$(uuidgen)
           echo "idempotency_key=$KEY"
 
           node dist/index.js devices command "$DEV" turnOn --idempotency-key "$KEY" --json > /tmp/i1.json
           cat /tmp/i1.json
+          jq -e '.data.ok == true' /tmp/i1.json
           jq -e '(.data.replayed // false) == false' /tmp/i1.json
-          echo "step1 PASS: first call not replayed"
-
-          node dist/index.js devices command "$DEV" turnOn --idempotency-key "$KEY" --json > /tmp/i2.json
-          cat /tmp/i2.json
-          jq -e '.data.replayed == true' /tmp/i2.json
-          echo "step2 PASS: replay hit"
-
-          set +e
-          node dist/index.js devices command "$DEV" turnOff --idempotency-key "$KEY" --json > /tmp/i3.json
-          code=$?
-          set -e
-          cat /tmp/i3.json
-          jq -e '.data.error == "idempotency_conflict"' /tmp/i3.json
-          test "$code" -eq 2
-          echo "step3 PASS: conflict detected, exit 2"
+          echo "PASS: --idempotency-key accepted, first call not flagged as replayed"
 
       - name: History range end-to-end
         if: ${{ inputs.physical_device_id != '' }}
