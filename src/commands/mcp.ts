@@ -4,7 +4,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
 import { intArg, stringArg } from '../utils/arg-parsers.js';
-import { handleError, isJsonMode } from '../utils/output.js';
+import { handleError, isJsonMode, buildErrorPayload } from '../utils/output.js';
 import { VERSION } from '../version.js';
 import {
   fetchDeviceList,
@@ -50,16 +50,46 @@ function mcpError(
   kind: McpErrorKind,
   code: number,
   message: string,
-  options?: { hint?: string; retryable?: boolean; context?: Record<string, unknown> },
+  options?: {
+    hint?: string;
+    retryable?: boolean;
+    context?: Record<string, unknown>;
+    subKind?: string;
+    errorClass?: string;
+    transient?: boolean;
+    retryAfterMs?: number;
+  },
 ) {
   const obj: Record<string, unknown> = { code, kind, message };
   if (options?.hint) obj.hint = options.hint;
   if (options?.retryable) obj.retryable = true;
   if (options?.context) obj.context = options.context;
+  if (options?.subKind !== undefined) obj.subKind = options.subKind;
+  if (options?.errorClass !== undefined) obj.errorClass = options.errorClass;
+  if (options?.transient !== undefined) obj.transient = options.transient;
+  if (options?.retryAfterMs !== undefined) obj.retryAfterMs = options.retryAfterMs;
   return {
     isError: true as const,
     content: [{ type: 'text' as const, text: JSON.stringify({ error: obj }, null, 2) }],
+    structuredContent: { error: obj },
   };
+}
+
+/**
+ * Convert any thrown error into a structured MCP tool-error response,
+ * preserving all ErrorPayload fields (subKind, transient, hint, etc.).
+ */
+function apiErrorToMcpError(err: unknown) {
+  const payload = buildErrorPayload(err);
+  return mcpError(payload.kind, payload.code, payload.message, {
+    hint: payload.hint,
+    retryable: payload.retryable,
+    context: payload.context,
+    subKind: payload.subKind,
+    errorClass: payload.errorClass,
+    transient: payload.transient,
+    retryAfterMs: payload.retryAfterMs,
+  });
 }
 
 export function createSwitchBotMcpServer(options?: { eventManager?: EventSubscriptionManager }): McpServer {
@@ -400,7 +430,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
             },
           });
         }
-        throw err;
+        return apiErrorToMcpError(err);
       }
       const isIr = getCachedDevice(deviceId)?.category === 'ir';
       const structured: {
@@ -460,7 +490,11 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
           structuredContent: structured,
         };
       }
-      await executeScene(sceneId);
+      try {
+        await executeScene(sceneId);
+      } catch (err) {
+        return apiErrorToMcpError(err);
+      }
       const structured = { ok: true as const, sceneId };
       return {
         content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
@@ -578,7 +612,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
             context: { deviceId },
           });
         }
-        throw err;
+        return apiErrorToMcpError(err);
       }
     }
   );

@@ -17,9 +17,21 @@ const apiMock = vi.hoisted(() => {
 vi.mock('../../src/api/client.js', () => ({
   createClient: apiMock.createClient,
   ApiError: class ApiError extends Error {
-    constructor(message: string, public readonly code: number) {
+    public readonly retryable: boolean;
+    public readonly hint?: string;
+    public readonly retryAfterMs?: number;
+    public readonly transient: boolean;
+    constructor(
+      message: string,
+      public readonly code: number,
+      meta: { retryable?: boolean; hint?: string; retryAfterMs?: number; transient?: boolean } = {}
+    ) {
       super(message);
       this.name = 'ApiError';
+      this.retryable = meta.retryable ?? false;
+      this.hint = meta.hint;
+      this.retryAfterMs = meta.retryAfterMs;
+      this.transient = meta.transient ?? false;
     }
   },
   DryRunSignal: class DryRunSignal extends Error {
@@ -60,6 +72,7 @@ vi.mock('../../src/devices/cache.js', () => ({
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createSwitchBotMcpServer } from '../../src/commands/mcp.js';
+import { ApiError } from '../../src/api/client.js';
 
 /** Connect a fresh server + client pair and return both. */
 async function pair() {
@@ -392,5 +405,74 @@ describe('mcp server', () => {
       vi.restoreAllMocks();
       fs.rmSync(tmpHome, { recursive: true, force: true });
     }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Bug #38: structured error metadata preserved in MCP tool responses
+  // ---------------------------------------------------------------------------
+
+  it('send_command preserves structured error metadata on ApiError (code 161 device-offline)', async () => {
+    cacheMock.map.set('BLE1', { type: 'Bot', name: 'BLE Bot', category: 'physical' });
+    // Mock the POST to throw a device-offline ApiError
+    apiMock.__instance.post.mockRejectedValueOnce(
+      new ApiError('Device offline (check Wi-Fi / Bluetooth connection)', 161, { transient: false })
+    );
+    const { client } = await pair();
+
+    const res = await client.callTool({
+      name: 'send_command',
+      arguments: { deviceId: 'BLE1', command: 'turnOn' },
+    });
+
+    expect(res.isError).toBe(true);
+    const sc = (res as { structuredContent?: unknown }).structuredContent as
+      | { error?: { code?: number; subKind?: string; transient?: boolean; hint?: string } }
+      | undefined;
+    expect(sc?.error?.code).toBe(161);
+    expect(sc?.error?.subKind).toBe('device-offline');
+    expect(sc?.error?.transient).toBe(false);
+    expect(sc?.error?.hint).toMatch(/Hub/);
+    // content[0].text must still be a JSON string (backwards compat)
+    const text = (res.content as Array<{ type: string; text: string }>)[0].text;
+    expect(() => JSON.parse(text)).not.toThrow();
+  });
+
+  it('describe_device preserves structured error metadata on ApiError (code 401 auth-failed)', async () => {
+    // Mock the GET (fetchDeviceList inside describeDevice) to throw auth error
+    apiMock.__instance.get.mockRejectedValueOnce(
+      new ApiError('Authentication failed', 401, { transient: false, retryable: false })
+    );
+    const { client } = await pair();
+
+    const res = await client.callTool({
+      name: 'describe_device',
+      arguments: { deviceId: 'ANY1' },
+    });
+
+    expect(res.isError).toBe(true);
+    const sc = (res as { structuredContent?: unknown }).structuredContent as
+      | { error?: { subKind?: string; errorClass?: string } }
+      | undefined;
+    expect(sc?.error?.subKind).toBe('auth-failed');
+    expect(sc?.error?.errorClass).toBe('api');
+  });
+
+  it('run_scene preserves structured error metadata on ApiError (code 190 device-busy)', async () => {
+    // Mock the POST (executeScene) to throw device-busy ApiError
+    apiMock.__instance.post.mockRejectedValueOnce(
+      new ApiError('Device internal error', 190, { transient: false })
+    );
+    const { client } = await pair();
+
+    const res = await client.callTool({
+      name: 'run_scene',
+      arguments: { sceneId: 'SCENE1' },
+    });
+
+    expect(res.isError).toBe(true);
+    const sc = (res as { structuredContent?: unknown }).structuredContent as
+      | { error?: { subKind?: string } }
+      | undefined;
+    expect(sc?.error?.subKind).toBe('device-busy');
   });
 });
