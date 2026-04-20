@@ -138,7 +138,7 @@ export type ErrorSubKind =
   | 'command-not-supported'
   | 'auth-failed'
   | 'quota-exceeded'
-  | 'device-busy'
+  | 'device-internal-error'
   | 'unknown-api-error';
 
 export interface ErrorPayload {
@@ -151,7 +151,7 @@ export interface ErrorPayload {
   context?: Record<string, unknown>;
   retryAfterMs?: number;
   transient?: boolean;
-  errorClass?: 'network' | 'api' | 'device-offline' | 'device-busy' | 'guard' | 'usage';
+  errorClass?: 'network' | 'api' | 'device-offline' | 'device-internal-error' | 'guard' | 'usage';
 }
 
 export class StructuredUsageError extends Error {
@@ -168,7 +168,7 @@ function classifyApiError(code: number): ErrorSubKind {
     case 152: return 'device-not-found';
     case 161:
     case 171: return 'device-offline';
-    case 190: return 'device-busy';
+    case 190: return 'device-internal-error';
     case 401: return 'auth-failed';
     case 429: return 'quota-exceeded';
     default:  return 'unknown-api-error';
@@ -291,7 +291,7 @@ function errorHint(code: number): string | null {
     case 171:
       return 'The Hub itself is offline — check its power and Wi-Fi.';
     case 190:
-      return "Often means the deviceId is wrong or the command/parameter is invalid for this device. Double-check with 'switchbot devices list' and 'switchbot devices describe <deviceId>'. Use --verbose to see the raw API response.";
+      return 'SwitchBot API code 190 is a generic internal error. Common causes: invalid deviceId, unsupported command/parameter, or the endpoint does not apply (e.g., "webhook query" with no webhook configured). Verify with --verbose.';
     case 401:
       return "Re-run 'switchbot config set-token <token> <secret>', or verify SWITCHBOT_TOKEN / SWITCHBOT_SECRET.";
     case 429:

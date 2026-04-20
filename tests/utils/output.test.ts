@@ -199,7 +199,7 @@ describe('handleError', () => {
     expect(() => handleError(new ApiError('x', 190))).toThrow('__exit');
     const joined = errSpy.mock.calls.map((c) => String(c[0])).join('\n');
     expect(joined).toContain('Hint:');
-    expect(joined).toMatch(/devices list|devices describe/);
+    expect(joined).toMatch(/generic internal error/);
   });
 
   it('does not print a hint for unknown/unmapped codes', async () => {
@@ -252,7 +252,7 @@ describe('handleError', () => {
       expect(parsed.schemaVersion).toBe('1.1');
       expect(parsed.error.code).toBe(190);
       expect(parsed.error.message).toBe('bad device');
-      expect(parsed.error.hint).toMatch(/devices/);
+      expect(parsed.error.hint).toMatch(/generic internal error/);
     });
 
     it('marks 429 errors as retryable when ApiError.retryable is true', async () => {
@@ -348,5 +348,12 @@ describe('buildErrorPayload', () => {
     const p = buildErrorPayload(new ApiError('not found', 152));
     expect(p.hint).toContain('deviceId');
     expect(p.transient).toBe(false);
+  });
+
+  it('ApiError code 190 → subKind device-internal-error (bug #27)', async () => {
+    const { ApiError } = await import('../../src/api/client.js');
+    const p = buildErrorPayload(new ApiError('internal error', 190));
+    expect(p.subKind).toBe('device-internal-error');
+    expect(p.hint).toMatch(/generic internal error/);
   });
 });

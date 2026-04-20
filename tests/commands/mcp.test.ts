@@ -457,8 +457,8 @@ describe('mcp server', () => {
     expect(sc?.error?.errorClass).toBe('api');
   });
 
-  it('run_scene preserves structured error metadata on ApiError (code 190 device-busy)', async () => {
-    // Mock the POST (executeScene) to throw device-busy ApiError
+  it('run_scene preserves structured error metadata on ApiError (code 190 device-internal-error)', async () => {
+    // Mock the POST (executeScene) to throw device-internal-error ApiError
     apiMock.__instance.post.mockRejectedValueOnce(
       new ApiError('Device internal error', 190, { transient: false })
     );
@@ -473,6 +473,6 @@ describe('mcp server', () => {
     const sc = (res as { structuredContent?: unknown }).structuredContent as
       | { error?: { subKind?: string } }
       | undefined;
-    expect(sc?.error?.subKind).toBe('device-busy');
+    expect(sc?.error?.subKind).toBe('device-internal-error');
   });
 });
