@@ -5,6 +5,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { z } from 'zod';
 import { intArg, stringArg } from '../utils/arg-parsers.js';
 import { handleError, isJsonMode } from '../utils/output.js';
+import { VERSION } from '../version.js';
 import {
   fetchDeviceList,
   fetchDeviceStatus,
@@ -66,7 +67,7 @@ export function createSwitchBotMcpServer(options?: { eventManager?: EventSubscri
   const server = new McpServer(
     {
       name: 'switchbot',
-      version: '2.0.0',
+      version: VERSION,
     },
     {
       capabilities: { tools: {}, resources: {} },
@@ -672,7 +673,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
       const quota = todayUsage();
 
       const overview = {
-        version: '2.0.0',
+        version: VERSION,
         schemaVersion: '1.1',
         devices: deviceList.deviceList.map(toMcpDeviceListShape),
         infraredRemotes: deviceList.infraredRemoteList.map(toMcpIrDeviceShape),
@@ -863,7 +864,7 @@ Inspect locally:
               res.writeHead(200, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({
                 ok: true,
-                version: '2.0.0',
+                version: VERSION,
                 pid: process.pid,
                 uptimeSec: Math.floor(process.uptime()),
               }));
@@ -874,7 +875,7 @@ Inspect locally:
               const state = eventManager.getState();
               const ready = state !== 'failed' && state !== 'disabled';
               const status = ready ? 200 : 503;
-              const body: Record<string, unknown> = { ready, version: '2.0.0', mqtt: state };
+              const body: Record<string, unknown> = { ready, version: VERSION, mqtt: state };
               if (!ready) body.reason = state === 'disabled' ? 'mqtt disabled' : 'mqtt failed';
               res.writeHead(status, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify(body));
