@@ -1,4 +1,7 @@
-import type { QueryOptions } from './history-query.js';
+import fs from 'node:fs';
+import readline from 'node:readline';
+import type { QueryOptions, HistoryRecord } from './history-query.js';
+import { jsonlFilesForDevice, resolveRange } from './history-query.js';
 
 export type AggFn = 'count' | 'min' | 'max' | 'avg' | 'sum' | 'p50' | 'p95';
 
@@ -41,9 +44,114 @@ export interface AggResult {
   notes: string[];
 }
 
+interface Acc {
+  min: number;
+  max: number;
+  sum: number;
+  count: number;
+  samples: number[] | null;
+  sampleCapHit: boolean;
+}
+
 export async function aggregateDeviceHistory(
-  _deviceId: string,
-  _opts: AggOptions,
+  deviceId: string,
+  opts: AggOptions,
 ): Promise<AggResult> {
-  throw new Error('aggregateDeviceHistory: not implemented');
+  const { fromMs, toMs } = resolveRange(opts);
+  const aggs: AggFn[] = (opts.aggs && opts.aggs.length > 0) ? opts.aggs : [...DEFAULT_AGGS];
+  const needQuantile = aggs.includes('p50') || aggs.includes('p95');
+
+  // bucketKey (epoch ms; 0 when no --bucket) → metric name → Acc
+  const buckets = new Map<number, Map<string, Acc>>();
+
+  for (const file of jsonlFilesForDevice(deviceId)) {
+    const stream = fs.createReadStream(file, { encoding: 'utf-8' });
+    const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+    for await (const line of rl) {
+      if (!line) continue;
+      let rec: HistoryRecord;
+      try { rec = JSON.parse(line) as HistoryRecord; } catch { continue; }
+      const tMs = Date.parse(rec.t);
+      if (!Number.isFinite(tMs) || tMs < fromMs || tMs > toMs) continue;
+
+      const key = 0; // single-bucket mode; Task 4 introduces bucketMs
+      let bkt = buckets.get(key);
+      if (!bkt) { bkt = new Map(); buckets.set(key, bkt); }
+
+      for (const metric of opts.metrics) {
+        const v = (rec.payload as Record<string, unknown> | null | undefined)?.[metric];
+        if (typeof v !== 'number' || !Number.isFinite(v)) continue;
+        let acc = bkt.get(metric);
+        if (!acc) {
+          acc = {
+            min: v,
+            max: v,
+            sum: 0,
+            count: 0,
+            samples: needQuantile ? [] : null,
+            sampleCapHit: false,
+          };
+          bkt.set(metric, acc);
+        }
+        acc.min = Math.min(acc.min, v);
+        acc.max = Math.max(acc.max, v);
+        acc.sum += v;
+        acc.count += 1;
+      }
+    }
+  }
+
+  return finalize(deviceId, opts, aggs, buckets, false, []);
+}
+
+function finalize(
+  deviceId: string,
+  opts: AggOptions,
+  aggs: AggFn[],
+  buckets: Map<number, Map<string, Acc>>,
+  partial: boolean,
+  notes: string[],
+): AggResult {
+  const { fromMs, toMs } = resolveRange(opts);
+  const fromIso = Number.isFinite(fromMs) ? new Date(fromMs).toISOString() : new Date(0).toISOString();
+  const toIso = Number.isFinite(toMs) ? new Date(toMs).toISOString() : new Date(Date.now()).toISOString();
+
+  const keys = [...buckets.keys()].sort((a, b) => a - b);
+  const outBuckets: AggBucket[] = [];
+  for (const key of keys) {
+    const perMetric = buckets.get(key)!;
+    const metricsOut: Record<string, BucketMetricResult> = {};
+    for (const [metric, acc] of perMetric.entries()) {
+      if (acc.count === 0) continue;
+      const r: BucketMetricResult = {};
+      if (aggs.includes('count')) r.count = acc.count;
+      if (aggs.includes('min')) r.min = acc.min;
+      if (aggs.includes('max')) r.max = acc.max;
+      if (aggs.includes('avg')) r.avg = acc.sum / acc.count;
+      if (aggs.includes('sum')) r.sum = acc.sum;
+      if ((aggs.includes('p50') || aggs.includes('p95')) && acc.samples) {
+        const sorted = [...acc.samples].sort((a, b) => a - b);
+        if (aggs.includes('p50')) r.p50 = sorted[Math.floor(0.5 * (sorted.length - 1))];
+        if (aggs.includes('p95')) r.p95 = sorted[Math.floor(0.95 * (sorted.length - 1))];
+      }
+      metricsOut[metric] = r;
+    }
+    if (Object.keys(metricsOut).length === 0) continue;
+    outBuckets.push({
+      t: new Date(key).toISOString(),
+      metrics: metricsOut,
+    });
+  }
+
+  return {
+    deviceId,
+    bucket: opts.bucket,
+    from: fromIso,
+    to: toIso,
+    metrics: [...opts.metrics],
+    aggs: [...aggs],
+    buckets: outBuckets,
+    partial,
+    notes,
+  };
 }
