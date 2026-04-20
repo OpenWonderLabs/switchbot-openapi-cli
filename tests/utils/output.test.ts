@@ -356,4 +356,11 @@ describe('buildErrorPayload', () => {
     expect(p.subKind).toBe('device-internal-error');
     expect(p.hint).toMatch(/generic internal error/);
   });
+
+  it('ApiError code 3005 → subKind command-not-supported with --type customize hint (bug #29)', async () => {
+    const { ApiError } = await import('../../src/api/client.js');
+    const p = buildErrorPayload(new ApiError('invalid value', 3005, { transient: false }));
+    expect(p.subKind).toBe('command-not-supported');
+    expect(p.hint).toMatch(/--type customize/);
+  });
 });

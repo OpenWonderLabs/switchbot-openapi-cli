@@ -164,7 +164,8 @@ export class StructuredUsageError extends Error {
 function classifyApiError(code: number): ErrorSubKind {
   switch (code) {
     case 151:
-    case 160: return 'command-not-supported';
+    case 160:
+    case 3005: return 'command-not-supported';
     case 152: return 'device-not-found';
     case 161:
     case 171: return 'device-offline';
@@ -296,6 +297,8 @@ function errorHint(code: number): string | null {
       return "Re-run 'switchbot config set-token <token> <secret>', or verify SWITCHBOT_TOKEN / SWITCHBOT_SECRET.";
     case 429:
       return 'Daily quota is 10,000 requests/account — retry after midnight UTC.';
+    case 3005:
+      return "SwitchBot rejected the command as invalid for this specific device model. For IR remotes, this often means the command works only on --type customize (user-learned buttons). Try 'switchbot devices commands <type>' or check the device's capabilities.";
     default:
       return null;
   }
