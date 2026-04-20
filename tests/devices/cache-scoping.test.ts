@@ -14,6 +14,7 @@ import os from 'node:os';
 import { createHash } from 'node:crypto';
 
 import {
+  loadCache,
   updateCacheFromDeviceList,
   setCachedStatus,
   resetListCache,
@@ -144,7 +145,50 @@ describe('cache scoping — status cache follows the same rule', () => {
   });
 });
 
-// ── e. --config-path override takes precedence (profile is ignored) ──────────
+// ── e. In-memory cache does not leak across profile switches ─────────────────
+
+describe('cache scoping — in-memory hot cache isolation across profiles', () => {
+  it('in-memory cache does not leak across profile switches within a single process', () => {
+    const alphaBody = {
+      deviceList: [{ deviceId: 'ALPHA-1', deviceName: 'Alpha Bot', deviceType: 'Bot' }],
+      infraredRemoteList: [],
+    };
+    const betaBody = {
+      deviceList: [{ deviceId: 'BETA-1', deviceName: 'Beta Plug', deviceType: 'Plug' }],
+      infraredRemoteList: [],
+    };
+
+    // Write alpha cache on disk and populate in-memory hot cache for alpha.
+    withRequestContext({ profile: 'alpha' }, () => {
+      updateCacheFromDeviceList(alphaBody);
+    });
+
+    // Verify alpha is in-memory.
+    const alphaResult = withRequestContext({ profile: 'alpha' }, () => loadCache());
+    expect(alphaResult?.devices['ALPHA-1']).toBeDefined();
+
+    // Write beta's inventory directly to disk (bypassing the hot-cache write path),
+    // simulating the scenario where beta's data was written in a prior process and
+    // only the hot cache is "stale" (points to alpha).
+    const betaDir = path.join(tmpDir, '.switchbot', 'cache', sha8('beta'));
+    fs.mkdirSync(betaDir, { recursive: true });
+    const betaCache = {
+      lastUpdated: new Date().toISOString(),
+      devices: { 'BETA-1': { type: 'Plug', name: 'Beta Plug', category: 'physical' } },
+    };
+    fs.writeFileSync(path.join(betaDir, 'devices.json'), JSON.stringify(betaCache));
+
+    // Read under profile "beta" WITHOUT calling resetListCache() first.
+    // With the bug (single global _listCache), this would return alpha's data.
+    // With the fix (Map keyed by profile), this must read from disk and return beta's data.
+    const betaResult = withRequestContext({ profile: 'beta' }, () => loadCache());
+
+    expect(betaResult?.devices['BETA-1']).toBeDefined();
+    expect(betaResult?.devices['ALPHA-1']).toBeUndefined();
+  });
+});
+
+// ── f. --config-path override takes precedence (profile is ignored) ──────────
 
 describe('cache scoping — --config-path override', () => {
   it('uses config override dirname regardless of active profile', () => {
