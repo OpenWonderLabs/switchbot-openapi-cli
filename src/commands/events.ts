@@ -2,7 +2,8 @@ import { Command } from 'commander';
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { printJson, isJsonMode, handleError, UsageError } from '../utils/output.js';
-import { intArg, stringArg } from '../utils/arg-parsers.js';
+import { intArg, stringArg, durationArg } from '../utils/arg-parsers.js';
+import { parseDurationToMs } from '../utils/flags.js';
 import { SwitchBotMqttClient } from '../mqtt/client.js';
 import { fetchMqttCredential } from '../mqtt/credential.js';
 import { tryLoadConfig } from '../config.js';
@@ -156,6 +157,7 @@ export function registerEventsCommand(program: Command): void {
     .option('--path <p>', `HTTP path to match (default "${DEFAULT_PATH}"; use "*" for all paths)`, stringArg('--path'), DEFAULT_PATH)
     .option('--filter <expr>', 'Filter events, e.g. "deviceId=ABC123" or "type=Bot" (comma-separated)', stringArg('--filter'))
     .option('--max <n>', 'Stop after N matching events (default: run until Ctrl-C)', intArg('--max', { min: 1 }))
+    .option('--for <dur>', 'Stop after elapsed time (e.g. "5m", "30s"). Combines with --max: first limit wins.', durationArg('--for'))
     .addHelpText(
       'after',
       `
@@ -180,7 +182,7 @@ Examples:
   $ switchbot events tail --filter 'type=WoMeter' --max 5 --json
 `,
     )
-    .action(async (options: { port: string; path: string; filter?: string; max?: string }) => {
+    .action(async (options: { port: string; path: string; filter?: string; max?: string; for?: string }) => {
       try {
         const port = Number(options.port);
         if (!Number.isInteger(port) || port <= 0 || port > 65535) {
@@ -190,10 +192,14 @@ Examples:
         if (maxMatched !== null && (!Number.isFinite(maxMatched) || maxMatched < 1)) {
           throw new UsageError(`Invalid --max "${options.max}". Must be a positive integer.`);
         }
+        const forMs = options.for ? parseDurationToMs(options.for) : null;
         const filter = parseFilter(options.filter);
 
         let matchedCount = 0;
         const ac = new AbortController();
+        const forTimer = forMs !== null && forMs > 0
+          ? setTimeout(() => ac.abort(), forMs)
+          : null;
         await new Promise<void>((resolve, reject) => {
           let server: http.Server | null = null;
           try {
@@ -220,6 +226,7 @@ Examples:
           if (!isJsonMode()) console.error(startMsg);
 
           const cleanup = () => {
+            if (forTimer) clearTimeout(forTimer);
             server?.close();
             resolve();
           };
@@ -237,6 +244,7 @@ Examples:
     .description('Subscribe to SwitchBot MQTT shadow events and stream them as JSONL')
     .option('--topic <pattern>', 'MQTT topic filter (default: SwitchBot shadow topic from credential)', stringArg('--topic'))
     .option('--max <n>', 'Stop after N events (default: run until Ctrl-C)', intArg('--max', { min: 1 }))
+    .option('--for <dur>', 'Stop after elapsed time (e.g. "5m", "30s"). Combines with --max: first limit wins.', durationArg('--for'))
     .option(
       '--sink <type>',
       'Output sink: stdout (default), file, webhook, openclaw, telegram, homeassistant (repeatable)',
@@ -300,6 +308,7 @@ Examples:
     .action(async (options: {
       topic?: string;
       max?: string;
+      for?: string;
       sink: string[];
       sinkFile?: string;
       webhookUrl?: string;
@@ -318,6 +327,7 @@ Examples:
         if (maxEvents !== null && (!Number.isInteger(maxEvents) || maxEvents < 1)) {
           throw new UsageError(`Invalid --max "${options.max}". Must be a positive integer.`);
         }
+        const forMs = options.for ? parseDurationToMs(options.for) : null;
 
         const loaded = tryLoadConfig();
         if (!loaded) {
@@ -381,6 +391,9 @@ Examples:
 
         let eventCount = 0;
         const ac = new AbortController();
+        const forTimer = forMs !== null && forMs > 0
+          ? setTimeout(() => ac.abort(), forMs)
+          : null;
         const client = new SwitchBotMqttClient(
           credential,
           () => fetchMqttCredential(loaded.token, loaded.secret),
@@ -472,6 +485,7 @@ Examples:
 
         await new Promise<void>((resolve) => {
           const cleanup = () => {
+            if (forTimer) clearTimeout(forTimer);
             process.removeListener('SIGINT', cleanup);
             process.removeListener('SIGTERM', cleanup);
             unsub();
