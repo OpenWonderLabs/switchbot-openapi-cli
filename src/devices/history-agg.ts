@@ -101,7 +101,7 @@ export async function aggregateDeviceHistory(
     }
   }
 
-  return finalize(deviceId, opts, aggs, buckets, false, []);
+  return finalize(deviceId, opts, aggs, buckets, false, [], fromMs, toMs);
 }
 
 function finalize(
@@ -111,8 +111,9 @@ function finalize(
   buckets: Map<number, Map<string, Acc>>,
   partial: boolean,
   notes: string[],
+  fromMs: number,
+  toMs: number,
 ): AggResult {
-  const { fromMs, toMs } = resolveRange(opts);
   const fromIso = Number.isFinite(fromMs) ? new Date(fromMs).toISOString() : new Date(0).toISOString();
   const toIso = Number.isFinite(toMs) ? new Date(toMs).toISOString() : new Date(Date.now()).toISOString();
 
