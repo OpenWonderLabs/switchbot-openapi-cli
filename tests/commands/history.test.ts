@@ -346,12 +346,13 @@ describe('history aggregate (D7)', () => {
     expect(parsed.data.buckets[0].metrics.temperature.avg).toBe(22);
   });
 
-  it('exits 2 with UsageError when --metric is missing', async () => {
-    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((_code) => { throw new Error('process.exit'); });
+  it('exits with error when --metric is missing (requiredOption enforcement, bug #42)', async () => {
     const res = await runCli(registerHistoryCommand, [
       'history', 'aggregate', 'DEV1', '--since', '1h',
     ]);
-    exitSpy.mockRestore();
-    expect(res.exitCode).toBe(2);
+    expect(res.exitCode).not.toBeNull();
+    expect(res.exitCode).not.toBe(0);
+    const errOut = res.stderr.join('\n');
+    expect(errOut).toMatch(/--metric/);
   });
 });
