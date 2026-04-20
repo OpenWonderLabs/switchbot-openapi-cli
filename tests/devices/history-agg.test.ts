@@ -229,28 +229,37 @@ describe('aggregateDeviceHistory — single bucket', () => {
     const currentFile = path.join(historyDir, `${id}.jsonl`);
 
     const threeDaysAgo = new Date(Date.now() - 3 * 24 * 3600 * 1000);
+    const thirtySecondsAgo = new Date(Date.now() - 30_000); // Inside 5m window
     const nowish = new Date();
 
-    // Rotated file: old record with backdated mtime
-    writeJsonl(rotatedFile, [
-      { t: threeDaysAgo.toISOString(), topic: 'status', payload: { temperature: 10 } },
-    ]);
-    fs.utimesSync(rotatedFile, threeDaysAgo, threeDaysAgo);
+    // Rotated file: RECENT record (inside 5m window) but backdated file mtime (outside window)
+    const rotatedRecord = { t: thirtySecondsAgo.toISOString(), topic: 'status', payload: { temperature: 99 } };
+    writeJsonl(rotatedFile, [rotatedRecord]);
+    fs.utimesSync(rotatedFile, threeDaysAgo, threeDaysAgo); // Backdate file mtime only
 
-    // Current file: recent record
+    // Current file: recent record with different value
     writeJsonl(currentFile, [
-      { t: nowish.toISOString(), topic: 'status', payload: { temperature: 30 } },
+      { t: nowish.toISOString(), topic: 'status', payload: { temperature: 21 } },
     ]);
+
+    // Before calling aggregateDeviceHistory, assert that the rotated record is recent enough
+    // to pass the per-record timestamp filter (if there were no mtime prune)
+    const fromMs = Date.now() - 5 * 60 * 1000;
+    const rotatedRecordTms = Date.parse(rotatedRecord.t);
+    expect(rotatedRecordTms).toBeGreaterThan(fromMs); // record is inside window
+    expect(fs.statSync(rotatedFile).mtimeMs).toBeLessThan(fromMs); // but file mtime is outside
 
     const res = await aggregateDeviceHistory(id, {
       since: '5m',
       metrics: ['temperature'],
-      aggs: ['count'],
+      aggs: ['count', 'min', 'max'],
     });
 
-    // Only the current file's record should be present
+    // Only the current file's record should be present (rotated file filtered by mtime)
     expect(res.buckets).toHaveLength(1);
     expect(res.buckets[0].metrics.temperature.count).toBe(1);
-    expect(res.buckets[0].metrics.temperature).not.toHaveProperty('min');
+    // Verify it's the current file's value (21), not the rotated file's (99)
+    expect(res.buckets[0].metrics.temperature.min).toBe(21);
+    expect(res.buckets[0].metrics.temperature.max).toBe(21);
   });
 });
