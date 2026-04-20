@@ -116,7 +116,8 @@ const IDEMPOTENCY_CONTRACT = {
   windowSeconds: 60,
   replayBehavior: 'Same (command, parameter, deviceId) within window → returns cached result with replayed:true.',
   conflictBehavior: 'Same key + different (command, parameter) within window → exit 2, error:"idempotency_conflict".',
-  keyStorage: 'Stored as SHA-256 hash on disk (not raw).',
+  keyStorage: 'In-memory SHA-256 fingerprint; raw key never stored, no disk persistence.',
+  scope: 'Process-local. Replay + conflict apply within a single long-lived process (MCP session, devices batch, plan run, history replay). Independent CLI invocations do NOT share cache — each fresh `node` process starts empty.',
   mcp: 'MCP send_command accepts the same idempotencyKey field with identical semantics.',
 };
 

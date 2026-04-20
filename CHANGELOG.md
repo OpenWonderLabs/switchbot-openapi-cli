@@ -79,7 +79,12 @@ fields when they upgrade.
   `replayed: true`. A reused key with a **different** `(command, parameter)`
   shape within the 60 s window exits 2 with
   `error: "idempotency_conflict"` and the old/new shape in the payload.
-  Keys are SHA-256-hashed on disk.
+  The cache is **process-local, in-memory**: keys live as SHA-256
+  fingerprints on the heap (never raw, so heap dumps / log captures don't
+  leak the user-supplied key) and vanish when the process exits. Replay
+  + conflict therefore apply within a single long-lived process — MCP
+  server session, `devices batch` run, `plan run`, `history replay` — and
+  do **not** carry across independent CLI invocations.
 - **Profile label / description / daily cap / default flags** — `config
   set-token` grew `--label`, `--description`, `--daily-cap <N>`,
   `--default-flags "<csv>"`. The daily cap is enforced before any request
