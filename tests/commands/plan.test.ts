@@ -160,6 +160,12 @@ describe('plan command', () => {
       expect(out.valid).toBe(true);
       expect(out.steps).toBe(1);
     });
+
+    it('--help output contains "structural only" (bug #32)', async () => {
+      const res = await runCli(registerPlanCommand, ['plan', 'validate', '--help']);
+      const all = [...res.stdout, ...res.stderr].join('\n');
+      expect(all).toMatch(/structural only/);
+    });
   });
 
   describe('plan run', () => {
