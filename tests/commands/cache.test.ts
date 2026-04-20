@@ -43,6 +43,16 @@ const SAMPLE_BODY = {
 };
 
 describe('cache show', () => {
+  it('works with "status" alias', async () => {
+    const result = await runCli(registerCacheCommand, ['cache', 'status']);
+    expect(result.exitCode).toBeNull();
+    const out = result.stdout.join('\n');
+    expect(out).toMatch(/Device list cache/);
+    expect(out).toMatch(/Exists:\s+no/);
+    expect(out).toMatch(/Status cache/);
+    expect(out).toMatch(/Entries:\s+0/);
+  });
+
   it('prints empty summaries on a fresh machine', async () => {
     const result = await runCli(registerCacheCommand, ['cache', 'show']);
     expect(result.exitCode).toBeNull();

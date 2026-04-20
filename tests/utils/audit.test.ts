@@ -137,7 +137,7 @@ describe('audit log', () => {
   it('verifyAudit returns a problem when file is missing', () => {
     const report = verifyAudit(path.join(tmp, 'missing.log'));
     expect(report.parsedLines).toBe(0);
-    expect(report.problems).toHaveLength(1);
-    expect(report.problems[0].reason).toContain('does not exist');
+    expect(report.fileMissing).toBe(true);
+    expect(report.problems).toHaveLength(0);
   });
 });

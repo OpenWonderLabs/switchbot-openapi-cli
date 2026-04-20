@@ -141,6 +141,9 @@ Examples:
           scope: cachedDevices.length > 0 ? 'used' : 'all',
           types: catalogTypes,
         },
+        // hints: empty array means no hints to report; always emitted, never null.
+        // An empty array signals "nothing to act on" — agents should not treat
+        // it as a disabled or missing field.
         hints: cachedDevices.length === 0
           ? ['Run `switchbot devices list` once to populate the device cache for richer bootstrap output.']
           : [],

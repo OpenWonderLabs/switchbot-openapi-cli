@@ -54,7 +54,7 @@ export function parseInstantToMs(spec: string): number | null {
   return Number.isFinite(ms) ? ms : null;
 }
 
-function resolveRange(opts: QueryOptions): { fromMs: number; toMs: number } {
+export function resolveRange(opts: QueryOptions): { fromMs: number; toMs: number } {
   let fromMs = Number.NEGATIVE_INFINITY;
   let toMs = Number.POSITIVE_INFINITY;
 

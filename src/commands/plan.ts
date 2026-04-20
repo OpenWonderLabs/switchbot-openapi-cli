@@ -240,7 +240,13 @@ Workflow:
     .command('schema')
     .description('Print the JSON Schema for the plan format')
     .action(() => {
-      printJson(PLAN_JSON_SCHEMA);
+      printJson({
+        ...PLAN_JSON_SCHEMA,
+        agentNotes: {
+          deviceNameStrategy:
+            "Plan step `deviceName` fields are resolved with the `require-unique` strategy (same default as `devices command`). Plans that expect a specific device should pin `deviceId` instead.",
+        },
+      });
     });
 
   plan

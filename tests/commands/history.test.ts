@@ -137,6 +137,81 @@ describe('history command', () => {
       expect(res.stdout.join('\n')).toMatch(/replayed turnOff on BOT2/);
     });
   });
+
+  describe('verify', () => {
+    it('exits 0 with status warn when audit.log does not exist (fresh install)', async () => {
+      const res = await runCli(registerHistoryCommand, [
+        'history', 'verify', '--file', auditFile,
+      ]);
+      expect(res.exitCode).toBe(0);
+      const out = res.stdout.join('\n');
+      expect(out).toMatch(/fresh install/i);
+      expect(out).toMatch(/warn/i);
+    });
+
+    it('exits 0 with status ok for an empty-but-existing file', async () => {
+      fs.writeFileSync(auditFile, '');
+      const res = await runCli(registerHistoryCommand, [
+        'history', 'verify', '--file', auditFile,
+      ]);
+      expect(res.exitCode).toBe(0);
+      const out = res.stdout.join('\n');
+      expect(out).not.toMatch(/warn/i);
+    });
+
+    it('exits 1 with status fail when file has a malformed line', async () => {
+      seed([
+        { t: 't1', kind: 'command', deviceId: 'A', command: 'cmd', parameter: undefined, commandType: 'command', dryRun: false },
+        'not valid json',
+      ]);
+      const res = await runCli(registerHistoryCommand, [
+        'history', 'verify', '--file', auditFile,
+      ]);
+      expect(res.exitCode).toBe(1);
+      const out = res.stdout.join('\n');
+      expect(out).toMatch(/Malformed:/);
+      expect(out).toMatch(/1/);
+    });
+
+    it('exits 0 with status warn and fileMissing=true when --json on missing file', async () => {
+      const res = await runCli(registerHistoryCommand, [
+        '--json', 'history', 'verify', '--file', auditFile,
+      ]);
+      expect(res.exitCode).toBe(0);
+      const envelope = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+      expect(envelope.data.status).toBe('warn');
+      expect(envelope.data.fileMissing).toBe(true);
+      expect(envelope.data.parsed).toBe(0);
+      expect(envelope.data.malformed).toBe(0);
+      expect(envelope.data.unversioned).toBe(0);
+    });
+
+    it('exits 1 with status fail when --json on file with malformed entries', async () => {
+      // Write a file with a line that doesn't parse as JSON
+      fs.writeFileSync(auditFile, 'not valid json\n');
+      const res = await runCli(registerHistoryCommand, [
+        '--json', 'history', 'verify', '--file', auditFile,
+      ]);
+      expect(res.exitCode).toBe(1);
+      const envelope = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+      expect(envelope.data.status).toBe('fail');
+      expect(envelope.data.fileMissing).toBe(false);
+      expect(envelope.data.malformed).toBeGreaterThan(0);
+    });
+
+    it('exits 0 with status ok when all entries are valid', async () => {
+      seed([
+        { auditVersion: 1, t: '2026-04-18T10:00:00.000Z', kind: 'command', deviceId: 'BOT1', command: 'turnOn', parameter: undefined, commandType: 'command', dryRun: false },
+        { auditVersion: 1, t: '2026-04-18T10:00:05.000Z', kind: 'command', deviceId: 'BOT1', command: 'turnOff', parameter: undefined, commandType: 'command', dryRun: false },
+      ]);
+      const res = await runCli(registerHistoryCommand, [
+        'history', 'verify', '--file', auditFile,
+      ]);
+      expect(res.exitCode).toBe(0);
+      const out = res.stdout.join('\n');
+      expect(out).toMatch(/Parsed lines:\s+2/);
+    });
+  });
 });
 
 describe('history range / stats (D3)', () => {
@@ -230,5 +305,53 @@ describe('history range / stats (D3)', () => {
     expect(env.data.deviceId).toBe('DEV1');
     expect(env.data.recordCount).toBe(1);
     expect(env.data.oldest).toBe('2026-04-10T00:00:00.000Z');
+  });
+});
+
+describe('history aggregate (D7)', () => {
+  let tmpHome: string;
+  let historyDir: string;
+
+  beforeEach(() => {
+    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-histcmd-agg-'));
+    historyDir = path.join(tmpHome, '.switchbot', 'device-history');
+    fs.mkdirSync(historyDir, { recursive: true });
+    vi.spyOn(os, 'homedir').mockReturnValue(tmpHome);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    try { fs.rmSync(tmpHome, { recursive: true, force: true }); } catch { /* */ }
+  });
+
+  function seedJsonl(deviceId: string, records: Array<Record<string, unknown>>): void {
+    const line = records.map((r) => JSON.stringify(r)).join('\n') + '\n';
+    fs.writeFileSync(path.join(historyDir, `${deviceId}.jsonl`), line);
+  }
+
+  it('emits the expected --json envelope for a single-bucket aggregation', async () => {
+    seedJsonl('DEV1', [
+      { t: '2026-04-19T10:00:00.000Z', topic: 'sb/DEV1', payload: { temperature: 20 } },
+      { t: '2026-04-19T10:30:00.000Z', topic: 'sb/DEV1', payload: { temperature: 24 } },
+    ]);
+    const res = await runCli(registerHistoryCommand, [
+      '--json', 'history', 'aggregate', 'DEV1',
+      '--from', '2026-04-19T00:00:00.000Z',
+      '--to', '2026-04-20T00:00:00.000Z',
+      '--metric', 'temperature',
+      '--agg', 'count,avg',
+    ]);
+    const parsed = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    expect(parsed.data.buckets[0].metrics.temperature.count).toBe(2);
+    expect(parsed.data.buckets[0].metrics.temperature.avg).toBe(22);
+  });
+
+  it('exits 2 with UsageError when --metric is missing', async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((_code) => { throw new Error('process.exit'); });
+    const res = await runCli(registerHistoryCommand, [
+      'history', 'aggregate', 'DEV1', '--since', '1h',
+    ]);
+    exitSpy.mockRestore();
+    expect(res.exitCode).toBe(2);
   });
 });

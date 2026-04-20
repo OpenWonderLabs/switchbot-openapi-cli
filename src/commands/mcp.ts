@@ -5,6 +5,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { z } from 'zod';
 import { intArg, stringArg } from '../utils/arg-parsers.js';
 import { handleError, isJsonMode } from '../utils/output.js';
+import { VERSION } from '../version.js';
 import {
   fetchDeviceList,
   fetchDeviceStatus,
@@ -25,6 +26,13 @@ import { getCachedDevice } from '../devices/cache.js';
 import { EventSubscriptionManager } from '../mcp/events-subscription.js';
 import { deviceHistoryStore } from '../mcp/device-history.js';
 import { queryDeviceHistory } from '../devices/history-query.js';
+import {
+  aggregateDeviceHistory,
+  ALL_AGG_FNS,
+  MAX_SAMPLE_CAP,
+  type AggFn,
+  type AggOptions,
+} from '../devices/history-agg.js';
 import { todayUsage } from '../utils/quota.js';
 import { describeCache } from '../devices/cache.js';
 import { withRequestContext } from '../lib/request-context.js';
@@ -59,7 +67,7 @@ export function createSwitchBotMcpServer(options?: { eventManager?: EventSubscri
   const server = new McpServer(
     {
       name: 'switchbot',
-      version: '2.0.0',
+      version: VERSION,
     },
     {
       capabilities: { tools: {}, resources: {} },
@@ -93,7 +101,8 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
       title: 'List all devices on the account',
       description:
         'Fetch the complete inventory of physical devices and IR remotes on this SwitchBot account. Refreshes the local metadata cache and groups devices by type. Use this as the bootstrap call to discover available deviceIds. Devices without enableCloudService cannot receive commands via API. IR remotes depend on a Hub for connectivity.',
-      inputSchema: {},
+      _meta: { agentSafetyTier: 'read' },
+      inputSchema: z.object({}).strict(),
       outputSchema: {
         deviceList: z.array(z.object({
           deviceId: z.string(),
@@ -134,9 +143,10 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
       title: 'Get live status for a device',
       description:
         'Query the real-time status payload for a physical device. IR remotes have no status channel and will error.',
-      inputSchema: {
+      _meta: { agentSafetyTier: 'read' },
+      inputSchema: z.object({
         deviceId: z.string().describe('Device ID from list_devices'),
-      },
+      }).strict(),
       outputSchema: {
         status: z.object({
           deviceId: z.string().optional(),
@@ -164,10 +174,11 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         'Return device state history recorded from MQTT events (persisted to ~/.switchbot/device-history/). ' +
         'No API call — zero quota cost. Use when you need recent historical readings or want to avoid a live API call. ' +
         'Omit deviceId to list all devices with stored history.',
-      inputSchema: {
+      _meta: { agentSafetyTier: 'read' },
+      inputSchema: z.object({
         deviceId: z.string().optional().describe('Device MAC address (deviceId). Omit to list all devices with history.'),
         limit: z.number().int().min(1).max(100).optional().describe('Max history entries to return (default 20, max 100)'),
-      },
+      }).strict(),
       outputSchema: {
         deviceId: z.string().optional(),
         latest: z.unknown().optional(),
@@ -204,14 +215,15 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         'Return records from the append-only JSONL history (~/.switchbot/device-history/<deviceId>.jsonl) ' +
         'filtered by a relative duration (since) or absolute ISO-8601 range (from/to). ' +
         'No API call — zero quota cost. Use for trend questions like "how many times did this switch turn on last week".',
-      inputSchema: {
+      _meta: { agentSafetyTier: 'read' },
+      inputSchema: z.object({
         deviceId: z.string().describe('Device ID to query'),
         since: z.string().optional().describe('Relative window ending now, e.g. "30s", "15m", "1h", "7d". Mutually exclusive with from/to.'),
         from: z.string().optional().describe('Range start (ISO-8601).'),
         to: z.string().optional().describe('Range end (ISO-8601).'),
         fields: z.array(z.string()).optional().describe('Project these payload fields; omit for the full payload.'),
         limit: z.number().int().min(1).max(10000).optional().describe('Max records to return (default 1000).'),
-      },
+      }).strict(),
       outputSchema: {
         deviceId: z.string(),
         count: z.number().int(),
@@ -248,7 +260,8 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
       title: 'Send a control command to a device',
       description:
         'Execute a control command on a device (turnOn, setColor, startClean, unlock, openDoor, createKey, etc.). Destructive commands (Smart Lock unlock, Garage Door open, Keypad createKey/deleteKey) require confirm:true to proceed; otherwise rejected. Commands are validated offline against the device catalog. Use idempotencyKey to safely deduplicate retries within 60 seconds.',
-      inputSchema: {
+      _meta: { agentSafetyTier: 'action' },
+      inputSchema: z.object({
         deviceId: z.string().describe('Device ID from list_devices'),
         command: z.string().describe('Command name, case-sensitive (e.g. turnOn, setColor, unlock)'),
         parameter: z
@@ -271,12 +284,16 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
           .describe(
             'Deduplication key — repeat calls with the same key within 60s replay the first result (adds replayed:true). Same key + different (command, parameter) within 60s returns an idempotency_conflict guard error.',
           ),
-      },
+        dryRun: z
+          .boolean()
+          .optional()
+          .describe('When true, do not call the API — return { ok:true, dryRun:true, wouldSend:{...} } instead.'),
+      }).strict(),
       outputSchema: {
         ok: z.literal(true),
-        command: z.string(),
-        deviceId: z.string(),
-        result: z.unknown().describe('API response body from SwitchBot'),
+        command: z.string().optional(),
+        deviceId: z.string().optional(),
+        result: z.unknown().optional().describe('API response body from SwitchBot (absent on dryRun)'),
         verification: z
           .object({
             verifiable: z.boolean(),
@@ -287,10 +304,32 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
           .describe(
             'Present when the target is an IR device. IR is unidirectional — agents should treat the success as "signal sent" not "state changed".',
           ),
+        dryRun: z.literal(true).optional().describe('Present when dryRun:true was requested'),
+        wouldSend: z.object({
+          deviceId: z.string(),
+          command: z.string(),
+          parameter: z.unknown(),
+          commandType: z.string(),
+        }).optional().describe('The request shape that would have been POSTed (present when dryRun:true)'),
       },
     },
-    async ({ deviceId, command, parameter, commandType, confirm, idempotencyKey }) => {
+    async ({ deviceId, command, parameter, commandType, confirm, idempotencyKey, dryRun }) => {
       const effectiveType = commandType ?? 'command';
+
+      // dryRun early-return — no API call, no validation against live device list
+      if (dryRun) {
+        const wouldSend = {
+          deviceId,
+          command,
+          parameter: parameter ?? 'default',
+          commandType: effectiveType,
+        };
+        const structured = { ok: true as const, dryRun: true as const, wouldSend };
+        return {
+          content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+          structuredContent: structured,
+        };
+      }
 
       // Resolve the device's catalog type via cache or a fresh lookup so we
       // can evaluate destructive/validation without an extra round-trip if
@@ -395,15 +434,32 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
     {
       title: 'Execute a manual scene',
       description: 'Execute a manual SwitchBot scene by its sceneId (from list_scenes).',
-      inputSchema: {
+      _meta: { agentSafetyTier: 'action' },
+      inputSchema: z.object({
         sceneId: z.string().describe('Scene ID from list_scenes'),
-      },
+        dryRun: z
+          .boolean()
+          .optional()
+          .describe('When true, do not call the API — return { ok:true, dryRun:true, wouldSend:{...} } instead.'),
+      }).strict(),
       outputSchema: {
         ok: z.literal(true),
-        sceneId: z.string(),
+        sceneId: z.string().optional(),
+        dryRun: z.literal(true).optional().describe('Present when dryRun:true was requested'),
+        wouldSend: z.object({
+          sceneId: z.string(),
+        }).optional().describe('The request shape that would have been POSTed (present when dryRun:true)'),
       },
     },
-    async ({ sceneId }) => {
+    async ({ sceneId, dryRun }) => {
+      if (dryRun) {
+        const wouldSend = { sceneId };
+        const structured = { ok: true as const, dryRun: true as const, wouldSend };
+        return {
+          content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+          structuredContent: structured,
+        };
+      }
       await executeScene(sceneId);
       const structured = { ok: true as const, sceneId };
       return {
@@ -419,7 +475,8 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
     {
       title: 'List all manual scenes',
       description: 'Fetch all manual scenes configured in the SwitchBot app.',
-      inputSchema: {},
+      _meta: { agentSafetyTier: 'read' },
+      inputSchema: z.object({}).strict(),
       outputSchema: {
         scenes: z.array(z.object({ sceneId: z.string(), sceneName: z.string() })),
       },
@@ -440,10 +497,11 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
       title: 'Search the offline device catalog',
       description:
         'Search the built-in device catalog by type name or alias. Returns matching entries with their commands, roles, destructive flags, and status fields. No API call.',
-      inputSchema: {
+      _meta: { agentSafetyTier: 'read' },
+      inputSchema: z.object({
         query: z.string().describe('Search query (matches type and aliases, case-insensitive). Use empty string to list all.'),
         limit: z.number().int().min(1).max(100).optional().default(20).describe('Max entries returned (default 20)'),
-      },
+      }).strict(),
       outputSchema: {
         results: z.array(z.object({
           type: z.string(),
@@ -481,10 +539,11 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
       title: 'Describe a specific device',
       description:
         'Resolve a deviceId to its metadata + catalog entry + suggested safe actions. Pass live:true to also fetch real-time status values.',
-      inputSchema: {
+      _meta: { agentSafetyTier: 'read' },
+      inputSchema: z.object({
         deviceId: z.string().describe('Device ID from list_devices'),
         live: z.boolean().optional().default(false).describe('Also fetch live /status values (costs 1 extra API call)'),
-      },
+      }).strict(),
       outputSchema: {
         device: z.object({
           device: z.object({ deviceId: z.string(), deviceName: z.string() }).passthrough(),
@@ -524,6 +583,45 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
     }
   );
 
+  // ---- aggregate_device_history --------------------------------------------
+  server.registerTool(
+    'aggregate_device_history',
+    {
+      title: 'Aggregate device history',
+      description:
+        'Bucketed statistics (count/min/max/avg/sum/p50/p95) over JSONL-recorded device history. Read-only; no network calls.',
+      _meta: { agentSafetyTier: 'read' },
+      inputSchema: z
+        .object({
+          deviceId: z.string().min(1),
+          since: z.string().optional(),
+          from: z.string().optional(),
+          to: z.string().optional(),
+          metrics: z.array(z.string().min(1)).min(1),
+          aggs: z.array(z.enum(ALL_AGG_FNS as unknown as [AggFn, ...AggFn[]])).optional(),
+          bucket: z.string().optional(),
+          maxBucketSamples: z.number().int().positive().max(MAX_SAMPLE_CAP).optional(),
+        })
+        .strict(),
+    },
+    async (args) => {
+      const opts: AggOptions = {
+        since: args.since,
+        from: args.from,
+        to: args.to,
+        metrics: args.metrics,
+        aggs: args.aggs,
+        bucket: args.bucket,
+        maxBucketSamples: args.maxBucketSamples,
+      };
+      const res = await aggregateDeviceHistory(args.deviceId, opts);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(res, null, 2) }],
+        structuredContent: res as unknown as Record<string, unknown>,
+      };
+    },
+  );
+
   // ---- account_overview ---------------------------------------------------
   server.registerTool(
     'account_overview',
@@ -531,7 +629,8 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
       title: 'Bootstrap account overview',
       description:
         'Get a complete account snapshot: devices, scenes, quota usage, cache status, and MQTT connection state. Use this for cold-start initialization or periodic health checks.',
-      inputSchema: {},
+      _meta: { agentSafetyTier: 'read' },
+      inputSchema: z.object({}).strict(),
       outputSchema: {
         version: z.string(),
         schemaVersion: z.string(),
@@ -584,7 +683,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
       const quota = todayUsage();
 
       const overview = {
-        version: '2.0.0',
+        version: VERSION,
         schemaVersion: '1.1',
         devices: deviceList.deviceList.map(toMcpDeviceListShape),
         infraredRemotes: deviceList.infraredRemoteList.map(toMcpIrDeviceShape),
@@ -656,15 +755,18 @@ export function registerMcpCommand(program: Command): void {
     .command('mcp')
     .description('Run as a Model Context Protocol server so AI agents can call SwitchBot tools')
     .addHelpText('after', `
-The MCP server exposes eight tools:
-  - list_devices          fetch all physical + IR devices
-  - get_device_status     live status for a physical device
-  - send_command          control a device (destructive commands need confirm:true)
-  - list_scenes           list all manual scenes
-  - run_scene             execute a manual scene
-  - search_catalog        offline catalog search by type/alias
-  - describe_device       metadata + commands + (optionally) live status for one device
-  - account_overview      single cold-start snapshot: devices + scenes + quota + cache + MQTT state
+The MCP server exposes eleven tools:
+  - list_devices            fetch all physical + IR devices
+  - get_device_status       live status for a physical device
+  - send_command            control a device (destructive commands need confirm:true)
+  - list_scenes             list all manual scenes
+  - run_scene               execute a manual scene
+  - search_catalog          offline catalog search by type/alias
+  - describe_device         metadata + commands + (optionally) live status for one device
+  - account_overview        single cold-start snapshot: devices + scenes + quota + cache + MQTT state
+  - get_device_history      fetch raw JSONL history records for a device
+  - query_device_history    filter + page history records with field/time predicates
+  - aggregate_device_history compute count/min/max/avg/sum/p50/p95 over history records
 
 Resource (read-only):
   - switchbot://events    snapshot of recent MQTT shadow events from the ring buffer
@@ -775,7 +877,7 @@ Inspect locally:
               res.writeHead(200, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({
                 ok: true,
-                version: '2.0.0',
+                version: VERSION,
                 pid: process.pid,
                 uptimeSec: Math.floor(process.uptime()),
               }));
@@ -786,7 +888,7 @@ Inspect locally:
               const state = eventManager.getState();
               const ready = state !== 'failed' && state !== 'disabled';
               const status = ready ? 200 : 503;
-              const body: Record<string, unknown> = { ready, version: '2.0.0', mqtt: state };
+              const body: Record<string, unknown> = { ready, version: VERSION, mqtt: state };
               if (!ready) body.reason = state === 'disabled' ? 'mqtt disabled' : 'mqtt failed';
               res.writeHead(status, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify(body));

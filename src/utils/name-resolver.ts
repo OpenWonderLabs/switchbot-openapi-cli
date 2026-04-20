@@ -69,9 +69,17 @@ function resolveDeviceByName(
     const rawName = normalizeDeviceName(device.name);
     const normAlias = alias ? normalizeDeviceName(alias) : null;
 
-    // exact alias/name wins regardless of strategy
+    // exact alias/name wins immediately for lenient strategies.
+    // Under require-unique we must NOT short-circuit: there may be other devices
+    // that also match (e.g. via substring), making the result ambiguous.  Collect
+    // the exact hit as a candidate and let the full ambiguity check decide below.
     if ((normAlias && normAlias === q) || rawName === q) {
-      return { ok: true, deviceId };
+      if (strategy !== 'require-unique') {
+        return { ok: true, deviceId };
+      }
+      // require-unique: treat exact match as a high-priority candidate (score 0)
+      candidates.push({ deviceId, name: device.name, score: 0 });
+      continue;
     }
 
     if (strategy === 'exact') continue;

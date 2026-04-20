@@ -2,7 +2,7 @@ import { printTable, printJson, isJsonMode, UsageError } from './output.js';
 import { getFormat, getFields } from './flags.js';
 import { dump as yamlDump } from 'js-yaml';
 
-export type OutputFormat = 'table' | 'json' | 'jsonl' | 'tsv' | 'yaml' | 'id';
+export type OutputFormat = 'table' | 'json' | 'jsonl' | 'tsv' | 'yaml' | 'id' | 'markdown';
 
 export function parseFormat(flag: string | undefined): OutputFormat {
   if (!flag) return 'table';
@@ -14,8 +14,9 @@ export function parseFormat(flag: string | undefined): OutputFormat {
     case 'tsv': return 'tsv';
     case 'yaml': return 'yaml';
     case 'id': return 'id';
+    case 'markdown': return 'markdown';
     default: {
-      const msg = `Unknown --format "${flag}". Expected: table, json, jsonl, tsv, yaml, id.`;
+      const msg = `Unknown --format "${flag}". Expected: table, json, jsonl, tsv, yaml, id, markdown.`;
       if (isJsonMode()) {
         console.error(JSON.stringify({ error: { code: 2, kind: 'usage', message: msg } }));
       } else {
@@ -82,6 +83,14 @@ export function renderRows(
   const filtered = filterFields(headers, rows, fields, aliases);
   const h = filtered.headers;
   const r = filtered.rows;
+
+  // Markdown format is rendered as table with markdown style forced regardless
+  // of the user's --table-style, so `--format markdown` is a self-contained
+  // contract (bug #8).
+  if (format === 'markdown') {
+    printTable(h, r as (string | number | boolean | null | undefined)[][], 'markdown');
+    return;
+  }
 
   switch (format) {
     case 'table':

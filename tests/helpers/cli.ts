@@ -24,6 +24,7 @@ export async function runCli(
   // tests can use `--dry-run`, `--verbose`, etc. without Commander rejecting
   // them as unknown-option before the action runs. Values here do not need
   // argParser validation — the tests don't exercise those paths.
+  program.option('--no-color', 'Disable ANSI colors in output');
   program.option('--json', 'Output results in JSON format');
   program.option('--format <type>', 'Output format');
   program.option('--fields <csv>', 'Column filter');

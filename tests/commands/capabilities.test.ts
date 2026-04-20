@@ -20,6 +20,9 @@ function makeProgram(): Command {
   describe.argument('<id>', 'Device ID');
   describe.option('--json', 'JSON output');
 
+  const history = p.command('history').description('Device history and aggregation');
+  history.command('aggregate').description('Aggregate device history');
+
   p.command('scenes').description('List and run scenes');
   p.command('schema').description('Export device catalog');
   p.command('mcp').description('Start MCP server');
@@ -205,5 +208,20 @@ describe('capabilities B3/B4', () => {
     expect(ic.flag).toBe('--idempotency-key <key>');
     expect(ic.windowSeconds).toBe(60);
     expect(ic.replayBehavior).toMatch(/replayed:true/);
+  });
+
+  it('exposes history aggregate as a read-tier leaf', async () => {
+    const out = await runCapabilitiesWith(['--compact']);
+    const cmds = out.commands as Array<{ name: string; agentSafetyTier: string; mutating: boolean }>;
+    const agg = cmds.find((c) => c.name === 'history aggregate');
+    expect(agg).toBeDefined();
+    expect(agg!.agentSafetyTier).toBe('read');
+    expect(agg!.mutating).toBe(false);
+  });
+
+  it('surfaces.mcp.tools includes aggregate_device_history', async () => {
+    const out = await runCapabilitiesWith([]);
+    const mcp = (out.surfaces as Record<string, { tools: string[] }>).mcp;
+    expect(mcp.tools).toContain('aggregate_device_history');
   });
 });

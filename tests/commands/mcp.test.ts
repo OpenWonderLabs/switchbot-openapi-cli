@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 // ---------------------------------------------------------------------------
 // Mock the API layer so we don't hit real HTTPS.
@@ -76,7 +79,7 @@ describe('mcp server', () => {
     cacheMock.updateCacheFromDeviceList.mockClear();
   });
 
-  it('exposes the ten tools with titles and input schemas', async () => {
+  it('exposes the eleven tools with titles and input schemas', async () => {
     const { client } = await pair();
     const { tools } = await client.listTools();
 
@@ -84,6 +87,7 @@ describe('mcp server', () => {
     expect(names).toEqual(
       [
         'account_overview',
+        'aggregate_device_history',
         'describe_device',
         'get_device_history',
         'get_device_status',
@@ -325,5 +329,68 @@ describe('mcp server', () => {
       '/v1.1/devices/COLDBOT/commands',
       expect.objectContaining({ command: 'turnOn' })
     );
+  });
+
+  it('lists aggregate_device_history with _meta.agentSafetyTier=read', async () => {
+    const { client } = await pair();
+    const { tools } = await client.listTools();
+
+    const tool = tools.find((t) => t.name === 'aggregate_device_history');
+    expect(tool, 'aggregate_device_history should be listed').toBeDefined();
+    expect((tool as { _meta?: { agentSafetyTier?: string } } | undefined)?._meta?.agentSafetyTier).toBe('read');
+  });
+
+  it('aggregate_device_history rejects unknown input keys with -32602', async () => {
+    const { client } = await pair();
+
+    const res = await client.callTool({
+      name: 'aggregate_device_history',
+      arguments: { deviceId: 'DEV1', metrics: ['temperature'], bogusField: 'nope' },
+    });
+    expect(res.isError).toBe(true);
+    const text = (res.content as Array<{ type: string; text: string }>)[0].text;
+    expect(text).toMatch(/-32602|unrecognized_keys|Unrecognized key/i);
+  });
+
+  it('aggregate_device_history returns the same shape as the CLI --json.data', async () => {
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-agg-test-'));
+    vi.spyOn(os, 'homedir').mockReturnValue(tmpHome);
+
+    try {
+      const histDir = path.join(tmpHome, '.switchbot', 'device-history');
+      fs.mkdirSync(histDir, { recursive: true });
+      const lines = [
+        JSON.stringify({ t: '2026-04-19T10:00:00.000Z', topic: 't/DEV1', payload: { temperature: 20 } }),
+        JSON.stringify({ t: '2026-04-19T10:30:00.000Z', topic: 't/DEV1', payload: { temperature: 24 } }),
+      ];
+      fs.writeFileSync(path.join(histDir, 'DEV1.jsonl'), lines.join('\n') + '\n');
+
+      const { client } = await pair();
+      const res = await client.callTool({
+        name: 'aggregate_device_history',
+        arguments: {
+          deviceId: 'DEV1',
+          from: '2026-04-19T00:00:00.000Z',
+          to: '2026-04-20T00:00:00.000Z',
+          metrics: ['temperature'],
+          aggs: ['count', 'avg'],
+        },
+      });
+
+      expect(res.isError).toBeFalsy();
+      const sc = (res as { structuredContent?: unknown }).structuredContent as Record<string, unknown> | undefined;
+      const buckets = (
+        sc && 'buckets' in sc
+          ? (sc as { buckets: unknown[] }).buckets
+          : (sc as { data?: { buckets: unknown[] } } | undefined)?.data?.buckets
+      ) as Array<{ metrics: { temperature: { count?: number; avg?: number } } }> | undefined;
+
+      expect(buckets, 'structuredContent should have buckets').toBeDefined();
+      expect(buckets![0].metrics.temperature.count).toBe(2);
+      expect(buckets![0].metrics.temperature.avg).toBe(22);
+    } finally {
+      vi.restoreAllMocks();
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    }
   });
 });

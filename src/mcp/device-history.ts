@@ -9,6 +9,12 @@ export interface HistoryEntry {
   payload: unknown;
 }
 
+export interface ControlEvent {
+  type: '__connect' | '__reconnect' | '__disconnect' | '__heartbeat';
+  at: string;
+  eventId: string;
+}
+
 export interface DeviceHistory {
   latest: HistoryEntry | null;
   history: HistoryEntry[];
@@ -50,20 +56,30 @@ export class DeviceHistoryStore {
       fs.writeFileSync(file, JSON.stringify(existing, null, 2), { mode: 0o600 });
 
       // 2. Append-only JSONL for range queries.
-      this.appendJsonl(deviceId, entry);
+      this.writeJsonl(deviceId, entry);
     } catch {
       // best-effort — history loss is non-fatal
     }
   }
 
-  private appendJsonl(deviceId: string, entry: HistoryEntry): void {
+  /** Append a mqtt control event (no deviceId) to the dedicated __control.jsonl file. */
+  recordControl(event: ControlEvent): void {
     try {
-      const jsonlPath = path.join(this.dir, `${deviceId}.jsonl`);
-      const line = JSON.stringify(entry) + '\n';
+      if (!fs.existsSync(this.dir)) fs.mkdirSync(this.dir, { recursive: true });
+      this.writeJsonl('__control', event);
+    } catch {
+      // best-effort — never block the event stream
+    }
+  }
+
+  private writeJsonl(fileKey: string, record: unknown): void {
+    try {
+      const jsonlPath = path.join(this.dir, `${fileKey}.jsonl`);
+      const line = JSON.stringify(record) + '\n';
       const lineBytes = Buffer.byteLength(line, 'utf-8');
 
       // Seed size counter from disk on first touch (avoids drift across restarts).
-      let size = this.jsonlSizes.get(deviceId);
+      let size = this.jsonlSizes.get(fileKey);
       if (size === undefined) {
         try {
           size = fs.existsSync(jsonlPath) ? fs.statSync(jsonlPath).size : 0;
@@ -73,19 +89,19 @@ export class DeviceHistoryStore {
       }
 
       if (size + lineBytes > JSONL_ROTATE_BYTES) {
-        this.rotateJsonl(deviceId);
+        this.rotateJsonl(fileKey);
         size = 0;
       }
 
       fs.appendFileSync(jsonlPath, line, { mode: 0o600 });
-      this.jsonlSizes.set(deviceId, size + lineBytes);
+      this.jsonlSizes.set(fileKey, size + lineBytes);
     } catch {
       // best-effort
     }
   }
 
-  private rotateJsonl(deviceId: string): void {
-    const base = path.join(this.dir, `${deviceId}.jsonl`);
+  private rotateJsonl(fileKey: string): void {
+    const base = path.join(this.dir, `${fileKey}.jsonl`);
     // .jsonl.3 is dropped; .2 → .3, .1 → .2, current → .1
     try {
       const oldest = `${base}.${JSONL_KEEP_ROTATIONS}`;

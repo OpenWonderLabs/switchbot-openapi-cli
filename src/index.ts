@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { Command, CommanderError, InvalidArgumentError } from 'commander';
 import { createRequire } from 'node:module';
+import chalk from 'chalk';
 import { intArg, stringArg, enumArg } from './utils/arg-parsers.js';
 import { parseDurationToMs } from './utils/flags.js';
 import { registerConfigCommand } from './commands/config.js';
@@ -22,6 +23,12 @@ import { registerAgentBootstrapCommand } from './commands/agent-bootstrap.js';
 
 const require = createRequire(import.meta.url);
 const { version: pkgVersion } = require('../package.json') as { version: string };
+
+// Early initialization: check for --no-color flag or NO_COLOR env var and disable chalk.
+// This must happen before any commands run so all chalk output is affected.
+if (process.argv.includes('--no-color') || Boolean(process.env.NO_COLOR)) {
+  chalk.level = 0;
+}
 
 const program = new Command();
 
@@ -51,6 +58,7 @@ program
   .name('switchbot')
   .description('Command-line tool for SwitchBot API v1.1')
   .version(pkgVersion)
+  .option('--no-color', 'Disable ANSI colors in output')
   .option('--json', 'Output raw JSON response (disables tables; useful for pipes/scripts)')
   .option('--format <type>', 'Output format: table (default), json, jsonl, tsv, yaml, id, markdown', enumArg('--format', ['table', 'json', 'jsonl', 'tsv', 'yaml', 'id', 'markdown']))
   .option('--fields <csv>', 'Comma-separated list of columns to include (e.g. --fields=id,name,type)', stringArg('--fields', { disallow: TOP_LEVEL_COMMANDS }))

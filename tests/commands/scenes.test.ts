@@ -129,4 +129,42 @@ describe('scenes command', () => {
       expect(res.stderr.join('\n').toLowerCase()).toContain('missing required');
     });
   });
+
+  describe('describe', () => {
+    it('returns scene metadata for a known sceneId', async () => {
+      apiMock.__instance.get.mockResolvedValue({
+        data: {
+          body: [
+            { sceneId: 'S1', sceneName: 'Good Morning' },
+            { sceneId: 'S2', sceneName: 'Movie Time' },
+          ],
+        },
+      });
+      const res = await runCli(registerScenesCommand, ['scenes', 'describe', 'S1', '--json']);
+      expect(res.exitCode).toBeNull();
+      const out = res.stdout.join('\n');
+      const parsed = JSON.parse(out);
+      expect(parsed.data.sceneId).toBe('S1');
+      expect(parsed.data.sceneName).toBe('Good Morning');
+      expect(parsed.data.stepCount).toBeNull();
+      expect(parsed.data.note).toMatch(/does not expose scene steps/);
+    });
+
+    it('exits 2 with scene_not_found when sceneId is unknown', async () => {
+      apiMock.__instance.get.mockResolvedValue({
+        data: {
+          body: [
+            { sceneId: 'S1', sceneName: 'Good Morning' },
+          ],
+        },
+      });
+      const res = await runCli(registerScenesCommand, ['scenes', 'describe', 'MISSING', '--json']);
+      expect(res.exitCode).toBe(2);
+      const out = res.stderr.join('\n');
+      const parsed = JSON.parse(out);
+      expect(parsed.error?.context?.error).toBe('scene_not_found');
+      expect(parsed.error?.context?.sceneId).toBe('MISSING');
+      expect(parsed.error?.context?.candidates).toHaveLength(1);
+    });
+  });
 });

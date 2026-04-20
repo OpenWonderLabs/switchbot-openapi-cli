@@ -212,6 +212,13 @@ Examples:
             description:
               'CLI-synthesized receipt-acknowledgment metadata. For IR devices, verifiable:false signals that no device-side confirmation is possible.',
           },
+          {
+            field: 'hints',
+            appliesTo: ['agent-bootstrap'],
+            type: 'string[]',
+            description:
+              'CLI-synthesized advisory messages for the calling agent. Always emitted; empty array ([]) means no hints to report — never null and not a disabled-field signal.',
+          },
         ];
       }
       printJson(payload);

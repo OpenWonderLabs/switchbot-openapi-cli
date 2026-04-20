@@ -51,6 +51,7 @@ Examples:
 
   cache
     .command('show')
+    .alias('status')
     .description('Summarize the cache files (paths, ages, entry counts)')
     .action(() => {
       const summary = describeCache();

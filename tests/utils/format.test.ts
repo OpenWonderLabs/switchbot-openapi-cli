@@ -10,6 +10,7 @@ vi.mock('../../src/utils/flags.js', () => ({
   getCacheMode: vi.fn(() => ({ listTtlMs: 0, statusTtlMs: 0 })),
   getFormat: vi.fn(() => undefined),
   getFields: vi.fn(() => undefined),
+  getTableStyle: vi.fn(() => 'unicode'),
 }));
 
 import { parseFormat, filterFields, renderRows, resolveFormat, type OutputFormat } from '../../src/utils/format.js';
@@ -26,6 +27,7 @@ describe('parseFormat', () => {
     expect(parseFormat('yaml')).toBe('yaml');
     expect(parseFormat('id')).toBe('id');
     expect(parseFormat('table')).toBe('table');
+    expect(parseFormat('markdown')).toBe('markdown');
   });
 
   it('is case-insensitive', () => {
@@ -171,6 +173,17 @@ describe('renderRows', () => {
     const combined = logOutput.join('\n');
     expect(combined).toContain('a: null');
     expect(combined).toContain('b: ok');
+  });
+
+  it('markdown: renders pipe-delimited table with header separator, ignoring getTableStyle', () => {
+    // getTableStyle mock still returns 'unicode'; --format markdown must still
+    // produce markdown output (style override at call site).
+    renderRows(headers, rows, 'markdown');
+    const combined = logOutput.join('\n');
+    expect(combined).toContain('| deviceId | name | type |');
+    expect(combined).toMatch(/\|\s*-+\s*\|\s*-+\s*\|\s*-+\s*\|/);
+    expect(combined).toContain('| DEV1 | Light | Bot |');
+    expect(combined).toContain('| DEV2 | Door | Smart Lock |');
   });
 });
 
