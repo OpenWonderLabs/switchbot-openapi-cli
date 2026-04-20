@@ -273,6 +273,7 @@ Output (JSONL, one event per line):
   { "t": "<ISO>", "eventId": "<uuid>", "topic": "<mqtt-topic>", "payload": <parsed JSON or raw string> }
 
 Control records (interleaved, no "payload" field — use type-prefix to filter):
+  { "type": "__session_start", "at": "<ISO>", "eventId": "<uuid>", "state": "connecting" }  before credential fetch (JSON mode only)
   { "type": "__connect",     "at": "<ISO>", "eventId": "<uuid>" }   first successful connect
   { "type": "__reconnect",   "at": "<ISO>", "eventId": "<uuid>" }   connect after a disconnect
   { "type": "__disconnect",  "at": "<ISO>", "eventId": "<uuid>" }   reconnecting or failed
@@ -385,6 +386,17 @@ Examples:
 
         if (!isJsonMode()) {
           console.error('Fetching MQTT credentials from SwitchBot service…');
+        }
+        // Emit a __session_start envelope immediately (before any credential
+        // fetch) so JSON consumers can distinguish "connecting" from "never
+        // connected" even when mqtt-tail exits before the broker connects.
+        if (isJsonMode()) {
+          printJson({
+            type: '__session_start',
+            at: new Date().toISOString(),
+            eventId: crypto.randomUUID(),
+            state: 'connecting',
+          });
         }
         const credential = await fetchMqttCredential(loaded.token, loaded.secret);
         const topic = options.topic ?? credential.topics.status;

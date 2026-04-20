@@ -282,9 +282,12 @@ describe('events mqtt-tail', () => {
 
     const res = await runCli(registerEventsCommand, ['events', 'mqtt-tail', '--max', '1']);
     expect(res.exitCode).toBe(null);
-    const jsonLines = res.stdout.filter((l) => l.trim().startsWith('{'));
-    expect(jsonLines).toHaveLength(1);
-    const parsed = JSON.parse(jsonLines[0]) as { t: string; topic: string; payload: unknown };
+    const jsonLines = res.stdout
+      .filter((l) => l.trim().startsWith('{'))
+      .map((l) => JSON.parse(l) as { type?: string; topic?: string; payload?: unknown; t?: string });
+    const events = jsonLines.filter((j) => typeof j.type !== 'string' || !j.type.startsWith('__'));
+    expect(events).toHaveLength(1);
+    const parsed = events[0] as { t: string; topic: string; payload: unknown };
     expect(parsed.topic).toBe('test/topic');
     expect(parsed.payload).toEqual({ state: 'on' });
     expect(typeof parsed.t).toBe('string');
@@ -295,11 +298,15 @@ describe('events mqtt-tail', () => {
 
     const res = await runCli(registerEventsCommand, ['--json', 'events', 'mqtt-tail', '--max', '1']);
     expect(res.exitCode).toBe(null);
-    const jsonLines = res.stdout.filter((l) => l.trim().startsWith('{'));
-    expect(jsonLines).toHaveLength(1);
-    const parsed = JSON.parse(jsonLines[0]) as { schemaVersion: string; data: { topic: string } };
-    expect(parsed.schemaVersion).toBe('1.1');
-    expect(parsed.data.topic).toBe('test/topic');
+    const jsonLines = res.stdout
+      .filter((l) => l.trim().startsWith('{'))
+      .map((l) => JSON.parse(l) as { schemaVersion: string; data: { type?: string; topic?: string } });
+    const events = jsonLines.filter(
+      (j) => typeof j.data?.type !== 'string' || !j.data.type.startsWith('__'),
+    );
+    expect(events).toHaveLength(1);
+    expect(events[0].schemaVersion).toBe('1.1');
+    expect(events[0].data.topic).toBe('test/topic');
   });
 
   it('exits 2 when --max is not a positive integer', async () => {
@@ -348,6 +355,22 @@ describe('events mqtt-tail', () => {
     const jsonLines = res.stdout.filter((l) => l.trim().startsWith('{')).map((l) => JSON.parse(l));
     const disconnect = jsonLines.find((j) => (j as { type?: string }).type === '__disconnect');
     expect(disconnect).toBeDefined();
+  });
+
+  it('emits __session_start envelope under --json before broker connect (bug #56)', async () => {
+    mqttMock.connectShouldFireMessage = true;
+    const res = await runCli(registerEventsCommand, ['--json', 'events', 'mqtt-tail', '--max', '1']);
+    const jsonLines = res.stdout
+      .filter((l) => l.trim().startsWith('{'))
+      .map((l) => JSON.parse(l) as { data: { type?: string; state?: string; at?: string; eventId?: string } });
+    const sessionStart = jsonLines.find((j) => j.data?.type === '__session_start');
+    expect(sessionStart).toBeDefined();
+    expect(sessionStart!.data.state).toBe('connecting');
+    expect(typeof sessionStart!.data.at).toBe('string');
+    expect(typeof sessionStart!.data.eventId).toBe('string');
+    // Must be the FIRST JSON line emitted so consumers see it even if broker
+    // never connects.
+    expect((jsonLines[0] as { data: { type?: string } }).data.type).toBe('__session_start');
   });
 });
 
