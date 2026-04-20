@@ -2061,4 +2061,47 @@ describe('devices command', () => {
       );
     });
   });
+
+  // =====================================================================
+  // command — dry-run structured output (bug #36)
+  // =====================================================================
+  describe('command — dry-run output', () => {
+    const DRY_ID = 'DRY-DEV-1';
+
+    beforeEach(() => {
+      // Make post throw DryRunSignal (simulates --dry-run interceptor)
+      apiMock.__instance.post.mockImplementation(async () => {
+        throw new apiMock.DryRunSignal('POST', `/v1.1/devices/${DRY_ID}/commands`);
+      });
+    });
+
+    it('emits structured JSON with dryRun:true when --dry-run --json', async () => {
+      const res = await runCli(registerDevicesCommand, [
+        '--dry-run', '--json', 'devices', 'command', DRY_ID, 'turnOff',
+      ]);
+      expect(res.exitCode).toBeNull();
+      // post was called (and threw DryRunSignal — that's the mechanism), but the API
+      // result was never used; we verify the structured output instead.
+      expect(apiMock.__instance.post).toHaveBeenCalledTimes(1);
+      // stdout must have valid JSON
+      const out = res.stdout.join('\n');
+      expect(out).toBeTruthy();
+      const parsed = JSON.parse(out);
+      expect(parsed.schemaVersion).toBe('1.1');
+      expect(parsed.data.dryRun).toBe(true);
+      expect(parsed.data.wouldSend.deviceId).toBe(DRY_ID);
+      expect(parsed.data.wouldSend.command).toBe('turnOff');
+      expect(parsed.data.wouldSend.commandType).toBe('command');
+    });
+
+    it('emits human-readable dry-run message to stdout when --dry-run (no --json)', async () => {
+      const res = await runCli(registerDevicesCommand, [
+        '--dry-run', 'devices', 'command', DRY_ID, 'turnOn',
+      ]);
+      expect(res.exitCode).toBeNull();
+      const out = res.stdout.join('\n');
+      expect(out).toMatch(/dry-run/i);
+      expect(out).toContain(DRY_ID);
+    });
+  });
 });

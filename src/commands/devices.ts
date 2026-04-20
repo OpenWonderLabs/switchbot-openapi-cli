@@ -25,6 +25,7 @@ import { registerExplainCommand } from './explain.js';
 import { registerExpandCommand } from './expand.js';
 import { registerDevicesMetaCommand } from './device-meta.js';
 import { isDryRun } from '../utils/flags.js';
+import { DryRunSignal } from '../api/client.js';
 
 export function registerDevicesCommand(program: Command): void {
   const COMMAND_TYPES = ['command', 'customize'] as const;
@@ -371,6 +372,10 @@ Examples:
   $ switchbot devices command <lockId> unlock --yes
 `)
     .action(async (deviceIdArg: string | undefined, cmdArg: string | undefined, parameter: string | undefined, options: { name?: string; nameStrategy?: string; nameType?: string; nameCategory?: 'physical' | 'ir'; nameRoom?: string; type: string; yes?: boolean; idempotencyKey?: string }) => {
+      // Declared outside try so the DryRunSignal catch branch can reference them.
+      let _deviceId: string | undefined;
+      let _cmd: string | undefined;
+      let _parsedParam: unknown;
       try {
         // BUG-FIX: When --name is provided, Commander fills positionals left-to-right
         // starting at [deviceId]. Shift them back to their semantic slots.
@@ -404,6 +409,7 @@ Examples:
           category: options.nameCategory,
           room: options.nameRoom,
         });
+        _deviceId = deviceId;
         if (!getCachedDevice(deviceId)) {
           console.error(
             `Note: device ${deviceId} is not in the local cache — run 'switchbot devices list' first to enable command validation.`,
@@ -513,6 +519,9 @@ Examples:
             // keep as string
           }
         }
+        // Capture for DryRunSignal catch branch (which runs after executeCommand throws).
+        _cmd = cmd;
+        _parsedParam = parsedParam;
 
         const body = await executeCommand(
           deviceId,
@@ -558,6 +567,16 @@ Examples:
         // Re-throw mock process.exit signals (Vitest intercepts process.exit as thrown
         // Error('__exit__')) so they aren't double-handled and the exit code is preserved.
         if (error instanceof Error && error.message === '__exit__') throw error;
+        if (error instanceof DryRunSignal) {
+          const commandType = (options.type ?? 'command') as string;
+          const wouldSend = { deviceId: _deviceId, command: _cmd, parameter: _parsedParam, commandType };
+          if (isJsonMode()) {
+            printJson({ dryRun: true, wouldSend });
+          } else {
+            console.log(`[dry-run] Would POST devices/${_deviceId}/commands with ${JSON.stringify({ command: _cmd, parameter: _parsedParam, commandType })}`);
+          }
+          return;
+        }
         handleError(error);
       }
     });
