@@ -130,4 +130,22 @@ describe('recordRequest + todayUsage', () => {
     recordRequest('GET', 'https://api.switch-bot.com/v1.1/devices');
     expect(todayUsage().total).toBe(1);
   });
+
+  it('C5: checkDailyCap flags over=true when count meets the cap', async () => {
+    const { recordRequest, checkDailyCap } = await importQuota();
+    for (let i = 0; i < 3; i++) {
+      recordRequest('GET', 'https://api.switch-bot.com/v1.1/devices');
+    }
+    const res = checkDailyCap(3);
+    expect(res.over).toBe(true);
+    expect(res.total).toBe(3);
+    expect(res.cap).toBe(3);
+  });
+
+  it('C5: checkDailyCap returns over=false when cap is undefined or 0', async () => {
+    const { recordRequest, checkDailyCap } = await importQuota();
+    recordRequest('GET', 'https://api.switch-bot.com/v1.1/devices');
+    expect(checkDailyCap(undefined).over).toBe(false);
+    expect(checkDailyCap(0).over).toBe(false);
+  });
 });

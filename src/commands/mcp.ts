@@ -24,6 +24,7 @@ import { findCatalogEntry } from '../devices/catalog.js';
 import { getCachedDevice } from '../devices/cache.js';
 import { EventSubscriptionManager } from '../mcp/events-subscription.js';
 import { deviceHistoryStore } from '../mcp/device-history.js';
+import { queryDeviceHistory } from '../devices/history-query.js';
 import { todayUsage } from '../utils/quota.js';
 import { describeCache } from '../devices/cache.js';
 import { withRequestContext } from '../lib/request-context.js';
@@ -194,6 +195,52 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
     }
   );
 
+  // ---- query_device_history --------------------------------------------------
+  server.registerTool(
+    'query_device_history',
+    {
+      title: 'Query time-ranged device history',
+      description:
+        'Return records from the append-only JSONL history (~/.switchbot/device-history/<deviceId>.jsonl) ' +
+        'filtered by a relative duration (since) or absolute ISO-8601 range (from/to). ' +
+        'No API call — zero quota cost. Use for trend questions like "how many times did this switch turn on last week".',
+      inputSchema: {
+        deviceId: z.string().describe('Device ID to query'),
+        since: z.string().optional().describe('Relative window ending now, e.g. "30s", "15m", "1h", "7d". Mutually exclusive with from/to.'),
+        from: z.string().optional().describe('Range start (ISO-8601).'),
+        to: z.string().optional().describe('Range end (ISO-8601).'),
+        fields: z.array(z.string()).optional().describe('Project these payload fields; omit for the full payload.'),
+        limit: z.number().int().min(1).max(10000).optional().describe('Max records to return (default 1000).'),
+      },
+      outputSchema: {
+        deviceId: z.string(),
+        count: z.number().int(),
+        records: z.array(z.object({
+          t: z.string(),
+          topic: z.string(),
+          deviceType: z.string().optional(),
+          payload: z.unknown(),
+        })),
+      },
+    },
+    async ({ deviceId, since, from, to, fields, limit }) => {
+      if (since && (from || to)) {
+        return mcpError('usage', 2, '--since is mutually exclusive with --from/--to.');
+      }
+      try {
+        const records = await queryDeviceHistory(deviceId, { since, from, to, fields, limit });
+        const result = { deviceId, count: records.length, records };
+        return {
+          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+          structuredContent: result,
+        };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'history query failed';
+        return mcpError('usage', 2, msg);
+      }
+    }
+  );
+
   // ---- send_command ---------------------------------------------------------
   server.registerTool(
     'send_command',
@@ -218,15 +265,31 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
           .optional()
           .default(false)
           .describe('Required true for destructive commands (unlock, garage open, createKey, ...)'),
+        idempotencyKey: z
+          .string()
+          .optional()
+          .describe(
+            'Deduplication key — repeat calls with the same key within 60s replay the first result (adds replayed:true). Same key + different (command, parameter) within 60s returns an idempotency_conflict guard error.',
+          ),
       },
       outputSchema: {
         ok: z.literal(true),
         command: z.string(),
         deviceId: z.string(),
         result: z.unknown().describe('API response body from SwitchBot'),
+        verification: z
+          .object({
+            verifiable: z.boolean(),
+            reason: z.string(),
+            suggestedFollowup: z.string(),
+          })
+          .optional()
+          .describe(
+            'Present when the target is an IR device. IR is unidirectional — agents should treat the success as "signal sent" not "state changed".',
+          ),
       },
     },
-    async ({ deviceId, command, parameter, commandType, confirm }) => {
+    async ({ deviceId, command, parameter, commandType, confirm, idempotencyKey }) => {
       const effectiveType = commandType ?? 'command';
 
       // Resolve the device's catalog type via cache or a fresh lookup so we
@@ -283,8 +346,42 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         );
       }
 
-      const result = await executeCommand(deviceId, command, parameter, effectiveType);
-      const structured = { ok: true as const, command, deviceId, result };
+      let result: unknown;
+      try {
+        result = await executeCommand(deviceId, command, parameter, effectiveType, undefined, {
+          idempotencyKey,
+        });
+      } catch (err) {
+        if (err instanceof Error && err.name === 'IdempotencyConflictError') {
+          return mcpError('guard', 2, err.message, {
+            hint: 'Use a fresh idempotencyKey, or wait for the prior key to expire (60s TTL).',
+            context: {
+              existingShape: (err as { existingShape?: string }).existingShape,
+              newShape: (err as { newShape?: string }).newShape,
+            },
+          });
+        }
+        throw err;
+      }
+      const isIr = getCachedDevice(deviceId)?.category === 'ir';
+      const structured: {
+        ok: true;
+        command: string;
+        deviceId: string;
+        result: unknown;
+        verification?: {
+          verifiable: boolean;
+          reason: string;
+          suggestedFollowup: string;
+        };
+      } = { ok: true as const, command, deviceId, result };
+      if (isIr) {
+        structured.verification = {
+          verifiable: false,
+          reason: 'IR transmission is unidirectional; no receipt acknowledgment is possible.',
+          suggestedFollowup: 'Confirm visible change manually or via a paired state sensor.',
+        };
+      }
       return {
         content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
         structuredContent: structured,

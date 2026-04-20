@@ -2,9 +2,14 @@ import { Command } from 'commander';
 import path from 'node:path';
 import os from 'node:os';
 import { intArg, stringArg } from '../utils/arg-parsers.js';
-import { printJson, isJsonMode, handleError } from '../utils/output.js';
-import { readAudit, type AuditEntry } from '../utils/audit.js';
+import { printJson, isJsonMode, handleError, UsageError } from '../utils/output.js';
+import { readAudit, verifyAudit, type AuditEntry } from '../utils/audit.js';
 import { executeCommand } from '../lib/devices.js';
+import {
+  queryDeviceHistory,
+  queryDeviceHistoryStats,
+  type HistoryRecord,
+} from '../devices/history-query.js';
 
 const DEFAULT_AUDIT = path.join(os.homedir(), '.switchbot', 'audit.log');
 
@@ -108,5 +113,129 @@ Examples:
       } catch (err) {
         handleError(err);
       }
+    });
+
+  history
+    .command('range')
+    .description('Query time-ranged device history from JSONL storage (populated by events mqtt-tail / MCP)')
+    .argument('<deviceId>', 'Device ID to query')
+    .option('--since <duration>', 'Relative window ending now, e.g. "30s", "15m", "1h", "7d" (mutually exclusive with --from/--to)', stringArg('--since'))
+    .option('--from <iso>', 'Range start (ISO-8601)', stringArg('--from'))
+    .option('--to <iso>', 'Range end (ISO-8601)', stringArg('--to'))
+    .option('--field <name>', 'Project a payload field (repeat to keep multiple)', (v, acc: string[] = []) => acc.concat(v), [] as string[])
+    .option('--limit <n>', 'Maximum records to return (default 1000)', intArg('--limit', { min: 1 }))
+    .addHelpText('after', `
+History is the append-only JSONL mirror of the per-device ring buffer: every
+'events mqtt-tail' event and every MCP tool status-refresh is written to
+~/.switchbot/device-history/<deviceId>.jsonl (rotates at 50MB × 3 files).
+
+Examples:
+  $ switchbot history range <id> --since 7d --json
+  $ switchbot history range <id> --since 1h --field temperature --field humidity
+  $ switchbot history range <id> --from 2026-04-18T00:00:00Z --to 2026-04-19T00:00:00Z
+`)
+    .action(async (
+      deviceId: string,
+      options: { since?: string; from?: string; to?: string; field?: string[]; limit?: string },
+    ) => {
+      // Usage-level validation: keep synchronous and pre-query so handleError
+      // maps these to exit 2 (via UsageError) rather than runtime exit 1.
+      if (options.since && (options.from || options.to)) {
+        handleError(new UsageError('--since is mutually exclusive with --from/--to.'));
+      }
+
+      try {
+        const records: HistoryRecord[] = await queryDeviceHistory(deviceId, {
+          since: options.since,
+          from: options.from,
+          to: options.to,
+          fields: options.field ?? [],
+          limit: options.limit !== undefined ? Number(options.limit) : undefined,
+        });
+
+        if (isJsonMode()) {
+          printJson({ deviceId, count: records.length, records });
+          return;
+        }
+        if (records.length === 0) {
+          console.log(`(no history records for ${deviceId} in requested range)`);
+          return;
+        }
+        for (const r of records) {
+          const payloadStr = JSON.stringify(r.payload);
+          console.log(`${r.t}  ${r.topic}  ${payloadStr}`);
+        }
+      } catch (err) {
+        // Convert history-query's plain Error range messages into UsageError so
+        // they exit 2 instead of 1.
+        if (err instanceof Error && /^(Invalid --|--from|--since)/i.test(err.message)) {
+          handleError(new UsageError(err.message));
+        }
+        handleError(err);
+      }
+    });
+
+  history
+    .command('stats')
+    .description('Show on-disk size + record counts for a device history')
+    .argument('<deviceId>', 'Device ID to inspect')
+    .action((deviceId: string) => {
+      try {
+        const stats = queryDeviceHistoryStats(deviceId);
+        if (isJsonMode()) {
+          printJson(stats);
+          return;
+        }
+        console.log(`Device:        ${stats.deviceId}`);
+        console.log(`History dir:   ${stats.historyDir}`);
+        console.log(`JSONL files:   ${stats.fileCount} (${stats.jsonlFiles.join(', ') || '—'})`);
+        console.log(`Total size:    ${stats.totalBytes.toLocaleString()} bytes`);
+        console.log(`Record count:  ${stats.recordCount}`);
+        console.log(`Oldest:        ${stats.oldest ?? '—'}`);
+        console.log(`Newest:        ${stats.newest ?? '—'}`);
+      } catch (err) {
+        handleError(err);
+      }
+    });
+
+  history
+    .command('verify')
+    .description('Check the audit log for malformed lines and schema-version drift')
+    .option('--file <path>', `Path to the audit log (default ${DEFAULT_AUDIT})`, stringArg('--file'))
+    .addHelpText('after', `
+See docs/audit-log.md for the audit log format. Exit code:
+  0  every line parses and carries the current auditVersion
+  1  one or more lines are malformed OR the file is missing
+  2  (usage) — not emitted by this subcommand
+
+Examples:
+  $ switchbot history verify
+  $ switchbot history verify --file ./custom.log --json
+`)
+    .action((options: { file?: string }) => {
+      const file = options.file ?? DEFAULT_AUDIT;
+      const report = verifyAudit(file);
+      if (isJsonMode()) {
+        printJson(report);
+      } else {
+        console.log(`Audit log:       ${report.file}`);
+        console.log(`Parsed lines:    ${report.parsedLines} / ${report.totalLines}`);
+        console.log(`Malformed:       ${report.malformedLines}`);
+        console.log(`Unversioned:     ${report.unversionedEntries}`);
+        const versions = Object.entries(report.versionCounts)
+          .map(([v, n]) => `${v}:${n}`)
+          .join(', ');
+        console.log(`Version counts:  ${versions || '—'}`);
+        if (report.earliest) console.log(`Earliest:        ${report.earliest}`);
+        if (report.latest) console.log(`Latest:          ${report.latest}`);
+        if (report.problems.length > 0) {
+          console.log('\nProblems:');
+          for (const p of report.problems) {
+            console.log(`  line ${p.line}: ${p.reason}${p.preview ? ` — "${p.preview}"` : ''}`);
+          }
+        }
+      }
+      const ok = report.malformedLines === 0 && report.problems.length === 0;
+      process.exit(ok ? 0 : 1);
     });
 }

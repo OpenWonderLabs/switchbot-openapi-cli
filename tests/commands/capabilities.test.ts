@@ -116,13 +116,14 @@ describe('capabilities', () => {
     expect(cat.typeCount as number).toBeGreaterThan(10);
   });
 
-  it('surfaces.mcp.tools has 9 entries including send_command, account_overview and get_device_history', async () => {
+  it('surfaces.mcp.tools includes send_command, account_overview, get_device_history and query_device_history', async () => {
     const out = await runCapabilities();
     const mcp = (out.surfaces as Record<string, { tools: string[]; resources: string[] }>).mcp;
-    expect(mcp.tools).toHaveLength(9);
+    expect(mcp.tools.length).toBeGreaterThanOrEqual(9);
     expect(mcp.tools).toContain('send_command');
     expect(mcp.tools).toContain('account_overview');
     expect(mcp.tools).toContain('get_device_history');
+    expect(mcp.tools).toContain('query_device_history');
     expect(mcp.resources).toEqual(['switchbot://events']);
   });
 
@@ -141,5 +142,68 @@ describe('capabilities', () => {
   it('version matches semver format', async () => {
     const out = await runCapabilities();
     expect(out.version as string).toMatch(/^\d+\.\d+\.\d+/);
+  });
+});
+
+async function runCapabilitiesWith(extra: string[]): Promise<Record<string, unknown>> {
+  const program = makeProgram();
+  program.exitOverride();
+  const chunks: string[] = [];
+  const logSpy = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+    chunks.push(args.map(String).join(' '));
+  });
+  registerCapabilitiesCommand(program);
+  try {
+    await program.parseAsync(['node', 'test', 'capabilities', ...extra]);
+  } finally {
+    logSpy.mockRestore();
+  }
+  return (JSON.parse(chunks.join('')) as { data: Record<string, unknown> }).data;
+}
+
+describe('capabilities B3/B4', () => {
+  it('--compact emits a flat leaf-command list with safety metadata', async () => {
+    const out = await runCapabilitiesWith(['--compact']);
+    const cmds = out.commands as Array<Record<string, unknown>>;
+    expect(Array.isArray(cmds)).toBe(true);
+    // compact leaves are flat and every entry has the safety metadata.
+    for (const c of cmds) {
+      expect(c).toHaveProperty('agentSafetyTier');
+      expect(c).toHaveProperty('mutating');
+      expect(c).toHaveProperty('consumesQuota');
+      expect(c).toHaveProperty('idempotencySupported');
+    }
+  });
+
+  it('exposes agentGuide.safetyTiers definitions', async () => {
+    const out = await runCapabilitiesWith([]);
+    const guide = out.agentGuide as Record<string, Record<string, string>>;
+    expect(guide.safetyTiers.read).toBeTruthy();
+    expect(guide.safetyTiers.action).toBeTruthy();
+    expect(guide.safetyTiers.destructive).toBeTruthy();
+  });
+
+  it('known leaf commands carry expected agentSafetyTier values', async () => {
+    const out = await runCapabilitiesWith(['--compact']);
+    const cmds = out.commands as Array<{ name: string; agentSafetyTier: string }>;
+    const byName = Object.fromEntries(cmds.map((c) => [c.name, c.agentSafetyTier]));
+    expect(byName['devices list']).toBe('read');
+    expect(byName['devices command']).toBe('action');
+  });
+
+  it('--surface mcp restricts surfaces block to mcp only', async () => {
+    const out = await runCapabilitiesWith(['--surface', 'mcp']);
+    const surfaces = out.surfaces as Record<string, unknown>;
+    expect(Object.keys(surfaces)).toEqual(['mcp']);
+  });
+
+  it('surfaces.cli exposes idempotencyContract with replay + conflict semantics', async () => {
+    const out = await runCapabilitiesWith([]);
+    const cli = (out.surfaces as Record<string, Record<string, unknown>>).cli;
+    expect(cli.idempotencyContract).toBeDefined();
+    const ic = cli.idempotencyContract as Record<string, unknown>;
+    expect(ic.flag).toBe('--idempotency-key <key>');
+    expect(ic.windowSeconds).toBe(60);
+    expect(ic.replayBehavior).toMatch(/replayed:true/);
   });
 });

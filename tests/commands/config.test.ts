@@ -7,6 +7,7 @@ const configMock = vi.hoisted(() => ({
   saveConfig: vi.fn(),
   showConfig: vi.fn(),
   listProfiles: vi.fn(() => [] as string[]),
+  readProfileMeta: vi.fn(() => null),
 }));
 
 vi.mock('../../src/config.js', () => configMock);
@@ -25,8 +26,24 @@ describe('config command', () => {
   describe('set-token', () => {
     it('calls saveConfig with positional token and secret', async () => {
       const res = await runCli(registerConfigCommand, ['config', 'set-token', 'MY_T', 'MY_S']);
-      expect(configMock.saveConfig).toHaveBeenCalledWith('MY_T', 'MY_S');
+      expect(configMock.saveConfig).toHaveBeenCalledWith('MY_T', 'MY_S', expect.any(Object));
       expect(res.stdout.join('\n')).toContain('Credentials saved');
+    });
+
+    it('warns on stderr when positional token/secret are passed', async () => {
+      const res = await runCli(registerConfigCommand, ['config', 'set-token', 'MY_T', 'MY_S']);
+      expect(res.stderr.join('\n').toLowerCase()).toMatch(/discouraged/);
+    });
+
+    it('scrubs token/secret out of process.argv before saveConfig runs', async () => {
+      let argvAtCallTime: string[] = [];
+      configMock.saveConfig.mockImplementation(() => {
+        argvAtCallTime = [...process.argv];
+      });
+      await runCli(registerConfigCommand, ['config', 'set-token', 'RAW_TOK', 'RAW_SEC']);
+      expect(argvAtCallTime).not.toContain('RAW_TOK');
+      expect(argvAtCallTime).not.toContain('RAW_SEC');
+      expect(argvAtCallTime.filter((a) => a === '***').length).toBeGreaterThanOrEqual(2);
     });
 
     it('fails when token is missing (no positional, no --from-*)', async () => {
@@ -69,7 +86,18 @@ describe('config command', () => {
       configMock.listProfiles.mockReturnValue(['home']);
       const res = await runCli(registerConfigCommand, ['--json', 'config', 'list-profiles']);
       const out = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
-      expect(out.data.profiles).toEqual(['home']);
+      expect(out.data.profiles).toEqual([{ name: 'home' }]);
+    });
+
+    it('C5: surfaces label and dailyCap when present', async () => {
+      configMock.listProfiles.mockReturnValue(['home']);
+      configMock.readProfileMeta.mockImplementation((p: string) =>
+        p === 'home' ? { label: 'Home Account', limits: { dailyCap: 500 }, path: '/x' } : null,
+      );
+      const res = await runCli(registerConfigCommand, ['config', 'list-profiles']);
+      const combined = res.stdout.join('\n');
+      expect(combined).toContain('Home Account');
+      expect(combined).toContain('dailyCap=500');
     });
   });
 
@@ -84,7 +112,7 @@ describe('config command', () => {
       const res = await runCli(registerConfigCommand, [
         'config', 'set-token', '--from-env-file', envFile,
       ]);
-      expect(configMock.saveConfig).toHaveBeenCalledWith('env_tok_abc', 'env_sec_xyz');
+      expect(configMock.saveConfig).toHaveBeenCalledWith('env_tok_abc', 'env_sec_xyz', expect.any(Object));
       expect(res.stdout.join('\n')).toContain('Credentials saved');
       fs.rmSync(dir, { recursive: true, force: true });
     });

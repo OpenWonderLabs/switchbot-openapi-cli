@@ -25,17 +25,20 @@ vi.mock('../../src/mqtt/client.js', () => {
   const MockSwitchBotMqttClient = vi.fn(function (this: unknown) {
     const inst = {
       connect: vi.fn(async () => {
+        // State fires first (matches real MQTT: connection completes, then
+        // messages arrive). Both are scheduled with setTimeout(0) so they
+        // land in order on the microtask queue.
+        if (mqttMock.connectShouldFireState) {
+          const state = mqttMock.connectShouldFireState;
+          setTimeout(() => {
+            if (mqttMock.stateHandler) mqttMock.stateHandler(state);
+          }, 0);
+        }
         if (mqttMock.connectShouldFireMessage) {
           setTimeout(() => {
             if (mqttMock.messageHandler) {
               mqttMock.messageHandler('test/topic', Buffer.from(JSON.stringify({ state: 'on' })));
             }
-          }, 0);
-        }
-        if (mqttMock.connectShouldFireState) {
-          const state = mqttMock.connectShouldFireState;
-          setTimeout(() => {
-            if (mqttMock.stateHandler) mqttMock.stateHandler(state);
           }, 0);
         }
       }),
@@ -314,5 +317,32 @@ describe('events mqtt-tail', () => {
     const res = await runCli(registerEventsCommand, ['events', 'mqtt-tail']);
     expect(res.exitCode).toBe(1);
     expect(res.stderr.join('\n')).toMatch(/failed permanently|credential expired|reconnect exhausted/i);
+  });
+
+  it('emits __connect control record on initial connect + eventId on messages (C2)', async () => {
+    mqttMock.connectShouldFireMessage = true;
+    mqttMock.connectShouldFireState = 'connected';
+
+    const res = await runCli(registerEventsCommand, ['events', 'mqtt-tail', '--max', '1']);
+    const jsonLines = res.stdout.filter((l) => l.trim().startsWith('{')).map((l) => JSON.parse(l));
+    // Expect at least a control record (__connect) + one real event.
+    const control = jsonLines.find((j) => typeof (j as { type?: unknown }).type === 'string' && (j as { type: string }).type.startsWith('__'));
+    expect(control).toBeDefined();
+    expect((control as { type: string }).type).toBe('__connect');
+    expect(typeof (control as { eventId: string }).eventId).toBe('string');
+
+    const real = jsonLines.find((j) => (j as { topic?: string }).topic === 'test/topic');
+    expect(real).toBeDefined();
+    expect(typeof (real as { eventId: string }).eventId).toBe('string');
+    // UUID v4 shape, not the control UUID.
+    expect((real as { eventId: string }).eventId).not.toBe((control as { eventId: string }).eventId);
+  });
+
+  it('emits __disconnect control record when state transitions to failed (C2)', async () => {
+    mqttMock.connectShouldFireState = 'failed';
+    const res = await runCli(registerEventsCommand, ['events', 'mqtt-tail']);
+    const jsonLines = res.stdout.filter((l) => l.trim().startsWith('{')).map((l) => JSON.parse(l));
+    const disconnect = jsonLines.find((j) => (j as { type?: string }).type === '__disconnect');
+    expect(disconnect).toBeDefined();
   });
 });

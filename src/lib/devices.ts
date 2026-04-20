@@ -200,7 +200,17 @@ export async function executeCommand(
     }
   };
 
-  return idempotencyCache.run<unknown>(options?.idempotencyKey, execute);
+  const { result, replayed } = await idempotencyCache.run<unknown>(
+    options?.idempotencyKey,
+    execute,
+    { command: cmd, parameter },
+  );
+  if (!replayed) return result;
+  // Cached hit — attach replayed marker without mutating the original.
+  if (result && typeof result === 'object') {
+    return { ...(result as Record<string, unknown>), replayed: true };
+  }
+  return { value: result, replayed: true };
 }
 
 /**
