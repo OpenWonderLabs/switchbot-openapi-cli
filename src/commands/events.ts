@@ -435,6 +435,12 @@ Examples:
           } else {
             console.log(JSON.stringify(ctl));
           }
+          // Persist to __control.jsonl — best-effort, never blocks the stream.
+          try {
+            deviceHistoryStore.recordControl(ctl);
+          } catch {
+            // swallow
+          }
         };
         const unsubState = client.onStateChange((state) => {
           if (!isJsonMode()) {

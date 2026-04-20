@@ -1,8 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import http from 'node:http';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { once } from 'node:events';
 import { AddressInfo } from 'node:net';
 import { startReceiver, registerEventsCommand } from '../../src/commands/events.js';
+import { deviceHistoryStore } from '../../src/mcp/device-history.js';
 import { runCli } from '../helpers/cli.js';
 
 // ---------------------------------------------------------------------------
@@ -344,5 +348,76 @@ describe('events mqtt-tail', () => {
     const jsonLines = res.stdout.filter((l) => l.trim().startsWith('{')).map((l) => JSON.parse(l));
     const disconnect = jsonLines.find((j) => (j as { type?: string }).type === '__disconnect');
     expect(disconnect).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// __control.jsonl persistence tests (bug #10)
+// ---------------------------------------------------------------------------
+describe('events mqtt-tail — control event persistence', () => {
+  let tmpHome: string;
+
+  beforeEach(() => {
+    mqttMock.messageHandler = null;
+    mqttMock.stateHandler = null;
+    mqttMock.connectShouldFireMessage = false;
+    mqttMock.connectShouldFireState = null;
+    vi.mocked(fetchMqttCredential).mockResolvedValue(mockCredential);
+    vi.mocked(tryLoadConfig).mockReturnValue({ token: 'test-token', secret: 'test-secret' });
+
+    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sbcli-ctlevt-'));
+    vi.spyOn(os, 'homedir').mockReturnValue(tmpHome);
+    deviceHistoryStore.resetSizes();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    try { fs.rmSync(tmpHome, { recursive: true, force: true }); } catch { /* */ }
+  });
+
+  it('writes __control.jsonl with __connect event on initial connect', async () => {
+    mqttMock.connectShouldFireMessage = true;
+    mqttMock.connectShouldFireState = 'connected';
+
+    await runCli(registerEventsCommand, ['events', 'mqtt-tail', '--max', '1']);
+
+    const controlFile = path.join(tmpHome, '.switchbot', 'device-history', '__control.jsonl');
+    expect(fs.existsSync(controlFile)).toBe(true);
+
+    const lines = fs.readFileSync(controlFile, 'utf-8').trim().split('\n').filter(Boolean);
+    expect(lines.length).toBeGreaterThanOrEqual(1);
+
+    const parsed = JSON.parse(lines[0]) as { type: string; at: string; eventId: string };
+    expect(parsed.type).toBe('__connect');
+    expect(typeof parsed.at).toBe('string');
+    expect(typeof parsed.eventId).toBe('string');
+  });
+
+  it('writes __disconnect to __control.jsonl on failed state', async () => {
+    mqttMock.connectShouldFireState = 'failed';
+
+    await runCli(registerEventsCommand, ['events', 'mqtt-tail']);
+
+    const controlFile = path.join(tmpHome, '.switchbot', 'device-history', '__control.jsonl');
+    expect(fs.existsSync(controlFile)).toBe(true);
+
+    const lines = fs.readFileSync(controlFile, 'utf-8').trim().split('\n').filter(Boolean);
+    const types = lines.map((l) => (JSON.parse(l) as { type: string }).type);
+    expect(types).toContain('__disconnect');
+  });
+
+  it('does not write per-device files for control events (no cross-contamination)', async () => {
+    // Use 'failed' so the command exits cleanly without needing --max or a device message.
+    mqttMock.connectShouldFireState = 'failed';
+
+    await runCli(registerEventsCommand, ['events', 'mqtt-tail']);
+
+    const histDir = path.join(tmpHome, '.switchbot', 'device-history');
+    if (!fs.existsSync(histDir)) return; // no dir means no per-device files — pass
+
+    const files = fs.readdirSync(histDir);
+    // Only __control.jsonl should exist; no per-device .json or .jsonl for a real deviceId
+    const deviceFiles = files.filter((f) => !f.startsWith('__'));
+    expect(deviceFiles).toHaveLength(0);
   });
 });
