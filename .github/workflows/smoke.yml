@@ -44,7 +44,7 @@ jobs:
         run: |
           node dist/index.js devices list --json > /tmp/list.json
           echo "device count=$(jq '.data | length' /tmp/list.json)"
-          node dist/index.js doctor --json | jq '.summary'
+          node dist/index.js doctor --json | jq '.data.summary'
 
       - name: IR verification flag (destructive — real IR transmission)
         if: ${{ inputs.ir_device_id != '' }}
@@ -54,8 +54,8 @@ jobs:
         run: |
           node dist/index.js devices command "${{ inputs.ir_device_id }}" turnOn --json > /tmp/ir.json
           cat /tmp/ir.json
-          jq -e '.verification.verifiable == false' /tmp/ir.json
-          echo "PASS: verification.verifiable == false"
+          jq -e '.data.verification.verifiable == false' /tmp/ir.json
+          echo "PASS: data.verification.verifiable == false"
 
       - name: Idempotency replay + conflict (destructive — real device toggle)
         if: ${{ inputs.physical_device_id != '' }}
@@ -69,12 +69,12 @@ jobs:
 
           node dist/index.js devices command "$DEV" turnOn --idempotency-key "$KEY" --json > /tmp/i1.json
           cat /tmp/i1.json
-          jq -e '(.replayed // false) == false' /tmp/i1.json
+          jq -e '(.data.replayed // false) == false' /tmp/i1.json
           echo "step1 PASS: first call not replayed"
 
           node dist/index.js devices command "$DEV" turnOn --idempotency-key "$KEY" --json > /tmp/i2.json
           cat /tmp/i2.json
-          jq -e '.replayed == true' /tmp/i2.json
+          jq -e '.data.replayed == true' /tmp/i2.json
           echo "step2 PASS: replay hit"
 
           set +e
@@ -82,7 +82,7 @@ jobs:
           code=$?
           set -e
           cat /tmp/i3.json
-          jq -e '.error == "idempotency_conflict"' /tmp/i3.json
+          jq -e '.data.error == "idempotency_conflict"' /tmp/i3.json
           test "$code" -eq 2
           echo "step3 PASS: conflict detected, exit 2"
 
@@ -99,6 +99,6 @@ jobs:
           kill $TAIL_PID 2>/dev/null || true
           wait $TAIL_PID 2>/dev/null || true
 
-          node dist/index.js history stats "$DEV" --json | tee /tmp/stats.json | jq '.'
-          node dist/index.js history range "$DEV" --since 5m --json | jq 'length'
+          node dist/index.js history stats "$DEV" --json | tee /tmp/stats.json | jq '.data'
+          node dist/index.js history range "$DEV" --since 5m --json | jq '.data | length'
           echo "PASS: history commands returned valid JSON"
