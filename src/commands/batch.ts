@@ -12,7 +12,7 @@ import { createClient } from '../api/client.js';
 import { parseFilter, applyFilter, FilterSyntaxError } from '../utils/filter.js';
 import { isDryRun } from '../utils/flags.js';
 import { DryRunSignal } from '../api/client.js';
-import { getCachedTypeMap, getCachedDevice } from '../devices/cache.js';
+import { getCachedTypeMap, getCachedDevice, loadStatusCache } from '../devices/cache.js';
 
 interface BatchStepTiming {
   startedAt: string;
@@ -33,6 +33,7 @@ interface BatchResult {
     };
   } & BatchStepTiming>;
   failed: Array<{ deviceId: string; error: ErrorPayload } & BatchStepTiming>;
+  skipped?: Array<{ deviceId: string; reason: 'offline' }>;
   summary: {
     total: number;
     ok: number;
@@ -158,6 +159,7 @@ export function registerBatchCommand(devices: Command): void {
     .option('--stdin', 'Read deviceIds from stdin, one per line (same as trailing "-")')
     .option('--idempotency-key-prefix <prefix>', 'Client-supplied prefix for idempotency keys (key per device: <prefix>-<deviceId>). process-local 60s window; cache is per Node process (MCP session, batch run, plan run). Independent CLI invocations do not share cache.', stringArg('--idempotency-key-prefix'))
     .option('--idempotency-key <prefix>', 'Alias for --idempotency-key-prefix.', stringArg('--idempotency-key'))
+    .option('--skip-offline', 'Skip devices whose cached status is offline (no API call; cache miss → send as usual).')
     .addHelpText('after', `
 Targets are resolved in this priority order:
   1. --ids when present       (explicit deviceIds)
@@ -213,6 +215,7 @@ Examples:
           stdin?: boolean;
           idempotencyKeyPrefix?: string;
           idempotencyKey?: string;
+          skipOffline?: boolean;
         },
         commandObj: Command
       ) => {
@@ -271,6 +274,24 @@ Examples:
         const effectiveType = (options.type === 'customize' ? 'customize' : 'command') as
           | 'command'
           | 'customize';
+
+        // --skip-offline: preflight using the status cache (no network). Cache
+        // miss = send as usual; only definite "offline" cached entries skip.
+        const preSkipped: Array<{ deviceId: string; reason: 'offline' }> = [];
+        if (options.skipOffline && resolved.ids.length > 0) {
+          const statusCache = loadStatusCache();
+          const kept: string[] = [];
+          for (const id of resolved.ids) {
+            const entry = statusCache.entries[id];
+            const online = entry?.body?.onlineStatus;
+            if (online === 'offline') {
+              preSkipped.push({ deviceId: id, reason: 'offline' });
+            } else {
+              kept.push(id);
+            }
+          }
+          resolved = { ...resolved, ids: kept };
+        }
 
         // Pre-flight: identify destructive targets before spending API calls.
         const blockedForDestructive: Array<{ deviceId: string; reason: string }> = [];
@@ -463,11 +484,12 @@ Examples:
             finishedAt: f.finishedAt,
             durationMs: f.durationMs,
           })),
+          ...(preSkipped.length > 0 ? { skipped: preSkipped } : {}),
           summary: {
-            total: resolved.ids.length,
+            total: resolved.ids.length + preSkipped.length,
             ok: succeeded.length,
             failed: failed.length,
-            skipped: dryRunned.length,
+            skipped: dryRunned.length + preSkipped.length,
             durationMs: Date.now() - startedAt,
             unverifiableCount: succeeded.filter((s) => getCachedDevice(s.deviceId)?.category === 'ir').length,
             schemaVersion: '1.1',
