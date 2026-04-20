@@ -138,3 +138,97 @@ describe('history command', () => {
     });
   });
 });
+
+describe('history range / stats (D3)', () => {
+  let tmpHome: string;
+  let historyDir: string;
+
+  beforeEach(() => {
+    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-histcmd-'));
+    historyDir = path.join(tmpHome, '.switchbot', 'device-history');
+    fs.mkdirSync(historyDir, { recursive: true });
+    vi.spyOn(os, 'homedir').mockReturnValue(tmpHome);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    try { fs.rmSync(tmpHome, { recursive: true, force: true }); } catch { /* */ }
+  });
+
+  function seedJsonl(deviceId: string, records: Array<Record<string, unknown>>): void {
+    const line = records.map((r) => JSON.stringify(r)).join('\n') + '\n';
+    fs.writeFileSync(path.join(historyDir, `${deviceId}.jsonl`), line);
+  }
+
+  it('exits 2 when --since and --from are combined', async () => {
+    const res = await runCli(registerHistoryCommand, [
+      'history', 'range', 'DEV1', '--since', '1h', '--from', '2026-04-18T00:00:00Z',
+    ]);
+    expect(res.exitCode).toBe(2);
+    expect(res.stderr.join('\n')).toMatch(/mutually exclusive/i);
+  });
+
+  it('exits 2 on bad --since format', async () => {
+    const res = await runCli(registerHistoryCommand, [
+      'history', 'range', 'DEV1', '--since', 'garbage',
+    ]);
+    expect(res.exitCode).toBe(2);
+  });
+
+  it('prints (no history records) when JSONL is missing', async () => {
+    const res = await runCli(registerHistoryCommand, [
+      'history', 'range', 'NOPE', '--since', '1h',
+    ]);
+    expect(res.stdout.join('\n')).toMatch(/no history records/);
+  });
+
+  it('emits JSON with {deviceId, count, records} when --json set', async () => {
+    const now = Date.now();
+    seedJsonl('DEV1', [
+      { t: new Date(now - 30_000).toISOString(), topic: 'sb/DEV1', payload: { power: 'on' } },
+      { t: new Date(now - 10_000).toISOString(), topic: 'sb/DEV1', payload: { power: 'off' } },
+    ]);
+    const res = await runCli(registerHistoryCommand, [
+      '--json', 'history', 'range', 'DEV1', '--since', '5m',
+    ]);
+    const envelope = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    expect(envelope.data.deviceId).toBe('DEV1');
+    expect(envelope.data.count).toBe(2);
+    expect(envelope.data.records.length).toBe(2);
+  });
+
+  it('--field can be repeated to project payload subset', async () => {
+    seedJsonl('DEV1', [
+      { t: new Date().toISOString(), topic: 't', payload: { temp: 22, humidity: 50, battery: 90 } },
+    ]);
+    const res = await runCli(registerHistoryCommand, [
+      '--json', 'history', 'range', 'DEV1', '--field', 'temp', '--field', 'humidity',
+    ]);
+    const env = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    expect(env.data.records[0].payload).toEqual({ temp: 22, humidity: 50 });
+  });
+
+  it('stats prints file/record counts in plain mode', async () => {
+    seedJsonl('DEV1', [
+      { t: '2026-04-01T00:00:00Z', topic: 't', payload: {} },
+      { t: '2026-04-20T00:00:00Z', topic: 't', payload: {} },
+    ]);
+    const res = await runCli(registerHistoryCommand, ['history', 'stats', 'DEV1']);
+    const out = res.stdout.join('\n');
+    expect(out).toMatch(/Record count:\s+2/);
+    expect(out).toMatch(/JSONL files:\s+1/);
+    expect(out).toMatch(/2026-04-01/);
+    expect(out).toMatch(/2026-04-20/);
+  });
+
+  it('stats --json emits structured payload', async () => {
+    seedJsonl('DEV1', [
+      { t: '2026-04-10T00:00:00Z', topic: 't', payload: {} },
+    ]);
+    const res = await runCli(registerHistoryCommand, ['--json', 'history', 'stats', 'DEV1']);
+    const env = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    expect(env.data.deviceId).toBe('DEV1');
+    expect(env.data.recordCount).toBe(1);
+    expect(env.data.oldest).toBe('2026-04-10T00:00:00.000Z');
+  });
+});

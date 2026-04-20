@@ -325,4 +325,80 @@ describe('devices batch', () => {
     expect(parsed.data.summary.total).toBe(0);
     expect(apiMock.__instance.post).not.toHaveBeenCalled();
   });
+
+  it('C3: each step carries startedAt / finishedAt / durationMs timings', async () => {
+    apiMock.__instance.get.mockResolvedValue({ data: { statusCode: 100, body: DEVICE_LIST_BODY } });
+    apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body: {} } });
+
+    const result = await runCli(registerDevicesCommand, [
+      '--json',
+      'devices',
+      'batch',
+      'turnOn',
+      '--filter',
+      'type=Bot',
+    ]);
+
+    expect(result.exitCode).toBeNull();
+    const parsed = JSON.parse(result.stdout[0]);
+    expect(parsed.data.summary.maxConcurrent).toBeGreaterThan(0);
+    expect(parsed.data.summary.staggerMs).toBe(0);
+    for (const s of parsed.data.succeeded) {
+      expect(typeof s.startedAt).toBe('string');
+      expect(typeof s.finishedAt).toBe('string');
+      expect(typeof s.durationMs).toBe('number');
+      expect(s.durationMs).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it('C3: --max-concurrent overrides --concurrency and is reported in summary', async () => {
+    apiMock.__instance.get.mockResolvedValue({ data: { statusCode: 100, body: DEVICE_LIST_BODY } });
+    apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body: {} } });
+
+    const result = await runCli(registerDevicesCommand, [
+      '--json',
+      'devices',
+      'batch',
+      'turnOn',
+      '--filter',
+      'type=Bot',
+      '--concurrency',
+      '5',
+      '--max-concurrent',
+      '2',
+    ]);
+
+    expect(result.exitCode).toBeNull();
+    const parsed = JSON.parse(result.stdout[0]);
+    expect(parsed.data.summary.maxConcurrent).toBe(2);
+  });
+
+  it('C3: --dry-run --plan emits a plan document and does not call POST', async () => {
+    flagsMock.dryRun = true;
+    apiMock.__instance.get.mockResolvedValue({ data: { statusCode: 100, body: DEVICE_LIST_BODY } });
+
+    const result = await runCli(registerDevicesCommand, [
+      '--json',
+      'devices',
+      'batch',
+      'turnOn',
+      '--filter',
+      'type=Bot',
+      '--plan',
+      '--stagger',
+      '250',
+      '--max-concurrent',
+      '3',
+    ]);
+
+    expect(result.exitCode).toBeNull();
+    expect(apiMock.__instance.post).not.toHaveBeenCalled();
+    const parsed = JSON.parse(result.stdout[0]);
+    expect(parsed.data.dryRun).toBe(true);
+    expect(parsed.data.plan.command).toBe('turnOn');
+    expect(parsed.data.plan.maxConcurrent).toBe(3);
+    expect(parsed.data.plan.staggerMs).toBe(250);
+    expect(parsed.data.plan.stepCount).toBe(2);
+    expect(parsed.data.plan.steps.map((s: { deviceId: string }) => s.deviceId).sort()).toEqual(['BOT1', 'BOT2']);
+  });
 });

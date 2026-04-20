@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { writeAudit, readAudit } from '../../src/utils/audit.js';
+import { writeAudit, readAudit, verifyAudit, AUDIT_VERSION } from '../../src/utils/audit.js';
 
 describe('audit log', () => {
   const originalArgv = process.argv;
@@ -95,5 +95,49 @@ describe('audit log', () => {
 
   it('readAudit returns [] when the file does not exist', () => {
     expect(readAudit(path.join(tmp, 'nope.log'))).toEqual([]);
+  });
+
+  it('writeAudit stamps every record with the current auditVersion', () => {
+    const file = path.join(tmp, 'audit.log');
+    process.argv = ['node', 'cli', '--audit-log', '--audit-log-path', file];
+    writeAudit({
+      t: '2026-04-20T09:00:00.000Z',
+      kind: 'command',
+      deviceId: 'X',
+      command: 'turnOn',
+      parameter: undefined,
+      commandType: 'command',
+      dryRun: false,
+      result: 'ok',
+    });
+    const line = fs.readFileSync(file, 'utf-8').trim();
+    const parsed = JSON.parse(line);
+    expect(parsed.auditVersion).toBe(AUDIT_VERSION);
+    expect(parsed.deviceId).toBe('X');
+  });
+
+  it('verifyAudit reports parsed/malformed/version counts', () => {
+    const file = path.join(tmp, 'audit.log');
+    const ok1 = { auditVersion: 1, t: '2026-04-20T09:00:00.000Z', kind: 'command', deviceId: 'A', command: 'turnOn', parameter: 'default', commandType: 'command', dryRun: false, result: 'ok' };
+    const legacy = { t: '2026-04-18T08:00:00.000Z', kind: 'command', deviceId: 'B', command: 'turnOff', parameter: 'default', commandType: 'command', dryRun: false, result: 'ok' };
+    const content = [JSON.stringify(ok1), '{ not json', JSON.stringify(legacy), ''].join('\n');
+    fs.writeFileSync(file, content);
+    const report = verifyAudit(file);
+    expect(report.parsedLines).toBe(2);
+    expect(report.malformedLines).toBe(1);
+    expect(report.unversionedEntries).toBe(1);
+    expect(report.versionCounts['1']).toBe(1);
+    expect(report.versionCounts['unversioned']).toBe(1);
+    expect(report.earliest).toBe('2026-04-18T08:00:00.000Z');
+    expect(report.latest).toBe('2026-04-20T09:00:00.000Z');
+    expect(report.problems).toHaveLength(1);
+    expect(report.problems[0].reason).toContain('JSON parse');
+  });
+
+  it('verifyAudit returns a problem when file is missing', () => {
+    const report = verifyAudit(path.join(tmp, 'missing.log'));
+    expect(report.parsedLines).toBe(0);
+    expect(report.problems).toHaveLength(1);
+    expect(report.problems[0].reason).toContain('does not exist');
   });
 });

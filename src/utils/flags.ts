@@ -17,6 +17,15 @@ export function isVerbose(): boolean {
   return process.argv.includes('--verbose') || process.argv.includes('-v');
 }
 
+/**
+ * Opt-in: disable header redaction in verbose traces. Adds a big warning on
+ * stderr. Use only when actively debugging an auth issue — never in logs or
+ * CI output.
+ */
+export function isTraceUnsafe(): boolean {
+  return process.argv.includes('--trace-unsafe');
+}
+
 export function isDryRun(): boolean {
   return process.argv.includes('--dry-run');
 }
@@ -129,6 +138,23 @@ export function getFields(): string[] | undefined {
   const v = getFlagValue('--fields');
   if (!v) return undefined;
   return v.split(',').map((f) => f.trim()).filter(Boolean);
+}
+
+/**
+ * Table rendering style. Defaults to `unicode` on a TTY and `ascii` on pipes —
+ * agents consuming stdout tend to choke on the Unicode box-drawing chars.
+ * Valid values: `unicode` (default on TTY), `ascii`, `simple` (whitespace-only),
+ * `markdown` (fenced `| col | col |` table for agent-friendly UI embedding).
+ */
+export type TableStyle = 'unicode' | 'ascii' | 'simple' | 'markdown';
+
+export function getTableStyle(): TableStyle {
+  const v = getFlagValue('--table-style');
+  if (v === 'unicode' || v === 'ascii' || v === 'simple' || v === 'markdown') return v;
+  if (getFormat() === 'markdown') return 'markdown';
+  // TTY → pretty unicode borders. Non-TTY (pipe/redirect) → ascii to avoid
+  // mojibake in consumer logs.
+  return process.stdout.isTTY ? 'unicode' : 'ascii';
 }
 
 export function getCacheMode(): CacheMode {

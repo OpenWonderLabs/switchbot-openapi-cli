@@ -1,0 +1,104 @@
+name: Smoke (real device)
+
+# Manual-only. Runs against real SwitchBot account + real devices.
+# Requires repo secrets: SWITCHBOT_TOKEN, SWITCHBOT_SECRET.
+# Each configured test WILL send commands to live hardware.
+
+on:
+  workflow_dispatch:
+    inputs:
+      physical_device_id:
+        description: "Physical device ID (idempotency + history). Will send turnOn, turnOn (replay), turnOff (conflict). Omit to skip."
+        required: false
+      ir_device_id:
+        description: "IR device ID (verification flag). Will send ONE turnOn IR transmission. Omit to skip."
+        required: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+
+      - name: Verify credentials present
+        env:
+          TOKEN: ${{ secrets.SWITCHBOT_TOKEN }}
+          SECRET: ${{ secrets.SWITCHBOT_SECRET }}
+        run: |
+          if [ -z "$TOKEN" ] || [ -z "$SECRET" ]; then
+            echo "SWITCHBOT_TOKEN / SWITCHBOT_SECRET not set in repo secrets"
+            exit 1
+          fi
+          echo "credentials=present"
+
+      - name: Warm cache + doctor
+        env:
+          SWITCHBOT_TOKEN: ${{ secrets.SWITCHBOT_TOKEN }}
+          SWITCHBOT_SECRET: ${{ secrets.SWITCHBOT_SECRET }}
+        run: |
+          node dist/index.js devices list --json > /tmp/list.json
+          echo "device count=$(jq '.data | length' /tmp/list.json)"
+          node dist/index.js doctor --json | jq '.summary'
+
+      - name: IR verification flag (destructive — real IR transmission)
+        if: ${{ inputs.ir_device_id != '' }}
+        env:
+          SWITCHBOT_TOKEN: ${{ secrets.SWITCHBOT_TOKEN }}
+          SWITCHBOT_SECRET: ${{ secrets.SWITCHBOT_SECRET }}
+        run: |
+          node dist/index.js devices command "${{ inputs.ir_device_id }}" turnOn --json > /tmp/ir.json
+          cat /tmp/ir.json
+          jq -e '.verification.verifiable == false' /tmp/ir.json
+          echo "PASS: verification.verifiable == false"
+
+      - name: Idempotency replay + conflict (destructive — real device toggle)
+        if: ${{ inputs.physical_device_id != '' }}
+        env:
+          SWITCHBOT_TOKEN: ${{ secrets.SWITCHBOT_TOKEN }}
+          SWITCHBOT_SECRET: ${{ secrets.SWITCHBOT_SECRET }}
+          DEV: ${{ inputs.physical_device_id }}
+        run: |
+          KEY=$(uuidgen)
+          echo "idempotency_key=$KEY"
+
+          node dist/index.js devices command "$DEV" turnOn --idempotency-key "$KEY" --json > /tmp/i1.json
+          cat /tmp/i1.json
+          jq -e '(.replayed // false) == false' /tmp/i1.json
+          echo "step1 PASS: first call not replayed"
+
+          node dist/index.js devices command "$DEV" turnOn --idempotency-key "$KEY" --json > /tmp/i2.json
+          cat /tmp/i2.json
+          jq -e '.replayed == true' /tmp/i2.json
+          echo "step2 PASS: replay hit"
+
+          set +e
+          node dist/index.js devices command "$DEV" turnOff --idempotency-key "$KEY" --json > /tmp/i3.json
+          code=$?
+          set -e
+          cat /tmp/i3.json
+          jq -e '.error == "idempotency_conflict"' /tmp/i3.json
+          test "$code" -eq 2
+          echo "step3 PASS: conflict detected, exit 2"
+
+      - name: History range end-to-end
+        if: ${{ inputs.physical_device_id != '' }}
+        env:
+          SWITCHBOT_TOKEN: ${{ secrets.SWITCHBOT_TOKEN }}
+          SWITCHBOT_SECRET: ${{ secrets.SWITCHBOT_SECRET }}
+          DEV: ${{ inputs.physical_device_id }}
+        run: |
+          node dist/index.js events mqtt-tail --json > /tmp/mqtt.log 2>&1 &
+          TAIL_PID=$!
+          sleep 30
+          kill $TAIL_PID 2>/dev/null || true
+          wait $TAIL_PID 2>/dev/null || true
+
+          node dist/index.js history stats "$DEV" --json | tee /tmp/stats.json | jq '.'
+          node dist/index.js history range "$DEV" --since 5m --json | jq 'length'
+          echo "PASS: history commands returned valid JSON"

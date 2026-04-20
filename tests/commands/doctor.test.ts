@@ -100,4 +100,66 @@ describe('doctor command', () => {
     expect(mqtt.status).toBe('ok');
     expect(mqtt.detail).toMatch(/auto-provisioned/);
   });
+
+  it('exposes the locked JSON shape: ok, overall, generatedAt, schemaVersion, summary, checks', async () => {
+    process.env.SWITCHBOT_TOKEN = 't';
+    process.env.SWITCHBOT_SECRET = 's';
+    const res = await runCli(registerDoctorCommand, ['--json', 'doctor']);
+    const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    const data = payload.data;
+    expect(typeof data.ok).toBe('boolean');
+    expect(['ok', 'warn', 'fail']).toContain(data.overall);
+    expect(typeof data.generatedAt).toBe('string');
+    expect(data.generatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(data.schemaVersion).toBe(1);
+    expect(data.summary).toHaveProperty('ok');
+    expect(data.summary).toHaveProperty('warn');
+    expect(data.summary).toHaveProperty('fail');
+    expect(Array.isArray(data.checks)).toBe(true);
+    for (const c of data.checks) {
+      expect(c).toHaveProperty('name');
+      expect(c).toHaveProperty('status');
+      expect(c).toHaveProperty('detail');
+      expect(['ok', 'warn', 'fail']).toContain(c.status);
+    }
+  });
+
+  it('clock check emits detail.probeSource and detail.skewMs fields', async () => {
+    process.env.SWITCHBOT_TOKEN = 't';
+    process.env.SWITCHBOT_SECRET = 's';
+    // Stub global fetch so the probe does not actually hit the network.
+    const mockedDate = new Date(Date.now() - 500).toUTCString();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(null, {
+        status: 401,
+        headers: { date: mockedDate },
+      }) as unknown as Response,
+    );
+    try {
+      const res = await runCli(registerDoctorCommand, ['--json', 'doctor']);
+      const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+      const clock = payload.data.checks.find((c: { name: string }) => c.name === 'clock');
+      expect(clock).toBeDefined();
+      expect(clock.detail.probeSource).toBe('api');
+      expect(typeof clock.detail.skewMs).toBe('number');
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('clock check falls back to probeSource:none when the fetch rejects', async () => {
+    process.env.SWITCHBOT_TOKEN = 't';
+    process.env.SWITCHBOT_SECRET = 's';
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'));
+    try {
+      const res = await runCli(registerDoctorCommand, ['--json', 'doctor']);
+      const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+      const clock = payload.data.checks.find((c: { name: string }) => c.name === 'clock');
+      expect(clock.status).toBe('warn');
+      expect(clock.detail.probeSource).toBe('none');
+      expect(clock.detail.skewMs).toBeNull();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
 });

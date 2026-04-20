@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import http from 'node:http';
+import crypto from 'node:crypto';
 import { printJson, isJsonMode, handleError, UsageError } from '../utils/output.js';
 import { intArg, stringArg } from '../utils/arg-parsers.js';
 import { SwitchBotMqttClient } from '../mqtt/client.js';
@@ -19,6 +20,15 @@ import { deviceHistoryStore } from '../mcp/device-history.js';
 const DEFAULT_PORT = 3000;
 const DEFAULT_PATH = '/';
 const MAX_BODY_BYTES = 1_000_000;
+
+function extractEventId(parsed: unknown): string | null {
+  if (!parsed || typeof parsed !== 'object') return null;
+  const p = parsed as Record<string, unknown>;
+  if (typeof p.eventId === 'string' && p.eventId.length > 0) return p.eventId;
+  const ctx = p.context as Record<string, unknown> | undefined;
+  if (ctx && typeof ctx.eventId === 'string' && ctx.eventId.length > 0) return ctx.eventId;
+  return null;
+}
 
 interface EventRecord {
   t: string;
@@ -252,7 +262,19 @@ Connects to the SwitchBot MQTT service using your existing credentials
 No additional MQTT configuration required.
 
 Output (JSONL, one event per line):
-  { "t": "<ISO>", "topic": "<mqtt-topic>", "payload": <parsed JSON or raw string> }
+  { "t": "<ISO>", "eventId": "<uuid>", "topic": "<mqtt-topic>", "payload": <parsed JSON or raw string> }
+
+Control records (interleaved, no "payload" field — use type-prefix to filter):
+  { "type": "__connect",     "at": "<ISO>", "eventId": "<uuid>" }   first successful connect
+  { "type": "__reconnect",   "at": "<ISO>", "eventId": "<uuid>" }   connect after a disconnect
+  { "type": "__disconnect",  "at": "<ISO>", "eventId": "<uuid>" }   reconnecting or failed
+
+Reconnect policy: the MQTT client retries with exponential backoff
+(1s → 30s capped, forever) while the credential is still valid; if the
+credential is rejected or 5 consecutive reconnects fail, state goes to
+'failed' and the command exits non-zero so supervisors can restart it.
+QoS is 0 (at-most-once); agents requiring at-least-once delivery should
+fan-out via --sink file and deduplicate by eventId on the consumer side.
 
 Sink types (--sink, repeatable):
   stdout             Print JSONL to stdout (default when no --sink given)
@@ -373,17 +395,22 @@ Examples:
           }
 
           const t = new Date().toISOString();
+          // Every event carries an eventId so downstream sinks / replay tools
+          // can dedupe. If the broker supplied one (some providers do via a
+          // header), prefer that; otherwise synth a UUID locally.
+          const existingId = extractEventId(parsed);
+          const eventId = existingId ?? crypto.randomUUID();
 
           if (dispatcher) {
             const { deviceId, deviceType, text } = parseSinkEvent(parsed);
-            const sinkEvent: MqttSinkEvent = { t, topic: msgTopic, deviceId, deviceType, payload: parsed, text };
+            const sinkEvent: MqttSinkEvent = { t, topic: msgTopic, deviceId, deviceType, payload: parsed, text, eventId };
             deviceHistoryStore.record(deviceId, msgTopic, deviceType, parsed, t);
             dispatcher.dispatch(sinkEvent).catch(() => {});
           } else {
             // Default behavior: record history + print to stdout
             const { deviceId, deviceType } = parseSinkEvent(parsed);
             deviceHistoryStore.record(deviceId, msgTopic, deviceType, parsed, t);
-            const record = { t, topic: msgTopic, payload: parsed };
+            const record = { t, eventId, topic: msgTopic, payload: parsed };
             if (isJsonMode()) {
               printJson(record);
             } else {
@@ -398,12 +425,29 @@ Examples:
         });
 
         let mqttFailed = false;
+        let hasConnectedBefore = false;
+        const emitControl = (kind: '__connect' | '__reconnect' | '__disconnect' | '__heartbeat'): void => {
+          const ctl = { type: kind, at: new Date().toISOString(), eventId: crypto.randomUUID() };
+          // Control events always go to stdout as JSONL so consumers that
+          // filter real events by presence of `payload` can skip them.
+          if (isJsonMode()) {
+            printJson(ctl);
+          } else {
+            console.log(JSON.stringify(ctl));
+          }
+        };
         const unsubState = client.onStateChange((state) => {
           if (!isJsonMode()) {
             console.error(`[${new Date().toLocaleTimeString()}] MQTT state: ${state}`);
           }
-          if (state === 'failed') {
+          if (state === 'connected') {
+            emitControl(hasConnectedBefore ? '__reconnect' : '__connect');
+            hasConnectedBefore = true;
+          } else if (state === 'reconnecting') {
+            emitControl('__disconnect');
+          } else if (state === 'failed') {
             mqttFailed = true;
+            emitControl('__disconnect');
             if (!isJsonMode()) {
               console.error(
                 'MQTT connection failed permanently (credential expired or reconnect exhausted) — exiting.',

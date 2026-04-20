@@ -36,6 +36,7 @@ vi.mock('axios', () => ({
 
 vi.mock('../../src/config.js', () => ({
   loadConfig: vi.fn(() => ({ token: 'fake-token', secret: 'fake-secret' })),
+  readProfileMeta: vi.fn(() => null),
 }));
 
 vi.mock('../../src/auth.js', () => ({

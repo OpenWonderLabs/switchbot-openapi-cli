@@ -1,5 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
 import { registerSchemaCommand } from '../../src/commands/schema.js';
+import { updateCacheFromDeviceList, resetListCache } from '../../src/devices/cache.js';
 import { runCli } from '../helpers/cli.js';
 
 describe('schema export', () => {
@@ -85,5 +88,72 @@ describe('schema export', () => {
       expect(t.description, `${t.type} missing description in export`).toBeTypeOf('string');
       expect((t.description as string).length, `${t.type} description is empty`).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('schema export B3 slim flags', () => {
+  let tmpHome: string;
+
+  beforeEach(() => {
+    tmpHome = fs.mkdtempSync(`${os.tmpdir()}/sbcli-schema-`);
+    vi.spyOn(os, 'homedir').mockReturnValue(tmpHome);
+    resetListCache();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetListCache();
+    try { fs.rmSync(tmpHome, { recursive: true, force: true }); } catch { /* */ }
+  });
+
+  it('--compact drops descriptions and is significantly smaller than full', async () => {
+    const full = await runCli(registerSchemaCommand, ['schema', 'export']);
+    const compact = await runCli(registerSchemaCommand, ['schema', 'export', '--compact']);
+    const fullLen = full.stdout.join('').length;
+    const compactLen = compact.stdout.join('').length;
+    expect(compactLen).toBeLessThan(fullLen * 0.8);
+    const parsed = JSON.parse(compact.stdout.join('')).data;
+    for (const t of parsed.types) {
+      expect(t.description).toBeUndefined();
+      expect(t.aliases).toBeUndefined();
+      for (const c of t.commands) {
+        expect(c.description).toBeUndefined();
+      }
+    }
+  });
+
+  it('--types accepts a comma-separated list', async () => {
+    const res = await runCli(registerSchemaCommand, ['schema', 'export', '--types', 'Bot,Curtain']);
+    const parsed = JSON.parse(res.stdout.join('')).data;
+    const types = parsed.types.map((t: { type: string }) => t.type);
+    expect(types).toContain('Bot');
+    expect(types).toContain('Curtain');
+  });
+
+  it('--used filters to types present in the local cache', async () => {
+    updateCacheFromDeviceList({
+      deviceList: [{ deviceId: 'X', deviceName: 'My Bot', deviceType: 'Bot', hubDeviceId: 'H' }],
+      infraredRemoteList: [],
+    });
+    const res = await runCli(registerSchemaCommand, ['schema', 'export', '--used']);
+    const parsed = JSON.parse(res.stdout.join('')).data;
+    const types = parsed.types.map((t: { type: string }) => t.type);
+    expect(types).toContain('Bot');
+    expect(types).not.toContain('Curtain');
+  });
+
+  it('--used returns empty types when no cache exists', async () => {
+    const res = await runCli(registerSchemaCommand, ['schema', 'export', '--used']);
+    const parsed = JSON.parse(res.stdout.join('')).data;
+    expect(parsed.types).toEqual([]);
+  });
+
+  it('--project projects only requested top-level keys on each entry', async () => {
+    const res = await runCli(registerSchemaCommand, ['schema', 'export', '--type', 'Bot', '--project', 'type,commands']);
+    const parsed = JSON.parse(res.stdout.join('')).data;
+    expect(parsed.types[0].type).toBe('Bot');
+    expect(parsed.types[0].commands).toBeDefined();
+    expect(parsed.types[0].category).toBeUndefined();
+    expect(parsed.types[0].description).toBeUndefined();
   });
 });

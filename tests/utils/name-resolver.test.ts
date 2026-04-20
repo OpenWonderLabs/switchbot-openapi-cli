@@ -87,3 +87,85 @@ describe('resolveDeviceId', () => {
     expect(() => resolveDeviceId(undefined, 'anything')).toThrow('devices list');
   });
 });
+
+describe('resolveDeviceId narrowing + strategies', () => {
+  let tmpHome: string;
+
+  beforeEach(() => {
+    tmpHome = fs.mkdtempSync(`${os.tmpdir()}/sbcli-resolver-narrow-`);
+    vi.spyOn(os, 'homedir').mockReturnValue(tmpHome);
+    resetListCache();
+    updateCacheFromDeviceList({
+      deviceList: [
+        { deviceId: 'BOT-LIVING', deviceName: 'Living Switch', deviceType: 'Bot', hubDeviceId: 'H1', enableCloudService: true, roomName: 'Living Room' },
+        { deviceId: 'LAMP-LIVING', deviceName: 'Living Lamp', deviceType: 'Color Bulb', hubDeviceId: 'H1', enableCloudService: true, roomName: 'Living Room' },
+        { deviceId: 'BOT-BED', deviceName: 'Bedroom Switch', deviceType: 'Bot', hubDeviceId: 'H1', enableCloudService: true, roomName: 'Bedroom' },
+      ],
+      infraredRemoteList: [
+        { deviceId: 'AC-LIVING', deviceName: 'Living AC', remoteType: 'Air Conditioner', hubDeviceId: 'H1' },
+      ],
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetListCache();
+    try { fs.rmSync(tmpHome, { recursive: true, force: true }); } catch { /* */ }
+  });
+
+  it('filters by --name-type', () => {
+    // "Switch" matches both Bots; narrowing by type="Bot" still leaves two → ambiguous
+    expect(() => resolveDeviceId(undefined, 'Switch', { type: 'Bot' })).toThrow('ambiguous');
+    // narrow with a non-matching type → no match
+    expect(() => resolveDeviceId(undefined, 'Switch', { type: 'Curtain' })).toThrow('No device');
+  });
+
+  it('filters by --name-category (ir vs physical)', () => {
+    // "Living" alone is ambiguous across 3 devices; narrow to ir → 1 match
+    expect(resolveDeviceId(undefined, 'Living', { category: 'ir' })).toBe('AC-LIVING');
+  });
+
+  it('filters by --name-room', () => {
+    // "Switch" narrows by room=Bedroom → only BOT-BED
+    expect(resolveDeviceId(undefined, 'Switch', { room: 'Bedroom' })).toBe('BOT-BED');
+  });
+
+  it('strategy=exact rejects substring matches', () => {
+    expect(() => resolveDeviceId(undefined, 'Living', { strategy: 'exact' })).toThrow('No device');
+    // exact match still succeeds
+    expect(resolveDeviceId(undefined, 'Living Lamp', { strategy: 'exact' })).toBe('LAMP-LIVING');
+  });
+
+  it('strategy=prefix matches by prefix only', () => {
+    expect(resolveDeviceId(undefined, 'Bedroom', { strategy: 'prefix' })).toBe('BOT-BED');
+  });
+
+  it('strategy=first returns the top scored candidate without ambiguity error', () => {
+    // "Living" matches 3 devices; first strategy picks the top-scored one
+    const id = resolveDeviceId(undefined, 'Living', { strategy: 'first' });
+    expect(['BOT-LIVING', 'LAMP-LIVING', 'AC-LIVING']).toContain(id);
+  });
+
+  it('strategy=require-unique throws on multi-match even with low distance', () => {
+    // fuzzy might collapse a near-tie cluster to 1; require-unique refuses to pick
+    let err: Error | null = null;
+    try { resolveDeviceId(undefined, 'Living', { strategy: 'require-unique' }); } catch (e) { err = e as Error; }
+    expect(err).not.toBeNull();
+    expect(err!.message).toMatch(/ambiguous/i);
+    const structured = err as { context?: { error?: string; candidates?: unknown[] } };
+    expect(structured.context?.error).toBe('ambiguous_name_match');
+    expect(Array.isArray(structured.context?.candidates)).toBe(true);
+  });
+
+  it('invalid strategy raises UsageError', () => {
+    expect(() => resolveDeviceId(undefined, 'anything', { strategy: 'bogus' as never }))
+      .toThrow('--name-strategy');
+  });
+
+  it('ambiguous_name_match error includes hint pointing at narrow flags', () => {
+    let err: Error | null = null;
+    try { resolveDeviceId(undefined, 'Living', { strategy: 'require-unique' }); } catch (e) { err = e as Error; }
+    const structured = err as { context?: { hint?: string } };
+    expect(structured.context?.hint).toMatch(/--name-type|--name-room|--name-category|deviceId|--name-strategy/);
+  });
+});
