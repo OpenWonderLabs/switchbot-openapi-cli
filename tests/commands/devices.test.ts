@@ -374,6 +374,16 @@ describe('devices command', () => {
       expect(lines[1]).not.toContain('Living Lamp');
     });
 
+    it('--fields id,name aliases resolve to deviceId/deviceName columns (bug #22)', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list', '--format', 'tsv', '--fields', 'id,name']);
+      const lines = res.stdout.join('\n').split('\n');
+      // Header row must show the resolved canonical column names
+      expect(lines[0]).toBe('deviceId\tdeviceName');
+      // Data rows must contain the device id and name values
+      expect(lines[1]).toBe('ABC123\tLiving Lamp');
+    });
+
     it('--format=id outputs one deviceId per line', async () => {
       apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
       const res = await runCli(registerDevicesCommand, ['devices', 'list', '--format', 'id']);

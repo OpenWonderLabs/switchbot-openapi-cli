@@ -194,7 +194,7 @@ Examples:
         const defaultFields = options.wide ? undefined : narrowHeaders;
         // Accept API field names and short aliases alongside canonical column names
         const DEVICE_LIST_ALIASES: Record<string, string> = {
-          name: 'deviceName', deviceType: 'type', type: 'type',
+          id: 'deviceId', name: 'deviceName', deviceType: 'type', type: 'type',
           roomName: 'room', familyName: 'family',
           hubDeviceId: 'hub', enableCloudService: 'cloud',
         };
