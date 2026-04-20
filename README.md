@@ -221,6 +221,12 @@ switchbot devices list --filter category=physical
 switchbot devices list --filter type=Bot
 switchbot devices list --filter name=living,category=physical
 
+# Filter operators: = (legacy exact/substring), ~ (case-insensitive substring),
+# =/regex/ (case-insensitive regex). Clauses are AND-ed.
+switchbot devices list --filter 'name~living'
+switchbot devices list --filter 'type=/Hub.*/'
+switchbot devices list --filter 'name~office,type=/Bulb|Strip/'
+
 # Filter by family / room (family & room info requires the 'src: OpenClaw'
 # header, which this CLI sends on every request)
 switchbot devices list --json | jq '.deviceList[] | select(.familyName == "Home")'
@@ -279,6 +285,8 @@ Generic parameter shapes (which one applies is decided by the device — see the
 | Custom IR button    | `devices command <id> MyButton --type customize`         |
 
 Parameters for `setAll` (Air Conditioner), `setPosition` (Curtain / Blind Tilt), and `setMode` (Relay Switch) are validated client-side before the request — malformed shapes, out-of-range values, and JSON for CSV fields all fail fast with exit 2. Command names are also case-normalized against the catalog (e.g. `turnon` is auto-corrected to `turnOn` with a stderr warning); unknown names still exit 2 with the supported-commands list.
+
+Negative numeric parameters (e.g. `setBrightness -1` for a probe) are passed through to the command validator instead of being swallowed by the flag parser as an unknown option.
 
 For the complete per-device command reference, see the [SwitchBot API docs](https://github.com/OpenWonderLabs/SwitchBotAPI#send-device-control-commands).
 
@@ -343,9 +351,18 @@ switchbot devices list --format=id --filter 'type=Bot' | switchbot devices batch
 
 # Destructive commands require --yes
 switchbot devices batch unlock --filter 'type=Smart Lock' --yes
+
+# Skip devices whose cached status is offline (default: off)
+switchbot devices batch turnOn --ids ID1,ID2 --skip-offline
+
+# --idempotency-key is an alias for --idempotency-key-prefix; both append -<deviceId>
+switchbot devices batch turnOn --ids ID1,ID2 --idempotency-key morning-lights
 ```
 
 Sends the same command to many devices in one run. Uses the same `--filter` expressions as `devices list`. Destructive commands (Smart Lock unlock, Garage Door Opener, etc.) require `--yes` to prevent accidents.
+
+`--skip-offline` reads from the local status cache only (no new API calls);
+skipped devices appear under `summary.skipped` with `skippedReason:'offline'`.
 
 ### `scenes` — run manual scenes
 
@@ -390,6 +407,9 @@ switchbot events tail --filter deviceId=ABC123
 # Stop after 5 matching events
 switchbot events tail --filter 'type=WoMeter' --max 5
 
+# Stop after 10 minutes regardless of event count
+switchbot events tail --for 10m
+
 # Custom port / path
 switchbot events tail --port 8080 --path /hook --json
 ```
@@ -414,6 +434,9 @@ switchbot events mqtt-tail --topic 'switchbot/#'
 
 # Stop after 10 events
 switchbot events mqtt-tail --max 10 --json
+
+# Stop after a fixed duration (emits __session_start under --json before connect)
+switchbot events mqtt-tail --for 30s --json
 ```
 
 Connects to the SwitchBot MQTT service automatically using the same credentials configured for the REST API (`SWITCHBOT_TOKEN` + `SWITCHBOT_SECRET`). No additional MQTT configuration is required — the client certificates are provisioned on first use.
@@ -514,9 +537,12 @@ switchbot devices watch <deviceId>
 
 # Custom interval; emit every tick even when nothing changed
 switchbot devices watch <deviceId> --interval 10s --include-unchanged --json
+
+# Time-bounded: stop after 5 minutes instead of a fixed tick count
+switchbot devices watch <deviceId> --for 5m
 ```
 
-Output is a JSONL stream of status-change events (with `--json`) or a refreshed table. Use `--max <n>` to stop after N ticks.
+Output is a JSONL stream of status-change events (with `--json`) or a refreshed table. Use `--max <n>` to stop after N ticks, or `--for <duration>` to stop after an elapsed wall-clock window (e.g. `30s`, `1h`, `2d`). When both are set, whichever limit trips first wins.
 
 ### `mcp` — Model Context Protocol server
 

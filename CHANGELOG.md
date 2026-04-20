@@ -7,10 +7,16 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [2.5.1] - 2026-04-20
 
-Round-2 smoke-test response: 13 bugs closed (7 🔴 correctness / safety, 6 🟡
-UX). Source: `switchbot-cli-v2.5.0-round2-report.md`. Two items the report
-flagged as bugs were found to be working as designed (false positives); two
-were feature requests and deferred to 2.6.0 — see *Not included* below.
+Round-2 + Round-3 smoke-test response: 24 bugs closed across three groups —
+Round-2 correctness (13), Round-2 leftovers (3), and Round-3 contract & DX
+(8). Sources: `switchbot-cli-v2.5.0-round2-report.md` and
+`switchbot-cli-v2.5.0-round3-report.md`.
+
+The release was cut initially against the Round-2 report; the Round-3 report
+arrived shortly after and is folded into the same patch so consumers of
+2.5.1 get the full fix set in one version bump. The two Round-3 🔴 items
+(`#SYS-1`, `#SYS-3`) are contract bugs that break agent pipelines and could
+not wait.
 
 ### Fixed (correctness & safety)
 
@@ -92,22 +98,89 @@ were feature requests and deferred to 2.6.0 — see *Not included* below.
   while only the append-only `.jsonl` was mentioned. `docs/agent-guide.md`
   now describes both files and `__control.jsonl`. (bug #43)
 
-### Not included (response to report)
+### Fixed (Round 3 contract bugs — 🔴)
+
+- **`--json` errors now emit on stdout instead of stderr** — piped
+  consumers (`cli --json ... | jq`) could not decode failure envelopes
+  because `handleError` wrote them to stderr. The JSON envelope
+  `{schemaVersion, error:{...}}` now lands on stdout for both success
+  and failure; TTY users still get a colored human-readable summary on
+  stderr, non-TTY invocations get silence on stderr. 15+ bespoke JSON
+  error sites across `batch`, `config`, `devices`, `expand`, `history`,
+  `mcp`, and `format` were consolidated through a new `emitJsonError`
+  helper. (bug #SYS-1)
+- **MCP `send_command { dryRun:true }` validates deviceId against the
+  local cache** — dryRun previously accepted any string and echoed back
+  a plausible-looking preview, defeating the whole point of a
+  validation surface. Unknown IDs now return `subKind:'device-not-found'`
+  with a hint to run `list_devices` first. Happy path unchanged for
+  cached IDs. (bug #SYS-3)
+
+### Fixed (Round 2 leftovers)
+
+- **`devices batch --idempotency-key`** accepted as alias for
+  `--idempotency-key-prefix`. Still uses prefix semantics internally
+  (auto-appends `-<deviceId>` per step). (bug #30)
+- **`--filter` DSL accepts three operators** — `key=value` (legacy
+  exact/substring), `key~value` (case-insensitive substring), and
+  `key=/pattern/` (case-insensitive regex; invalid regex returns a
+  usage error). (bug #39)
+
+### Added (Round 2/3 features)
+
+- **`devices batch --skip-offline`** (default off) skips devices whose
+  cached status is offline, with each skip recorded under
+  `summary.skipped` with `skippedReason:'offline'`. Reads the local
+  status cache only — no new API calls. Off by default preserves 2.5.0
+  behavior. (bug #33)
+- **`--for <duration>` alias** on `devices watch`, `events tail`, and
+  `events mqtt-tail` — stops after elapsed time instead of tick/event
+  count. Accepts the same duration grammar as `--since` (ms/s/m/h/d/w).
+  When both `--for` and `--max` are set, the first limit to hit wins.
+  (bug #52)
+- **Duration parser accepts `d` (days) and `w` (weeks)** in addition
+  to `ms/s/m/h`. Unsupported units like `1y` / `1month` now produce a
+  usage error that lists the supported unit set. (bug #54)
+- **`events mqtt-tail --json` emits a `__session_start` envelope**
+  immediately on invocation (before the broker connect), so downstream
+  tools can distinguish "connecting" from "never connected" and get an
+  eventId to correlate with subsequent `__connect` / `__disconnect`
+  events. (bug #56)
+
+### Polish (Round 3 DX)
+
+- **`--name-strategy` help + `agent-bootstrap` list all six
+  strategies** — `exact`, `prefix`, `substring`, `fuzzy`, `first`,
+  `require-unique`. `ALL_STRATEGIES` in `name-resolver.ts` is the
+  single source of truth; help text is generated from it. (bug #51)
+- **MCP `search_catalog` rejects empty queries** with a usage error
+  pointing to `list_catalog_types` for enumeration. Silent
+  "return everything" behavior was surprising and agent-hostile.
+  (bug #57)
+- **Negative positional parameters reach the validation layer** —
+  `setBrightness -1` was being swallowed by Commander as "unknown
+  option `-1`". `devices command` now uses `.passThroughOptions()` so
+  negative numeric positionals are forwarded to the command-specific
+  validator, where they can be accepted or range-rejected as
+  appropriate. (bug #53)
+
+### Not included (response to reports)
 
 - **Report bug #19 (MCP strict schema not enforced) — false positive.**
   All 11 MCP tools already have `.strict()` on their Zod input schemas
   and the SDK enforces it via `safeParseAsync` → JSON-RPC `-32602`.
   Could not reproduce the reported behavior; the existing test suite
   exercises the full JSON-RPC path.
-- **Report bug #30 (`devices batch --idempotency-key`) — working as
-  designed.** Batch intentionally uses `--idempotency-key-prefix` and
-  auto-appends `-<deviceId>` per step so each step has a distinct key.
-  A single `--idempotency-key` across a batch would cause only the first
-  step to execute and the rest to be replayed.
-- **Deferred to 2.6.0:** `devices batch --skip-offline` (bug #33 — a
-  preflight status refresh + short-circuit; feature request, not a
-  correctness bug) and `--filter` DSL expansion with substring/regex
-  (bug #39 — current `key=value` exact match is documented behavior).
+- **Deferred to 2.6.0:**
+  - Report bug #58 (parallel `devices status` outlier) — needs
+    profiling to separate CLI-side latency from API-side, and the fix
+    likely involves a concurrency knob rather than a single flip.
+  - Report bug #55 (`devices watch --json` rewording) — already works
+    via the global `--json` flag; pure doc rewording scheduled with
+    other doc sweeps.
+  - MCP / CLI naming alignment (`live` vs `includeStatus`, `metric` vs
+    `metrics`) flagged in Round-3 §4.
+  - `devices meta import/export` (Round-2 #40 follow-up).
 
 ## [2.5.0] - 2026-04-20
 
