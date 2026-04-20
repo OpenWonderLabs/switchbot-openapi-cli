@@ -80,6 +80,12 @@ export async function aggregateDeviceHistory(
   const buckets = new Map<number, Map<string, Acc>>();
 
   for (const file of jsonlFilesForDevice(deviceId)) {
+    try {
+      const st = fs.statSync(file);
+      if (st.mtimeMs < fromMs) continue;
+    } catch {
+      continue;
+    }
     const stream = fs.createReadStream(file, { encoding: 'utf-8' });
     const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
     for await (const line of rl) {

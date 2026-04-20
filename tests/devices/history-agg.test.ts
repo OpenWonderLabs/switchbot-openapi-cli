@@ -167,4 +167,90 @@ describe('aggregateDeviceHistory — single bucket', () => {
     // count is still exact (all 5 samples folded in)
     expect(res.buckets[0].metrics.v.count).toBe(5);
   });
+
+  it('skips non-numeric samples for a metric', async () => {
+    const file = path.join(historyDir, 'DEV2.jsonl');
+    writeJsonl(file, [
+      { t: '2026-04-19T10:00:00.000Z', topic: 'status', payload: { temperature: 20 } },
+      { t: '2026-04-19T10:01:00.000Z', topic: 'status', payload: { temperature: 'hot' } },
+      { t: '2026-04-19T10:02:00.000Z', topic: 'status', payload: { temperature: null } },
+      { t: '2026-04-19T10:03:00.000Z', topic: 'status', payload: { temperature: 24 } },
+    ]);
+
+    const res = await aggregateDeviceHistory('DEV2', {
+      from: '2026-04-19T00:00:00.000Z',
+      to: '2026-04-20T00:00:00.000Z',
+      metrics: ['temperature'],
+      aggs: ['count', 'avg'],
+    });
+
+    expect(res.buckets).toHaveLength(1);
+    expect(res.buckets[0].metrics.temperature.count).toBe(2);
+    expect(res.buckets[0].metrics.temperature.avg).toBe(22);
+  });
+
+  it('omits metric entirely when no numeric samples exist in a bucket', async () => {
+    const file = path.join(historyDir, 'DEV3.jsonl');
+    writeJsonl(file, [
+      { t: '2026-04-19T10:00:00.000Z', topic: 'status', payload: { temperature: 20, humidity: 'dry' } },
+      { t: '2026-04-19T10:01:00.000Z', topic: 'status', payload: { temperature: 22, humidity: null } },
+    ]);
+
+    const res = await aggregateDeviceHistory('DEV3', {
+      from: '2026-04-19T00:00:00.000Z',
+      to: '2026-04-20T00:00:00.000Z',
+      metrics: ['temperature', 'humidity'],
+      aggs: ['count', 'avg'],
+    });
+
+    // One bucket exists because temperature has numeric samples
+    expect(res.buckets).toHaveLength(1);
+    // humidity is absent because it has no numeric samples
+    expect(res.buckets[0].metrics.humidity).toBeUndefined();
+    // temperature is present
+    expect(res.buckets[0].metrics.temperature.count).toBe(2);
+  });
+
+  it('returns empty buckets for an unknown device', async () => {
+    const res = await aggregateDeviceHistory('does-not-exist', {
+      from: '2026-04-19T00:00:00.000Z',
+      to: '2026-04-20T00:00:00.000Z',
+      metrics: ['temperature'],
+    });
+
+    expect(res.buckets).toEqual([]);
+    expect(res.partial).toBe(false);
+    expect(res.notes).toEqual([]);
+  });
+
+  it('skips rotated files whose mtime is older than --since window', async () => {
+    const id = 'DEV4';
+    const rotatedFile = path.join(historyDir, `${id}.jsonl.1`);
+    const currentFile = path.join(historyDir, `${id}.jsonl`);
+
+    const threeDaysAgo = new Date(Date.now() - 3 * 24 * 3600 * 1000);
+    const nowish = new Date();
+
+    // Rotated file: old record with backdated mtime
+    writeJsonl(rotatedFile, [
+      { t: threeDaysAgo.toISOString(), topic: 'status', payload: { temperature: 10 } },
+    ]);
+    fs.utimesSync(rotatedFile, threeDaysAgo, threeDaysAgo);
+
+    // Current file: recent record
+    writeJsonl(currentFile, [
+      { t: nowish.toISOString(), topic: 'status', payload: { temperature: 30 } },
+    ]);
+
+    const res = await aggregateDeviceHistory(id, {
+      since: '5m',
+      metrics: ['temperature'],
+      aggs: ['count'],
+    });
+
+    // Only the current file's record should be present
+    expect(res.buckets).toHaveLength(1);
+    expect(res.buckets[0].metrics.temperature.count).toBe(1);
+    expect(res.buckets[0].metrics.temperature).not.toHaveProperty('min');
+  });
 });
