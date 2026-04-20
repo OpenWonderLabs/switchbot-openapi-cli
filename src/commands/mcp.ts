@@ -25,6 +25,13 @@ import { getCachedDevice } from '../devices/cache.js';
 import { EventSubscriptionManager } from '../mcp/events-subscription.js';
 import { deviceHistoryStore } from '../mcp/device-history.js';
 import { queryDeviceHistory } from '../devices/history-query.js';
+import {
+  aggregateDeviceHistory,
+  ALL_AGG_FNS,
+  MAX_SAMPLE_CAP,
+  type AggFn,
+  type AggOptions,
+} from '../devices/history-agg.js';
 import { todayUsage } from '../utils/quota.js';
 import { describeCache } from '../devices/cache.js';
 import { withRequestContext } from '../lib/request-context.js';
@@ -522,6 +529,45 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         throw err;
       }
     }
+  );
+
+  // ---- aggregate_device_history --------------------------------------------
+  server.registerTool(
+    'aggregate_device_history',
+    {
+      title: 'Aggregate device history',
+      description:
+        'Bucketed statistics (count/min/max/avg/sum/p50/p95) over JSONL-recorded device history. Read-only; no network calls.',
+      _meta: { agentSafetyTier: 'read' },
+      inputSchema: z
+        .object({
+          deviceId: z.string().min(1),
+          since: z.string().optional(),
+          from: z.string().optional(),
+          to: z.string().optional(),
+          metrics: z.array(z.string().min(1)).min(1),
+          aggs: z.array(z.enum(ALL_AGG_FNS as unknown as [AggFn, ...AggFn[]])).optional(),
+          bucket: z.string().optional(),
+          maxBucketSamples: z.number().int().positive().max(MAX_SAMPLE_CAP).optional(),
+        })
+        .strict(),
+    },
+    async (args) => {
+      const opts: AggOptions = {
+        since: args.since,
+        from: args.from,
+        to: args.to,
+        metrics: args.metrics,
+        aggs: args.aggs,
+        bucket: args.bucket,
+        maxBucketSamples: args.maxBucketSamples,
+      };
+      const res = await aggregateDeviceHistory(args.deviceId, opts);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(res, null, 2) }],
+        structuredContent: res as unknown as Record<string, unknown>,
+      };
+    },
   );
 
   // ---- account_overview ---------------------------------------------------
