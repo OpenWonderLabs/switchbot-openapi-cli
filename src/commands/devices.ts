@@ -103,7 +103,7 @@ Examples:
 `)
     .option('--wide', 'Show all columns (controlType, family, roomID, room, hub, cloud)')
     .option('--show-hidden', 'Include devices hidden via "devices meta set --hide"')
-    .option('--filter <expr>', 'Filter devices: comma-separated clauses. Each clause is "key=value" (substring; exact for category), "key!=value" (negated substring), "key~value" (explicit substring), or "key=/regex/" (case-insensitive regex). Supported keys: deviceId/id, deviceName/name, deviceType/type, controlType, roomName/room, category.', stringArg('--filter'))
+    .option('--filter <expr>', 'Filter devices: comma-separated clauses. Each clause is "key=value" (substring; exact for category), "key!=value" (negated substring), "key~value" (explicit substring), or "key=/regex/" (case-insensitive regex). Supported keys: deviceId/id, deviceName/name, deviceType/type, controlType, roomName/room, category, familyName/family, hubDeviceId/hub, roomID/roomid, enableCloudService/cloud, alias.', stringArg('--filter'))
     .action(async (options: { wide?: boolean; showHidden?: boolean; filter?: string }) => {
       try {
         const body = await fetchDeviceList();
@@ -115,8 +115,11 @@ Examples:
 
         // Parse --filter into a list of clauses. Shared grammar across
         // `devices list`, `devices batch`, and `events tail` / `mqtt-tail`.
-        const LIST_KEYS = ['deviceId', 'type', 'name', 'category', 'room', 'controlType'] as const;
-        const LIST_FILTER_CANONICAL = ['deviceId', 'deviceName', 'deviceType', 'controlType', 'roomName', 'category'] as const;
+        const LIST_KEYS = ['deviceId', 'type', 'name', 'category', 'room', 'controlType',
+          'family', 'hub', 'roomID', 'cloud', 'alias'] as const;
+        const LIST_FILTER_CANONICAL = ['deviceId', 'deviceName', 'deviceType', 'controlType',
+          'roomName', 'category', 'familyName', 'hubDeviceId', 'roomID',
+          'enableCloudService', 'alias'] as const;
         const LIST_FILTER_TO_RUNTIME: Record<string, (typeof LIST_KEYS)[number]> = {
           deviceId: 'deviceId',
           deviceName: 'name',
@@ -124,6 +127,11 @@ Examples:
           controlType: 'controlType',
           roomName: 'room',
           category: 'category',
+          familyName: 'family',
+          hubDeviceId: 'hub',
+          roomID: 'roomID',
+          enableCloudService: 'cloud',
+          alias: 'alias',
         };
         let listClauses: FilterClause[] | null = null;
         if (options.filter) {
@@ -141,7 +149,11 @@ Examples:
           }
         }
 
-        const matchesFilter = (entry: { deviceId: string; type: string; name: string; category: 'physical' | 'ir'; room: string; controlType: string }) => {
+        const matchesFilter = (entry: {
+          deviceId: string; type: string; name: string; category: 'physical' | 'ir';
+          room: string; controlType: string; family: string; hub: string;
+          roomID: string; cloud: string; alias: string;
+        }) => {
           if (!listClauses || listClauses.length === 0) return true;
           for (const c of listClauses) {
             const fieldVal = (entry as Record<string, string>)[c.key] ?? '';
@@ -153,11 +165,11 @@ Examples:
         if (fmt === 'json' && process.argv.includes('--json')) {
           if (listClauses) {
             const filteredDeviceList = deviceList.filter((d) =>
-              matchesFilter({ deviceId: d.deviceId, type: d.deviceType || '', name: d.deviceName, category: 'physical', room: d.roomName || '', controlType: d.controlType || '' })
+              matchesFilter({ deviceId: d.deviceId, type: d.deviceType || '', name: d.deviceName, category: 'physical', room: d.roomName || '', controlType: d.controlType || '', family: d.familyName || '', hub: d.hubDeviceId || '', roomID: d.roomID || '', cloud: String(d.enableCloudService), alias: deviceMeta.devices[d.deviceId]?.alias || '' })
             );
             const filteredIrList = infraredRemoteList.filter((d) => {
               const inherited = hubLocation.get(d.hubDeviceId);
-              return matchesFilter({ deviceId: d.deviceId, type: d.remoteType, name: d.deviceName, category: 'ir', room: inherited?.room || '', controlType: d.controlType || '' });
+              return matchesFilter({ deviceId: d.deviceId, type: d.remoteType, name: d.deviceName, category: 'ir', room: inherited?.room || '', controlType: d.controlType || '', family: inherited?.family || '', hub: d.hubDeviceId || '', roomID: inherited?.roomID || '', cloud: '', alias: deviceMeta.devices[d.deviceId]?.alias || '' });
             });
             printJson({ ok: true, deviceList: filteredDeviceList, infraredRemoteList: filteredIrList });
           } else {
@@ -174,7 +186,7 @@ Examples:
 
         for (const d of deviceList) {
           if (!options.showHidden && deviceMeta.devices[d.deviceId]?.hidden) continue;
-          if (!matchesFilter({ deviceId: d.deviceId, type: d.deviceType || '', name: d.deviceName, category: 'physical', room: d.roomName || '', controlType: d.controlType || '' })) continue;
+          if (!matchesFilter({ deviceId: d.deviceId, type: d.deviceType || '', name: d.deviceName, category: 'physical', room: d.roomName || '', controlType: d.controlType || '', family: d.familyName || '', hub: d.hubDeviceId || '', roomID: d.roomID || '', cloud: String(d.enableCloudService), alias: deviceMeta.devices[d.deviceId]?.alias || '' })) continue;
           rows.push([
             d.deviceId,
             d.deviceName,
@@ -193,7 +205,7 @@ Examples:
         for (const d of infraredRemoteList) {
           if (!options.showHidden && deviceMeta.devices[d.deviceId]?.hidden) continue;
           const inherited = hubLocation.get(d.hubDeviceId);
-          if (!matchesFilter({ deviceId: d.deviceId, type: d.remoteType, name: d.deviceName, category: 'ir', room: inherited?.room || '', controlType: d.controlType || '' })) continue;
+          if (!matchesFilter({ deviceId: d.deviceId, type: d.remoteType, name: d.deviceName, category: 'ir', room: inherited?.room || '', controlType: d.controlType || '', family: inherited?.family || '', hub: d.hubDeviceId || '', roomID: inherited?.roomID || '', cloud: '', alias: deviceMeta.devices[d.deviceId]?.alias || '' })) continue;
           rows.push([
             d.deviceId,
             d.deviceName,
@@ -682,7 +694,7 @@ Examples:
         const joinedMatch = findCatalogEntry(joined);
         if (joinedMatch && !Array.isArray(joinedMatch)) {
           if (isJsonMode()) {
-            printJson(joinedMatch);
+            printJson(normalizeCatalogForJson(joinedMatch));
           } else {
             renderCatalogEntry(joinedMatch);
           }
@@ -701,7 +713,7 @@ Examples:
           }
           if (individualMatches.length === typeParts.length) {
             if (isJsonMode()) {
-              printJson(individualMatches);
+              printJson(individualMatches.map(normalizeCatalogForJson));
             } else {
               individualMatches.forEach((entry, i) => {
                 if (i > 0) console.log('');
@@ -869,6 +881,13 @@ Examples:
 
   // switchbot devices meta set/get/list/clear
   registerDevicesMetaCommand(devices);
+}
+
+function normalizeCatalogForJson(entry: DeviceCatalogEntry): object {
+  return {
+    ...entry,
+    commands: entry.commands.map((c) => ({ ...c, destructive: Boolean(c.destructive) })),
+  };
 }
 
 function renderCatalogEntry(entry: DeviceCatalogEntry): void {

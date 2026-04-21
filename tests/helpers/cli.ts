@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { vi } from 'vitest';
+import { commandToJson, resolveTargetCommand } from '../../src/utils/help-json.js';
 
 export interface RunResult {
   stdout: string[];
@@ -42,7 +43,7 @@ export async function runCli(
   program.option('--audit-log');
   program.option('--audit-log-path <path>');
   program.configureOutput({
-    writeOut: (str) => stdout.push(stripTrailingNewline(str)),
+    writeOut: argv.includes('--json') ? () => {} : (str) => stdout.push(stripTrailingNewline(str)),
     writeErr: (str) => stderr.push(stripTrailingNewline(str)),
   });
 
@@ -81,10 +82,14 @@ export async function runCli(
     if (isCommanderExit && exitCode === null) {
       // Mirror production exitOverride in src/index.ts: non-help/version
       // Commander errors surface as usage errors (exit 2).
-      if (
-        errAsCommander.code === 'commander.helpDisplayed' ||
-        errAsCommander.code === 'commander.version'
-      ) {
+      if (errAsCommander.code === 'commander.helpDisplayed') {
+        // Mirror production: emit JSON help when --json is in argv.
+        if (argv.includes('--json')) {
+          const target = resolveTargetCommand(program, argv);
+          stdout.push(JSON.stringify({ schemaVersion: '1.1', data: commandToJson(target) }, null, 2));
+        }
+        exitCode = 0;
+      } else if (errAsCommander.code === 'commander.version') {
         exitCode = 0;
       } else {
         exitCode = 2;

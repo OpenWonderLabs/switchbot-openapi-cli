@@ -4,7 +4,8 @@ import { createRequire } from 'node:module';
 import chalk from 'chalk';
 import { intArg, stringArg, enumArg } from './utils/arg-parsers.js';
 import { parseDurationToMs } from './utils/flags.js';
-import { emitJsonError, isJsonMode } from './utils/output.js';
+import { emitJsonError, isJsonMode, printJson } from './utils/output.js';
+import { commandToJson, resolveTargetCommand } from './utils/help-json.js';
 import { registerConfigCommand } from './commands/config.js';
 import { registerDevicesCommand } from './commands/devices.js';
 import { registerScenesCommand } from './commands/scenes.js';
@@ -164,6 +165,11 @@ function enableSuggestions(cmd: Command): void {
 }
 enableSuggestions(program);
 
+// In JSON mode suppress the plain-text help output so we can emit structured JSON instead.
+if (isJsonMode()) {
+  program.configureOutput({ writeOut: () => {} });
+}
+
 try {
   await program.parseAsync();
 } catch (err) {
@@ -171,7 +177,14 @@ try {
   // argParser on a subcommand option) don't always hit the root exitOverride.
   // Mirror the root mapping so all usage errors surface as exit 2.
   if (err instanceof CommanderError) {
-    if (err.code === 'commander.helpDisplayed' || err.code === 'commander.version') {
+    if (err.code === 'commander.helpDisplayed') {
+      if (isJsonMode()) {
+        const target = resolveTargetCommand(program, process.argv.slice(2));
+        printJson(commandToJson(target));
+      }
+      process.exit(0);
+    }
+    if (err.code === 'commander.version') {
       process.exit(0);
     }
     if (isJsonMode()) {

@@ -382,7 +382,7 @@ export async function describeDevice(
     ? {
         role: catalogEntry.role ?? null,
         readOnly: catalogEntry.readOnly ?? false,
-        commands: catalogEntry.commands,
+        commands: catalogEntry.commands.map((c) => ({ ...c, destructive: Boolean(c.destructive) })),
         statusFields: catalogEntry.statusFields ?? [],
         ...(liveStatus !== undefined ? { liveStatus } : {}),
       }
