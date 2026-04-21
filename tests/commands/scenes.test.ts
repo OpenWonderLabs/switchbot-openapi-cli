@@ -187,5 +187,33 @@ describe('scenes command', () => {
       expect(parsed.error?.context?.sceneId).toBe('MISSING');
       expect(parsed.error?.context?.candidates).toHaveLength(1);
     });
+
+    it('plaintext describe unknown sceneId renders "Did you mean" with candidates (R-3)', async () => {
+      apiMock.__instance.get.mockResolvedValue({
+        data: {
+          body: [
+            { sceneId: 'S1', sceneName: 'Good Morning' },
+            { sceneId: 'S2', sceneName: 'Movie Time' },
+            { sceneId: 'S3', sceneName: 'Good Night' },
+          ],
+        },
+      });
+      const res = await runCli(registerScenesCommand, ['scenes', 'describe', 'MISSING']);
+      expect(res.exitCode).toBe(2);
+      const err = res.stderr.join('\n');
+      expect(err).toContain('scene not found: MISSING');
+      expect(err).toContain('Did you mean:');
+      expect(err).toContain('Good Morning (S1)');
+      expect(err).toContain('Movie Time (S2)');
+    });
+
+    it('plaintext describe unknown sceneId with empty list omits "Did you mean" (R-3)', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: [] } });
+      const res = await runCli(registerScenesCommand, ['scenes', 'describe', 'MISSING']);
+      expect(res.exitCode).toBe(2);
+      const err = res.stderr.join('\n');
+      expect(err).toContain('scene not found: MISSING');
+      expect(err).not.toContain('Did you mean:');
+    });
   });
 });

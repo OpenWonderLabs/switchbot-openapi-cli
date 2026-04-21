@@ -23,6 +23,7 @@ import {
 import { fetchScenes, executeScene } from '../lib/scenes.js';
 import { findCatalogEntry } from '../devices/catalog.js';
 import { getCachedDevice } from '../devices/cache.js';
+import { validateParameter } from '../devices/param-validator.js';
 import { EventSubscriptionManager } from '../mcp/events-subscription.js';
 import { deviceHistoryStore } from '../mcp/device-history.js';
 import { queryDeviceHistory } from '../devices/history-query.js';
@@ -345,6 +346,12 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
     },
     async ({ deviceId, command, parameter, commandType, confirm, idempotencyKey, dryRun }) => {
       const effectiveType = commandType ?? 'command';
+      let effectiveParameter: unknown = parameter;
+
+      // stringifiedParam mirrors the CLI form that validateCommand /
+      // validateParameter expect — B-1 runs on the string representation.
+      const stringifiedParam =
+        parameter === undefined ? undefined : typeof parameter === 'string' ? parameter : JSON.stringify(parameter);
 
       // dryRun early-return — no API call. We still preflight the deviceId
       // against the local cache so fabricated IDs don't silently pass
@@ -359,10 +366,24 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
             context: { deviceId },
           });
         }
+        // R-2: run B-1 param validation in dry-run too, so dry-run doesn't
+        // falsely accept inputs the live API would reject.
+        if (effectiveType !== 'customize') {
+          const pv = validateParameter(cached.type, command, stringifiedParam);
+          if (!pv.ok) {
+            return mcpError('usage', 2, pv.error, {
+              hint: 'Dry-run rejected the parameter client-side; the API would reject it too.',
+              context: { deviceType: cached.type, command, parameter: stringifiedParam },
+            });
+          }
+          if (pv.normalized !== undefined) {
+            effectiveParameter = pv.normalized;
+          }
+        }
         const wouldSend = {
           deviceId,
           command,
-          parameter: parameter ?? 'default',
+          parameter: effectiveParameter ?? 'default',
           commandType: effectiveType,
         };
         const structured = { ok: true as const, dryRun: true as const, wouldSend };
@@ -413,10 +434,9 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         );
       }
 
-      // stringifiedParam is what validateCommand expects to decide
-      // "no-parameter" conflicts — mirror the CLI behavior.
-      const stringifiedParam =
-        parameter === undefined ? undefined : typeof parameter === 'string' ? parameter : JSON.stringify(parameter);
+      // validateCommand covers command existence + required/unexpected-parameter.
+      // stringifiedParam was computed once at the top of the handler so dry-run
+      // and live paths share the same shape.
       const validation = validateCommand(deviceId, command, stringifiedParam, effectiveType);
       if (!validation.ok) {
         return mcpError(
@@ -426,9 +446,24 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         );
       }
 
+      // R-2: run B-1 client-side parameter validator (range/format checks).
+      // Customize commands (user-defined IR buttons) opt out — the catalog
+      // cannot know their expected shape.
+      if (effectiveType !== 'customize') {
+        const pv = validateParameter(typeName, command, stringifiedParam);
+        if (!pv.ok) {
+          return mcpError('usage', 2, pv.error, {
+            context: { deviceType: typeName, command, parameter: stringifiedParam, validationKind: 'param-out-of-range' },
+          });
+        }
+        if (pv.normalized !== undefined) {
+          effectiveParameter = pv.normalized;
+        }
+      }
+
       let result: unknown;
       try {
-        result = await executeCommand(deviceId, command, parameter, effectiveType, undefined, {
+        result = await executeCommand(deviceId, command, effectiveParameter, effectiveType, undefined, {
           idempotencyKey,
         });
       } catch (err) {
