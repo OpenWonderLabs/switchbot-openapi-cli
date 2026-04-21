@@ -3,6 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { getConfigPath } from './utils/flags.js';
 import { getActiveProfile } from './lib/request-context.js';
+import { emitJsonError, isJsonMode } from './utils/output.js';
 
 export interface SwitchBotConfig {
   token: string;
@@ -74,7 +75,12 @@ export function loadConfig(): SwitchBotConfig {
     const hint = profile
       ? `No credentials configured for profile "${profile}". Run: switchbot --profile ${profile} config set-token <token> <secret>`
       : 'No credentials configured. Run: switchbot config set-token <token> <secret>';
-    console.error(`${hint}\nOr set SWITCHBOT_TOKEN and SWITCHBOT_SECRET environment variables.`);
+    const msg = `${hint}\nOr set SWITCHBOT_TOKEN and SWITCHBOT_SECRET environment variables.`;
+    if (isJsonMode()) {
+      emitJsonError({ code: 1, kind: 'runtime', message: hint });
+    } else {
+      console.error(msg);
+    }
     process.exit(1);
   }
 
@@ -82,12 +88,20 @@ export function loadConfig(): SwitchBotConfig {
     const raw = fs.readFileSync(file, 'utf-8');
     const cfg = JSON.parse(raw) as SwitchBotConfig;
     if (!cfg.token || !cfg.secret) {
-      console.error('Invalid config format. Please re-run: switchbot config set-token');
+      if (isJsonMode()) {
+        emitJsonError({ code: 1, kind: 'runtime', message: 'Invalid config format. Please re-run: switchbot config set-token' });
+      } else {
+        console.error('Invalid config format. Please re-run: switchbot config set-token');
+      }
       process.exit(1);
     }
     return cfg;
   } catch {
-    console.error('Failed to read config file. Please re-run: switchbot config set-token');
+    if (isJsonMode()) {
+      emitJsonError({ code: 1, kind: 'runtime', message: 'Failed to read config file. Please re-run: switchbot config set-token' });
+    } else {
+      console.error('Failed to read config file. Please re-run: switchbot config set-token');
+    }
     process.exit(1);
   }
 }

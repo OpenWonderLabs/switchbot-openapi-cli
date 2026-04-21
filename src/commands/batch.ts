@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import type { AxiosInstance } from 'axios';
 import { intArg, enumArg, stringArg } from '../utils/arg-parsers.js';
-import { printJson, isJsonMode, handleError, buildErrorPayload, UsageError, emitJsonError, type ErrorPayload } from '../utils/output.js';
+import { printJson, isJsonMode, handleError, buildErrorPayload, UsageError, emitJsonError, exitWithError, type ErrorPayload } from '../utils/output.js';
 import {
   fetchDeviceList,
   executeCommand,
@@ -242,20 +242,10 @@ Examples:
           }, getClient);
         } catch (error) {
           if (error instanceof FilterSyntaxError) {
-            if (isJsonMode()) {
-              emitJsonError({ code: 2, kind: 'usage', message: error.message });
-            } else {
-              console.error(`Error: ${error.message}`);
-            }
-            process.exit(2);
+            exitWithError(`Error: ${error.message}`);
           }
           if (error instanceof Error && error.message.startsWith('No target devices')) {
-            if (isJsonMode()) {
-              emitJsonError({ code: 2, kind: 'usage', message: error.message });
-            } else {
-              console.error(`Error: ${error.message}`);
-            }
-            process.exit(2);
+            exitWithError(`Error: ${error.message}`);
           }
           handleError(error);
         }

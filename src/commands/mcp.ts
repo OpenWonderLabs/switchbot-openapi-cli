@@ -4,7 +4,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
 import { intArg, stringArg } from '../utils/arg-parsers.js';
-import { handleError, isJsonMode, buildErrorPayload, emitJsonError, type ErrorPayload, type ErrorSubKind } from '../utils/output.js';
+import { handleError, isJsonMode, buildErrorPayload, emitJsonError, exitWithError, type ErrorPayload, type ErrorSubKind } from '../utils/output.js';
 import { VERSION } from '../version.js';
 import {
   fetchDeviceList,
@@ -37,7 +37,7 @@ import {
 import { todayUsage } from '../utils/quota.js';
 import { describeCache } from '../devices/cache.js';
 import { withRequestContext } from '../lib/request-context.js';
-import { profileFilePath, loadConfig, tryLoadConfig } from '../config.js';
+import { profileFilePath, tryLoadConfig } from '../config.js';
 import fs from 'node:fs';
 
 /**
@@ -942,13 +942,7 @@ Examples:
         if (options.port) {
           const port = Number(options.port);
           if (!Number.isFinite(port) || port < 1 || port > 65535) {
-            const msg = `Invalid --port "${options.port}". Must be 1-65535.`;
-            if (isJsonMode()) {
-              emitJsonError({ code: 2, kind: 'usage', message: msg });
-            } else {
-              console.error(msg);
-            }
-            process.exit(2);
+            exitWithError(`Invalid --port "${options.port}". Must be 1-65535.`);
           }
 
           const bind = options.bind ?? '127.0.0.1';
@@ -959,13 +953,7 @@ Examples:
           // Guard: refuse to bind non-localhost without auth
           const isLocalhost = bind === '127.0.0.1' || bind === 'localhost' || bind === '::1';
           if (!isLocalhost && !authToken) {
-            const msg = 'Refusing to listen on 0.0.0.0 without --auth-token. Pass --auth-token <token> or bind to localhost (default).';
-            if (isJsonMode()) {
-              emitJsonError({ code: 2, kind: 'usage', message: msg });
-            } else {
-              console.error(msg);
-            }
-            process.exit(2);
+            exitWithError('Refusing to listen on 0.0.0.0 without --auth-token. Pass --auth-token <token> or bind to localhost (default).');
           }
 
           const { createServer } = await import('node:http');
@@ -1193,14 +1181,29 @@ process_uptime_seconds ${Math.floor(process.uptime())}
         const server = createSwitchBotMcpServer({ eventManager });
         const transport = new StdioServerTransport();
         await server.connect(transport);
-        let eofHandled = false;
-        process.stdin.on('end', () => {
-          if (eofHandled) return;
-          eofHandled = true;
-          setTimeout(() => {
-            eventManager.shutdown().finally(() => process.exit(0));
-          }, 500);
-        });
+
+        let isShuttingDown = false;
+        const gracefulShutdown = async () => {
+          if (isShuttingDown) return;
+          isShuttingDown = true;
+          console.error('Shutting down...');
+          // Force exit after 30s if shutdown hangs (e.g. stuck MQTT disconnect).
+          const forceExit = setTimeout(() => {
+            console.error('Force exiting after 30s timeout');
+            process.exit(1);
+          }, 30000);
+          forceExit.unref();
+          try {
+            await eventManager.shutdown();
+          } catch (err) {
+            console.error('Error during shutdown:', err instanceof Error ? err.message : String(err));
+          }
+          process.exit(0);
+        };
+
+        process.on('SIGTERM', gracefulShutdown);
+        process.on('SIGINT', gracefulShutdown);
+        process.stdin.on('end', gracefulShutdown);
       } catch (error) {
         handleError(error);
       }

@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import chalk from 'chalk';
 import { intArg, stringArg, enumArg } from './utils/arg-parsers.js';
 import { parseDurationToMs } from './utils/flags.js';
-import { emitJsonError } from './utils/output.js';
+import { emitJsonError, isJsonMode } from './utils/output.js';
 import { registerConfigCommand } from './commands/config.js';
 import { registerDevicesCommand } from './commands/devices.js';
 import { registerScenesCommand } from './commands/scenes.js';
@@ -32,10 +32,7 @@ if (process.argv.includes('--no-color') || Boolean(process.env.NO_COLOR)) {
 }
 
 const program = new Command();
-const jsonModeRequested = process.argv.includes('--json')
-  || process.argv.includes('--format=json')
-  || process.argv.some((arg, idx) => arg === '--format' && process.argv[idx + 1] === 'json');
-if (jsonModeRequested) {
+if (isJsonMode()) {
   // In --json mode, commander writes plain-text usage errors by default.
   // Silence that channel and emit a single structured error in the catch block.
   program.configureOutput({ writeErr: () => {} });
@@ -177,7 +174,7 @@ try {
     if (err.code === 'commander.helpDisplayed' || err.code === 'commander.version') {
       process.exit(0);
     }
-    if (jsonModeRequested) {
+    if (isJsonMode()) {
       emitJsonError({ code: 2, kind: 'usage', message: err.message });
     }
     process.exit(2);

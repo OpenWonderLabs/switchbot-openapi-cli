@@ -4,13 +4,12 @@ export const FIELD_ALIASES: Record<string, readonly string[]> = {
   deviceId: ['id'],
   deviceName: ['name'],
   deviceType: ['type'],
-  controlType: ['control', 'category'],
+  controlType: ['control'],
   roomName: ['room'],
   roomID: ['roomid'],
   familyName: ['family'],
   hubDeviceId: ['hub'],
   enableCloudService: ['cloud'],
-  category: ['category'],
   alias: ['alias'],
 };
 
