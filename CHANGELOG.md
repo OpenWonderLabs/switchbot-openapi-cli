@@ -5,6 +5,22 @@ All notable changes to `@switchbot/openapi-cli` are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.4] - 2026-04-21
+
+### Added
+
+- `devices describe` now shows a tip for device types that support `devices expand` (Air Conditioner, Curtain, Curtain 3, Blind Tilt, Relay Switch 2PM); `--json` output includes an `expandHint` field with `command`, `flags`, and a ready-to-run `example` string
+
+### Fixed
+
+- `--filter controlType=X` now works correctly; `controlType` was documented as a filterable key but was missing from the canonical key registry
+- `field-aliases.ts`: removed `category` from the `controlType` alias list to prevent collision with the physical/IR `category` filter key
+- MCP stdio path now handles `SIGTERM` and `SIGINT` with the same graceful shutdown as the HTTP path (30 s force-exit timeout, `isShuttingDown` guard)
+
+### Changed
+
+- Extracted `exitWithError()` helper in `output.ts`; deduplicated `isJsonMode()` across `index.ts` and `config.ts`
+
 ## [2.6.3] - 2026-04-21
 
 ### Fixed
