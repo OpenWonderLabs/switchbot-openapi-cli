@@ -1,7 +1,11 @@
 import { Command } from 'commander';
 import { printJson } from '../utils/output.js';
 import { loadCache } from '../devices/cache.js';
-import { getEffectiveCatalog, deriveSafetyTier } from '../devices/catalog.js';
+import {
+  getEffectiveCatalog,
+  deriveSafetyTier,
+  CATALOG_SCHEMA_VERSION,
+} from '../devices/catalog.js';
 import { readProfileMeta } from '../config.js';
 import { todayUsage, DAILY_QUOTA } from '../utils/quota.js';
 import { ALL_STRATEGIES } from '../utils/name-resolver.js';
@@ -9,6 +13,15 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const { version: pkgVersion } = require('../../package.json') as { version: string };
+
+/**
+ * Schema version of the agent-bootstrap payload. Must stay in lockstep
+ * with the catalog schema — bootstrap consumers (AI agents) reason about
+ * catalog-derived fields (safetyTier, destructive flag), so a drift
+ * between the two would silently break their assumptions. `doctor`
+ * fails the `catalog-schema` check when these differ.
+ */
+export const AGENT_BOOTSTRAP_SCHEMA_VERSION = CATALOG_SCHEMA_VERSION;
 
 const IDENTITY = {
   product: 'SwitchBot',
@@ -122,7 +135,7 @@ Examples:
       });
 
       const payload: Record<string, unknown> = {
-        schemaVersion: '1.0',
+        schemaVersion: AGENT_BOOTSTRAP_SCHEMA_VERSION,
         generatedAt: new Date().toISOString(),
         cliVersion: pkgVersion,
         identity: IDENTITY,

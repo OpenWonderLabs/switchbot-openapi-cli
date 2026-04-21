@@ -6,6 +6,9 @@ import { printJson, isJsonMode } from '../utils/output.js';
 import { getEffectiveCatalog } from '../devices/catalog.js';
 import { configFilePath, listProfiles, readProfileMeta } from '../config.js';
 import { describeCache } from '../devices/cache.js';
+import { DAILY_QUOTA, todayUsage } from '../utils/quota.js';
+import { AGENT_BOOTSTRAP_SCHEMA_VERSION } from './agent-bootstrap.js';
+import { CATALOG_SCHEMA_VERSION } from '../devices/catalog.js';
 
 interface Check {
   name: string;
@@ -169,14 +172,155 @@ function checkCache(): Check {
 function checkQuotaFile(): Check {
   const p = path.join(os.homedir(), '.switchbot', 'quota.json');
   if (!fs.existsSync(p)) {
-    return { name: 'quota', status: 'ok', detail: 'no quota file yet (will be created on first call)' };
+    return {
+      name: 'quota',
+      status: 'ok',
+      detail: {
+        path: p,
+        percentUsed: 0,
+        remaining: DAILY_QUOTA,
+        message: 'no quota file yet (will be created on first call)',
+      },
+    };
   }
   try {
     const raw = fs.readFileSync(p, 'utf-8');
     JSON.parse(raw);
-    return { name: 'quota', status: 'ok', detail: p };
   } catch {
-    return { name: 'quota', status: 'warn', detail: `${p} unreadable/malformed — run 'switchbot quota reset'` };
+    return {
+      name: 'quota',
+      status: 'warn',
+      detail: { path: p, message: `unreadable/malformed — run 'switchbot quota reset'` },
+    };
+  }
+  // P9: surface headroom so agents can decide when to slow down or pause.
+  // Quota resets at local midnight (the quota counter buckets by local
+  // date), so project the next reset to the next 00:00:00 local.
+  const usage = todayUsage();
+  const percentUsed = Math.round((usage.total / DAILY_QUOTA) * 100);
+  const now = new Date();
+  const reset = new Date(now);
+  reset.setHours(24, 0, 0, 0); // next local midnight
+  const status: 'ok' | 'warn' = percentUsed > 80 ? 'warn' : 'ok';
+  const recommendation = percentUsed > 90
+    ? 'over 90% used — consider --no-quota for read-only triage or rescheduling work after the reset'
+    : percentUsed > 80
+    ? 'over 80% used — avoid bulk operations until the daily reset'
+    : 'headroom available';
+  return {
+    name: 'quota',
+    status,
+    detail: {
+      path: p,
+      percentUsed,
+      remaining: usage.remaining,
+      total: usage.total,
+      dailyCap: DAILY_QUOTA,
+      projectedResetTime: reset.toISOString(),
+      recommendation,
+    },
+  };
+}
+
+function checkCatalogSchema(): Check {
+  // P9: sentinel against silent drift between the catalog shape and the
+  // agent-bootstrap payload. Both constants are exported from their
+  // respective modules; if a future refactor changes one without the
+  // other, this check fails so consumers (agents) learn before the
+  // mismatch corrupts their mental model.
+  const match = CATALOG_SCHEMA_VERSION === AGENT_BOOTSTRAP_SCHEMA_VERSION;
+  return {
+    name: 'catalog-schema',
+    status: match ? 'ok' : 'fail',
+    detail: {
+      catalogSchemaVersion: CATALOG_SCHEMA_VERSION,
+      bootstrapExpectsVersion: AGENT_BOOTSTRAP_SCHEMA_VERSION,
+      match,
+      message: match
+        ? 'catalog and agent-bootstrap schemaVersion aligned'
+        : 'catalog and agent-bootstrap schemaVersion have drifted — bump in lockstep',
+    },
+  };
+}
+
+interface AuditRecord {
+  auditVersion?: number;
+  t?: string;
+  kind?: string;
+  deviceId?: string;
+  command?: string;
+  result?: 'ok' | 'error';
+  error?: string;
+}
+
+function checkAudit(): Check {
+  // P9: surface recent command failures so agents / ops can spot problems
+  // before they page. When --audit-log was never enabled, the file won't
+  // exist — report that cleanly rather than as an error.
+  const p = path.join(os.homedir(), '.switchbot', 'audit.log');
+  if (!fs.existsSync(p)) {
+    return {
+      name: 'audit',
+      status: 'ok',
+      detail: {
+        path: p,
+        enabled: false,
+        message: 'audit log not present (enable with --audit-log)',
+      },
+    };
+  }
+  try {
+    const raw = fs.readFileSync(p, 'utf-8');
+    const since = Date.now() - 24 * 60 * 60 * 1000;
+    const recent: Array<{ t: string; command: string; deviceId?: string; error: string }> = [];
+    let total = 0;
+    for (const line of raw.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      let rec: AuditRecord;
+      try {
+        rec = JSON.parse(trimmed) as AuditRecord;
+      } catch {
+        continue;
+      }
+      if (rec.result !== 'error') continue;
+      total += 1;
+      const ts = rec.t ? Date.parse(rec.t) : NaN;
+      if (Number.isFinite(ts) && ts >= since) {
+        recent.push({
+          t: rec.t as string,
+          command: rec.command ?? '?',
+          deviceId: rec.deviceId,
+          error: rec.error ?? 'unknown',
+        });
+      }
+    }
+    // Cap the report to the 10 most recent so the doctor payload stays
+    // bounded even on a log with thousands of errors.
+    recent.sort((a, b) => (a.t < b.t ? 1 : -1));
+    const clipped = recent.slice(0, 10);
+    const status: 'ok' | 'warn' = recent.length > 0 ? 'warn' : 'ok';
+    return {
+      name: 'audit',
+      status,
+      detail: {
+        path: p,
+        enabled: true,
+        totalErrors: total,
+        errorsLast24h: recent.length,
+        recent: clipped,
+      },
+    };
+  } catch (err) {
+    return {
+      name: 'audit',
+      status: 'warn',
+      detail: {
+        path: p,
+        enabled: true,
+        message: `could not read audit log: ${err instanceof Error ? err.message : String(err)}`,
+      },
+    };
   }
 }
 
@@ -238,10 +382,12 @@ Examples:
         await checkCredentials(),
         checkProfiles(),
         checkCatalog(),
+        checkCatalogSchema(),
         checkCache(),
         checkQuotaFile(),
         await checkClockSkew(),
         checkMqtt(),
+        checkAudit(),
       ];
       const summary = {
         ok: checks.filter((c) => c.status === 'ok').length,

@@ -20,6 +20,15 @@
  */
 
 /**
+ * Catalog shape version. Bump when any of the exported interfaces
+ * (CommandSpec / DeviceCatalogEntry / SafetyTier) gain/lose/rename a
+ * load-bearing field. The agent-bootstrap payload's schemaVersion must
+ * stay pinned to this value; `doctor` fails the `catalog-schema` check
+ * when they drift.
+ */
+export const CATALOG_SCHEMA_VERSION = '1.0';
+
+/**
  * Safety classification for catalog commands.
  *
  *  - 'read'           —— Read-only query (status fetch). Reserved for v2.8+

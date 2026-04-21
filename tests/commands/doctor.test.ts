@@ -162,4 +162,104 @@ describe('doctor command', () => {
       fetchSpy.mockRestore();
     }
   });
+
+  // ---------------------------------------------------------------------
+  // P9: quota headroom + catalog-schema + audit checks
+  // ---------------------------------------------------------------------
+  it('P9: quota check exposes percentUsed / remaining / projectedResetTime when the quota file exists', async () => {
+    process.env.SWITCHBOT_TOKEN = 't';
+    process.env.SWITCHBOT_SECRET = 's';
+    const sbDir = path.join(tmp, '.switchbot');
+    fs.mkdirSync(sbDir, { recursive: true });
+    // 100 requests today — well under 80%, so status must stay 'ok'.
+    const today = new Date();
+    const y = today.getFullYear();
+    const m = String(today.getMonth() + 1).padStart(2, '0');
+    const d = String(today.getDate()).padStart(2, '0');
+    const date = `${y}-${m}-${d}`;
+    fs.writeFileSync(
+      path.join(sbDir, 'quota.json'),
+      JSON.stringify({ days: { [date]: { total: 100, endpoints: {} } } }),
+    );
+    const res = await runCli(registerDoctorCommand, ['--json', 'doctor']);
+    const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    const q = payload.data.checks.find((c: { name: string }) => c.name === 'quota');
+    expect(q.status).toBe('ok');
+    expect(q.detail.percentUsed).toBe(1);
+    expect(q.detail.remaining).toBe(9_900);
+    expect(q.detail.total).toBe(100);
+    expect(q.detail.dailyCap).toBe(10_000);
+    expect(typeof q.detail.projectedResetTime).toBe('string');
+    expect(q.detail.projectedResetTime).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(typeof q.detail.recommendation).toBe('string');
+  });
+
+  it('P9: quota check warns when usage is over 80%', async () => {
+    process.env.SWITCHBOT_TOKEN = 't';
+    process.env.SWITCHBOT_SECRET = 's';
+    const sbDir = path.join(tmp, '.switchbot');
+    fs.mkdirSync(sbDir, { recursive: true });
+    const today = new Date();
+    const y = today.getFullYear();
+    const m = String(today.getMonth() + 1).padStart(2, '0');
+    const d = String(today.getDate()).padStart(2, '0');
+    fs.writeFileSync(
+      path.join(sbDir, 'quota.json'),
+      JSON.stringify({ days: { [`${y}-${m}-${d}`]: { total: 9_500, endpoints: {} } } }),
+    );
+    const res = await runCli(registerDoctorCommand, ['--json', 'doctor']);
+    const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    const q = payload.data.checks.find((c: { name: string }) => c.name === 'quota');
+    expect(q.status).toBe('warn');
+    expect(q.detail.percentUsed).toBe(95);
+    expect(q.detail.recommendation).toMatch(/90|reset/);
+  });
+
+  it('P9: catalog-schema check passes when bootstrap and catalog versions match', async () => {
+    process.env.SWITCHBOT_TOKEN = 't';
+    process.env.SWITCHBOT_SECRET = 's';
+    const res = await runCli(registerDoctorCommand, ['--json', 'doctor']);
+    const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    const cs = payload.data.checks.find((c: { name: string }) => c.name === 'catalog-schema');
+    expect(cs).toBeDefined();
+    expect(cs.status).toBe('ok');
+    expect(cs.detail.match).toBe(true);
+    expect(cs.detail.catalogSchemaVersion).toBe(cs.detail.bootstrapExpectsVersion);
+  });
+
+  it('P9: audit check reports "not present" when the audit log file is missing', async () => {
+    process.env.SWITCHBOT_TOKEN = 't';
+    process.env.SWITCHBOT_SECRET = 's';
+    const res = await runCli(registerDoctorCommand, ['--json', 'doctor']);
+    const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    const audit = payload.data.checks.find((c: { name: string }) => c.name === 'audit');
+    expect(audit).toBeDefined();
+    expect(audit.status).toBe('ok');
+    expect(audit.detail.enabled).toBe(false);
+  });
+
+  it('P9: audit check warns and lists recent errors when the audit log has failures in the last 24h', async () => {
+    process.env.SWITCHBOT_TOKEN = 't';
+    process.env.SWITCHBOT_SECRET = 's';
+    const sbDir = path.join(tmp, '.switchbot');
+    fs.mkdirSync(sbDir, { recursive: true });
+    const recent = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const stale = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+    const lines = [
+      JSON.stringify({ auditVersion: 1, t: recent, kind: 'command', deviceId: 'BOT1', command: 'turnOff', result: 'error', error: 'rate limit' }),
+      JSON.stringify({ auditVersion: 1, t: stale, kind: 'command', deviceId: 'BOT1', command: 'turnOff', result: 'error', error: 'old' }),
+      JSON.stringify({ auditVersion: 1, t: recent, kind: 'command', deviceId: 'BOT2', command: 'press', result: 'ok' }),
+    ];
+    fs.writeFileSync(path.join(sbDir, 'audit.log'), lines.join('\n') + '\n');
+    const res = await runCli(registerDoctorCommand, ['--json', 'doctor']);
+    const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    const audit = payload.data.checks.find((c: { name: string }) => c.name === 'audit');
+    expect(audit.status).toBe('warn');
+    expect(audit.detail.enabled).toBe(true);
+    expect(audit.detail.totalErrors).toBe(2);
+    expect(audit.detail.errorsLast24h).toBe(1);
+    expect(audit.detail.recent).toHaveLength(1);
+    expect(audit.detail.recent[0].command).toBe('turnOff');
+    expect(audit.detail.recent[0].error).toBe('rate limit');
+  });
 });
