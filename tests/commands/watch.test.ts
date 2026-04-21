@@ -218,6 +218,43 @@ describe('devices watch', () => {
     expect(ev.changed.temp).toBeUndefined();
   });
 
+  // P1 — FIELD_ALIASES dispatch for --fields
+  it('P1: resolves --fields aliases against first API response (batt → battery)', async () => {
+    cacheMock.map.set('BOT1', { type: 'Bot', name: 'K', category: 'physical' });
+    apiMock.__instance.get
+      .mockResolvedValueOnce({ data: { statusCode: 100, body: { power: 'on', battery: 90, humidity: 40 } } });
+    flagsMock.getFields.mockReturnValueOnce(['batt', 'humid']);
+
+    const res = await runCli(registerDevicesCommand, [
+      '--json', 'devices', 'watch', 'BOT1', '--interval', '5s', '--max', '1', '--fields', 'batt,humid',
+    ]);
+    expect(res.exitCode).toBeNull();
+
+    const ev = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{'))[0]).data;
+    // Only the aliased canonical fields should surface.
+    expect(ev.changed.battery).toEqual({ from: null, to: 90 });
+    expect(ev.changed.humidity).toEqual({ from: null, to: 40 });
+    expect(ev.changed.power).toBeUndefined();
+  });
+
+  it('P1: exits 1 (handleError) when --fields names an unknown alias', async () => {
+    cacheMock.map.set('BOT1', { type: 'Bot', name: 'K', category: 'physical' });
+    apiMock.__instance.get
+      .mockResolvedValueOnce({ data: { statusCode: 100, body: { power: 'on', battery: 90 } } });
+    flagsMock.getFields.mockReturnValueOnce(['zombie']);
+
+    const res = await runCli(registerDevicesCommand, [
+      '--json', 'devices', 'watch', 'BOT1', '--interval', '5s', '--max', '1', '--fields', 'zombie',
+    ]);
+    // UsageError during watch is caught by handleError → exit 2.
+    expect(res.exitCode).toBe(2);
+    // With --json the envelope is routed to stdout (SYS-1 contract).
+    const out = res.stdout.join('\n');
+    expect(out).toMatch(/zombie/);
+    const envelope = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).pop()!);
+    expect(envelope.error.kind).toBe('usage');
+  });
+
   it('continues polling other devices when one errors', async () => {
     cacheMock.map.set('BOT1', { type: 'Bot', name: 'K1', category: 'physical' });
     cacheMock.map.set('BOT2', { type: 'Bot', name: 'K2', category: 'physical' });

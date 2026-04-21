@@ -27,7 +27,7 @@ import { registerExpandCommand } from './expand.js';
 import { registerDevicesMetaCommand } from './device-meta.js';
 import { isDryRun } from '../utils/flags.js';
 import { DryRunSignal } from '../api/client.js';
-import { resolveField, listSupportedFieldInputs } from '../schema/field-aliases.js';
+import { resolveField, resolveFieldList, listSupportedFieldInputs } from '../schema/field-aliases.js';
 
 const EXPAND_HINTS: Record<string, { command: string; flags: string }> = {
   'Air Conditioner':  { command: 'setAll',      flags: '--temp 26 --mode cool --fan low --power on' },
@@ -307,16 +307,20 @@ Examples:
               console.log(JSON.stringify(entry));
             }
           } else {
-            const fields = resolveFields();
+            const rawFields = resolveFields();
             for (const entry of batch) {
               const { deviceId, ok, error, _fetchedAt: ts, ...status } = entry as Record<string, unknown>;
               console.log(`\n─── ${String(deviceId)} ───`);
               if (!ok) {
                 console.error(`  error: ${String(error)}`);
               } else {
+                const statusMap = status as Record<string, unknown>;
+                const fields = rawFields
+                  ? resolveFieldList(rawFields, Object.keys(statusMap))
+                  : undefined;
                 const displayStatus: Record<string, unknown> = fields
-                  ? Object.fromEntries(fields.map((f) => [f, (status as Record<string, unknown>)[f] ?? null]))
-                  : (status as Record<string, unknown>);
+                  ? Object.fromEntries(fields.map((f) => [f, statusMap[f] ?? null]))
+                  : statusMap;
                 printKeyValue(displayStatus);
                 console.error(`  fetched at ${String(ts)}`);
               }
@@ -344,7 +348,10 @@ Examples:
           const statusWithTs = { ...(body as Record<string, unknown>), _fetchedAt: fetchedAt };
           const allHeaders = Object.keys(statusWithTs);
           const allRows = [Object.values(statusWithTs) as unknown[]];
-          const fields = resolveFields();
+          const rawFields = resolveFields();
+          const fields = rawFields
+            ? resolveFieldList(rawFields, allHeaders)
+            : undefined;
           renderRows(allHeaders, allRows, fmt, fields);
           return;
         }

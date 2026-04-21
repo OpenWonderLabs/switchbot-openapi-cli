@@ -699,6 +699,91 @@ describe('devices command', () => {
       // null maps to empty string in cellToString; _fetchedAt column is also present
       expect(lines[1]).toMatch(/^on\t\t/);
     });
+
+    // P1 — FIELD_ALIASES dispatch on --fields
+    describe('--fields alias resolution (P1)', () => {
+      it('resolves "batt" → battery, "humid" → humidity (tsv)', async () => {
+        apiMock.__instance.get.mockResolvedValue({
+          data: { body: { power: 'on', battery: 87, humidity: 42, temperature: 22 } },
+        });
+        const res = await runCli(registerDevicesCommand, [
+          'devices', 'status', 'D1', '--format', 'tsv', '--fields', 'batt,humid',
+        ]);
+        const lines = res.stdout.join('\n').split('\n');
+        expect(lines[0]).toBe('battery\thumidity');
+        expect(lines[1]).toBe('87\t42');
+      });
+
+      it('resolves "temp" → temperature (not colorTemperature) even when both are present', async () => {
+        apiMock.__instance.get.mockResolvedValue({
+          data: { body: { temperature: 24, colorTemperature: 4000, battery: 50 } },
+        });
+        const res = await runCli(registerDevicesCommand, [
+          'devices', 'status', 'D1', '--format', 'tsv', '--fields', 'temp',
+        ]);
+        const lines = res.stdout.join('\n').split('\n');
+        expect(lines[0]).toBe('temperature');
+        expect(lines[1]).toBe('24');
+      });
+
+      it('resolves "kelvin" → colorTemperature', async () => {
+        apiMock.__instance.get.mockResolvedValue({
+          data: { body: { temperature: 24, colorTemperature: 4000 } },
+        });
+        const res = await runCli(registerDevicesCommand, [
+          'devices', 'status', 'D1', '--format', 'tsv', '--fields', 'kelvin',
+        ]);
+        const lines = res.stdout.join('\n').split('\n');
+        expect(lines[0]).toBe('colorTemperature');
+        expect(lines[1]).toBe('4000');
+      });
+
+      it('is case-insensitive (BATT, Battery, BaTt all resolve the same way)', async () => {
+        apiMock.__instance.get.mockResolvedValue({
+          data: { body: { battery: 77 } },
+        });
+        for (const f of ['BATT', 'Battery', 'BaTt']) {
+          apiMock.__instance.get.mockResolvedValueOnce({ data: { body: { battery: 77 } } });
+          const res = await runCli(registerDevicesCommand, [
+            'devices', 'status', 'D1', '--format', 'tsv', '--fields', f,
+          ]);
+          expect(res.stdout.join('\n').split('\n')[0]).toBe('battery');
+        }
+      });
+
+      it('passes canonical names through unchanged', async () => {
+        apiMock.__instance.get.mockResolvedValue({
+          data: { body: { power: 'on', battery: 90 } },
+        });
+        const res = await runCli(registerDevicesCommand, [
+          'devices', 'status', 'D1', '--format', 'tsv', '--fields', 'power,battery',
+        ]);
+        expect(res.stdout.join('\n').split('\n')[0]).toBe('power\tbattery');
+      });
+
+      it('exits 2 with candidate list on unknown field', async () => {
+        apiMock.__instance.get.mockResolvedValue({
+          data: { body: { power: 'on', battery: 80 } },
+        });
+        const res = await runCli(registerDevicesCommand, [
+          'devices', 'status', 'D1', '--format', 'tsv', '--fields', 'zombie',
+        ]);
+        expect(res.exitCode).toBe(2);
+        const err = res.stderr.join('\n');
+        expect(err).toMatch(/zombie/);
+        expect(err).toMatch(/Supported|power|battery/i);
+      });
+
+      it('preserves user input order in output', async () => {
+        apiMock.__instance.get.mockResolvedValue({
+          data: { body: { power: 'on', battery: 80, humidity: 40 } },
+        });
+        const res = await runCli(registerDevicesCommand, [
+          'devices', 'status', 'D1', '--format', 'tsv', '--fields', 'humid,power,batt',
+        ]);
+        expect(res.stdout.join('\n').split('\n')[0]).toBe('humidity\tpower\tbattery');
+      });
+    });
   });
 
   // =====================================================================
