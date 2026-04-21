@@ -5,6 +5,14 @@ All notable changes to `@switchbot/openapi-cli` are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.2] - 2026-04-21
+
+### Fixed
+
+- `scenes execute --dry-run` now outputs structured result on stdout instead of silently exiting (#54)
+- MCP `send_command` dry-run validates command name against catalog before returning success (#55)
+- MCP `run_scene` dry-run validates sceneId against scene list before returning success (#56)
+
 ## [2.6.1] - 2026-04-21
 
 Follow-up to v2.6.0 from the OpenClaw re-audit. Three real findings
