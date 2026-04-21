@@ -208,10 +208,10 @@ Examples:
       const payload: Record<string, unknown> = {
         version: '1.0',
         types: projected,
-        resources: RESOURCE_CATALOG,
       };
       if (!options.compact) {
         payload.generatedAt = new Date().toISOString();
+        payload.resources = RESOURCE_CATALOG;
         payload.cliAddedFields = [
           {
             field: '_fetchedAt',

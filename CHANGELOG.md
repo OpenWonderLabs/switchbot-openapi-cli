@@ -5,6 +5,14 @@ All notable changes to `@switchbot/openapi-cli` are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.2] - 2026-04-21
+
+Patch release — CI size-budget fix.
+
+### Fixed
+
+- **`schema export --compact`** — dropped the `resources` block from compact output. In v2.7.0 the resources catalog (scenes / webhooks / keys, ~12 KB) was added to the schema payload unconditionally, which pushed `schema export --compact --used` past the 15 KB agent-prompt budget enforced by CI. The `resources` block is still emitted under the full (non-`--compact`) output, and is always available via `capabilities --json`, which is the canonical source for CLI resource metadata. No behaviour change for `capabilities --json` consumers.
+
 ## [2.7.1] - 2026-04-21
 
 AI-discoverability patch. Top-level `--help` / `--help --json` and every
