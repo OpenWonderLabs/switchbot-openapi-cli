@@ -13,6 +13,17 @@ export interface SwitchBotConfig {
   defaults?: { flags?: string[] };
 }
 
+export interface ConfigSummary {
+  source: 'env' | 'file' | 'none' | 'invalid';
+  path?: string;
+  token?: string;
+  secret?: string;
+  label?: string;
+  description?: string;
+  dailyCap?: number;
+  defaultFlags?: string[];
+}
+
 function sanitizeOptionalString(v: unknown): string | undefined {
   if (typeof v !== 'string') return undefined;
   const trimmed = v.trim();
@@ -171,34 +182,62 @@ export function readProfileMeta(profile?: string): {
 }
 
 export function showConfig(): void {
+  const summary = getConfigSummary();
+  if (summary.source === 'env') {
+    console.log('Credential source: environment variables');
+    console.log(`token : ${summary.token ?? ''}`);
+    console.log(`secret: ${summary.secret ?? ''}`);
+    return;
+  }
+  if (summary.source === 'none') {
+    console.log('No credentials configured');
+    return;
+  }
+  if (summary.source === 'invalid') {
+    console.error('Failed to read config file');
+    return;
+  }
+  console.log(`Credential source: ${summary.path}`);
+  if (summary.label) console.log(`label : ${summary.label}`);
+  if (summary.description) console.log(`desc  : ${summary.description}`);
+  console.log(`token : ${summary.token ?? ''}`);
+  console.log(`secret: ${summary.secret ?? ''}`);
+  if (summary.dailyCap) console.log(`limits: dailyCap=${summary.dailyCap}`);
+  if (summary.defaultFlags?.length) console.log(`defaults: ${summary.defaultFlags.join(' ')}`);
+}
+
+export function getConfigSummary(): ConfigSummary {
   const envToken = process.env.SWITCHBOT_TOKEN;
   const envSecret = process.env.SWITCHBOT_SECRET;
 
   if (envToken && envSecret) {
-    console.log('Credential source: environment variables');
-    console.log(`token : ${maskCredential(envToken)}`);
-    console.log(`secret: ${maskSecret(envSecret)}`);
-    return;
+    return {
+      source: 'env',
+      token: maskCredential(envToken),
+      secret: maskSecret(envSecret),
+    };
   }
 
   const file = configFilePath();
   if (!fs.existsSync(file)) {
-    console.log('No credentials configured');
-    return;
+    return { source: 'none' };
   }
 
   try {
     const raw = fs.readFileSync(file, 'utf-8');
     const cfg = JSON.parse(raw) as SwitchBotConfig;
-    console.log(`Credential source: ${file}`);
-    if (cfg.label) console.log(`label : ${cfg.label}`);
-    if (cfg.description) console.log(`desc  : ${cfg.description}`);
-    console.log(`token : ${maskCredential(cfg.token)}`);
-    console.log(`secret: ${maskSecret(cfg.secret)}`);
-    if (cfg.limits?.dailyCap) console.log(`limits: dailyCap=${cfg.limits.dailyCap}`);
-    if (cfg.defaults?.flags?.length) console.log(`defaults: ${cfg.defaults.flags.join(' ')}`);
+    return {
+      source: 'file',
+      path: file,
+      label: cfg.label,
+      description: cfg.description,
+      token: maskCredential(cfg.token),
+      secret: maskSecret(cfg.secret),
+      dailyCap: cfg.limits?.dailyCap,
+      defaultFlags: cfg.defaults?.flags,
+    };
   } catch {
-    console.error('Failed to read config file');
+    return { source: 'invalid', path: file };
   }
 }
 

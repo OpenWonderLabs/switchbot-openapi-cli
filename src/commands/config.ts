@@ -4,7 +4,7 @@ import readline from 'node:readline';
 import { execFileSync } from 'node:child_process';
 import { stringArg } from '../utils/arg-parsers.js';
 import { intArg } from '../utils/arg-parsers.js';
-import { saveConfig, showConfig, listProfiles, readProfileMeta } from '../config.js';
+import { saveConfig, showConfig, getConfigSummary, listProfiles, readProfileMeta } from '../config.js';
 import { isJsonMode, printJson, emitJsonError } from '../utils/output.js';
 import chalk from 'chalk';
 
@@ -250,6 +250,10 @@ Files are written with mode 0600. Profiles live under ~/.switchbot/profiles/<nam
     .command('show')
     .description('Show the current credential source and a masked secret')
     .action(() => {
+      if (isJsonMode()) {
+        printJson(getConfigSummary());
+        return;
+      }
       showConfig();
     });
 

@@ -6,6 +6,7 @@ import path from 'node:path';
 const configMock = vi.hoisted(() => ({
   saveConfig: vi.fn(),
   showConfig: vi.fn(),
+  getConfigSummary: vi.fn(() => ({ source: 'none' })),
   listProfiles: vi.fn(() => [] as string[]),
   readProfileMeta: vi.fn(() => null),
 }));
@@ -19,6 +20,8 @@ describe('config command', () => {
   beforeEach(() => {
     configMock.saveConfig.mockReset();
     configMock.showConfig.mockReset();
+    configMock.getConfigSummary.mockReset();
+    configMock.getConfigSummary.mockReturnValue({ source: 'none' });
     configMock.listProfiles.mockReset();
     configMock.listProfiles.mockReturnValue([]);
   });
@@ -65,6 +68,20 @@ describe('config command', () => {
     it('delegates to showConfig()', async () => {
       await runCli(registerConfigCommand, ['config', 'show']);
       expect(configMock.showConfig).toHaveBeenCalledTimes(1);
+    });
+
+    it('emits structured JSON in --json mode', async () => {
+      configMock.getConfigSummary.mockReturnValue({
+        source: 'file',
+        path: '/tmp/config.json',
+        token: 'abcd****wxyz',
+        secret: 'ab****yz',
+      });
+      const res = await runCli(registerConfigCommand, ['--json', 'config', 'show']);
+      const parsed = JSON.parse(res.stdout.join('\n'));
+      expect(parsed.data.source).toBe('file');
+      expect(parsed.data.path).toBe('/tmp/config.json');
+      expect(parsed.data.token).toBe('abcd****wxyz');
     });
   });
 
