@@ -259,7 +259,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     category: 'physical',
     description: 'Entry-level robot vacuum with start/stop/dock and four suction power levels.',
     role: 'cleaning',
-    aliases: ['Robot Vacuum Cleaner S1 Plus', 'K10+'],
+    aliases: ['Robot Vacuum', 'Robot Vacuum Cleaner S1 Plus', 'K10+'],
     commands: [
       { command: 'start', parameter: '—', description: 'Start cleaning', idempotent: true },
       { command: 'stop', parameter: '—', description: 'Stop cleaning', idempotent: true },

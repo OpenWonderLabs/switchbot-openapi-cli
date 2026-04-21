@@ -84,6 +84,14 @@ Examples:
     .description("Show the effective catalog (or one entry). Alias: 'list'. Defaults to 'effective' source.")
     .argument('[type...]', 'Optional device type/alias (case-insensitive, partial match)')
     .option('--source <source>', 'Which catalog to show: built-in | overlay | effective (default)', enumArg('--source', SOURCES), 'effective')
+    .addHelpText('after', `
+Examples:
+  $ switchbot catalog show
+  $ switchbot catalog show Bot
+  $ switchbot catalog show Robot Vacuum
+  $ switchbot catalog show --source built-in
+  $ switchbot catalog show --json
+`)
     .action((typeParts: string[], options: { source: string }) => {
       try {
         const source = options.source;

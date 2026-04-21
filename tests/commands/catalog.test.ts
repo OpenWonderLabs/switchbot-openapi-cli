@@ -92,6 +92,13 @@ describe('catalog show', () => {
     expect(out).toMatch(/Smart Lock/);
   });
 
+  it('resolves "Robot Vacuum" to a single catalog entry', async () => {
+    const { stdout, exitCode } = await runCli(registerCatalogCommand, ['catalog', 'show', 'Robot', 'Vacuum']);
+    expect(exitCode).toBeNull();
+    const out = stdout.join('\n');
+    expect(out).toContain('Robot Vacuum Cleaner S1');
+  });
+
   it('--source built-in ignores overlay', async () => {
     writeOverlay([{ type: 'Bot', remove: true }]);
     const { stdout } = await runCli(registerCatalogCommand, ['catalog', 'show', '--source', 'built-in']);
