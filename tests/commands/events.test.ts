@@ -242,6 +242,64 @@ describe('events tail receiver', () => {
     await new Promise<void>((r) => server.close(() => r()));
     expect(status).toBe(413);
   });
+
+  it('P6: unified envelope carries schemaVersion / source / kind / payload / topic on webhook events', async () => {
+    const port = await pickPort();
+    const received: unknown[] = [];
+    const server = startReceiver(port, '/', null, (ev) => received.push(ev));
+    await postJson(port, '/', {
+      eventType: 'state-change',
+      context: { deviceMac: 'BOT-7', deviceType: 'Bot', eventId: 'evt-1' },
+    });
+    await new Promise<void>((r) => server.close(() => r()));
+    const ev = received[0] as {
+      schemaVersion: string;
+      source: string;
+      kind: string;
+      topic: string;
+      payload: unknown;
+      eventId: string | null;
+      deviceId: string | null;
+      matchedKeys: string[];
+      // legacy:
+      body: unknown;
+      path: string;
+      matched: boolean;
+    };
+    expect(ev.schemaVersion).toBe('1');
+    expect(ev.source).toBe('webhook');
+    expect(ev.kind).toBe('event');
+    expect(ev.topic).toBe('/');
+    expect(ev.eventId).toBe('evt-1');
+    expect(ev.deviceId).toBe('BOT-7');
+    expect(ev.matchedKeys).toEqual([]);
+    // legacy mirror still present:
+    expect(ev.path).toBe('/');
+    expect(ev.body).toEqual(ev.payload);
+    expect(ev.matched).toBe(true);
+  });
+
+  it('P6: matchedKeys lists which filter clauses hit on webhook events', async () => {
+    const port = await pickPort();
+    const received: Array<{ matched: boolean; matchedKeys: string[] }> = [];
+    const filter: FilterClause[] = [
+      { key: 'deviceId', op: 'eq', raw: 'BOT1' },
+      { key: 'type', op: 'eq', raw: 'Bot' },
+    ];
+    const server = startReceiver(
+      port,
+      '/',
+      filter,
+      (ev) => received.push(ev as { matched: boolean; matchedKeys: string[] }),
+    );
+    await postJson(port, '/', { context: { deviceMac: 'BOT1', deviceType: 'Bot' } });
+    await postJson(port, '/', { context: { deviceMac: 'BOT2', deviceType: 'Bot' } });
+    await new Promise<void>((r) => server.close(() => r()));
+    expect(received[0].matched).toBe(true);
+    expect(received[0].matchedKeys).toEqual(['deviceId', 'type']);
+    expect(received[1].matched).toBe(false);
+    expect(received[1].matchedKeys).toEqual([]);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -374,6 +432,63 @@ describe('events mqtt-tail', () => {
     // Must be the FIRST JSON line emitted so consumers see it even if broker
     // never connects.
     expect((jsonLines[0] as { data: { type?: string } }).data.type).toBe('__session_start');
+  });
+
+  it('P6: mqtt event record carries unified envelope (source/kind/schemaVersion/deviceId)', async () => {
+    mqttMock.connectShouldFireMessage = true;
+
+    const res = await runCli(registerEventsCommand, ['events', 'mqtt-tail', '--max', '1']);
+    expect(res.exitCode).toBe(null);
+    const jsonLines = res.stdout
+      .filter((l) => l.trim().startsWith('{'))
+      .map(
+        (l) =>
+          JSON.parse(l) as {
+            type?: string;
+            source?: string;
+            kind?: string;
+            schemaVersion?: string;
+            topic?: string;
+            payload?: unknown;
+            deviceId?: string | null;
+          },
+      );
+    const event = jsonLines.find((j) => j.kind === 'event');
+    expect(event).toBeDefined();
+    expect(event!.schemaVersion).toBe('1');
+    expect(event!.source).toBe('mqtt');
+    expect(event!.kind).toBe('event');
+    expect(event!.topic).toBe('test/topic');
+    expect(event!.payload).toEqual({ state: 'on' });
+    // deviceId is nullable on records without context — present as `null`
+    expect(event).toHaveProperty('deviceId');
+  });
+
+  it('P6: mqtt control records carry unified envelope alongside legacy type', async () => {
+    mqttMock.connectShouldFireState = 'failed';
+    const res = await runCli(registerEventsCommand, ['events', 'mqtt-tail']);
+    const jsonLines = res.stdout
+      .filter((l) => l.trim().startsWith('{'))
+      .map(
+        (l) =>
+          JSON.parse(l) as {
+            type?: string;
+            kind?: string;
+            source?: string;
+            schemaVersion?: string;
+            controlKind?: string;
+            at?: string;
+            t?: string;
+          },
+      );
+    const disconnect = jsonLines.find((j) => j.type === '__disconnect');
+    expect(disconnect).toBeDefined();
+    expect(disconnect!.kind).toBe('control');
+    expect(disconnect!.source).toBe('mqtt');
+    expect(disconnect!.schemaVersion).toBe('1');
+    expect(disconnect!.controlKind).toBe('disconnect');
+    // Legacy field `at` mirrors the unified `t`.
+    expect(disconnect!.at).toBe(disconnect!.t);
   });
 });
 

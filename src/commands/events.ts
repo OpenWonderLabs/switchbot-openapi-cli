@@ -23,6 +23,17 @@ const DEFAULT_PORT = 3000;
 const DEFAULT_PATH = '/';
 const MAX_BODY_BYTES = 1_000_000;
 
+/**
+ * P6: unified-envelope schema version shared by webhook and MQTT event output.
+ *
+ * The same key set now appears on both `events tail` (webhook) and
+ * `events mqtt-tail` (MQTT) output lines so downstream JSONL consumers can
+ * use a single parser regardless of source. Old fields are kept for one
+ * minor window so existing consumers keep working — see README and
+ * CHANGELOG for the deprecation schedule.
+ */
+export const EVENTS_SCHEMA_VERSION = '1';
+
 function extractEventId(parsed: unknown): string | null {
   if (!parsed || typeof parsed !== 'object') return null;
   const p = parsed as Record<string, unknown>;
@@ -32,22 +43,46 @@ function extractEventId(parsed: unknown): string | null {
   return null;
 }
 
+function extractDeviceId(parsed: unknown): string | null {
+  if (!parsed || typeof parsed !== 'object') return null;
+  const p = parsed as Record<string, unknown>;
+  const ctx = (p.context as Record<string, unknown> | undefined) ?? p;
+  const mac = ctx.deviceMac;
+  if (typeof mac === 'string' && mac.length > 0) return mac;
+  const id = ctx.deviceId;
+  if (typeof id === 'string' && id.length > 0) return id;
+  return null;
+}
+
 interface EventRecord {
+  // Unified envelope (P6): also present on `events mqtt-tail` output so JSONL
+  // consumers can key on `source` + `kind` to discriminate without probing
+  // field presence.
+  schemaVersion: typeof EVENTS_SCHEMA_VERSION;
+  source: 'webhook';
+  kind: 'event';
   t: string;
+  eventId: string | null;
+  deviceId: string | null;
+  topic: string;            // alias for `path` — unified across webhook & mqtt
+  payload: unknown;          // alias for `body` — unified across webhook & mqtt
+  matchedKeys: string[];     // unified: clause keys that matched (empty = no filter or no match)
+  // Legacy (deprecated as of v2.7; removed in v3.0):
   remote: string;
   path: string;
   body: unknown;
   matched: boolean;
 }
 
-function matchFilter(
+function matchFilterDetail(
   body: unknown,
   clauses: FilterClause[] | null,
-): boolean {
-  if (!clauses || clauses.length === 0) return true;
-  if (!body || typeof body !== 'object') return false;
+): { matched: boolean; matchedKeys: string[] } {
+  if (!clauses || clauses.length === 0) return { matched: true, matchedKeys: [] };
+  if (!body || typeof body !== 'object') return { matched: false, matchedKeys: [] };
   const b = body as Record<string, unknown>;
   const ctx = (b.context ?? b) as Record<string, unknown>;
+  const hitKeys: string[] = [];
   for (const c of clauses) {
     let candidate: string;
     if (c.key === 'deviceId') {
@@ -60,9 +95,10 @@ function matchFilter(
       const t = ctx.deviceType;
       candidate = typeof t === 'string' ? t : '';
     }
-    if (!matchClause(candidate, c)) return false;
+    if (!matchClause(candidate, c)) return { matched: false, matchedKeys: [] };
+    hitKeys.push(c.key);
   }
-  return true;
+  return { matched: true, matchedKeys: hitKeys };
 }
 
 const EVENT_FILTER_KEYS = ['deviceId', 'type'] as const;
@@ -123,11 +159,22 @@ export function startReceiver(
       } catch {
         // keep raw
       }
-      const matched = matchFilter(body, filter);
+      const { matched, matchedKeys } = matchFilterDetail(body, filter);
+      const t = new Date().toISOString();
+      const urlPath = req.url ?? '/';
       onEvent({
-        t: new Date().toISOString(),
+        schemaVersion: EVENTS_SCHEMA_VERSION,
+        source: 'webhook',
+        kind: 'event',
+        t,
+        eventId: extractEventId(body),
+        deviceId: extractDeviceId(body),
+        topic: urlPath,
+        payload: body,
+        matchedKeys,
+        // Legacy mirror:
         remote: `${req.socket.remoteAddress ?? ''}:${req.socket.remotePort ?? ''}`,
-        path: req.url ?? '/',
+        path: urlPath,
         body,
         matched,
       });
@@ -162,9 +209,14 @@ SwitchBot posts events to a single webhook URL configured via:
 the port to the internet yourself (ngrok/cloudflared/reverse proxy) and
 point the SwitchBot webhook at that public URL.
 
-Output (JSONL, one event per line):
-  { "t": "<ISO>", "remote": "<ip:port>", "path": "/",
-    "body": <parsed JSON or raw string>, "matched": true }
+Output (JSONL, one event per line; P6 unified envelope v2.7+):
+  { "schemaVersion": "1", "source": "webhook", "kind": "event",
+    "t": "<ISO>", "eventId": <string|null>, "deviceId": <string|null>,
+    "topic": "/",               // = path
+    "payload": <parsed JSON or raw string>,
+    "matchedKeys": ["deviceId"], // which filter clauses matched
+    // Legacy fields kept for one minor window (removed in v3.0):
+    "remote": "<ip:port>", "path": "/", "body": <payload>, "matched": true }
 
 Filter grammar: comma-separated clauses (AND-ed). Each clause is one of
   key=value     — case-insensitive substring
@@ -269,14 +321,20 @@ Connects to the SwitchBot MQTT service using your existing credentials
 (SWITCHBOT_TOKEN + SWITCHBOT_SECRET or ~/.switchbot/config.json).
 No additional MQTT configuration required.
 
-Output (JSONL, one event per line):
-  { "t": "<ISO>", "eventId": "<uuid>", "topic": "<mqtt-topic>", "payload": <parsed JSON or raw string> }
+Output (JSONL, one event per line; P6 unified envelope v2.7+):
+  { "schemaVersion": "1", "source": "mqtt", "kind": "event",
+    "t": "<ISO>", "eventId": "<uuid>", "deviceId": <string|null>,
+    "topic": "<mqtt-topic>",
+    "payload": <parsed JSON or raw string> }
 
-Control records (interleaved, no "payload" field — use type-prefix to filter):
-  { "type": "__session_start", "at": "<ISO>", "eventId": "<uuid>", "state": "connecting" }  before credential fetch (JSON mode only)
-  { "type": "__connect",     "at": "<ISO>", "eventId": "<uuid>" }   first successful connect
-  { "type": "__reconnect",   "at": "<ISO>", "eventId": "<uuid>" }   connect after a disconnect
-  { "type": "__disconnect",  "at": "<ISO>", "eventId": "<uuid>" }   reconnecting or failed
+Control records (interleaved, kind: "control" — filter by the "kind" field):
+  { "schemaVersion": "1", "source": "mqtt", "kind": "control",
+    "controlKind": "session_start"|"connect"|"reconnect"|"disconnect"|"heartbeat",
+    "t": "<ISO>", "eventId": "<uuid>",
+    "state": "connecting"         // present on session_start only
+    // Legacy fields kept for one minor window (removed in v3.0):
+    "type": "__session_start"|"__connect"|"__reconnect"|"__disconnect",
+    "at":   "<ISO>"  }
 
 Reconnect policy: the MQTT client retries with exponential backoff
 (1s → 30s capped, forever) while the credential is still valid; if the
@@ -391,11 +449,18 @@ Examples:
         // fetch) so JSON consumers can distinguish "connecting" from "never
         // connected" even when mqtt-tail exits before the broker connects.
         if (isJsonMode()) {
+          const sessionStartAt = new Date().toISOString();
           printJson({
-            type: '__session_start',
-            at: new Date().toISOString(),
+            schemaVersion: EVENTS_SCHEMA_VERSION,
+            source: 'mqtt',
+            kind: 'control',
+            controlKind: 'session_start',
+            t: sessionStartAt,
             eventId: crypto.randomUUID(),
             state: 'connecting',
+            // Legacy (deprecated as of v2.7; removed in v3.0):
+            type: '__session_start',
+            at: sessionStartAt,
           });
         }
         const credential = await fetchMqttCredential(loaded.token, loaded.secret);
@@ -435,7 +500,16 @@ Examples:
             // Default behavior: record history + print to stdout
             const { deviceId, deviceType } = parseSinkEvent(parsed);
             deviceHistoryStore.record(deviceId, msgTopic, deviceType, parsed, t);
-            const record = { t, eventId, topic: msgTopic, payload: parsed };
+            const record = {
+              schemaVersion: EVENTS_SCHEMA_VERSION,
+              source: 'mqtt' as const,
+              kind: 'event' as const,
+              t,
+              eventId,
+              deviceId: deviceId ?? null,
+              topic: msgTopic,
+              payload: parsed,
+            };
             if (isJsonMode()) {
               printJson(record);
             } else {
@@ -452,7 +526,24 @@ Examples:
         let mqttFailed = false;
         let hasConnectedBefore = false;
         const emitControl = (kind: '__connect' | '__reconnect' | '__disconnect' | '__heartbeat'): void => {
-          const ctl = { type: kind, at: new Date().toISOString(), eventId: crypto.randomUUID() };
+          const at = new Date().toISOString();
+          const controlKindMap: Record<typeof kind, 'connect' | 'reconnect' | 'disconnect' | 'heartbeat'> = {
+            __connect: 'connect',
+            __reconnect: 'reconnect',
+            __disconnect: 'disconnect',
+            __heartbeat: 'heartbeat',
+          };
+          const ctl = {
+            schemaVersion: EVENTS_SCHEMA_VERSION,
+            source: 'mqtt' as const,
+            kind: 'control' as const,
+            controlKind: controlKindMap[kind],
+            t: at,
+            eventId: crypto.randomUUID(),
+            // Legacy (deprecated as of v2.7; removed in v3.0):
+            type: kind,
+            at,
+          };
           // Control events always go to stdout as JSONL so consumers that
           // filter real events by presence of `payload` can skip them.
           if (isJsonMode()) {
