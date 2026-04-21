@@ -395,6 +395,14 @@ describe('devices command', () => {
       expect(lines[1]).toBe('ABC123\tLiving Lamp');
     });
 
+    it('--fields roomName resolves to the room column (API canonical alias)', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list', '--format', 'tsv', '--fields', 'roomName']);
+      const lines = res.stdout.join('\n').split('\n');
+      expect(lines[0]).toBe('room');
+      expect(lines).toContain('Living Room');
+    });
+
     it('--format=id outputs one deviceId per line', async () => {
       apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
       const res = await runCli(registerDevicesCommand, ['devices', 'list', '--format', 'id']);
@@ -516,6 +524,23 @@ describe('devices command', () => {
       const out = JSON.parse(res.stdout.join('\n'));
       expect(out.data.deviceList).toHaveLength(1);
       expect(out.data.deviceList[0].deviceId).toBe('ABC123');
+    });
+
+    it('--filter controlType=Bot filters by controlType', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list', '--filter', 'controlType=Bot', '--json']);
+      const out = JSON.parse(res.stdout.join('\n'));
+      expect(out.data.deviceList).toHaveLength(1);
+      expect(out.data.deviceList[0].deviceId).toBe('BLE-001');
+    });
+
+    it('--filter roomName=Living filters by roomName (API canonical name)', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list', '--filter', 'roomName=Living', '--json']);
+      const out = JSON.parse(res.stdout.join('\n'));
+      // ABC123 and NOHUB-1 both have roomName='Living Room'; BLE-001 has null
+      expect(out.data.deviceList).toHaveLength(2);
+      expect(out.data.deviceList.map((d: { deviceId: string }) => d.deviceId)).not.toContain('BLE-001');
     });
   });
 
@@ -1781,6 +1806,19 @@ describe('devices command', () => {
         infraredRemoteList: [],
       });
       const res = await runCmd('turnOn');
+      expect(res.exitCode).toBe(2);
+      expect(res.stderr.join('\n')).toMatch(/read-only sensor/i);
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
+    });
+
+    it('--allow-unknown-device does not bypass read-only rejection for cached devices', async () => {
+      updateCacheFromDeviceList({
+        deviceList: [
+          { deviceId: DID, deviceName: 'Bedroom Meter', deviceType: 'Meter' },
+        ],
+        infraredRemoteList: [],
+      });
+      const res = await runCmd('turnOn', '--allow-unknown-device');
       expect(res.exitCode).toBe(2);
       expect(res.stderr.join('\n')).toMatch(/read-only sensor/i);
       expect(apiMock.__instance.post).not.toHaveBeenCalled();

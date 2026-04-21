@@ -311,6 +311,23 @@ describe('mcp server', () => {
     expect(structured.wouldSend?.parameter).toBe('255:0:0');
   });
 
+  it('send_command normalizes command casing (e.g. turnon → turnOn)', async () => {
+    cacheMock.map.set('BOT1', { type: 'Bot', name: 'My Bot', category: 'physical' });
+    apiMock.__instance.post.mockResolvedValueOnce({
+      data: { statusCode: 100, body: {} },
+    });
+    const { client } = await pair();
+
+    const res = await client.callTool({
+      name: 'send_command',
+      arguments: { deviceId: 'BOT1', command: 'turnon' },
+    });
+
+    expect(res.isError).toBeFalsy();
+    const [, body] = apiMock.__instance.post.mock.calls[0];
+    expect(body).toMatchObject({ command: 'turnOn' });
+  });
+
   it('list_devices returns the raw API body and refreshes the cache', async () => {
     const body = { deviceList: [], infraredRemoteList: [] };
     apiMock.__instance.get.mockResolvedValueOnce({ data: { statusCode: 100, body } });
