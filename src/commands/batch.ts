@@ -153,7 +153,8 @@ export function registerBatchCommand(devices: Command): void {
     .option('--concurrency <n>', 'Max parallel in-flight requests (default 5)', intArg('--concurrency', { min: 1 }), '5')
     .option('--max-concurrent <n>', 'Alias for --concurrency; takes priority when set', intArg('--max-concurrent', { min: 1 }))
     .option('--stagger <ms>', 'Fixed delay between task starts in ms (default 0 = random 20-60ms jitter)', intArg('--stagger', { min: 0 }), '0')
-    .option('--plan', 'With --dry-run: emit a plan JSON document instead of executing anything')
+    .option('--plan', '[DEPRECATED, use --emit-plan] With --dry-run: emit a plan JSON document instead of executing anything')
+    .option('--emit-plan', 'With --dry-run: emit a plan JSON document instead of executing anything')
     .option('--yes', 'Allow destructive commands (Smart Lock unlock, garage open, ...)')
     .option('--type <commandType>', '"command" (default) or "customize" for user-defined IR buttons', enumArg('--type', COMMAND_TYPES), 'command')
     .option('--stdin', 'Read deviceIds from stdin, one per line (same as trailing "-")')
@@ -184,8 +185,9 @@ Concurrency & pacing:
   --stagger <ms>         Fixed delay between task starts; default 0 uses random 20-60ms jitter.
 
 Planning:
-  --dry-run --plan       Print the plan JSON without executing anything. Useful
+  --dry-run --emit-plan  Print the plan JSON without executing anything. Useful
                          for agents that want to show the user what will run.
+                         (--plan is the deprecated alias, removed in v3.0.)
 
 Safety:
   Destructive commands (Smart Lock unlock, Garage Door Opener turnOn/turnOff,
@@ -210,6 +212,7 @@ Examples:
           maxConcurrent?: string;
           stagger: string;
           plan?: boolean;
+          emitPlan?: boolean;
           yes?: boolean;
           type: string;
           stdin?: boolean;
@@ -222,6 +225,17 @@ Examples:
         // Trailing "-" sentinel selects stdin mode.
         const extra = commandObj.args ?? [];
         const readStdin = Boolean(options.stdin) || extra.includes('-');
+        // P12: --plan is deprecated in favor of --emit-plan. Reject both
+        // together (conflicting) and warn when only the old flag is used.
+        if (options.plan && options.emitPlan) {
+          handleError(new UsageError('Use --emit-plan; --plan is deprecated and cannot be combined with --emit-plan.'));
+          return;
+        }
+        if (options.plan && !options.emitPlan) {
+          // Warning goes to stderr so it cannot corrupt --json output on stdout.
+          console.error('[WARN] --plan is deprecated; use --emit-plan. Will be removed in v3.0.');
+        }
+        const emitPlan = Boolean(options.emitPlan || options.plan);
         // Accept --idempotency-key as alias; reject when both forms are supplied.
         if (options.idempotencyKey !== undefined && options.idempotencyKeyPrefix !== undefined) {
           handleError(new UsageError('Use either --idempotency-key or --idempotency-key-prefix, not both.'));
@@ -321,8 +335,8 @@ Examples:
         const staggerMs = Math.max(0, Number.parseInt(options.stagger, 10) || 0);
         const dryRun = isDryRun();
 
-        // --dry-run --plan: emit a plan document and return without executing.
-        if (dryRun && options.plan) {
+        // --dry-run --emit-plan (or legacy --plan): emit a plan document and return without executing.
+        if (dryRun && emitPlan) {
           const steps = resolved.ids.map((id) => ({
             deviceId: id,
             command: cmd,

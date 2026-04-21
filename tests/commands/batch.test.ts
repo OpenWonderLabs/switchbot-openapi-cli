@@ -405,6 +405,70 @@ describe('devices batch', () => {
     expect(parsed.data.plan.steps.map((s: { deviceId: string }) => s.deviceId).sort()).toEqual(['BOT1', 'BOT2']);
   });
 
+  it('P12: --dry-run --emit-plan emits the same plan doc as the legacy --plan', async () => {
+    flagsMock.dryRun = true;
+    apiMock.__instance.get.mockResolvedValue({ data: { statusCode: 100, body: DEVICE_LIST_BODY } });
+
+    const result = await runCli(registerDevicesCommand, [
+      '--json',
+      'devices',
+      'batch',
+      'turnOn',
+      '--filter',
+      'type=Bot',
+      '--emit-plan',
+    ]);
+
+    expect(result.exitCode).toBeNull();
+    expect(apiMock.__instance.post).not.toHaveBeenCalled();
+    const parsed = JSON.parse(result.stdout[0]);
+    expect(parsed.data.plan.command).toBe('turnOn');
+    expect(parsed.data.plan.stepCount).toBe(2);
+    // --emit-plan must not trigger the deprecation warning.
+    expect(result.stderr.join('\n')).not.toMatch(/deprecated/i);
+  });
+
+  it('P12: legacy --plan still works but emits a deprecation warning on stderr', async () => {
+    flagsMock.dryRun = true;
+    apiMock.__instance.get.mockResolvedValue({ data: { statusCode: 100, body: DEVICE_LIST_BODY } });
+
+    const result = await runCli(registerDevicesCommand, [
+      '--json',
+      'devices',
+      'batch',
+      'turnOn',
+      '--filter',
+      'type=Bot',
+      '--plan',
+    ]);
+
+    expect(result.exitCode).toBeNull();
+    // Plan JSON still emitted on stdout (contract unchanged).
+    const parsed = JSON.parse(result.stdout[0]);
+    expect(parsed.data.plan.command).toBe('turnOn');
+    // Deprecation warning lands on stderr, not stdout.
+    expect(result.stderr.join('\n')).toMatch(/--plan is deprecated/);
+    expect(result.stderr.join('\n')).toMatch(/--emit-plan/);
+  });
+
+  it('P12: supplying both --plan and --emit-plan is a usage error', async () => {
+    flagsMock.dryRun = true;
+    apiMock.__instance.get.mockResolvedValue({ data: { statusCode: 100, body: DEVICE_LIST_BODY } });
+
+    const result = await runCli(registerDevicesCommand, [
+      'devices',
+      'batch',
+      'turnOn',
+      '--filter',
+      'type=Bot',
+      '--plan',
+      '--emit-plan',
+    ]);
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr.join('\n')).toMatch(/--plan is deprecated.*cannot be combined|--emit-plan/i);
+  });
+
   it('--idempotency-key alias sets the same prefix as --idempotency-key-prefix', async () => {
     flagsMock.dryRun = true;
     apiMock.__instance.get.mockResolvedValue({ data: { statusCode: 100, body: DEVICE_LIST_BODY } });
