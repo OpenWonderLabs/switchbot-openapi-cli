@@ -34,6 +34,32 @@ export function emitJsonError(errorPayload: Record<string, unknown>): void {
   }
 }
 
+interface ExitWithErrorOptions {
+  message: string;
+  kind?: 'usage' | 'guard' | 'runtime';
+  code?: number;
+  hint?: string;
+  context?: Record<string, unknown>;
+  extra?: Record<string, unknown>;
+}
+
+export function exitWithError(messageOrOpts: string | ExitWithErrorOptions): never {
+  const opts: ExitWithErrorOptions =
+    typeof messageOrOpts === 'string' ? { message: messageOrOpts } : messageOrOpts;
+  const { message, kind = 'usage', code = 2, hint, context, extra } = opts;
+  if (isJsonMode()) {
+    const payload: Record<string, unknown> = { code, kind, message };
+    if (hint) payload.hint = hint;
+    if (context) payload.context = context;
+    if (extra) Object.assign(payload, extra);
+    emitJsonError(payload);
+  } else {
+    console.error(message);
+    if (hint) console.error(hint);
+  }
+  process.exit(code);
+}
+
 function escapeMarkdownCell(s: string): string {
   // Pipes break markdown table layout; backslash-escape them. Collapse
   // newlines into <br> so each row stays on one line.

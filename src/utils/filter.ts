@@ -20,6 +20,11 @@ export interface FilterClause {
   regex?: RegExp;
 }
 
+export interface ParseFilterOptions {
+  resolveKey?: (key: string) => string;
+  supportedKeys?: readonly string[];
+}
+
 export class FilterSyntaxError extends Error {
   constructor(message: string) {
     super(message);
@@ -46,6 +51,7 @@ export class FilterSyntaxError extends Error {
 export function parseFilterExpr(
   expr: string | undefined,
   allowedKeys: readonly string[],
+  options?: ParseFilterOptions,
 ): FilterClause[] {
   if (!expr) return [];
   const parts = expr.split(',').map((p) => p.trim()).filter((p) => p.length > 0);
@@ -102,13 +108,26 @@ export function parseFilterExpr(
     if (!raw) {
       throw new FilterSyntaxError(`Empty value for filter clause "${part}"`);
     }
-    if (!allowedKeys.includes(key)) {
+    let resolvedKey = key;
+    if (options?.resolveKey) {
+      try {
+        resolvedKey = options.resolveKey(key);
+      } catch (err) {
+        if (err instanceof Error) {
+          throw new FilterSyntaxError(err.message);
+        }
+        throw err;
+      }
+    }
+
+    if (!allowedKeys.includes(resolvedKey)) {
+      const printableKeys = options?.supportedKeys ?? allowedKeys;
       throw new FilterSyntaxError(
-        `Unknown filter key "${key}" — supported: ${allowedKeys.join(', ')}`,
+        `Unknown filter key "${key}" – supported: ${printableKeys.join(', ')}`,
       );
     }
 
-    clauses.push({ key, op, raw, regex });
+    clauses.push({ key: resolvedKey, op, raw, regex });
   }
 
   return clauses;

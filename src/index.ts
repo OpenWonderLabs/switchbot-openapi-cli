@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import chalk from 'chalk';
 import { intArg, stringArg, enumArg } from './utils/arg-parsers.js';
 import { parseDurationToMs } from './utils/flags.js';
+import { emitJsonError, isJsonMode } from './utils/output.js';
 import { registerConfigCommand } from './commands/config.js';
 import { registerDevicesCommand } from './commands/devices.js';
 import { registerScenesCommand } from './commands/scenes.js';
@@ -31,6 +32,11 @@ if (process.argv.includes('--no-color') || Boolean(process.env.NO_COLOR)) {
 }
 
 const program = new Command();
+if (isJsonMode()) {
+  // In --json mode, commander writes plain-text usage errors by default.
+  // Silence that channel and emit a single structured error in the catch block.
+  program.configureOutput({ writeErr: () => {} });
+}
 
 // Top-level subcommand names. Used by stringArg to produce clearer errors when
 // a value is omitted and the next argv token turns out to be a subcommand name.
@@ -141,10 +147,7 @@ Docs: https://github.com/OpenWonderLabs/SwitchBotAPI
 // per-command: subcommand errors won't bubble to the root override, so walk
 // every registered command and apply the same handler.
 const usageExitHandler = (err: CommanderError): never => {
-  if (err.code === 'commander.helpDisplayed' || err.code === 'commander.version') {
-    process.exit(0);
-  }
-  process.exit(2);
+  throw err;
 };
 
 function applyExitOverride(cmd: Command): void {
@@ -170,6 +173,9 @@ try {
   if (err instanceof CommanderError) {
     if (err.code === 'commander.helpDisplayed' || err.code === 'commander.version') {
       process.exit(0);
+    }
+    if (isJsonMode()) {
+      emitJsonError({ code: 2, kind: 'usage', message: err.message });
     }
     process.exit(2);
   }

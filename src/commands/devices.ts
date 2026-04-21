@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { enumArg, stringArg } from '../utils/arg-parsers.js';
-import { printTable, printKeyValue, printJson, isJsonMode, handleError, UsageError, StructuredUsageError, emitJsonError } from '../utils/output.js';
+import { printTable, printKeyValue, printJson, isJsonMode, handleError, UsageError, StructuredUsageError, emitJsonError, exitWithError } from '../utils/output.js';
 import { resolveFormat, resolveFields, renderRows } from '../utils/format.js';
 import { findCatalogEntry, getEffectiveCatalog, DeviceCatalogEntry } from '../devices/catalog.js';
 import { getCachedDevice, loadCache } from '../devices/cache.js';
@@ -27,6 +27,15 @@ import { registerExpandCommand } from './expand.js';
 import { registerDevicesMetaCommand } from './device-meta.js';
 import { isDryRun } from '../utils/flags.js';
 import { DryRunSignal } from '../api/client.js';
+import { resolveField, listSupportedFieldInputs } from '../schema/field-aliases.js';
+
+const EXPAND_HINTS: Record<string, { command: string; flags: string }> = {
+  'Air Conditioner':  { command: 'setAll',      flags: '--temp 26 --mode cool --fan low --power on' },
+  'Curtain':          { command: 'setPosition',  flags: '--position 50 --mode silent' },
+  'Curtain 3':        { command: 'setPosition',  flags: '--position 50' },
+  'Blind Tilt':       { command: 'setPosition',  flags: '--direction up --angle 50' },
+  'Relay Switch 2PM': { command: 'setMode',      flags: '--channel 1 --mode edge' },
+};
 
 export function registerDevicesCommand(program: Command): void {
   const COMMAND_TYPES = ['command', 'customize'] as const;
@@ -94,7 +103,7 @@ Examples:
 `)
     .option('--wide', 'Show all columns (controlType, family, roomID, room, hub, cloud)')
     .option('--show-hidden', 'Include devices hidden via "devices meta set --hide"')
-    .option('--filter <expr>', 'Filter devices: comma-separated clauses. Each clause is "key=value" (substring; exact for category), "key!=value" (negated substring), "key~value" (explicit substring), or "key=/regex/" (case-insensitive regex). Supported keys: type, name, category, room.', stringArg('--filter'))
+    .option('--filter <expr>', 'Filter devices: comma-separated clauses. Each clause is "key=value" (substring; exact for category), "key!=value" (negated substring), "key~value" (explicit substring), or "key=/regex/" (case-insensitive regex). Supported keys: deviceId/id, deviceName/name, deviceType/type, controlType, roomName/room, category.', stringArg('--filter'))
     .action(async (options: { wide?: boolean; showHidden?: boolean; filter?: string }) => {
       try {
         const body = await fetchDeviceList();
@@ -106,18 +115,33 @@ Examples:
 
         // Parse --filter into a list of clauses. Shared grammar across
         // `devices list`, `devices batch`, and `events tail` / `mqtt-tail`.
-        const LIST_KEYS = ['type', 'name', 'category', 'room'] as const;
+        const LIST_KEYS = ['deviceId', 'type', 'name', 'category', 'room', 'controlType'] as const;
+        const LIST_FILTER_CANONICAL = ['deviceId', 'deviceName', 'deviceType', 'controlType', 'roomName', 'category'] as const;
+        const LIST_FILTER_TO_RUNTIME: Record<string, (typeof LIST_KEYS)[number]> = {
+          deviceId: 'deviceId',
+          deviceName: 'name',
+          deviceType: 'type',
+          controlType: 'controlType',
+          roomName: 'room',
+          category: 'category',
+        };
         let listClauses: FilterClause[] | null = null;
         if (options.filter) {
           try {
-            listClauses = parseFilterExpr(options.filter, LIST_KEYS);
+            listClauses = parseFilterExpr(options.filter, LIST_KEYS, {
+              resolveKey: (input) => {
+                const canonical = resolveField(input, LIST_FILTER_CANONICAL);
+                return LIST_FILTER_TO_RUNTIME[canonical];
+              },
+              supportedKeys: listSupportedFieldInputs(LIST_FILTER_CANONICAL),
+            });
           } catch (err) {
             if (err instanceof FilterSyntaxError) throw new UsageError(err.message);
             throw err;
           }
         }
 
-        const matchesFilter = (entry: { type: string; name: string; category: 'physical' | 'ir'; room: string }) => {
+        const matchesFilter = (entry: { deviceId: string; type: string; name: string; category: 'physical' | 'ir'; room: string; controlType: string }) => {
           if (!listClauses || listClauses.length === 0) return true;
           for (const c of listClauses) {
             const fieldVal = (entry as Record<string, string>)[c.key] ?? '';
@@ -129,11 +153,11 @@ Examples:
         if (fmt === 'json' && process.argv.includes('--json')) {
           if (listClauses) {
             const filteredDeviceList = deviceList.filter((d) =>
-              matchesFilter({ type: d.deviceType || '', name: d.deviceName, category: 'physical', room: d.roomName || '' })
+              matchesFilter({ deviceId: d.deviceId, type: d.deviceType || '', name: d.deviceName, category: 'physical', room: d.roomName || '', controlType: d.controlType || '' })
             );
             const filteredIrList = infraredRemoteList.filter((d) => {
               const inherited = hubLocation.get(d.hubDeviceId);
-              return matchesFilter({ type: d.remoteType, name: d.deviceName, category: 'ir', room: inherited?.room || '' });
+              return matchesFilter({ deviceId: d.deviceId, type: d.remoteType, name: d.deviceName, category: 'ir', room: inherited?.room || '', controlType: d.controlType || '' });
             });
             printJson({ ok: true, deviceList: filteredDeviceList, infraredRemoteList: filteredIrList });
           } else {
@@ -150,7 +174,7 @@ Examples:
 
         for (const d of deviceList) {
           if (!options.showHidden && deviceMeta.devices[d.deviceId]?.hidden) continue;
-          if (!matchesFilter({ type: d.deviceType || '', name: d.deviceName, category: 'physical', room: d.roomName || '' })) continue;
+          if (!matchesFilter({ deviceId: d.deviceId, type: d.deviceType || '', name: d.deviceName, category: 'physical', room: d.roomName || '', controlType: d.controlType || '' })) continue;
           rows.push([
             d.deviceId,
             d.deviceName,
@@ -169,7 +193,7 @@ Examples:
         for (const d of infraredRemoteList) {
           if (!options.showHidden && deviceMeta.devices[d.deviceId]?.hidden) continue;
           const inherited = hubLocation.get(d.hubDeviceId);
-          if (!matchesFilter({ type: d.remoteType, name: d.deviceName, category: 'ir', room: inherited?.room || '' })) continue;
+          if (!matchesFilter({ deviceId: d.deviceId, type: d.remoteType, name: d.deviceName, category: 'ir', room: inherited?.room || '', controlType: d.controlType || '' })) continue;
           rows.push([
             d.deviceId,
             d.deviceName,
@@ -193,9 +217,19 @@ Examples:
         const defaultFields = options.wide ? undefined : narrowHeaders;
         // Accept API field names and short aliases alongside canonical column names
         const DEVICE_LIST_ALIASES: Record<string, string> = {
-          id: 'deviceId', name: 'deviceName', deviceType: 'type', type: 'type',
-          roomName: 'room', familyName: 'family',
-          hubDeviceId: 'hub', enableCloudService: 'cloud',
+          id: 'deviceId',
+          name: 'deviceName',
+          deviceType: 'type',
+          type: 'type',
+          roomName: 'room',
+          familyName: 'family',
+          hubDeviceId: 'hub',
+          enableCloudService: 'cloud',
+          controlType: 'controlType',
+          deviceName: 'deviceName',
+          deviceId: 'deviceId',
+          category: 'category',
+          alias: 'alias',
         };
         renderRows(wideHeaders, rows, fmt, userFields ?? defaultFields, DEVICE_LIST_ALIASES);
         if (fmt === 'table') {
@@ -439,90 +473,71 @@ Examples:
           }
         }
         const validation = validateCommand(deviceId, cmd, parameter, options.type);
-      if (!validation.ok) {
-        const err = validation.error;
-        if (isJsonMode()) {
-          const obj: Record<string, unknown> = { code: 2, kind: 'usage', message: err.message };
-          if (err.hint) obj.hint = err.hint;
-          obj.context = { validationKind: err.kind };
-          emitJsonError(obj);
-        } else {
-          console.error(`Error: ${err.message}`);
-          if (err.hint) console.error(err.hint);
-          if (err.kind === 'unknown-command') {
-            const cached = getCachedDevice(deviceId);
-            if (cached) {
-              console.error(
-                `Run 'switchbot devices commands ${JSON.stringify(cached.type)}' for parameter formats and descriptions.`
-              );
-              console.error(
-                `(If the catalog is out of date, run 'switchbot devices list' to refresh the local cache, or pass --type customize for custom IR buttons.)`
-              );
-            }
-          }
-        }
-        process.exit(2);
-      }
-
-      // Case-only mismatch: emit a warning and continue with the canonical name.
-      if (validation.caseNormalizedFrom && validation.normalized) {
-        console.error(
-          `Note: '${validation.caseNormalizedFrom}' normalized to '${validation.normalized}' (case mismatch). Use exact casing to silence this warning.`
-        );
-        cmd = validation.normalized;
-      } else if (validation.normalized) {
-        cmd = validation.normalized;
-      }
-
-      // Raw-parameter validation (runs for known (deviceType, command) pairs only).
-      const cachedForParam = getCachedDevice(deviceId);
-      if (cachedForParam && options.type === 'command' && !options.skipParamValidation) {
-        const paramCheck = validateParameter(cachedForParam.type, cmd, parameter);
-        if (!paramCheck.ok) {
+        if (!validation.ok) {
+          const err = validation.error;
           if (isJsonMode()) {
-            emitJsonError({
-              code: 2,
-              kind: 'usage',
-              message: paramCheck.error,
-              context: { command: cmd, deviceType: cachedForParam.type, deviceId, humanHint: paramCheck.error },
-            });
+            const obj: Record<string, unknown> = { code: 2, kind: 'usage', message: err.message };
+            if (err.hint) obj.hint = err.hint;
+            obj.context = { validationKind: err.kind };
+            emitJsonError(obj);
           } else {
-            console.error(`Error: ${paramCheck.error}`);
+            console.error(`Error: ${err.message}`);
+            if (err.hint) console.error(err.hint);
+            if (err.kind === 'unknown-command') {
+              const cached = getCachedDevice(deviceId);
+              if (cached) {
+                console.error(
+                  `Run 'switchbot devices commands ${JSON.stringify(cached.type)}' for parameter formats and descriptions.`
+                );
+                console.error(
+                  `(If the catalog is out of date, run 'switchbot devices list' to refresh the local cache, or pass --type customize for custom IR buttons.)`
+                );
+              }
+            }
           }
           process.exit(2);
         }
-        if (paramCheck.normalized !== undefined) parameter = paramCheck.normalized;
-      }
 
-      const cachedForGuard = getCachedDevice(deviceId);
-      if (
-        !options.yes &&
-        !isDryRun() &&
-        isDestructiveCommand(cachedForGuard?.type, cmd, options.type)
-      ) {
-        const typeLabel = cachedForGuard?.type ?? 'unknown';
-        const reason = getDestructiveReason(cachedForGuard?.type, cmd, options.type);
-        if (isJsonMode()) {
-          emitJsonError({
-            code: 2,
+        // Case-only mismatch: emit a warning and continue with the canonical name.
+        if (validation.caseNormalizedFrom && validation.normalized) {
+          console.error(
+            `Note: '${validation.caseNormalizedFrom}' normalized to '${validation.normalized}' (case mismatch). Use exact casing to silence this warning.`
+          );
+          cmd = validation.normalized;
+        } else if (validation.normalized) {
+          cmd = validation.normalized;
+        }
+
+        // Raw-parameter validation (runs for known (deviceType, command) pairs only).
+        const cachedForParam = getCachedDevice(deviceId);
+        if (cachedForParam && options.type === 'command' && !options.skipParamValidation) {
+          const paramCheck = validateParameter(cachedForParam.type, cmd, parameter);
+          if (!paramCheck.ok) {
+            exitWithError({
+              message: `Error: ${paramCheck.error}`,
+              context: { command: cmd, deviceType: cachedForParam.type, deviceId, humanHint: paramCheck.error },
+            });
+          }
+          if (paramCheck.normalized !== undefined) parameter = paramCheck.normalized;
+        }
+
+        const cachedForGuard = getCachedDevice(deviceId);
+        if (
+          !options.yes &&
+          !isDryRun() &&
+          isDestructiveCommand(cachedForGuard?.type, cmd, options.type)
+        ) {
+          const typeLabel = cachedForGuard?.type ?? 'unknown';
+          const reason = getDestructiveReason(cachedForGuard?.type, cmd, options.type);
+          exitWithError({
             kind: 'guard',
-            message: `"${cmd}" on ${typeLabel} is destructive and requires --yes.`,
+            message: `Refusing to run destructive command "${cmd}" on ${typeLabel} without --yes.`,
             hint: reason
               ? `Re-run with --yes to confirm. Reason: ${reason}`
               : 'Re-run with --yes to confirm, or --dry-run to preview without sending.',
             context: { command: cmd, deviceType: typeLabel, deviceId, ...(reason ? { destructiveReason: reason } : {}) },
           });
-        } else {
-          console.error(
-            `Refusing to run destructive command "${cmd}" on ${typeLabel} without --yes.`
-          );
-          if (reason) console.error(`Reason: ${reason}`);
-          console.error(
-            `Re-run with --yes to confirm, or --dry-run to preview without sending.`
-          );
         }
-        process.exit(2);
-      }
 
         // Warn when --yes is given but the command is not destructive (no-op flag)
         if (options.yes && !isDestructiveCommand(cachedForGuard?.type, cmd, options.type) && !isDryRun()) {
@@ -740,7 +755,8 @@ JSON output shape (--json):
       liveStatus: <status payload when --live was passed>
     },
     source: "catalog" | "live" | "catalog+live" | "none",
-    suggestedActions: [{command, parameter?, description}]
+    suggestedActions: [{command, parameter?, description}],
+    expandHint?: {command, flags, example}  // present when the type supports 'devices expand'
   }
 
 Examples:
@@ -761,6 +777,7 @@ Examples:
         const { device, isPhysical, typeName, controlType, catalog, capabilities, source, suggestedActions: picks } = result;
 
         if (isJsonMode()) {
+          const expandHint = catalog ? EXPAND_HINTS[catalog.type] : undefined;
           printJson({
             device,
             controlType,
@@ -768,6 +785,7 @@ Examples:
             capabilities,
             source,
             suggestedActions: picks,
+            ...(expandHint ? { expandHint: { command: expandHint.command, flags: expandHint.flags, example: `switchbot devices expand ${deviceId} ${expandHint.command} ${expandHint.flags}` } } : {}),
           });
           return;
         }
@@ -826,19 +844,12 @@ Examples:
       } catch (error) {
         if (error instanceof DeviceNotFoundError) {
           const message = `${error.message} Try 'switchbot devices list' to see the full list.`;
-          if (isJsonMode()) {
-            emitJsonError({
-              code: 1,
-              kind: 'runtime',
-              message,
-              errorClass: 'runtime',
-              transient: false,
-            });
-          } else {
-            console.error(error.message);
-            console.error(`Try 'switchbot devices list' to see the full list.`);
-          }
-          process.exit(1);
+          exitWithError({
+            code: 1,
+            kind: 'runtime',
+            message,
+            extra: { errorClass: 'runtime', transient: false },
+          });
         }
         handleError(error);
       }
@@ -895,5 +906,10 @@ function renderCatalogEntry(entry: DeviceCatalogEntry): void {
   if (entry.statusFields && entry.statusFields.length > 0) {
     console.log('\nStatus fields (from "devices status"):');
     console.log('  ' + entry.statusFields.join(', '));
+  }
+
+  const expandHint = EXPAND_HINTS[entry.type];
+  if (expandHint) {
+    console.log(`\nTip: Use 'devices expand <id> ${expandHint.command} ${expandHint.flags}' for semantic flags instead of raw parameters.`);
   }
 }

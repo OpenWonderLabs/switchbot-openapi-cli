@@ -179,6 +179,22 @@ describe('mcp server', () => {
     expect(apiMock.__instance.post).not.toHaveBeenCalled();
   });
 
+  it('send_command rejects read-only device commands before calling the API', async () => {
+    cacheMock.map.set('METER1', { type: 'Meter', name: 'Bedroom Meter', category: 'physical' });
+    const { client } = await pair();
+
+    const res = await client.callTool({
+      name: 'send_command',
+      arguments: { deviceId: 'METER1', command: 'turnOn' },
+    });
+
+    expect(res.isError).toBe(true);
+    const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    expect(parsed.error.kind).toBe('usage');
+    expect(parsed.error.context.validationKind).toBe('read-only-device');
+    expect(apiMock.__instance.post).not.toHaveBeenCalled();
+  });
+
   it('send_command sends non-destructive commands through without confirm', async () => {
     cacheMock.map.set('BULB1', { type: 'Color Bulb', name: 'Desk Lamp', category: 'physical' });
     apiMock.__instance.post.mockResolvedValueOnce({
@@ -293,6 +309,23 @@ describe('mcp server', () => {
     expect(res.isError).toBeFalsy();
     const structured = res.structuredContent as { wouldSend?: { parameter?: string } };
     expect(structured.wouldSend?.parameter).toBe('255:0:0');
+  });
+
+  it('send_command normalizes command casing (e.g. turnon → turnOn)', async () => {
+    cacheMock.map.set('BOT1', { type: 'Bot', name: 'My Bot', category: 'physical' });
+    apiMock.__instance.post.mockResolvedValueOnce({
+      data: { statusCode: 100, body: {} },
+    });
+    const { client } = await pair();
+
+    const res = await client.callTool({
+      name: 'send_command',
+      arguments: { deviceId: 'BOT1', command: 'turnon' },
+    });
+
+    expect(res.isError).toBeFalsy();
+    const [, body] = apiMock.__instance.post.mock.calls[0];
+    expect(body).toMatchObject({ command: 'turnOn' });
   });
 
   it('list_devices returns the raw API body and refreshes the cache', async () => {

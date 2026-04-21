@@ -76,7 +76,7 @@ export class DeviceNotFoundError extends Error {
 export class CommandValidationError extends Error {
   constructor(
     message: string,
-    public readonly kind: 'unknown-command' | 'unexpected-parameter' | 'missing-parameter',
+    public readonly kind: 'read-only-device' | 'unknown-command' | 'unexpected-parameter' | 'missing-parameter',
     public readonly hint?: string
   ) {
     super(message);
@@ -236,7 +236,16 @@ export function validateCommand(
   if (!match || Array.isArray(match)) return { ok: true };
 
   const builtinCommands = match.commands.filter((c) => c.commandType !== 'customize');
-  if (builtinCommands.length === 0) return { ok: true };
+  if (match.readOnly || builtinCommands.length === 0) {
+    return {
+      ok: false,
+      error: new CommandValidationError(
+        `${cached.name} (${cached.type}) is a read-only sensor — it has no control commands.`,
+        'read-only-device',
+        `Use 'switchbot devices status ${deviceId}' to read this device instead.`,
+      ),
+    };
+  }
 
   let spec = builtinCommands.find((c) => c.command === cmd);
   let caseNormalizedFrom: string | undefined;
