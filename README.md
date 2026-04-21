@@ -63,6 +63,7 @@ Under the hood every surface shares the same catalog, cache, and HMAC client —
 - [Scripting examples](#scripting-examples)
 - [Development](#development)
 - [Contributing](#contributing)
+- [Roadmap](#roadmap)
 - [License](#license)
 - [References](#references)
 
@@ -263,18 +264,18 @@ switchbot devices commands curtain      # Case-insensitive, substring match
 
 #### Filter expressions — per-command reference
 
-Three commands accept `--filter`. They share one three-operator grammar,
+Three commands accept `--filter`. They share one four-operator grammar,
 but each exposes its own key set:
 
 | Command                             | Operators                                                                                     | Supported keys                        |
 |-------------------------------------|-----------------------------------------------------------------------------------------------|---------------------------------------|
-| `devices list`                      | `=` (substring; **exact** for `category`), `~` (substring), `=/regex/` (case-insensitive regex) | `type`, `name`, `category`, `room`    |
+| `devices list`                      | `=` (substring; **exact** for `category`), `!=` (negated), `~` (substring), `=/regex/` (case-insensitive regex) | `type`, `name`, `category`, `room`    |
 | `devices batch`                     | same                                                                                          | `type`, `family`, `room`, `category`  |
 | `events tail` / `events mqtt-tail`  | same (tail only; mqtt-tail uses `--topic` instead)                                            | `deviceId`, `type`                    |
 
 Clauses are comma-separated and AND-ed. No OR across clauses — use regex
 alternation (`=/A|B/`) for that. `category` is the one key that stays exact
-under `=` to preserve `category=physical` / `category=ir` semantics.
+under `=` / `!=` to preserve `category=physical` / `category!=ir` semantics.
 
 #### Parameter formats
 
@@ -299,7 +300,9 @@ Generic parameter shapes (which one applies is decided by the device — see the
 | `<json object>`     | `'{"action":"sweep","param":{"fanLevel":2,"times":1}}'`  |
 | Custom IR button    | `devices command <id> MyButton --type customize`         |
 
-Parameters for `setAll` (Air Conditioner), `setPosition` (Curtain / Blind Tilt), and `setMode` (Relay Switch) are validated client-side before the request — malformed shapes, out-of-range values, and JSON for CSV fields all fail fast with exit 2. Command names are also case-normalized against the catalog (e.g. `turnon` is auto-corrected to `turnOn` with a stderr warning); unknown names still exit 2 with the supported-commands list.
+Parameters for `setAll` (Air Conditioner), `setPosition` (Curtain / Blind Tilt), `setMode` (Relay Switch), `setBrightness` (dimmable lights), and `setColor` (Color Bulb / Strip Light / Ceiling Light) are validated client-side before the request — malformed shapes, out-of-range values, and JSON for CSV fields all fail fast with exit 2. `setColor` accepts `R:G:B`, `R,G,B`, `#RRGGBB`, `#RGB`, and CSS named colors (`red`, `blue`, …); all normalize to `R:G:B` before hitting the API. Pass `--skip-param-validation` to bypass (escape hatch — prefer fixing the argument). Command names are also case-normalized against the catalog (e.g. `turnon` is auto-corrected to `turnOn` with a stderr warning); unknown names still exit 2 with the supported-commands list.
+
+Unknown deviceIds (not in the local cache) exit 2 by default so `--dry-run` is a reliable pre-flight gate. Run `switchbot devices list` first, or pass `--allow-unknown-device` for scripted pass-through.
 
 Negative numeric parameters (e.g. `setBrightness -1` for a probe) are passed through to the command validator instead of being swallowed by the flag parser as an unknown option.
 
@@ -325,7 +328,7 @@ switchbot devices expand <blindId> setPosition --direction up --angle 50
 switchbot devices expand <relayId> setMode --channel 1 --mode edge
 ```
 
-Run `switchbot devices expand <id> <command> --help` to see the available flags for any device command.
+Run `switchbot devices expand <id> <command> --help` to see the available flags for any device command. `expand` is only meaningful for multi-parameter commands (the four above); single-parameter commands like `setBrightness 50` or `setColor "#FF0000"` are already flag-free at the CLI level.
 
 #### `devices explain` — one-shot device summary
 
@@ -602,7 +605,9 @@ Reads the JSONL audit log (`~/.switchbot/audit.log` by default; override with `-
 
 ```bash
 switchbot catalog show              # all 42 built-in types
+switchbot catalog list              # alias for `show`
 switchbot catalog show Bot          # one type
+switchbot catalog search Hub        # fuzzy match across type / aliases / commands
 switchbot catalog diff              # what a local overlay changes vs built-in
 switchbot catalog path              # location of the local overlay file
 switchbot catalog refresh           # reload local overlay (clears in-process cache)
@@ -624,9 +629,10 @@ Exports the effective catalog in a machine-readable format. Pipe the output into
 
 ```bash
 switchbot capabilities --json
+switchbot capabilities --used --json   # only types seen in the local cache
 ```
 
-Prints a versioned JSON manifest describing available surfaces (CLI, MCP, MQTT, plan runner), commands, and environment variables. Designed for agents and tooling that need to discover the CLI's capabilities programmatically.
+Prints a versioned JSON manifest describing available surfaces (CLI, MCP, MQTT, plan runner), commands, and environment variables. Every subcommand leaf now carries a `{mutating, consumesQuota, idempotencySupported, agentSafetyTier, verifiability, typicalLatencyMs}` block, and the top-level payload publishes a flat `commandMeta` path-keyed lookup so agents don't have to walk the tree. `--used` filters the per-type summary to devices actually present in the local cache (same semantics as `schema export --used`).
 
 ### `cache` — inspect and clear local cache
 
@@ -821,6 +827,21 @@ Bug reports, feature requests, and PRs are welcome.
 2. Keep changes small and focused; add or update Vitest cases for any behavior change.
 3. Run `npm test` and `npm run build` locally — both must pass.
 4. Open a pull request against `main`. CI runs on Node 18/20/22; all three must stay green.
+
+## Roadmap
+
+Tracked for a future v3.x line (OpenClaw B-17 / B-18 / B-19 / B-21) — each is a
+standalone track rather than a bug fix:
+
+- **Daemon mode** — long-running local process with a Unix/named-pipe socket so
+  repeated MCP or plan invocations don't pay fresh-process startup every call.
+- **`npx @switchbot/mcp-server`** — split the MCP server into its own tiny
+  published package so non-CLI users can `npx` it directly without installing
+  the full CLI.
+- **`switchbot self-test`** — scripted end-to-end harness that checks a live
+  token + a representative device and prints a go/no-go report.
+- **Record / replay** — capture raw request/response pairs into a fixture file
+  and replay them offline for deterministic testing and CI.
 
 ## License
 
