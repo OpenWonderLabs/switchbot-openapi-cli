@@ -742,16 +742,69 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
       _meta: { agentSafetyTier: 'read' },
       inputSchema: z
         .object({
-          deviceId: z.string().min(1),
-          since: z.string().optional(),
-          from: z.string().optional(),
-          to: z.string().optional(),
-          metrics: z.array(z.string().min(1)).min(1),
-          aggs: z.array(z.enum(ALL_AGG_FNS as unknown as [AggFn, ...AggFn[]])).optional(),
-          bucket: z.string().optional(),
-          maxBucketSamples: z.number().int().positive().max(MAX_SAMPLE_CAP).optional(),
+          deviceId: z.string().min(1).describe('Device ID to aggregate over (must exist in ~/.switchbot/device-history/).'),
+          since: z
+            .string()
+            .optional()
+            .describe('Relative window ending now, e.g. "30s", "15m", "1h", "7d". Mutually exclusive with from/to.'),
+          from: z.string().optional().describe('Range start (ISO-8601). Requires `to`.'),
+          to: z.string().optional().describe('Range end (ISO-8601). Requires `from`.'),
+          metrics: z
+            .array(z.string().min(1))
+            .min(1)
+            .describe('One or more numeric payload field names to aggregate (e.g. ["temperature","humidity"]).'),
+          aggs: z
+            .array(z.enum(ALL_AGG_FNS as unknown as [AggFn, ...AggFn[]]))
+            .optional()
+            .describe('Aggregation functions to apply per metric (default: ["count","avg"]).'),
+          bucket: z
+            .string()
+            .optional()
+            .describe('Bucket width like "5m", "1h", "1d". Omit for a single bucket spanning the full range.'),
+          maxBucketSamples: z
+            .number()
+            .int()
+            .positive()
+            .max(MAX_SAMPLE_CAP)
+            .optional()
+            .describe(`Sample cap per bucket to bound memory (default ${10_000}, max ${MAX_SAMPLE_CAP}). partial=true in the result when any bucket was capped.`),
         })
         .strict(),
+      outputSchema: {
+        deviceId: z.string(),
+        bucket: z.string().optional().describe('Bucket width echoed back when specified; omitted for single-bucket results.'),
+        from: z.string().describe('Effective range start (ISO-8601).'),
+        to: z.string().describe('Effective range end (ISO-8601).'),
+        metrics: z.array(z.string()).describe('Metrics that were requested.'),
+        aggs: z
+          .array(z.enum(ALL_AGG_FNS as unknown as [AggFn, ...AggFn[]]))
+          .describe('Aggregation functions that were applied.'),
+        buckets: z
+          .array(
+            z.object({
+              t: z.string().describe('Bucket start timestamp (ISO-8601).'),
+              metrics: z
+                .record(
+                  z.string(),
+                  z
+                    .object({
+                      count: z.number().optional(),
+                      min: z.number().optional(),
+                      max: z.number().optional(),
+                      avg: z.number().optional(),
+                      sum: z.number().optional(),
+                      p50: z.number().optional(),
+                      p95: z.number().optional(),
+                    })
+                    .describe('Per-aggregate function result for this metric in this bucket.'),
+                )
+                .describe('Per-metric result keyed by metric name.'),
+            }),
+          )
+          .describe('Time-ordered buckets; empty when no records match.'),
+        partial: z.boolean().describe('True if any bucket was sample-capped; retry with a higher maxBucketSamples or a narrower range for exact values.'),
+        notes: z.array(z.string()).describe('Human-readable notes about the aggregation (e.g. "metric X is non-numeric").'),
+      },
     },
     async (args) => {
       const opts: AggOptions = {
@@ -764,9 +817,20 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         maxBucketSamples: args.maxBucketSamples,
       };
       const res = await aggregateDeviceHistory(args.deviceId, opts);
+      const structured: Record<string, unknown> = {
+        deviceId: res.deviceId,
+        from: res.from,
+        to: res.to,
+        metrics: res.metrics,
+        aggs: res.aggs,
+        buckets: res.buckets,
+        partial: res.partial,
+        notes: res.notes,
+      };
+      if (res.bucket !== undefined) structured.bucket = res.bucket;
       return {
         content: [{ type: 'text', text: JSON.stringify(res, null, 2) }],
-        structuredContent: res as unknown as Record<string, unknown>,
+        structuredContent: structured,
       };
     },
   );
