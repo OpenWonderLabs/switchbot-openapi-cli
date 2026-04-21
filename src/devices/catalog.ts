@@ -93,8 +93,102 @@ export interface DeviceCatalogEntry {
   aliases?: string[];
   commands: CommandSpec[];
   statusFields?: string[];
+  /**
+   * P11: strongly-typed read-only queries powering the 'read' safety tier.
+   * When omitted, deriveStatusQueries() produces equivalent entries from
+   * `statusFields`. Use this to override descriptions or attach examples.
+   */
+  statusQueries?: ReadOnlyQuerySpec[];
   role?: DeviceRole;
   readOnly?: boolean;
+}
+
+/**
+ * P11: a single read-only query against a device. `endpoint: 'status'` is
+ * the normal /devices/{id}/status call; 'keys' reads lock keypad entries;
+ * 'webhook' reads the server-side webhook event subscription. All three
+ * are safe to call at any time — they never mutate state.
+ */
+export interface ReadOnlyQuerySpec {
+  field: string;
+  description: string;
+  endpoint: 'status' | 'keys' | 'webhook';
+  safetyTier: 'read';
+  example?: unknown;
+}
+
+/**
+ * Human-readable descriptions for common status fields. Populated from
+ * the SwitchBot API v1.1 docs. Used by deriveStatusQueries() so every
+ * query has a meaningful description even when the entry itself only
+ * declares the field name.
+ */
+const STATUS_FIELD_DESCRIPTIONS: Record<string, string> = {
+  power: 'Power state (on/off)',
+  battery: 'Battery percentage (0-100)',
+  version: 'Firmware version string',
+  temperature: 'Ambient temperature (°C)',
+  humidity: 'Ambient humidity (% RH)',
+  CO2: 'CO2 concentration (ppm)',
+  brightness: 'Current brightness (0-100)',
+  color: 'Current RGB color (r:g:b)',
+  colorTemperature: 'Color temperature in Kelvin',
+  mode: 'Operating mode',
+  deviceMode: 'Hardware mode (Bot-specific)',
+  lockState: 'Lock state (locked/unlocked)',
+  doorState: 'Door contact state (open/closed)',
+  calibrate: 'Calibration status',
+  moving: 'Motion in progress (boolean)',
+  slidePosition: 'Slide position (0-100)',
+  group: 'Multi-device group membership',
+  direction: 'Tilt direction',
+  voltage: 'Line voltage',
+  electricCurrent: 'Instantaneous current draw',
+  electricityOfDay: 'kWh consumed today',
+  usedElectricity: 'Cumulative kWh',
+  useTime: 'Total runtime (seconds)',
+  weight: 'Load / weight reading',
+  switchStatus: 'Relay state (integer encoded)',
+  switch1Status: 'Channel 1 relay state',
+  switch2Status: 'Channel 2 relay state',
+  workingStatus: 'Device working status (vacuum/purifier)',
+  onlineStatus: 'Online / offline (string)',
+  online: 'Online / offline (boolean or int)',
+  taskType: 'Current task identifier',
+  nightStatus: 'Night-mode status',
+  oscillation: 'Horizontal oscillation on/off',
+  verticalOscillation: 'Vertical oscillation on/off',
+  chargingStatus: 'Charging (boolean)',
+  fanSpeed: 'Current fan speed level',
+  nebulizationEfficiency: 'Humidifier mist level',
+  childLock: 'Child-lock engaged',
+  sound: 'Beep / audio feedback enabled',
+  lackWater: 'Water tank low (boolean)',
+  filterElement: 'Filter life remaining',
+  auto: 'Auto mode enabled',
+  targetTemperature: 'Thermostat target temperature',
+  moveDetected: 'Motion detected (boolean)',
+  openState: 'Contact sensor open/closed',
+  status: 'Device-specific status word',
+  lightLevel: 'Ambient light level',
+};
+
+/**
+ * P11: derive the read-only query list for an entry. If the entry has
+ * explicit `statusQueries`, return them as-is; otherwise synthesize one
+ * ReadOnlyQuerySpec per `statusFields` entry, all keyed to the `status`
+ * endpoint. IR-category entries have no status channel so return [].
+ */
+export function deriveStatusQueries(entry: DeviceCatalogEntry): ReadOnlyQuerySpec[] {
+  if (entry.statusQueries && entry.statusQueries.length > 0) return entry.statusQueries;
+  if (entry.category === 'ir') return [];
+  const fields = entry.statusFields ?? [];
+  return fields.map((f) => ({
+    field: f,
+    description: STATUS_FIELD_DESCRIPTIONS[f] ?? `${f} (see API docs)`,
+    endpoint: 'status',
+    safetyTier: 'read',
+  }));
 }
 
 // ---- Command fragments (reused across entries) -------------------------

@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import {
   getEffectiveCatalog,
   deriveSafetyTier,
+  deriveStatusQueries,
   type DeviceCatalogEntry,
   type SafetyTier,
 } from '../devices/catalog.js';
@@ -16,8 +17,17 @@ function collectSafetyTiersInUse(entries: DeviceCatalogEntry[]): SafetyTier[] {
     for (const c of e.commands) {
       seen.add(deriveSafetyTier(c, e));
     }
+    // P11: statusQueries contribute the 'read' tier.
+    if (deriveStatusQueries(e).length > 0) {
+      seen.add('read');
+    }
   }
   return [...seen].sort();
+}
+
+/** P11: total number of read-only queries exposed across the catalog. */
+function countStatusQueries(entries: DeviceCatalogEntry[]): number {
+  return entries.reduce((n, e) => n + deriveStatusQueries(e).length, 0);
 }
 
 export type AgentSafetyTier = 'read' | 'action' | 'destructive';
@@ -308,6 +318,7 @@ export function registerCapabilitiesCommand(program: Command): void {
           ),
           safetyTiersInUse: collectSafetyTiersInUse(catalog),
           readOnlyTypeCount: catalog.filter((e) => e.readOnly).length,
+          readOnlyQueryCount: countStatusQueries(catalog),
         },
       };
       if (!compact) payload.generatedAt = new Date().toISOString();
@@ -337,6 +348,7 @@ export function registerCapabilitiesCommand(program: Command): void {
             ),
             safetyTiersInUse: collectSafetyTiersInUse(filteredCatalog),
             readOnlyTypeCount: filteredCatalog.filter((e) => e.readOnly).length,
+            readOnlyQueryCount: countStatusQueries(filteredCatalog),
           };
           payload.usedFilter = { applied: true, typesInCache: [...seen].sort() };
         }

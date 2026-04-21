@@ -125,6 +125,13 @@ describe('capabilities', () => {
     expect(cat.typeCount as number).toBeGreaterThan(10);
   });
 
+  it('P11: catalog.safetyTiersInUse includes "read" and catalog.readOnlyQueryCount > 0', async () => {
+    const out = await runCapabilities();
+    const cat = out.catalog as Record<string, unknown>;
+    expect((cat.safetyTiersInUse as string[])).toContain('read');
+    expect((cat.readOnlyQueryCount as number)).toBeGreaterThan(0);
+  });
+
   it('surfaces.mcp.tools includes send_command, account_overview, get_device_history and query_device_history', async () => {
     const out = await runCapabilities();
     const mcp = (out.surfaces as Record<string, { tools: string[]; resources: string[] }>).mcp;

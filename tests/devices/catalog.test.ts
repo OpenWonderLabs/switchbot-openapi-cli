@@ -428,4 +428,44 @@ describe('catalog overlay', () => {
     getEffectiveCatalog(); // force overlay application
     expect(builtin.find((e) => e.type === 'Bot')).toBeDefined();
   });
+
+  // ---------------------------------------------------------------------
+  // P11: ReadOnlyQuerySpec / deriveStatusQueries
+  // ---------------------------------------------------------------------
+  describe('P11: read-tier statusQueries', () => {
+    it('deriveStatusQueries returns one spec per statusFields entry for physical devices', async () => {
+      const { deriveStatusQueries, DEVICE_CATALOG: cat } = await import('../../src/devices/catalog.js');
+      const bot = cat.find((e) => e.type === 'Bot')!;
+      const queries = deriveStatusQueries(bot);
+      expect(queries.length).toBe(bot.statusFields!.length);
+      for (const q of queries) {
+        expect(q.safetyTier).toBe('read');
+        expect(q.endpoint).toBe('status');
+        expect(typeof q.description).toBe('string');
+      }
+    });
+
+    it('deriveStatusQueries returns [] for IR category entries', async () => {
+      const { deriveStatusQueries, DEVICE_CATALOG: cat } = await import('../../src/devices/catalog.js');
+      const tv = cat.find((e) => e.type === 'TV')!;
+      expect(deriveStatusQueries(tv)).toEqual([]);
+    });
+
+    it('deriveStatusQueries returns [] for entries without statusFields', async () => {
+      const { deriveStatusQueries } = await import('../../src/devices/catalog.js');
+      // Synthetic minimal entry.
+      const synthetic = { type: 'X', category: 'physical' as const, commands: [] };
+      expect(deriveStatusQueries(synthetic)).toEqual([]);
+    });
+
+    it('every physical entry with statusFields produces at least one read query', async () => {
+      const { deriveStatusQueries, DEVICE_CATALOG: cat } = await import('../../src/devices/catalog.js');
+      for (const entry of cat) {
+        if (entry.category !== 'physical' || !entry.statusFields?.length) continue;
+        const qs = deriveStatusQueries(entry);
+        expect(qs.length).toBeGreaterThan(0);
+        for (const q of qs) expect(q.safetyTier).toBe('read');
+      }
+    });
+  });
 });
