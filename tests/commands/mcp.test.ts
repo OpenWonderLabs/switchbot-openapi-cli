@@ -231,6 +231,70 @@ describe('mcp server', () => {
     expect(structured.wouldSend?.command).toBe('turnOff');
   });
 
+  it('send_command rejects out-of-range setBrightness in dry-run (R-2, 2.6.1)', async () => {
+    cacheMock.map.set('BULB1', { type: 'Color Bulb', name: 'Desk Lamp', category: 'physical' });
+    const { client } = await pair();
+
+    const res = await client.callTool({
+      name: 'send_command',
+      arguments: { deviceId: 'BULB1', command: 'setBrightness', parameter: '101', dryRun: true },
+    });
+
+    expect(res.isError).toBe(true);
+    const structured = res.structuredContent as { error?: { kind?: string; message?: string } };
+    expect(structured.error?.kind).toBe('usage');
+    expect(structured.error?.message).toMatch(/setBrightness.*1-100/);
+    expect(apiMock.__instance.post).not.toHaveBeenCalled();
+  });
+
+  it('send_command rejects out-of-range setBrightness live-path (R-2, 2.6.1)', async () => {
+    cacheMock.map.set('BULB1', { type: 'Color Bulb', name: 'Desk Lamp', category: 'physical' });
+    const { client } = await pair();
+
+    const res = await client.callTool({
+      name: 'send_command',
+      arguments: { deviceId: 'BULB1', command: 'setBrightness', parameter: '0' },
+    });
+
+    expect(res.isError).toBe(true);
+    const structured = res.structuredContent as { error?: { kind?: string; message?: string } };
+    expect(structured.error?.kind).toBe('usage');
+    expect(structured.error?.message).toMatch(/setBrightness.*1-100/);
+    expect(apiMock.__instance.post).not.toHaveBeenCalled();
+  });
+
+  it('send_command normalizes setColor hex to R:G:B before dispatch (R-2, 2.6.1)', async () => {
+    cacheMock.map.set('BULB1', { type: 'Color Bulb', name: 'Desk Lamp', category: 'physical' });
+    apiMock.__instance.post.mockResolvedValueOnce({
+      data: { statusCode: 100, body: {} },
+    });
+    const { client } = await pair();
+
+    const res = await client.callTool({
+      name: 'send_command',
+      arguments: { deviceId: 'BULB1', command: 'setColor', parameter: '#FF0000' },
+    });
+
+    expect(res.isError).toBeFalsy();
+    expect(apiMock.__instance.post).toHaveBeenCalledTimes(1);
+    const [, body] = apiMock.__instance.post.mock.calls[0];
+    expect(body).toMatchObject({ command: 'setColor', parameter: '255:0:0' });
+  });
+
+  it('send_command dry-run surfaces normalized setColor parameter (R-2, 2.6.1)', async () => {
+    cacheMock.map.set('BULB1', { type: 'Color Bulb', name: 'Desk Lamp', category: 'physical' });
+    const { client } = await pair();
+
+    const res = await client.callTool({
+      name: 'send_command',
+      arguments: { deviceId: 'BULB1', command: 'setColor', parameter: 'red', dryRun: true },
+    });
+
+    expect(res.isError).toBeFalsy();
+    const structured = res.structuredContent as { wouldSend?: { parameter?: string } };
+    expect(structured.wouldSend?.parameter).toBe('255:0:0');
+  });
+
   it('list_devices returns the raw API body and refreshes the cache', async () => {
     const body = { deviceList: [], infraredRemoteList: [] };
     apiMock.__instance.get.mockResolvedValueOnce({ data: { statusCode: 100, body } });

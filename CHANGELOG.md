@@ -5,6 +5,59 @@ All notable changes to `@switchbot/openapi-cli` are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.1] - 2026-04-21
+
+Follow-up to v2.6.0 from the OpenClaw re-audit. Three real findings
+(R-2, R-3, R-4) plus a repo-wide English-only chore; R-1 rejected with
+reason.
+
+### Fixed
+
+- **MCP `send_command` now runs the same client-side parameter validator
+  as the CLI** (`setBrightness`, `setColor`, AC `setAll`, Curtain /
+  Blind Tilt `setPosition`, Relay `setMode`). Out-of-range values fail
+  with `isError:true` and `usage` class before the API is called, in
+  both the `dryRun:true` and live paths. `setColor` hex / named-colour /
+  comma forms are normalised to the `R:G:B` wire format before
+  dispatch, and the dry-run `wouldSend.parameter` reflects the
+  normalised value. (R-2)
+
+### Documentation
+
+- **`--filter` empty-value rejection** is now called out in the README.
+  A clause like `name~` or `type=` with an empty RHS exits `2` — the
+  parser refuses to guess between "no constraint" and "match empty
+  string". Drop the clause outright to remove the constraint. (R-4)
+
+### Tests
+
+- Added coverage locking in plaintext `scenes describe <unknown>`
+  rendering of `Did you mean: <name> (<id>), …?` when candidates are
+  present (and suppressing it when the scene list is empty). The
+  behaviour already worked in v2.6.0; the re-audit's counter-example
+  was a 0-scene account. (R-3)
+
+### Chore
+
+- Stripped Chinese characters from README, source comments, help text,
+  and test fixtures in favour of neutral English examples
+  (`Living Room AC`, `family=home`, `alias=bedroom-lamp`, etc.).
+  The Chinese left in `tests/utils/string.test.ts` is intentional — it
+  exercises the CJK branch of `normalizeDeviceName` (`\u4e00-\u9fff`
+  in `src/utils/string.ts:20`), which is a supported product feature.
+
+### Rejected
+
+- **R-1 (MCP error envelope for Zod validation failures)** — rejected
+  by design. The MCP SDK wraps every tool handler error as
+  `CallToolResult.isError:true`; only `UrlElicitationRequired` escapes
+  as a JSON-RPC `error`. Faking a JSON-RPC error for Zod failures would
+  require forking or monkey-patching the SDK. The text payload already
+  carries `"MCP error -32602: …"`, so agents can still extract the
+  code from `content[0].text` if they need it.
+
+---
+
 ## [2.6.0] - 2026-04-21
 
 Addresses 14 findings from the OpenClaw v2.5.1 audit (B-1 … B-16, minus

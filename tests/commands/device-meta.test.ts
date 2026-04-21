@@ -40,7 +40,7 @@ describe('devices meta', () => {
 
   it('meta set creates alias entry', async () => {
     const res = await runCli(registerDevicesCommand, [
-      'devices', 'meta', 'set', 'LAMP-1', '--alias', '客厅灯',
+      'devices', 'meta', 'set', 'LAMP-1', '--alias', 'bedroom-lamp',
     ]);
     expect(res.exitCode).toBe(null);
     expect(res.stdout.join('\n')).toContain('LAMP-1');
