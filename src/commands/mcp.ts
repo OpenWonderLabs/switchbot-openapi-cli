@@ -380,12 +380,33 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
             effectiveParameter = pv.normalized;
           }
         }
-        const cmdVal = validateCommand(deviceId, command, stringifiedParam, effectiveType);
-        if (!cmdVal.ok) {
-          return mcpError('usage', 2, cmdVal.error.message, {
-            hint: cmdVal.error.hint,
-            context: { validationKind: cmdVal.error.kind },
-          });
+        // Bug #55: validateCommand is lenient by design (passes unknown device
+        // types, ambiguous catalog matches). For dry-run we need stricter
+        // checking — query the catalog directly and reject unknown commands
+        // when the catalog has a definitive match.
+        if (effectiveType !== 'customize') {
+          const catalogMatch = findCatalogEntry(cached.type);
+          if (catalogMatch && !Array.isArray(catalogMatch)) {
+            const builtinCmds = catalogMatch.commands.filter((c) => c.commandType !== 'customize');
+            if (builtinCmds.length > 0) {
+              const exactMatch = builtinCmds.find((c) => c.command === command);
+              const caseMatch = !exactMatch
+                ? builtinCmds.find((c) => c.command.toLowerCase() === command.toLowerCase())
+                : null;
+              if (!exactMatch && !caseMatch) {
+                const supported = [...new Set(builtinCmds.map((c) => c.command))].join(', ');
+                return mcpError('usage', 2, `"${command}" is not a supported command for ${cached.name} (${cached.type}).`, {
+                  hint: `Supported commands: ${supported}`,
+                  context: { validationKind: 'unknown-command', deviceType: cached.type, command },
+                });
+              }
+            } else if (catalogMatch.readOnly) {
+              return mcpError('usage', 2, `${cached.name} (${cached.type}) is a read-only sensor — it has no control commands.`, {
+                hint: "Use 'get_device_status' to read this device instead.",
+                context: { validationKind: 'read-only-device', deviceType: cached.type, command },
+              });
+            }
+          }
         }
         const wouldSend = {
           deviceId,

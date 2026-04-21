@@ -178,6 +178,54 @@ describe('dryRun support on mutating tools', () => {
     expect(apiMock.__instance.post).not.toHaveBeenCalled();
   });
 
+  it('send_command dryRun:true passes through for uncataloged device type (bug #55)', async () => {
+    cacheMock.map.set('NEWDEV', { type: 'FutureGadget9000', name: 'Lab Device', category: 'physical' });
+    const { client } = await pair();
+
+    const res = await client.callTool({
+      name: 'send_command',
+      arguments: { deviceId: 'NEWDEV', command: 'anyCommand', dryRun: true },
+    });
+
+    expect(res.isError).toBeFalsy();
+    const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    expect(parsed.dryRun).toBe(true);
+    expect(parsed.wouldSend.command).toBe('anyCommand');
+    expect(apiMock.__instance.post).not.toHaveBeenCalled();
+  });
+
+  it('send_command dryRun:true rejects commands on read-only sensor (bug #55)', async () => {
+    cacheMock.map.set('METER1', { type: 'Meter', name: 'Office Meter', category: 'physical' });
+    const { client } = await pair();
+
+    const res = await client.callTool({
+      name: 'send_command',
+      arguments: { deviceId: 'METER1', command: 'turnOn', dryRun: true },
+    });
+
+    expect(res.isError).toBe(true);
+    const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    expect(parsed.error.context?.validationKind).toBe('read-only-device');
+    expect(apiMock.__instance.post).not.toHaveBeenCalled();
+  });
+
+  it('send_command dryRun:true error includes supported commands hint (bug #55)', async () => {
+    cacheMock.map.set('BOT1', { type: 'Bot', name: 'Kitchen Bot', category: 'physical' });
+    const { client } = await pair();
+
+    const res = await client.callTool({
+      name: 'send_command',
+      arguments: { deviceId: 'BOT1', command: 'explode', dryRun: true },
+    });
+
+    expect(res.isError).toBe(true);
+    const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    expect(parsed.error.context?.validationKind).toBe('unknown-command');
+    expect(parsed.error.hint).toContain('turnOn');
+    expect(parsed.error.hint).toContain('press');
+    expect(apiMock.__instance.post).not.toHaveBeenCalled();
+  });
+
   // ---- run_scene ------------------------------------------------------------
 
   it('run_scene dryRun:true returns wouldSend without calling the API', async () => {
