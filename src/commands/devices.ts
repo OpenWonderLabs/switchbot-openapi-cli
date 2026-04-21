@@ -27,6 +27,7 @@ import { registerExpandCommand } from './expand.js';
 import { registerDevicesMetaCommand } from './device-meta.js';
 import { isDryRun } from '../utils/flags.js';
 import { DryRunSignal } from '../api/client.js';
+import { resolveField, listSupportedFieldInputs } from '../schema/field-aliases.js';
 
 export function registerDevicesCommand(program: Command): void {
   const COMMAND_TYPES = ['command', 'customize'] as const;
@@ -94,7 +95,7 @@ Examples:
 `)
     .option('--wide', 'Show all columns (controlType, family, roomID, room, hub, cloud)')
     .option('--show-hidden', 'Include devices hidden via "devices meta set --hide"')
-    .option('--filter <expr>', 'Filter devices: comma-separated clauses. Each clause is "key=value" (substring; exact for category), "key!=value" (negated substring), "key~value" (explicit substring), or "key=/regex/" (case-insensitive regex). Supported keys: type, name, category, room.', stringArg('--filter'))
+    .option('--filter <expr>', 'Filter devices: comma-separated clauses. Each clause is "key=value" (substring; exact for category), "key!=value" (negated substring), "key~value" (explicit substring), or "key=/regex/" (case-insensitive regex). Supported keys: deviceId/id, deviceName/name, deviceType/type, roomName/room, category.', stringArg('--filter'))
     .action(async (options: { wide?: boolean; showHidden?: boolean; filter?: string }) => {
       try {
         const body = await fetchDeviceList();
@@ -106,18 +107,32 @@ Examples:
 
         // Parse --filter into a list of clauses. Shared grammar across
         // `devices list`, `devices batch`, and `events tail` / `mqtt-tail`.
-        const LIST_KEYS = ['type', 'name', 'category', 'room'] as const;
+        const LIST_KEYS = ['deviceId', 'type', 'name', 'category', 'room'] as const;
+        const LIST_FILTER_CANONICAL = ['deviceId', 'deviceName', 'deviceType', 'roomName', 'category'] as const;
+        const LIST_FILTER_TO_RUNTIME: Record<string, (typeof LIST_KEYS)[number]> = {
+          deviceId: 'deviceId',
+          deviceName: 'name',
+          deviceType: 'type',
+          roomName: 'room',
+          category: 'category',
+        };
         let listClauses: FilterClause[] | null = null;
         if (options.filter) {
           try {
-            listClauses = parseFilterExpr(options.filter, LIST_KEYS);
+            listClauses = parseFilterExpr(options.filter, LIST_KEYS, {
+              resolveKey: (input) => {
+                const canonical = resolveField(input, LIST_FILTER_CANONICAL);
+                return LIST_FILTER_TO_RUNTIME[canonical];
+              },
+              supportedKeys: listSupportedFieldInputs(LIST_FILTER_CANONICAL),
+            });
           } catch (err) {
             if (err instanceof FilterSyntaxError) throw new UsageError(err.message);
             throw err;
           }
         }
 
-        const matchesFilter = (entry: { type: string; name: string; category: 'physical' | 'ir'; room: string }) => {
+        const matchesFilter = (entry: { deviceId: string; type: string; name: string; category: 'physical' | 'ir'; room: string }) => {
           if (!listClauses || listClauses.length === 0) return true;
           for (const c of listClauses) {
             const fieldVal = (entry as Record<string, string>)[c.key] ?? '';
@@ -129,11 +144,11 @@ Examples:
         if (fmt === 'json' && process.argv.includes('--json')) {
           if (listClauses) {
             const filteredDeviceList = deviceList.filter((d) =>
-              matchesFilter({ type: d.deviceType || '', name: d.deviceName, category: 'physical', room: d.roomName || '' })
+              matchesFilter({ deviceId: d.deviceId, type: d.deviceType || '', name: d.deviceName, category: 'physical', room: d.roomName || '' })
             );
             const filteredIrList = infraredRemoteList.filter((d) => {
               const inherited = hubLocation.get(d.hubDeviceId);
-              return matchesFilter({ type: d.remoteType, name: d.deviceName, category: 'ir', room: inherited?.room || '' });
+              return matchesFilter({ deviceId: d.deviceId, type: d.remoteType, name: d.deviceName, category: 'ir', room: inherited?.room || '' });
             });
             printJson({ ok: true, deviceList: filteredDeviceList, infraredRemoteList: filteredIrList });
           } else {
@@ -150,7 +165,7 @@ Examples:
 
         for (const d of deviceList) {
           if (!options.showHidden && deviceMeta.devices[d.deviceId]?.hidden) continue;
-          if (!matchesFilter({ type: d.deviceType || '', name: d.deviceName, category: 'physical', room: d.roomName || '' })) continue;
+          if (!matchesFilter({ deviceId: d.deviceId, type: d.deviceType || '', name: d.deviceName, category: 'physical', room: d.roomName || '' })) continue;
           rows.push([
             d.deviceId,
             d.deviceName,
@@ -169,7 +184,7 @@ Examples:
         for (const d of infraredRemoteList) {
           if (!options.showHidden && deviceMeta.devices[d.deviceId]?.hidden) continue;
           const inherited = hubLocation.get(d.hubDeviceId);
-          if (!matchesFilter({ type: d.remoteType, name: d.deviceName, category: 'ir', room: inherited?.room || '' })) continue;
+          if (!matchesFilter({ deviceId: d.deviceId, type: d.remoteType, name: d.deviceName, category: 'ir', room: inherited?.room || '' })) continue;
           rows.push([
             d.deviceId,
             d.deviceName,
@@ -193,9 +208,19 @@ Examples:
         const defaultFields = options.wide ? undefined : narrowHeaders;
         // Accept API field names and short aliases alongside canonical column names
         const DEVICE_LIST_ALIASES: Record<string, string> = {
-          id: 'deviceId', name: 'deviceName', deviceType: 'type', type: 'type',
-          roomName: 'room', familyName: 'family',
-          hubDeviceId: 'hub', enableCloudService: 'cloud',
+          id: 'deviceId',
+          name: 'deviceName',
+          deviceType: 'type',
+          type: 'type',
+          roomName: 'room',
+          familyName: 'family',
+          hubDeviceId: 'hub',
+          enableCloudService: 'cloud',
+          controlType: 'controlType',
+          deviceName: 'deviceName',
+          deviceId: 'deviceId',
+          category: 'category',
+          alias: 'alias',
         };
         renderRows(wideHeaders, rows, fmt, userFields ?? defaultFields, DEVICE_LIST_ALIASES);
         if (fmt === 'table') {

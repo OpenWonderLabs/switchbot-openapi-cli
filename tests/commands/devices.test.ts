@@ -453,6 +453,30 @@ describe('devices command', () => {
       expect(out).toContain('IR-001');
     });
 
+    it('--filter deviceType=Color Bulb accepts API canonical field name', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list', '--filter', 'deviceType=Color Bulb', '--json']);
+      const out = JSON.parse(res.stdout.join('\n'));
+      expect(out.data.deviceList).toHaveLength(1);
+      expect(out.data.deviceList[0].deviceId).toBe('ABC123');
+    });
+
+    it('--filter deviceName=Kitchen accepts API canonical field name', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list', '--filter', 'deviceName=Kitchen', '--json']);
+      const out = JSON.parse(res.stdout.join('\n'));
+      expect(out.data.deviceList).toHaveLength(1);
+      expect(out.data.deviceList[0].deviceId).toBe('BLE-001');
+    });
+
+    it('--filter deviceId=ABC123 matches by id', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list', '--filter', 'deviceId=ABC123', '--json']);
+      const out = JSON.parse(res.stdout.join('\n'));
+      expect(out.data.deviceList).toHaveLength(1);
+      expect(out.data.deviceList[0].deviceId).toBe('ABC123');
+    });
+
     it('--filter --json applies filter to JSON output', async () => {
       apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
       const res = await runCli(registerDevicesCommand, ['devices', 'list', '--filter', 'category=physical', '--json']);
@@ -1746,6 +1770,19 @@ describe('devices command', () => {
       expect(err).toContain('turnOn');
       expect(err).toContain('press');
       expect(err).toContain("switchbot devices commands");
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
+    });
+
+    it('rejects read-only device commands (meter) with exit 2', async () => {
+      updateCacheFromDeviceList({
+        deviceList: [
+          { deviceId: DID, deviceName: 'Bedroom Meter', deviceType: 'Meter' },
+        ],
+        infraredRemoteList: [],
+      });
+      const res = await runCmd('turnOn');
+      expect(res.exitCode).toBe(2);
+      expect(res.stderr.join('\n')).toMatch(/read-only sensor/i);
       expect(apiMock.__instance.post).not.toHaveBeenCalled();
     });
 
