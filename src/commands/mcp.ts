@@ -963,6 +963,18 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
   return server;
 }
 
+/**
+ * P10: list the tool names registered on an McpServer instance. Used by
+ * `doctor`'s dry-run check. The MCP SDK keeps `_registeredTools` private,
+ * so we reach through a narrow cast — safe because this only runs in
+ * diagnostic code and the shape is stable across SDK versions.
+ */
+export function listRegisteredTools(server: McpServer): string[] {
+  const internal = server as unknown as { _registeredTools?: Record<string, unknown> };
+  if (!internal._registeredTools) return [];
+  return Object.keys(internal._registeredTools).sort();
+}
+
 export function registerMcpCommand(program: Command): void {
   const mcp = program
     .command('mcp')

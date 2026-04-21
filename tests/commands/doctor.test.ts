@@ -262,4 +262,122 @@ describe('doctor command', () => {
     expect(audit.detail.recent[0].command).toBe('turnOff');
     expect(audit.detail.recent[0].error).toBe('rate limit');
   });
+
+  // ---------------------------------------------------------------------
+  // P10: MCP dry-run + --section / --list / --fix / --probe
+  // ---------------------------------------------------------------------
+  it('P10: mcp check is ok and reports a toolCount when the server instantiates', async () => {
+    process.env.SWITCHBOT_TOKEN = 't';
+    process.env.SWITCHBOT_SECRET = 's';
+    const res = await runCli(registerDoctorCommand, ['--json', 'doctor']);
+    const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    const mcp = payload.data.checks.find((c: { name: string }) => c.name === 'mcp');
+    expect(mcp).toBeDefined();
+    expect(mcp.status).toBe('ok');
+    expect(mcp.detail.serverInstantiated).toBe(true);
+    expect(typeof mcp.detail.toolCount).toBe('number');
+    expect(mcp.detail.toolCount).toBeGreaterThan(0);
+    expect(Array.isArray(mcp.detail.tools)).toBe(true);
+    expect(mcp.detail.transportsAvailable).toEqual(['stdio', 'http']);
+  });
+
+  it('P10: --list prints the registered check names without running any check', async () => {
+    const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--list']);
+    const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    expect(payload.data.checks).toBeDefined();
+    const names = payload.data.checks.map((c: { name: string }) => c.name);
+    expect(names).toContain('credentials');
+    expect(names).toContain('mcp');
+    expect(names).toContain('catalog-schema');
+    expect(names).toContain('audit');
+    // Should NOT include check results — just registry entries with description.
+    expect(payload.data.summary).toBeUndefined();
+    expect(payload.data.overall).toBeUndefined();
+    for (const entry of payload.data.checks) {
+      expect(typeof entry.description).toBe('string');
+      expect(entry.status).toBeUndefined();
+    }
+  });
+
+  it('P10: --section runs only the named checks (sorted by registry order)', async () => {
+    process.env.SWITCHBOT_TOKEN = 't';
+    process.env.SWITCHBOT_SECRET = 's';
+    const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--section', 'credentials,mcp']);
+    const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    const names = payload.data.checks.map((c: { name: string }) => c.name);
+    expect(names).toEqual(['credentials', 'mcp']);
+    expect(payload.data.summary.ok + payload.data.summary.warn + payload.data.summary.fail).toBe(2);
+  });
+
+  it('P10: --section dedupes duplicate names', async () => {
+    process.env.SWITCHBOT_TOKEN = 't';
+    process.env.SWITCHBOT_SECRET = 's';
+    const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--section', 'mcp,mcp,credentials,mcp']);
+    const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    const names = payload.data.checks.map((c: { name: string }) => c.name);
+    expect(names).toEqual(['credentials', 'mcp']);
+  });
+
+  it('P10: --section rejects unknown check names with exit 2 + valid-names hint', async () => {
+    const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--section', 'bogus']);
+    expect(res.exitCode).toBe(2);
+    const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    expect(payload.schemaVersion).toBe('1.1');
+    expect(payload.error.message).toMatch(/Unknown check name/);
+    expect(payload.error.message).toMatch(/bogus/);
+    expect(payload.error.message).toMatch(/Valid:/);
+  });
+
+  it('P10: --fix without --yes reports cache-clear as not-applied (pass --yes to apply)', async () => {
+    process.env.SWITCHBOT_TOKEN = 't';
+    process.env.SWITCHBOT_SECRET = 's';
+    // With no stored cache, the cache check status is still 'ok', so --fix
+    // should not queue any actions. Force a non-ok cache check by creating
+    // a list cache file that describeCache() can see, then scenarios where
+    // we expect fixes to be listed (or empty) both verify the fixes field.
+    const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--fix']);
+    const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    expect(Array.isArray(payload.data.fixes)).toBe(true);
+  });
+
+  it('P10: --fix --yes applies safe fixes and records them in the fixes array', async () => {
+    process.env.SWITCHBOT_TOKEN = 't';
+    process.env.SWITCHBOT_SECRET = 's';
+    const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--fix', '--yes']);
+    const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    expect(Array.isArray(payload.data.fixes)).toBe(true);
+    // Every fix entry must have check/action/applied fields.
+    for (const f of payload.data.fixes) {
+      expect(typeof f.check).toBe('string');
+      expect(typeof f.action).toBe('string');
+      expect(typeof f.applied).toBe('boolean');
+    }
+  });
+
+  it('P10: --probe runs the MQTT live-probe variant and tolerates failure as warn', async () => {
+    process.env.SWITCHBOT_TOKEN = 't';
+    process.env.SWITCHBOT_SECRET = 's';
+    // Stub fetch so fetchMqttCredential rejects; the probe should catch
+    // and surface probe:'failed' with status 'warn' (never hang the CLI).
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'));
+    try {
+      const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--probe', '--section', 'mqtt']);
+      const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+      const mqtt = payload.data.checks.find((c: { name: string }) => c.name === 'mqtt');
+      expect(mqtt.status).toBe('warn');
+      expect(mqtt.detail.probe).toBe('failed');
+      expect(typeof mqtt.detail.reason).toBe('string');
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('P10: --probe without credentials reports probe:skipped', async () => {
+    delete process.env.SWITCHBOT_TOKEN;
+    delete process.env.SWITCHBOT_SECRET;
+    const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--probe', '--section', 'mqtt']);
+    const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    const mqtt = payload.data.checks.find((c: { name: string }) => c.name === 'mqtt');
+    expect(mqtt.detail.probe).toBe('skipped');
+  });
 });

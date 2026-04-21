@@ -2,13 +2,14 @@ import { Command } from 'commander';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { printJson, isJsonMode } from '../utils/output.js';
+import { printJson, isJsonMode, exitWithError } from '../utils/output.js';
 import { getEffectiveCatalog } from '../devices/catalog.js';
 import { configFilePath, listProfiles, readProfileMeta } from '../config.js';
-import { describeCache } from '../devices/cache.js';
+import { describeCache, resetListCache } from '../devices/cache.js';
 import { DAILY_QUOTA, todayUsage } from '../utils/quota.js';
 import { AGENT_BOOTSTRAP_SCHEMA_VERSION } from './agent-bootstrap.js';
 import { CATALOG_SCHEMA_VERSION } from '../devices/catalog.js';
+import { createSwitchBotMcpServer, listRegisteredTools } from './mcp.js';
 
 interface Check {
   name: string;
@@ -364,10 +365,185 @@ function checkMqtt(): Check {
   };
 }
 
+async function checkMqttProbe(): Promise<Check> {
+  // P10: live-probe the MQTT broker. Only runs when --probe is passed.
+  // Does not subscribe — just connects + disconnects to verify the
+  // credential + TLS handshake works end-to-end. Hard 5s timeout so
+  // a misbehaving broker never wedges the doctor command.
+  const { fetchMqttCredential } = await import('../mqtt/credential.js');
+  const { SwitchBotMqttClient } = await import('../mqtt/client.js');
+
+  const token = process.env.SWITCHBOT_TOKEN;
+  const secret = process.env.SWITCHBOT_SECRET;
+  let creds: { token: string; secret: string } | null = null;
+  if (token && secret) {
+    creds = { token, secret };
+  } else {
+    const file = configFilePath();
+    if (fs.existsSync(file)) {
+      try {
+        const cfg = JSON.parse(fs.readFileSync(file, 'utf-8'));
+        if (cfg.token && cfg.secret) {
+          creds = { token: cfg.token, secret: cfg.secret };
+        }
+      } catch { /* fall through */ }
+    }
+  }
+  if (!creds) {
+    return {
+      name: 'mqtt',
+      status: 'warn',
+      detail: { probe: 'skipped', reason: 'no credentials configured' },
+    };
+  }
+
+  const deadline = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error('probe timeout after 5000ms')), 5000),
+  );
+  try {
+    const cred = await Promise.race([fetchMqttCredential(creds.token, creds.secret), deadline]);
+    const client = new SwitchBotMqttClient(cred);
+    await Promise.race([client.connect(), deadline]);
+    await client.disconnect();
+    return {
+      name: 'mqtt',
+      status: 'ok',
+      detail: { probe: 'connected', brokerUrl: cred.brokerUrl, region: cred.region },
+    };
+  } catch (err) {
+    return {
+      name: 'mqtt',
+      status: 'warn',
+      detail: { probe: 'failed', reason: err instanceof Error ? err.message : String(err) },
+    };
+  }
+}
+
+function checkMcp(): Check {
+  // P10: dry-run instantiation of the MCP server to catch tool-registration
+  // regressions. No network I/O, no token needed. If createSwitchBotMcpServer
+  // throws (e.g. duplicate tool name, schema build error) the check fails.
+  try {
+    const server = createSwitchBotMcpServer();
+    const tools = listRegisteredTools(server);
+    return {
+      name: 'mcp',
+      status: 'ok',
+      detail: {
+        serverInstantiated: true,
+        toolCount: tools.length,
+        tools,
+        transportsAvailable: ['stdio', 'http'],
+        message: `${tools.length} tools registered; no network probe`,
+      },
+    };
+  } catch (err) {
+    return {
+      name: 'mcp',
+      status: 'fail',
+      detail: {
+        serverInstantiated: false,
+        error: err instanceof Error ? err.message : String(err),
+      },
+    };
+  }
+}
+
+interface CheckDef {
+  name: string;
+  description: string;
+  run: (opts: DoctorRunOpts) => Check | Promise<Check>;
+}
+
+interface DoctorRunOpts {
+  probe: boolean;
+}
+
+const CHECK_REGISTRY: CheckDef[] = [
+  { name: 'node', description: 'Node.js version compatibility', run: () => checkNodeVersion() },
+  { name: 'credentials', description: 'credentials file present and parseable', run: () => checkCredentials() },
+  { name: 'profiles', description: 'profile definitions valid', run: () => checkProfiles() },
+  { name: 'catalog', description: 'catalog loads', run: () => checkCatalog() },
+  { name: 'catalog-schema', description: 'catalog vs agent-bootstrap version aligned', run: () => checkCatalogSchema() },
+  { name: 'cache', description: 'device cache state', run: () => checkCache() },
+  { name: 'quota', description: 'API quota headroom', run: () => checkQuotaFile() },
+  { name: 'clock', description: 'system clock skew', run: () => checkClockSkew() },
+  {
+    name: 'mqtt',
+    description: 'MQTT credentials (+ --probe for live broker handshake)',
+    run: ({ probe }) => (probe ? checkMqttProbe() : checkMqtt()),
+  },
+  { name: 'mcp', description: 'MCP server instantiable + tool count', run: () => checkMcp() },
+  { name: 'audit', description: 'recent command errors (last 24h)', run: () => checkAudit() },
+];
+
+interface FixResult {
+  check: string;
+  action: string;
+  applied: boolean;
+  message?: string;
+}
+
+function applyFixes(checks: Check[], writeOk: boolean): FixResult[] {
+  const results: FixResult[] = [];
+  for (const c of checks) {
+    if (c.name === 'cache' && c.status !== 'ok') {
+      if (writeOk) {
+        try {
+          resetListCache();
+          results.push({ check: 'cache', action: 'cache-cleared', applied: true });
+        } catch (err) {
+          results.push({
+            check: 'cache',
+            action: 'cache-clear',
+            applied: false,
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+      } else {
+        results.push({
+          check: 'cache',
+          action: 'cache-clear',
+          applied: false,
+          message: 'pass --yes to apply',
+        });
+      }
+    } else if (c.name === 'catalog-schema' && c.status !== 'ok') {
+      results.push({
+        check: 'catalog-schema',
+        action: 'manual',
+        applied: false,
+        message: "drift detected — run 'switchbot capabilities --reload' to refresh overlay",
+      });
+    } else if (c.name === 'credentials' && c.status === 'fail') {
+      results.push({
+        check: 'credentials',
+        action: 'manual',
+        applied: false,
+        message: "run 'switchbot config set-token' to configure credentials",
+      });
+    }
+  }
+  return results;
+}
+
+interface DoctorCliOptions {
+  section?: string;
+  list?: boolean;
+  fix?: boolean;
+  yes?: boolean;
+  probe?: boolean;
+}
+
 export function registerDoctorCommand(program: Command): void {
   program
     .command('doctor')
     .description('Self-check: credentials, catalog, cache, quota, profiles, Node version')
+    .option('--section <names>', 'Comma-separated list of checks to run (see --list for names)')
+    .option('--list', 'Print the registered check names and exit 0 without running any check')
+    .option('--fix', 'Apply safe, reversible remediations for failing checks (e.g. clear stale cache)')
+    .option('--yes', 'Required together with --fix to confirm write actions')
+    .option('--probe', 'Perform live-probe variant of checks that support it (mqtt)')
     .addHelpText('after', `
 Runs a battery of local sanity checks and exits with code 0 only when every
 check is 'ok'. 'warn' → exit 0 (informational); 'fail' → exit 1.
@@ -375,20 +551,54 @@ check is 'ok'. 'warn' → exit 0 (informational); 'fail' → exit 1.
 Examples:
   $ switchbot doctor
   $ switchbot --json doctor | jq '.checks[] | select(.status != "ok")'
+  $ switchbot doctor --list
+  $ switchbot doctor --section credentials,mcp --json
+  $ switchbot doctor --probe --json
+  $ switchbot doctor --fix --yes --json
 `)
-    .action(async () => {
-      const checks: Check[] = [
-        checkNodeVersion(),
-        await checkCredentials(),
-        checkProfiles(),
-        checkCatalog(),
-        checkCatalogSchema(),
-        checkCache(),
-        checkQuotaFile(),
-        await checkClockSkew(),
-        checkMqtt(),
-        checkAudit(),
-      ];
+    .action(async (opts: DoctorCliOptions) => {
+      // --list: print the registry and exit 0.
+      if (opts.list) {
+        if (isJsonMode()) {
+          printJson({
+            checks: CHECK_REGISTRY.map((c) => ({ name: c.name, description: c.description })),
+          });
+        } else {
+          console.log('Available checks:');
+          for (const c of CHECK_REGISTRY) {
+            console.log(`  ${c.name.padEnd(16)} ${c.description}`);
+          }
+        }
+        return;
+      }
+
+      // --section: run only the named subset, dedup and validate.
+      let selected: CheckDef[] = CHECK_REGISTRY;
+      if (opts.section) {
+        const raw = opts.section.split(',').map((s) => s.trim()).filter(Boolean);
+        const names = Array.from(new Set(raw));
+        const known = new Set(CHECK_REGISTRY.map((c) => c.name));
+        const unknown = names.filter((n) => !known.has(n));
+        if (unknown.length > 0) {
+          exitWithError({
+            code: 2,
+            kind: 'usage',
+            message: `Unknown check name(s): ${unknown.join(', ')}. Valid: ${CHECK_REGISTRY.map((c) => c.name).join(', ')}`,
+          });
+          return;
+        }
+        const order = new Map(CHECK_REGISTRY.map((c, i) => [c.name, i]));
+        selected = names
+          .map((n) => CHECK_REGISTRY.find((c) => c.name === n)!)
+          .sort((a, b) => (order.get(a.name)! - order.get(b.name)!));
+      }
+
+      const runOpts: DoctorRunOpts = { probe: Boolean(opts.probe) };
+      const checks: Check[] = [];
+      for (const def of selected) {
+        checks.push(await def.run(runOpts));
+      }
+
       const summary = {
         ok: checks.filter((c) => c.status === 'ok').length,
         warn: checks.filter((c) => c.status === 'warn').length,
@@ -397,20 +607,27 @@ Examples:
       const overallFail = summary.fail > 0;
       const overall: 'ok' | 'warn' | 'fail' = overallFail ? 'fail' : summary.warn > 0 ? 'warn' : 'ok';
 
+      let fixes: FixResult[] | undefined;
+      if (opts.fix) {
+        fixes = applyFixes(checks, Boolean(opts.yes));
+      }
+
       if (isJsonMode()) {
         // Stable contract (locked as doctor.schemaVersion=1):
         //   { ok: boolean, overall: 'ok'|'warn'|'fail', generatedAt, schemaVersion,
         //     summary: { ok, warn, fail }, checks: [{ name, status, detail }] }
         // `ok` is an alias of (overall === 'ok') — agents prefer the boolean,
         // humans prefer the string; both are provided.
-        printJson({
+        const payload: Record<string, unknown> = {
           ok: overall === 'ok',
           overall,
           generatedAt: new Date().toISOString(),
           schemaVersion: DOCTOR_SCHEMA_VERSION,
           summary,
           checks,
-        });
+        };
+        if (fixes !== undefined) payload.fixes = fixes;
+        printJson(payload);
       } else {
         for (const c of checks) {
           const icon = c.status === 'ok' ? '✓' : c.status === 'warn' ? '!' : '✗';
@@ -419,6 +636,14 @@ Examples:
         }
         console.log('');
         console.log(`${summary.ok} ok, ${summary.warn} warn, ${summary.fail} fail`);
+        if (fixes && fixes.length > 0) {
+          console.log('');
+          console.log('Fixes:');
+          for (const f of fixes) {
+            const marker = f.applied ? '✓' : '-';
+            console.log(`  ${marker} ${f.check}: ${f.action}${f.message ? ' — ' + f.message : ''}`);
+          }
+        }
       }
       if (overallFail) process.exit(1);
     });
