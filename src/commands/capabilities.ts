@@ -1,8 +1,24 @@
 import { Command } from 'commander';
-import { getEffectiveCatalog } from '../devices/catalog.js';
+import {
+  getEffectiveCatalog,
+  deriveSafetyTier,
+  type DeviceCatalogEntry,
+  type SafetyTier,
+} from '../devices/catalog.js';
 import { loadCache } from '../devices/cache.js';
 import { printJson } from '../utils/output.js';
 import { enumArg, stringArg } from '../utils/arg-parsers.js';
+
+/** Collect the distinct catalog safety tiers actually used across the given entries. Sorted. */
+function collectSafetyTiersInUse(entries: DeviceCatalogEntry[]): SafetyTier[] {
+  const seen = new Set<SafetyTier>();
+  for (const e of entries) {
+    for (const c of e.commands) {
+      seen.add(deriveSafetyTier(c, e));
+    }
+  }
+  return [...seen].sort();
+}
 
 export type AgentSafetyTier = 'read' | 'action' | 'destructive';
 export type Verifiability = 'local' | 'deviceConfirmed' | 'deviceDependent' | 'none';
@@ -286,9 +302,11 @@ export function registerCapabilitiesCommand(program: Command): void {
           typeCount: catalog.length,
           roles,
           destructiveCommandCount: catalog.reduce(
-            (n, e) => n + e.commands.filter((c) => c.destructive).length,
+            (n, e) =>
+              n + e.commands.filter((c) => deriveSafetyTier(c, e) === 'destructive').length,
             0,
           ),
+          safetyTiersInUse: collectSafetyTiersInUse(catalog),
           readOnlyTypeCount: catalog.filter((e) => e.readOnly).length,
         },
       };
@@ -313,9 +331,11 @@ export function registerCapabilitiesCommand(program: Command): void {
             typeCount: filteredCatalog.length,
             roles: [...new Set(filteredCatalog.map((e) => e.role ?? 'other'))].sort(),
             destructiveCommandCount: filteredCatalog.reduce(
-              (n, e) => n + e.commands.filter((c) => c.destructive).length,
+              (n, e) =>
+                n + e.commands.filter((c) => deriveSafetyTier(c, e) === 'destructive').length,
               0,
             ),
+            safetyTiersInUse: collectSafetyTiersInUse(filteredCatalog),
             readOnlyTypeCount: filteredCatalog.filter((e) => e.readOnly).length,
           };
           payload.usedFilter = { applied: true, typesInCache: [...seen].sort() };

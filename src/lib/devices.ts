@@ -5,6 +5,8 @@ import {
   findCatalogEntry,
   suggestedActions,
   getEffectiveCatalog,
+  deriveSafetyTier,
+  getCommandSafetyReason,
   type DeviceCatalogEntry,
   type CommandSpec,
 } from '../devices/catalog.js';
@@ -323,10 +325,11 @@ export function isDestructiveCommand(
   const match = findCatalogEntry(deviceType);
   if (!match || Array.isArray(match)) return false;
   const spec = match.commands.find((c) => c.command === cmd);
-  return Boolean(spec?.destructive);
+  if (!spec) return false;
+  return deriveSafetyTier(spec, match) === 'destructive';
 }
 
-/** Return the destructiveReason for a command, or null if not destructive / not found. */
+/** Return the safetyReason for a command, or null if not destructive / not found. */
 export function getDestructiveReason(
   deviceType: string | undefined,
   cmd: string,
@@ -337,7 +340,7 @@ export function getDestructiveReason(
   const match = findCatalogEntry(deviceType);
   if (!match || Array.isArray(match)) return null;
   const spec = match.commands.find((c) => c.command === cmd);
-  return spec?.destructiveReason ?? null;
+  return spec ? getCommandSafetyReason(spec) : null;
 }
 
 /**
@@ -382,7 +385,16 @@ export async function describeDevice(
     ? {
         role: catalogEntry.role ?? null,
         readOnly: catalogEntry.readOnly ?? false,
-        commands: catalogEntry.commands.map((c) => ({ ...c, destructive: Boolean(c.destructive) })),
+        commands: catalogEntry.commands.map((c) => {
+          const tier = deriveSafetyTier(c, catalogEntry);
+          const reason = getCommandSafetyReason(c);
+          return {
+            ...c,
+            safetyTier: tier,
+            destructive: tier === 'destructive',
+            ...(reason ? { safetyReason: reason } : {}),
+          };
+        }),
         statusFields: catalogEntry.statusFields ?? [],
         ...(liveStatus !== undefined ? { liveStatus } : {}),
       }

@@ -21,7 +21,11 @@ import {
   toMcpIrDeviceShape,
 } from '../lib/devices.js';
 import { fetchScenes, executeScene } from '../lib/scenes.js';
-import { findCatalogEntry } from '../devices/catalog.js';
+import {
+  findCatalogEntry,
+  deriveSafetyTier,
+  getCommandSafetyReason,
+} from '../devices/catalog.js';
 import { getCachedDevice } from '../devices/cache.js';
 import { validateParameter } from '../devices/param-validator.js';
 import { EventSubscriptionManager } from '../mcp/events-subscription.js';
@@ -448,7 +452,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
               command: effectiveCommand,
               deviceType: typeName,
               description: spec?.description ?? null,
-              ...(reason ? { destructiveReason: reason } : {}),
+              ...(reason ? { safetyReason: reason, destructiveReason: reason } : {}),
             },
           },
         );
@@ -632,6 +636,8 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
             description: z.string(),
             commandType: z.enum(['command', 'customize']).optional(),
             idempotent: z.boolean().optional(),
+            safetyTier: z.enum(['read', 'mutation', 'ir-fire-forget', 'destructive', 'maintenance']).optional(),
+            safetyReason: z.string().optional(),
             destructive: z.boolean().optional(),
           }).passthrough()),
           aliases: z.array(z.string()).optional(),
@@ -654,9 +660,22 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         );
       }
       const hits = searchCatalog(query, limit);
-      const structured = { results: hits as unknown as Array<Record<string, unknown>>, total: hits.length };
+      const normalised = hits.map((e) => ({
+        ...e,
+        commands: e.commands.map((c) => {
+          const tier = deriveSafetyTier(c, e);
+          const reason = getCommandSafetyReason(c);
+          return {
+            ...c,
+            safetyTier: tier,
+            destructive: tier === 'destructive',
+            ...(reason ? { safetyReason: reason } : {}),
+          };
+        }),
+      }));
+      const structured = { results: normalised as unknown as Array<Record<string, unknown>>, total: normalised.length };
       return {
-        content: [{ type: 'text', text: JSON.stringify(hits, null, 2) }],
+        content: [{ type: 'text', text: JSON.stringify(normalised, null, 2) }],
         structuredContent: structured,
       };
     }

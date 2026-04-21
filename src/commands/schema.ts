@@ -1,7 +1,14 @@
 import { Command } from 'commander';
 import { enumArg, stringArg } from '../utils/arg-parsers.js';
 import { printJson } from '../utils/output.js';
-import { getEffectiveCatalog, type CommandSpec, type DeviceCatalogEntry } from '../devices/catalog.js';
+import {
+  getEffectiveCatalog,
+  deriveSafetyTier,
+  getCommandSafetyReason,
+  type CommandSpec,
+  type DeviceCatalogEntry,
+  type SafetyTier,
+} from '../devices/catalog.js';
 import { loadCache } from '../devices/cache.js';
 
 interface SchemaEntry {
@@ -17,7 +24,10 @@ interface SchemaEntry {
     description: string;
     commandType: 'command' | 'customize';
     idempotent: boolean;
+    safetyTier: SafetyTier;
+    /** @deprecated Derived from safetyTier === 'destructive'. Will be removed in v3.0. */
     destructive: boolean;
+    safetyReason?: string;
     exampleParams?: string[];
   }>;
   statusFields: string[];
@@ -33,6 +43,8 @@ interface CompactSchemaEntry {
     parameter: string;
     commandType: 'command' | 'customize';
     idempotent: boolean;
+    safetyTier: SafetyTier;
+    /** @deprecated Derived from safetyTier === 'destructive'. Will be removed in v3.0. */
     destructive: boolean;
   }>;
   statusFields: string[];
@@ -46,19 +58,23 @@ function toSchemaEntry(e: DeviceCatalogEntry): SchemaEntry {
     aliases: e.aliases ?? [],
     role: e.role ?? null,
     readOnly: e.readOnly ?? false,
-    commands: e.commands.map(toSchemaCommand),
+    commands: e.commands.map((c) => toSchemaCommand(c, e)),
     statusFields: e.statusFields ?? [],
   };
 }
 
-function toSchemaCommand(c: CommandSpec) {
+function toSchemaCommand(c: CommandSpec, entry: DeviceCatalogEntry) {
+  const tier = deriveSafetyTier(c, entry);
+  const reason = getCommandSafetyReason(c);
   return {
     command: c.command,
     parameter: c.parameter,
     description: c.description,
     commandType: (c.commandType ?? 'command') as 'command' | 'customize',
     idempotent: Boolean(c.idempotent),
-    destructive: Boolean(c.destructive),
+    safetyTier: tier,
+    destructive: tier === 'destructive',
+    ...(reason ? { safetyReason: reason } : {}),
     ...(c.exampleParams ? { exampleParams: c.exampleParams } : {}),
   };
 }
@@ -69,13 +85,17 @@ function toCompactEntry(e: DeviceCatalogEntry): CompactSchemaEntry {
     category: e.category,
     role: e.role ?? null,
     readOnly: e.readOnly ?? false,
-    commands: e.commands.map((c) => ({
-      command: c.command,
-      parameter: c.parameter,
-      commandType: (c.commandType ?? 'command') as 'command' | 'customize',
-      idempotent: Boolean(c.idempotent),
-      destructive: Boolean(c.destructive),
-    })),
+    commands: e.commands.map((c) => {
+      const tier = deriveSafetyTier(c, e);
+      return {
+        command: c.command,
+        parameter: c.parameter,
+        commandType: (c.commandType ?? 'command') as 'command' | 'customize',
+        idempotent: Boolean(c.idempotent),
+        safetyTier: tier,
+        destructive: tier === 'destructive',
+      };
+    }),
     statusFields: e.statusFields ?? [],
   };
 }

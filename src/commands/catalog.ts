@@ -9,6 +9,7 @@ import {
   getEffectiveCatalog,
   loadCatalogOverlay,
   resetCatalogOverlayCache,
+  deriveSafetyTier,
   type DeviceCatalogEntry,
 } from '../devices/catalog.js';
 
@@ -343,9 +344,10 @@ function renderEntry(entry: DeviceCatalogEntry): void {
   } else {
     console.log('\nCommands:');
     const rows = entry.commands.map((c) => {
+      const tier = deriveSafetyTier(c, entry);
       const flags: string[] = [];
       if (c.commandType === 'customize') flags.push('customize');
-      if (c.destructive) flags.push('!destructive');
+      if (tier === 'destructive') flags.push('!destructive');
       const label = flags.length > 0 ? `${c.command}  [${flags.join(', ')}]` : c.command;
       return [label, c.parameter, c.description];
     });

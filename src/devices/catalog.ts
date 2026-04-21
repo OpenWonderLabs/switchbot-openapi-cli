@@ -7,14 +7,39 @@
  *   - CommandSpec.idempotent: repeat-safe — calling it N times ends in the
  *     same state as calling it once (turnOn, setBrightness 50). Agents can
  *     retry these freely. Counter-examples: toggle, press, volumeAdd.
- *   - CommandSpec.destructive: causes a real-world effect that is hard or
- *     unsafe to reverse (unlock, garage open, deleteKey). UIs and agents
- *     should require explicit confirmation before issuing these.
+ *   - CommandSpec.safetyTier: explicit action safety classification. See
+ *     SafetyTier for the 5-tier enum. Built-in entries set this on the
+ *     destructive tier; other tiers are derived (see deriveSafetyTier).
+ *   - CommandSpec.destructive (deprecated, v3.0 removal): legacy boolean
+ *     that maps to safetyTier === 'destructive'. Still accepted in
+ *     ~/.switchbot/catalog.json overlays and derived into safetyTier.
  *   - DeviceCatalogEntry.role: functional grouping for filter/search
  *     ("all lighting", "all security"). Does not affect API behavior.
  *   - DeviceCatalogEntry.readOnly: the device has no control commands; it
  *     can only be queried via 'devices status'.
  */
+
+/**
+ * Safety classification for catalog commands.
+ *
+ *  - 'read'           —— Read-only query (status fetch). Reserved for v2.8+
+ *                        `statusQueries` expansion; no command uses it today.
+ *  - 'mutation'       —— Causes a state change but is reversible/idempotent
+ *                        (turnOn/Off, setBrightness, setPosition).
+ *  - 'ir-fire-forget' —— IR command (no reply/ack) or customize IR button.
+ *                        Fire-and-forget; reversibility depends on device.
+ *  - 'destructive'    —— Hard or unsafe to reverse; physical-world side effects
+ *                        (unlock, garage open, deleteKey). Needs confirmation.
+ *  - 'maintenance'    —— Factory reset / firmware update / deep calibrate.
+ *                        Reserved; the SwitchBot API exposes no such endpoint
+ *                        today, so no command uses it.
+ */
+export type SafetyTier =
+  | 'read'
+  | 'mutation'
+  | 'ir-fire-forget'
+  | 'destructive'
+  | 'maintenance';
 
 export interface CommandSpec {
   command: string;
@@ -22,8 +47,18 @@ export interface CommandSpec {
   description: string;
   commandType?: 'command' | 'customize';
   idempotent?: boolean;
+  /**
+   * Explicit safety tier. When omitted, deriveSafetyTier() infers:
+   *   destructive: true      → 'destructive'
+   *   commandType: 'customize' or entry.category === 'ir'  → 'ir-fire-forget'
+   *   otherwise              → 'mutation'
+   */
+  safetyTier?: SafetyTier;
+  /** One sentence explaining *why* this command needs caution — used in guard errors. */
+  safetyReason?: string;
+  /** @deprecated Since v2.7 — use safetyTier: 'destructive'. Will be removed in v3.0. */
   destructive?: boolean;
-  /** One sentence explaining *why* this command is destructive — used in guard errors so agents/users can decide whether to confirm. */
+  /** @deprecated Since v2.7 — use safetyReason. Will be removed in v3.0. */
   destructiveReason?: string;
   exampleParams?: string[];
 }
@@ -104,7 +139,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     aliases: ['Smart Lock Pro'],
     commands: [
       { command: 'lock', parameter: '—', description: 'Lock the door', idempotent: true },
-      { command: 'unlock', parameter: '—', description: 'Unlock the door', idempotent: true, destructive: true, destructiveReason: 'Physically unlocks the door — anyone nearby can open it.' },
+      { command: 'unlock', parameter: '—', description: 'Unlock the door', idempotent: true, safetyTier: 'destructive', safetyReason: 'Physically unlocks the door — anyone nearby can open it.' },
       { command: 'deadbolt', parameter: '—', description: 'Pro only: engage deadbolt', idempotent: true },
     ],
     statusFields: ['battery', 'version', 'lockState', 'doorState', 'calibrate'],
@@ -116,7 +151,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     role: 'security',
     commands: [
       { command: 'lock', parameter: '—', description: 'Lock the door', idempotent: true },
-      { command: 'unlock', parameter: '—', description: 'Unlock the door', idempotent: true, destructive: true, destructiveReason: 'Physically unlocks the door — anyone nearby can open it.' },
+      { command: 'unlock', parameter: '—', description: 'Unlock the door', idempotent: true, safetyTier: 'destructive', safetyReason: 'Physically unlocks the door — anyone nearby can open it.' },
     ],
     statusFields: ['battery', 'version', 'lockState', 'doorState', 'calibrate'],
   },
@@ -127,7 +162,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     role: 'security',
     commands: [
       { command: 'lock', parameter: '—', description: 'Lock the door', idempotent: true },
-      { command: 'unlock', parameter: '—', description: 'Unlock the door', idempotent: true, destructive: true, destructiveReason: 'Physically unlocks the door — anyone nearby can open it.' },
+      { command: 'unlock', parameter: '—', description: 'Unlock the door', idempotent: true, safetyTier: 'destructive', safetyReason: 'Physically unlocks the door — anyone nearby can open it.' },
       { command: 'deadbolt', parameter: '—', description: 'Engage deadbolt', idempotent: true },
     ],
     statusFields: ['battery', 'version', 'lockState', 'doorState', 'calibrate'],
@@ -346,8 +381,8 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     description: 'Cloud-connected garage door controller; turnOn opens and turnOff closes the door.',
     role: 'security',
     commands: [
-      { command: 'turnOn', parameter: '—', description: 'Open the garage door', idempotent: true, destructive: true, destructiveReason: 'Opens the garage door — anyone nearby can enter the space.' },
-      { command: 'turnOff', parameter: '—', description: 'Close the garage door', idempotent: true, destructive: true, destructiveReason: 'Closes the garage door — verify no person or obstacle is in the way.' },
+      { command: 'turnOn', parameter: '—', description: 'Open the garage door', idempotent: true, safetyTier: 'destructive', safetyReason: 'Opens the garage door — anyone nearby can enter the space.' },
+      { command: 'turnOff', parameter: '—', description: 'Close the garage door', idempotent: true, safetyTier: 'destructive', safetyReason: 'Closes the garage door — verify no person or obstacle is in the way.' },
     ],
     statusFields: ['switchStatus', 'version', 'online'],
   },
@@ -369,8 +404,8 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     role: 'security',
     aliases: ['Keypad Touch'],
     commands: [
-      { command: 'createKey', parameter: '\'{"name":"...","type":"permanent|timeLimit|disposable|urgent","password":"6-12 digits","startTime":<s>,"endTime":<s>}\'', description: 'Create a passcode (async; result via webhook)', idempotent: false, destructive: true, destructiveReason: 'Provisions a new access credential — anyone with this passcode can unlock the door.' },
-      { command: 'deleteKey', parameter: '\'{"id":<passcode_id>}\'', description: 'Delete a passcode (async; result via webhook)', idempotent: true, destructive: true, destructiveReason: 'Permanently removes a passcode — the holder immediately loses door access.' },
+      { command: 'createKey', parameter: '\'{"name":"...","type":"permanent|timeLimit|disposable|urgent","password":"6-12 digits","startTime":<s>,"endTime":<s>}\'', description: 'Create a passcode (async; result via webhook)', idempotent: false, safetyTier: 'destructive', safetyReason: 'Provisions a new access credential — anyone with this passcode can unlock the door.' },
+      { command: 'deleteKey', parameter: '\'{"id":<passcode_id>}\'', description: 'Delete a passcode (async; result via webhook)', idempotent: true, safetyTier: 'destructive', safetyReason: 'Permanently removes a passcode — the holder immediately loses door access.' },
     ],
     statusFields: ['version'],
   },
@@ -585,6 +620,33 @@ export function findCatalogEntry(query: string): DeviceCatalogEntry | DeviceCata
 }
 
 /**
+ * Derive the safety tier for a catalog command, honouring an explicit
+ * `safetyTier` when present and falling back to heuristic inference.
+ *
+ * The inference order is:
+ *   1. Explicit `spec.safetyTier`.
+ *   2. Legacy `spec.destructive: true` → `'destructive'` (overlay compat).
+ *   3. IR context (customize command OR entry.category === 'ir')
+ *      → `'ir-fire-forget'`.
+ *   4. Default → `'mutation'`.
+ */
+export function deriveSafetyTier(
+  spec: CommandSpec,
+  entry?: Pick<DeviceCatalogEntry, 'category'>,
+): SafetyTier {
+  if (spec.safetyTier) return spec.safetyTier;
+  if (spec.destructive) return 'destructive';
+  if (spec.commandType === 'customize') return 'ir-fire-forget';
+  if (entry?.category === 'ir') return 'ir-fire-forget';
+  return 'mutation';
+}
+
+/** Read the safety reason for a command, with fallback to the legacy field. */
+export function getCommandSafetyReason(spec: CommandSpec): string | null {
+  return spec.safetyReason ?? spec.destructiveReason ?? null;
+}
+
+/**
  * Pick up to 3 non-destructive, idempotent commands an agent can safely invoke
  * to explore or exercise a device. Used by `devices describe --json` to hint
  * at concrete next steps.
@@ -595,7 +657,10 @@ export function suggestedActions(entry: DeviceCatalogEntry): Array<{
   description: string;
 }> {
   const safe = entry.commands.filter(
-    (c) => c.idempotent === true && !c.destructive && c.commandType !== 'customize'
+    (c) =>
+      c.idempotent === true &&
+      deriveSafetyTier(c, entry) !== 'destructive' &&
+      c.commandType !== 'customize',
   );
   const picks: CommandSpec[] = [];
   const seen = new Set<string>();

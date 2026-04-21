@@ -2,7 +2,13 @@ import { Command } from 'commander';
 import { enumArg, stringArg } from '../utils/arg-parsers.js';
 import { printTable, printKeyValue, printJson, isJsonMode, handleError, UsageError, StructuredUsageError, emitJsonError, exitWithError } from '../utils/output.js';
 import { resolveFormat, resolveFields, renderRows } from '../utils/format.js';
-import { findCatalogEntry, getEffectiveCatalog, DeviceCatalogEntry } from '../devices/catalog.js';
+import {
+  findCatalogEntry,
+  getEffectiveCatalog,
+  deriveSafetyTier,
+  getCommandSafetyReason,
+  DeviceCatalogEntry,
+} from '../devices/catalog.js';
 import { getCachedDevice, loadCache } from '../devices/cache.js';
 import { loadDeviceMeta } from '../devices/device-meta.js';
 import { resolveDeviceId, NameResolveStrategy, ALL_STRATEGIES } from '../utils/name-resolver.js';
@@ -554,7 +560,7 @@ Examples:
             hint: reason
               ? `Re-run with --yes to confirm. Reason: ${reason}`
               : 'Re-run with --yes to confirm, or --dry-run to preview without sending.',
-            context: { command: cmd, deviceType: typeLabel, deviceId, ...(reason ? { destructiveReason: reason } : {}) },
+            context: { command: cmd, deviceType: typeLabel, deviceId, ...(reason ? { safetyReason: reason, destructiveReason: reason } : {}) },
           });
         }
 
@@ -893,7 +899,16 @@ Examples:
 function normalizeCatalogForJson(entry: DeviceCatalogEntry): object {
   return {
     ...entry,
-    commands: entry.commands.map((c) => ({ ...c, destructive: Boolean(c.destructive) })),
+    commands: entry.commands.map((c) => {
+      const tier = deriveSafetyTier(c, entry);
+      const reason = getCommandSafetyReason(c);
+      return {
+        ...c,
+        safetyTier: tier,
+        destructive: tier === 'destructive',
+        ...(reason ? { safetyReason: reason } : {}),
+      };
+    }),
   };
 }
 
@@ -912,9 +927,10 @@ function renderCatalogEntry(entry: DeviceCatalogEntry): void {
     console.log('\nCommands:');
     const hasExamples = entry.commands.some((c) => c.exampleParams && c.exampleParams.length > 0);
     const rows = entry.commands.map((c) => {
+      const tier = deriveSafetyTier(c, entry);
       const flags: string[] = [];
       if (c.commandType === 'customize') flags.push('customize');
-      if (c.destructive) flags.push('!destructive');
+      if (tier === 'destructive') flags.push('!destructive');
       const label = flags.length > 0 ? `${c.command}  [${flags.join(', ')}]` : c.command;
       const base = [label, c.parameter, c.description];
       return hasExamples ? [...base, (c.exampleParams ?? []).join(' | ') || ''] : base;
@@ -923,7 +939,9 @@ function renderCatalogEntry(entry: DeviceCatalogEntry): void {
       ? ['command', 'parameter', 'description', 'example']
       : ['command', 'parameter', 'description'];
     printTable(tableHeaders, rows);
-    const hasDestructive = entry.commands.some((c) => c.destructive);
+    const hasDestructive = entry.commands.some(
+      (c) => deriveSafetyTier(c, entry) === 'destructive',
+    );
     if (hasDestructive) {
       console.log('\n[!destructive] commands have hard-to-reverse real-world effects — confirm before issuing.');
     }

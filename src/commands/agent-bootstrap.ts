@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { printJson } from '../utils/output.js';
 import { loadCache } from '../devices/cache.js';
-import { getEffectiveCatalog } from '../devices/catalog.js';
+import { getEffectiveCatalog, deriveSafetyTier } from '../devices/catalog.js';
 import { readProfileMeta } from '../config.js';
 import { todayUsage, DAILY_QUOTA } from '../utils/quota.js';
 import { ALL_STRATEGIES } from '../utils/name-resolver.js';
@@ -107,12 +107,16 @@ Examples:
           category: e.category,
           role: e.role ?? null,
           readOnly: e.readOnly ?? false,
-          commands: e.commands.map((c) => ({
-            command: c.command,
-            parameter: c.parameter,
-            destructive: Boolean(c.destructive),
-            idempotent: Boolean(c.idempotent),
-          })),
+          commands: e.commands.map((c) => {
+            const tier = deriveSafetyTier(c, e);
+            return {
+              command: c.command,
+              parameter: c.parameter,
+              safetyTier: tier,
+              destructive: tier === 'destructive',
+              idempotent: Boolean(c.idempotent),
+            };
+          }),
           statusFields: e.statusFields ?? [],
         };
       });
