@@ -46,6 +46,35 @@ describe('commandToJson', () => {
     const formatOpt = result.options.find((o) => o.flags.includes('--format'));
     expect(formatOpt?.choices).toEqual(['json', 'table', 'tsv']);
   });
+
+  it('omits identity fields by default', () => {
+    const cmd = new Command('switchbot').description('root');
+    const result = commandToJson(cmd);
+    expect(result.product).toBeUndefined();
+    expect(result.domain).toBeUndefined();
+    expect(result.vendor).toBeUndefined();
+    expect(result.apiVersion).toBeUndefined();
+    expect(result.apiDocs).toBeUndefined();
+    expect(result.productCategories).toBeUndefined();
+  });
+
+  it('includes identity fields when {includeIdentity:true} is passed (root --help --json)', () => {
+    const cmd = new Command('switchbot').description('root');
+    const result = commandToJson(cmd, { includeIdentity: true });
+    expect(result.product).toBe('SwitchBot');
+    expect(result.domain).toMatch(/smart home|IoT/i);
+    expect(result.vendor).toBe('Wonderlabs, Inc.');
+    expect(result.apiVersion).toBe('v1.1');
+    expect(result.apiDocs).toMatch(/OpenWonderLabs/);
+    expect(Array.isArray(result.productCategories)).toBe(true);
+    expect(result.productCategories!.length).toBeGreaterThan(0);
+    // AI discoverability: product categories should name common device kinds.
+    const joined = (result.productCategories ?? []).join(' | ').toLowerCase();
+    expect(joined).toMatch(/light/);
+    expect(joined).toMatch(/lock/);
+    expect(joined).toMatch(/curtain/);
+    expect(joined).toMatch(/ir/);
+  });
 });
 
 describe('resolveTargetCommand', () => {

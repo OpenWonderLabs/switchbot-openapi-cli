@@ -1,4 +1,5 @@
 import type { Command, Option, Argument } from 'commander';
+import { IDENTITY } from '../commands/identity.js';
 
 interface ArgJson {
   name: string;
@@ -22,12 +23,24 @@ interface SubcommandJson {
 export interface CommandJson {
   name: string;
   description: string;
+  /** Root-only — present only when commandToJson() is called with {includeIdentity:true}. */
+  product?: string;
+  domain?: string;
+  vendor?: string;
+  apiVersion?: string;
+  apiDocs?: string;
+  productCategories?: readonly string[];
   arguments: ArgJson[];
   options: OptionJson[];
   subcommands: SubcommandJson[];
 }
 
-export function commandToJson(cmd: Command): CommandJson {
+export interface CommandToJsonOptions {
+  /** Inject product identity fields at top level. Intended for the root program only. */
+  includeIdentity?: boolean;
+}
+
+export function commandToJson(cmd: Command, opts: CommandToJsonOptions = {}): CommandJson {
   const args: ArgJson[] = (cmd.registeredArguments as Argument[]).map((a) => ({
     name: a.name(),
     required: a.required,
@@ -35,7 +48,7 @@ export function commandToJson(cmd: Command): CommandJson {
     description: a.description ?? '',
   }));
 
-  const opts: OptionJson[] = (cmd.options as Option[])
+  const options: OptionJson[] = (cmd.options as Option[])
     .filter((o) => o.long !== '--help' && o.long !== '--version')
     .map((o) => {
       const entry: OptionJson = { flags: o.flags, description: o.description ?? '' };
@@ -44,17 +57,28 @@ export function commandToJson(cmd: Command): CommandJson {
       return entry;
     });
 
-  const subs: SubcommandJson[] = cmd.commands
+  const subcommands: SubcommandJson[] = cmd.commands
     .filter((c) => !c.name().startsWith('_'))
     .map((c) => ({ name: c.name(), description: c.description() }));
 
-  return {
+  const out: CommandJson = {
     name: cmd.name(),
     description: cmd.description(),
     arguments: args,
-    options: opts,
-    subcommands: subs,
+    options,
+    subcommands,
   };
+
+  if (opts.includeIdentity) {
+    out.product = IDENTITY.product;
+    out.domain = IDENTITY.domain;
+    out.vendor = IDENTITY.vendor;
+    out.apiVersion = IDENTITY.apiVersion;
+    out.apiDocs = IDENTITY.apiDocs;
+    out.productCategories = IDENTITY.productCategories;
+  }
+
+  return out;
 }
 
 /** Walk argv tokens (skipping flags) to find the deepest matching subcommand. */

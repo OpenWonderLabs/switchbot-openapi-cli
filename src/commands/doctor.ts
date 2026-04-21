@@ -538,7 +538,7 @@ interface DoctorCliOptions {
 export function registerDoctorCommand(program: Command): void {
   program
     .command('doctor')
-    .description('Self-check: credentials, catalog, cache, quota, profiles, Node version')
+    .description('Self-check the SwitchBot CLI setup: credentials, catalog, cache, quota, MQTT, MCP')
     .option('--section <names>', 'Comma-separated list of checks to run (see --list for names)')
     .option('--list', 'Print the registered check names and exit 0 without running any check')
     .option('--fix', 'Apply safe, reversible remediations for failing checks (e.g. clear stale cache)')

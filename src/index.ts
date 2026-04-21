@@ -6,6 +6,7 @@ import { intArg, stringArg, enumArg } from './utils/arg-parsers.js';
 import { parseDurationToMs } from './utils/flags.js';
 import { emitJsonError, isJsonMode, printJson } from './utils/output.js';
 import { commandToJson, resolveTargetCommand } from './utils/help-json.js';
+import { PRODUCT_TAGLINE } from './commands/identity.js';
 import { registerConfigCommand } from './commands/config.js';
 import { registerDevicesCommand } from './commands/devices.js';
 import { registerScenesCommand } from './commands/scenes.js';
@@ -63,7 +64,7 @@ const cacheModeArg = (value: string): string => {
 
 program
   .name('switchbot')
-  .description('Command-line tool for SwitchBot API v1.1')
+  .description(PRODUCT_TAGLINE)
   .version(pkgVersion)
   .option('--no-color', 'Disable ANSI colors in output')
   .option('--json', 'Output raw JSON response (disables tables; useful for pipes/scripts)')
@@ -180,7 +181,7 @@ try {
     if (err.code === 'commander.helpDisplayed') {
       if (isJsonMode()) {
         const target = resolveTargetCommand(program, process.argv.slice(2));
-        printJson(commandToJson(target));
+        printJson(commandToJson(target, { includeIdentity: target === program }));
       }
       process.exit(0);
     }

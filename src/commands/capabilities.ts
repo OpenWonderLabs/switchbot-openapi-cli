@@ -10,6 +10,7 @@ import { RESOURCE_CATALOG } from '../devices/resources.js';
 import { loadCache } from '../devices/cache.js';
 import { printJson } from '../utils/output.js';
 import { enumArg, stringArg } from '../utils/arg-parsers.js';
+import { IDENTITY } from './identity.js';
 
 /** Collect the distinct catalog safety tiers actually used across the given entries. Sorted. */
 function collectSafetyTiersInUse(entries: DeviceCatalogEntry[]): SafetyTier[] {
@@ -115,24 +116,6 @@ function metaFor(command: string): CommandMeta | null {
   return COMMAND_META[command] ?? null;
 }
 
-const IDENTITY = {
-  product: 'SwitchBot',
-  domain: 'IoT smart home device control',
-  vendor: 'Wonderlabs, Inc.',
-  apiVersion: 'v1.1',
-  apiDocs: 'https://github.com/OpenWonderLabs/SwitchBotAPI',
-  deviceCategories: {
-    physical: 'Wi-Fi/BLE devices controllable via Cloud API (Hub required for BLE-only)',
-    ir: 'IR remote devices learned by a SwitchBot Hub (TV, AC, etc.)',
-  },
-  constraints: {
-    quotaPerDay: 10000,
-    bleRequiresHub: true,
-    authMethod: 'HMAC-SHA256 token+secret',
-  },
-  agentGuide: 'docs/agent-guide.md',
-};
-
 const MCP_TOOLS = [
   'list_devices',
   'get_device_status',
@@ -206,7 +189,7 @@ export function registerCapabilitiesCommand(program: Command): void {
   const SURFACES = ['cli', 'mcp', 'plan', 'mqtt', 'all'] as const;
   program
     .command('capabilities')
-    .description('Print a machine-readable manifest of CLI capabilities (for agent bootstrap)')
+    .description('Print a machine-readable manifest of SwitchBot CLI capabilities (for AI agent bootstrap)')
     .option('--minimal', 'Omit per-subcommand flag details to reduce output size (alias of --compact)')
     .option('--compact', 'Emit a compact summary: identity + leaf command list with safety metadata only')
     .option('--used', 'Restrict the catalog summary to device types present in the local cache. Mirrors `schema export --used`.')

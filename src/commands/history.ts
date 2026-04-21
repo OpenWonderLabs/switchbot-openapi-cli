@@ -22,7 +22,7 @@ const DEFAULT_AUDIT = path.join(os.homedir(), '.switchbot', 'audit.log');
 export function registerHistoryCommand(program: Command): void {
   const history = program
     .command('history')
-    .description('View and replay commands recorded via --audit-log')
+    .description('View and replay SwitchBot commands recorded via --audit-log')
     .addHelpText('after', `
 Every 'devices command' run with --audit-log is appended as JSONL to the
 audit file (default ~/.switchbot/audit.log). 'history show' prints the file,

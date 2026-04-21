@@ -5,6 +5,25 @@ All notable changes to `@switchbot/openapi-cli` are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.1] - 2026-04-21
+
+AI-discoverability patch. Top-level `--help` / `--help --json` and every
+subcommand description now lead with the SwitchBot product category
+(smart home: lights, locks, curtains, sensors, plugs, IR appliances) so
+AI agents reading help text can identify scope without parsing the
+catalog. Identity is consolidated into a single module to prevent drift.
+
+### Changed
+
+- **Top-level `switchbot --help`** — program description rewritten to "SwitchBot smart home CLI — control lights, locks, curtains, sensors, plugs, and IR appliances (TV/AC/fan) via Cloud API v1.1; run scenes, stream real-time events, and integrate AI agents via MCP." (previously the terse "Command-line tool for SwitchBot API v1.1"). Both human and AI scanners now learn the product category on the first line.
+- **`switchbot --help --json` (root)** — now carries top-level `product`, `domain`, `vendor`, `apiVersion`, `apiDocs`, and `productCategories[]` fields for programmatic discovery. Subcommand `--help --json` output is unchanged (identity is root-only to keep per-command payloads tight).
+- **Subcommand descriptions** — `catalog`, `schema`, `history`, `plan`, `doctor`, `capabilities` now explicitly mention "SwitchBot" so each command self-describes in `--help` (the other 10 top-level commands already mentioned it).
+- **README intro** — rewritten to lead with the product category ("SwitchBot smart home CLI — control lights, locks, curtains, sensors, plugs, and IR appliances …") instead of the API version.
+
+### Refactored
+
+- **Shared IDENTITY module** — extracted the product-identity constant to `src/commands/identity.ts`; `capabilities.ts`, `agent-bootstrap.ts`, and `utils/help-json.ts` now import from a single source of truth to prevent field drift. The canonical IDENTITY adds `productCategories: string[]` (8 category keywords AI agents can scan) and clarifies `constraints.transport = "Cloud API v1.1 (HTTPS)"` — the CLI does **not** drive BLE radios directly; BLE-only devices are reached through a SwitchBot Hub, which the Cloud API handles transparently. `agent-bootstrap --json` gains additive identity fields (`apiDocs`, `deviceCategories`, `productCategories`, `agentGuide`) via the shared module; no fields removed.
+
 ## [2.7.0] - 2026-04-21
 
 AI-first maturity release. Broader field-alias coverage, richer capability

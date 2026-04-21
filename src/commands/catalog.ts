@@ -17,7 +17,7 @@ export function registerCatalogCommand(program: Command): void {
   const SOURCES = ['built-in', 'overlay', 'effective'] as const;
   const catalog = program
     .command('catalog')
-    .description('Inspect the built-in device catalog and any local overlay')
+    .description('Inspect the SwitchBot device catalog (supported device types + any local overlay)')
     .addHelpText('after', `
 This CLI ships with a static catalog of known SwitchBot device types and
 their commands (see 'switchbot devices types'). You can extend or override

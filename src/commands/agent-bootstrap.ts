@@ -9,6 +9,7 @@ import {
 import { readProfileMeta } from '../config.js';
 import { todayUsage, DAILY_QUOTA } from '../utils/quota.js';
 import { ALL_STRATEGIES } from '../utils/name-resolver.js';
+import { IDENTITY } from './identity.js';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
@@ -22,14 +23,6 @@ const { version: pkgVersion } = require('../../package.json') as { version: stri
  * fails the `catalog-schema` check when these differ.
  */
 export const AGENT_BOOTSTRAP_SCHEMA_VERSION = CATALOG_SCHEMA_VERSION;
-
-const IDENTITY = {
-  product: 'SwitchBot',
-  domain: 'IoT smart home device control',
-  vendor: 'Wonderlabs, Inc.',
-  apiVersion: 'v1.1',
-  authMethod: 'HMAC-SHA256 token+secret',
-};
 
 const SAFETY_TIERS = {
   read: 'No state mutation; safe to call freely.',

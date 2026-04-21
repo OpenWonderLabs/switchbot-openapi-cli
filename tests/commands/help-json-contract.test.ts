@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { Command } from 'commander';
 import { commandToJson, type CommandJson } from '../../src/utils/help-json.js';
+import { PRODUCT_TAGLINE } from '../../src/commands/identity.js';
 import { registerConfigCommand } from '../../src/commands/config.js';
 import { registerDevicesCommand } from '../../src/commands/devices.js';
 import { registerScenesCommand } from '../../src/commands/scenes.js';
@@ -39,7 +40,7 @@ const TOP_LEVEL_COMMANDS = [
 
 function buildProgram(): Command {
   const program = new Command();
-  program.name('switchbot').description('Command-line tool for SwitchBot API v1.1').version('0.0.0-test');
+  program.name('switchbot').description(PRODUCT_TAGLINE).version('0.0.0-test');
   registerConfigCommand(program);
   registerDevicesCommand(program);
   registerScenesCommand(program);
@@ -152,6 +153,35 @@ describe('help --json contract coverage', () => {
         for (const s of cmd.commands) walk(s);
       }
       for (const top of program.commands) walk(top);
+    });
+  });
+
+  describe('root identity — AI discoverability (v2.7.1)', () => {
+    it('top-level description is the product tagline (smart-home + categories)', () => {
+      expect(program.description()).toBe(PRODUCT_TAGLINE);
+      expect(PRODUCT_TAGLINE).toMatch(/SwitchBot/);
+      expect(PRODUCT_TAGLINE).toMatch(/smart home/i);
+      // Must not reintroduce "BLE" — CLI only drives Cloud API.
+      expect(PRODUCT_TAGLINE).not.toMatch(/\bBLE\b/);
+    });
+
+    it('root --help --json carries identity (product / domain / vendor / apiVersion / apiDocs / productCategories)', () => {
+      const json = commandToJson(program, { includeIdentity: true });
+      expect(json.product).toBe('SwitchBot');
+      expect(json.domain).toMatch(/smart home|IoT/i);
+      expect(json.vendor).toMatch(/Wonderlabs/);
+      expect(json.apiVersion).toBe('v1.1');
+      expect(json.apiDocs).toMatch(/OpenWonderLabs/);
+      expect(Array.isArray(json.productCategories)).toBe(true);
+      expect((json.productCategories ?? []).length).toBeGreaterThan(4);
+    });
+
+    it('subcommand --help --json does NOT carry identity fields', () => {
+      const devices = program.commands.find((c) => c.name() === 'devices')!;
+      const json = commandToJson(devices);
+      expect(json.product).toBeUndefined();
+      expect(json.domain).toBeUndefined();
+      expect(json.productCategories).toBeUndefined();
     });
   });
 });

@@ -6,8 +6,8 @@
 [![node](https://img.shields.io/node/v/@switchbot/openapi-cli.svg)](https://nodejs.org)
 [![CI](https://github.com/OpenWonderLabs/switchbot-openapi-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/OpenWonderLabs/switchbot-openapi-cli/actions/workflows/ci.yml)
 
-Command-line interface for the [SwitchBot API v1.1](https://github.com/OpenWonderLabs/SwitchBotAPI).
-List devices, query live status, send control commands, run scenes, receive real-time events, and connect AI agents via the built-in MCP server — all from your terminal or shell scripts.
+**SwitchBot** smart home CLI — control lights, locks, curtains, sensors, plugs, and IR appliances (TV/AC/fan) via the [SwitchBot Cloud API v1.1](https://github.com/OpenWonderLabs/SwitchBotAPI).
+Run scenes, stream real-time events over MQTT, and plug AI agents into your home via the built-in MCP server — all from your terminal or shell scripts.
 
 - **npm package:** [`@switchbot/openapi-cli`](https://www.npmjs.com/package/@switchbot/openapi-cli)
 - **Source code:** [github.com/OpenWonderLabs/switchbot-openapi-cli](https://github.com/OpenWonderLabs/switchbot-openapi-cli)

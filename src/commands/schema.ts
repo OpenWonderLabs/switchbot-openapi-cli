@@ -114,7 +114,7 @@ export function registerSchemaCommand(program: Command): void {
   const CATEGORIES = ['physical', 'ir'] as const;
   const schema = program
     .command('schema')
-    .description('Export the device catalog as structured JSON (for agent prompts / tooling)');
+    .description('Export the SwitchBot device catalog as structured JSON (for AI agent prompts / tooling)');
 
   schema
     .command('export')
