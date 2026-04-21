@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { enumArg, stringArg } from '../utils/arg-parsers.js';
-import { printTable, printKeyValue, printJson, isJsonMode, handleError, UsageError, StructuredUsageError, emitJsonError, exitWithError } from '../utils/output.js';
+import { printTable, printKeyValue, printJson, isJsonMode, handleError, UsageError, StructuredUsageError, exitWithError } from '../utils/output.js';
 import { resolveFormat, resolveFields, renderRows } from '../utils/format.js';
 import {
   findCatalogEntry,
@@ -500,27 +500,23 @@ Examples:
         const validation = validateCommand(deviceId, cmd, parameter, options.type);
         if (!validation.ok) {
           const err = validation.error;
-          if (isJsonMode()) {
-            const obj: Record<string, unknown> = { code: 2, kind: 'usage', message: err.message };
-            if (err.hint) obj.hint = err.hint;
-            obj.context = { validationKind: err.kind };
-            emitJsonError(obj);
-          } else {
-            console.error(`Error: ${err.message}`);
-            if (err.hint) console.error(err.hint);
-            if (err.kind === 'unknown-command') {
-              const cached = getCachedDevice(deviceId);
-              if (cached) {
-                console.error(
-                  `Run 'switchbot devices commands ${JSON.stringify(cached.type)}' for parameter formats and descriptions.`
-                );
-                console.error(
-                  `(If the catalog is out of date, run 'switchbot devices list' to refresh the local cache, or pass --type customize for custom IR buttons.)`
-                );
-              }
+          let hint = err.hint;
+          if (err.kind === 'unknown-command') {
+            const cached = getCachedDevice(deviceId);
+            if (cached) {
+              const extra =
+                `Run 'switchbot devices commands ${JSON.stringify(cached.type)}' for parameter formats and descriptions.\n` +
+                `(If the catalog is out of date, run 'switchbot devices list' to refresh the local cache, or pass --type customize for custom IR buttons.)`;
+              hint = hint ? `${hint}\n${extra}` : extra;
             }
           }
-          process.exit(2);
+          exitWithError({
+            code: 2,
+            kind: 'usage',
+            message: err.message,
+            hint,
+            context: { validationKind: err.kind },
+          });
         }
 
         // Case-only mismatch: emit a warning and continue with the canonical name.

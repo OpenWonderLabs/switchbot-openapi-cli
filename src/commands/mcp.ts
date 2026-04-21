@@ -4,7 +4,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
 import { intArg, stringArg } from '../utils/arg-parsers.js';
-import { handleError, isJsonMode, buildErrorPayload, emitJsonError, exitWithError, type ErrorPayload, type ErrorSubKind } from '../utils/output.js';
+import { handleError, isJsonMode, buildErrorPayload, exitWithError, type ErrorPayload, type ErrorSubKind } from '../utils/output.js';
 import { VERSION } from '../version.js';
 import {
   fetchDeviceList,

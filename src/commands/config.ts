@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { stringArg } from '../utils/arg-parsers.js';
 import { intArg } from '../utils/arg-parsers.js';
 import { saveConfig, showConfig, getConfigSummary, listProfiles, readProfileMeta } from '../config.js';
-import { isJsonMode, printJson, emitJsonError } from '../utils/output.js';
+import { isJsonMode, printJson, exitWithError } from '../utils/output.js';
 import chalk from 'chalk';
 
 function parseEnvFile(file: string): { token?: string; secret?: string } {
@@ -162,13 +162,11 @@ Files are written with mode 0600. Profiles live under ~/.switchbot/profiles/<nam
 
       if (options.fromEnvFile) {
         if (!fs.existsSync(options.fromEnvFile)) {
-          const msg = `--from-env-file: file not found: ${options.fromEnvFile}`;
-          if (isJsonMode()) {
-            emitJsonError({ code: 2, kind: 'usage', message: msg });
-          } else {
-            console.error(msg);
-          }
-          process.exit(2);
+          exitWithError({
+            code: 2,
+            kind: 'usage',
+            message: `--from-env-file: file not found: ${options.fromEnvFile}`,
+          });
         }
         const parsed = parseEnvFile(options.fromEnvFile);
         token = token ?? parsed.token;
@@ -177,35 +175,33 @@ Files are written with mode 0600. Profiles live under ~/.switchbot/profiles/<nam
 
       if (options.fromOp) {
         if (!options.opSecret) {
-          const msg = '--from-op requires --op-secret <ref> for the secret reference.';
-          if (isJsonMode()) {
-            emitJsonError({ code: 2, kind: 'usage', message: msg });
-          } else {
-            console.error(msg);
-          }
-          process.exit(2);
+          exitWithError({
+            code: 2,
+            kind: 'usage',
+            message: '--from-op requires --op-secret <ref> for the secret reference.',
+          });
         }
         try {
           token = readFromOp(options.fromOp);
           secret = readFromOp(options.opSecret);
         } catch (err) {
-          const msg = `1Password CLI read failed: ${err instanceof Error ? err.message : String(err)}`;
-          if (isJsonMode()) {
-            emitJsonError({ code: 1, kind: 'runtime', message: msg, hint: 'Ensure the "op" CLI is installed and authenticated (op signin).' });
-          } else {
-            console.error(msg);
-            console.error('Ensure the "op" CLI is installed and authenticated (op signin).');
-          }
-          process.exit(1);
+          exitWithError({
+            code: 1,
+            kind: 'runtime',
+            message: `1Password CLI read failed: ${err instanceof Error ? err.message : String(err)}`,
+            hint: 'Ensure the "op" CLI is installed and authenticated (op signin).',
+          });
         }
       }
 
       // No credentials yet and stdin is a TTY → interactive prompt (safest path).
       if ((!token || !secret) && !options.fromEnvFile && !options.fromOp && process.stdin.isTTY) {
         if (isJsonMode()) {
-          const msg = 'Interactive mode cannot run under --json. Provide token/secret via --from-env-file, --from-op, or positional args.';
-          emitJsonError({ code: 2, kind: 'usage', message: msg });
-          process.exit(2);
+          exitWithError({
+            code: 2,
+            kind: 'usage',
+            message: 'Interactive mode cannot run under --json. Provide token/secret via --from-env-file, --from-op, or positional args.',
+          });
         }
         try {
           if (!token) token = (await promptSecret('Token: ')).trim();
@@ -217,13 +213,11 @@ Files are written with mode 0600. Profiles live under ~/.switchbot/profiles/<nam
       }
 
       if (!token || !secret) {
-        const msg = 'Missing token/secret. Run interactively, or use --from-env-file / --from-op, or pass positional arguments (discouraged).';
-        if (isJsonMode()) {
-          emitJsonError({ code: 2, kind: 'usage', message: msg });
-        } else {
-          console.error(msg);
-        }
-        process.exit(2);
+        exitWithError({
+          code: 2,
+          kind: 'usage',
+          message: 'Missing token/secret. Run interactively, or use --from-env-file / --from-op, or pass positional arguments (discouraged).',
+        });
       }
 
       saveConfig(token, secret, {

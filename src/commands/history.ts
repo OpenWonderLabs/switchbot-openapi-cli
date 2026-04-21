@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import path from 'node:path';
 import os from 'node:os';
 import { intArg, stringArg } from '../utils/arg-parsers.js';
-import { printJson, isJsonMode, handleError, UsageError, emitJsonError } from '../utils/output.js';
+import { printJson, isJsonMode, handleError, UsageError, exitWithError } from '../utils/output.js';
 import { readAudit, verifyAudit, type AuditEntry } from '../utils/audit.js';
 import { executeCommand } from '../lib/devices.js';
 import {
@@ -86,23 +86,19 @@ Examples:
       const entries = readAudit(file);
       const idx = Number(indexArg);
       if (!Number.isInteger(idx) || idx < 1 || idx > entries.length) {
-        const msg = `Invalid index ${indexArg}. Log has ${entries.length} entries.`;
-        if (isJsonMode()) {
-          emitJsonError({ code: 2, kind: 'usage', message: msg });
-        } else {
-          console.error(msg);
-        }
-        process.exit(2);
+        exitWithError({
+          code: 2,
+          kind: 'usage',
+          message: `Invalid index ${indexArg}. Log has ${entries.length} entries.`,
+        });
       }
       const entry: AuditEntry = entries[idx - 1];
       if (entry.kind !== 'command') {
-        const msg = `Entry ${idx} is not a command (kind=${entry.kind}).`;
-        if (isJsonMode()) {
-          emitJsonError({ code: 2, kind: 'usage', message: msg });
-        } else {
-          console.error(msg);
-        }
-        process.exit(2);
+        exitWithError({
+          code: 2,
+          kind: 'usage',
+          message: `Entry ${idx} is not a command (kind=${entry.kind}).`,
+        });
       }
       try {
         const result = await executeCommand(

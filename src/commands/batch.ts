@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import type { AxiosInstance } from 'axios';
 import { intArg, enumArg, stringArg } from '../utils/arg-parsers.js';
-import { printJson, isJsonMode, handleError, buildErrorPayload, UsageError, emitJsonError, exitWithError, type ErrorPayload } from '../utils/output.js';
+import { printJson, isJsonMode, handleError, buildErrorPayload, UsageError, exitWithError, type ErrorPayload } from '../utils/output.js';
 import {
   fetchDeviceList,
   executeCommand,
@@ -296,22 +296,14 @@ Examples:
         }
 
         if (blockedForDestructive.length > 0 && !options.yes) {
-          if (isJsonMode()) {
-            const deviceIds = blockedForDestructive.map((b) => b.deviceId);
-            emitJsonError({
-              code: 2,
-              kind: 'guard',
-              message: `Destructive command "${cmd}" requires --yes to run on ${blockedForDestructive.length} device(s).`,
-              hint: 'Re-issue the call with --yes to proceed.',
-              context: { command: cmd, deviceIds },
-            });
-          } else {
-            console.error(
-              `Refusing to run destructive command "${cmd}" on ${blockedForDestructive.length} device(s) without --yes:`
-            );
-            for (const b of blockedForDestructive) console.error(`  ${b.deviceId}`);
-          }
-          process.exit(2);
+          const deviceIds = blockedForDestructive.map((b) => b.deviceId);
+          exitWithError({
+            code: 2,
+            kind: 'guard',
+            message: `Refusing to run destructive command "${cmd}" on ${blockedForDestructive.length} device(s) without --yes: ${deviceIds.join(', ')}`,
+            hint: 'Re-issue the call with --yes to proceed.',
+            context: { command: cmd, deviceIds },
+          });
         }
 
         // parameter may be a JSON object string; mirror the single-command action.
