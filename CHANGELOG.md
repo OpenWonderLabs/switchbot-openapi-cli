@@ -5,6 +5,46 @@ All notable changes to `@switchbot/openapi-cli` are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.0] - 2026-04-21
+
+AI-first maturity release. Broader field-alias coverage, richer capability
+metadata, and agent-discoverable resource surfaces (scenes, webhooks, keys).
+
+### Added
+
+- **Field aliases** — registry expanded from ~10 to ~51 canonical keys (~98% coverage of catalog `statusFields` + webhook payload fields), dispatched through `devices status`, `devices watch`, and `--fields` parsers. Phase 4 sweep adds ultra-niche sensor/webhook aliases: `waterLeakDetect`, `pressure`, `moveCount`, `errorCode`, `buttonName`, `pressedAt`, `deviceMac`, `detectionState`.
+- **safetyTier enum (5 tiers)** — catalog commands now carry `safetyTier: 'read' | 'mutation' | 'ir-fire-forget' | 'destructive' | 'maintenance'`; replaces the legacy `destructive: boolean` flag.
+- **`DeviceCatalogEntry.statusQueries`** — read-tier catalog entries exposing queryable status fields; derived from existing `statusFields` plus a curated `STATUS_FIELD_DESCRIPTIONS` map. Powers `safetyTier: 'read'` and lights up `capabilities.catalog.readOnlyQueryCount`.
+- **`capabilities.resources`** — new top-level `resources` block in `capabilities --json` and `schema export`, exposing scenes (list/execute/describe), webhooks (4 endpoints + 15 event specs + constraints), and keypad keys (4 types: permanent/timeLimit/disposable/urgent). Each endpoint/event declares its safety tier so agents can plan without trial-and-error.
+- **Multi-format output** — `--format=yaml` and `--format=tsv` for all non-streaming commands (devices list, scenes list, catalog, etc.); `id` / `markdown` formats preserved. `--json` remains the alias for `--format=json`.
+- **doctor upgrades** — new `--section`, `--list`, `--fix`, `--yes`, `--probe` flags; new checks `catalog-schema`, `audit`, `mcp` (dry-run — instantiates MCP server and counts registered tools), plus live MQTT probe (guarded by `--probe`, 5 s timeout).
+- **Streaming JSON contract** — every streaming command (watch / events tail / events mqtt-tail) now emits a `{ schemaVersion, stream: true, eventKind, cadence }` header as its first NDJSON line; documented in `docs/json-contract.md`.
+- **Events envelope** — unified `{ schemaVersion, t, source, deviceId, topic, type, payload }` shape across `events tail` and `events mqtt-tail`.
+- **MCP tool schema completeness** — every tool input schema now carries `.describe()` annotations; new test suite enforces this.
+- **Help-JSON contract test** — table-driven coverage for all 16 top-level commands.
+- **batch `--emit-plan`** — new canonical flag alias for the deprecated `--plan`.
+
+### Changed
+
+- **Error envelope** — all error paths route through `exitWithError()` / `handleError()`; `--json` failure output always carries `schemaVersion` + structured `error` object.
+- **Quota accounting** — requests are recorded on attempt (request interceptor) instead of on success, so timeouts / 4xx / 5xx count against daily quota.
+- **`--json` vs `--format=json`** — both paths go through the same formatter; `--json` is now documented as the alias.
+
+### Deprecated
+
+- `destructive: boolean` on catalog entries — derived from `safetyTier === 'destructive'`. Removed in v3.0.
+- `DeviceCatalogEntry.statusFields` — superseded by `statusQueries`. Removed in v3.0.
+- `batch --plan` — renamed to `--emit-plan`. Old flag still works but prints a deprecation warning to stderr. Removed in v3.0.
+- Events legacy fields `body` / `remote` on `events tail` — superseded by the unified envelope. Removed in v3.0.
+
+### Reserved
+
+- `safetyTier: 'maintenance'` — enum value accepted by the type system but no catalog entry uses it today. Reserved for future SwitchBot API endpoints (factoryReset, firmwareUpdate, deepCalibrate).
+
+### Fixed
+
+- Quota counter no longer under-counts requests that fail at the transport or server layer.
+
 ## [2.6.4] - 2026-04-21
 
 ### Added
