@@ -77,6 +77,16 @@ export const FIELD_ALIASES: Record<string, readonly string[]> = {
   switchStatus: ['relay'],
   lockState: ['locked'],
   slidePosition: ['slide'],
+
+  // Phase 4 — ultra-niche sensor + webhook fields (~98% coverage target)
+  waterLeakDetect: ['leak', 'water'],
+  pressure: ['press', 'pa'],
+  moveCount: ['movecnt'],
+  errorCode: ['err'],
+  buttonName: ['btn', 'button'],
+  pressedAt: ['pressed'],
+  deviceMac: ['mac'],
+  detectionState: ['detected', 'detect'],
 };
 
 /**

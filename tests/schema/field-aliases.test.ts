@@ -8,8 +8,8 @@ import {
 } from '../../src/schema/field-aliases.js';
 
 describe('FIELD_ALIASES registry', () => {
-  it('has at least ~43 canonical keys after P1 expansion', () => {
-    expect(Object.keys(FIELD_ALIASES).length).toBeGreaterThanOrEqual(43);
+  it('has at least ~51 canonical keys after P14 expansion', () => {
+    expect(Object.keys(FIELD_ALIASES).length).toBeGreaterThanOrEqual(51);
   });
 
   it('never uses reserved/too-generic words as aliases (beyond the grandfathered "type"→deviceType)', () => {
@@ -224,6 +224,46 @@ describe('resolveField() — Phase 3 aliases', () => {
 
   it('filterElement: filter', () => {
     expect(resolveField('filter', ['filterElement'])).toBe('filterElement');
+  });
+});
+
+describe('resolveField() — Phase 4 aliases (ultra-niche)', () => {
+  it('waterLeakDetect: leak, water', () => {
+    expect(resolveField('leak', ['waterLeakDetect'])).toBe('waterLeakDetect');
+    expect(resolveField('water', ['waterLeakDetect'])).toBe('waterLeakDetect');
+  });
+
+  it('pressure: press, pa', () => {
+    expect(resolveField('press', ['pressure'])).toBe('pressure');
+    expect(resolveField('pa', ['pressure'])).toBe('pressure');
+  });
+
+  it('moveCount: movecnt', () => {
+    expect(resolveField('movecnt', ['moveCount'])).toBe('moveCount');
+  });
+
+  it('errorCode: err', () => {
+    expect(resolveField('err', ['errorCode'])).toBe('errorCode');
+  });
+
+  it('buttonName: btn, button', () => {
+    expect(resolveField('btn', ['buttonName'])).toBe('buttonName');
+    expect(resolveField('button', ['buttonName'])).toBe('buttonName');
+  });
+
+  it('pressedAt: pressed (distinct from pressure.press)', () => {
+    expect(resolveField('pressed', ['pressedAt'])).toBe('pressedAt');
+    // `press` goes to pressure, not pressedAt
+    expect(resolveField('press', ['pressure', 'pressedAt'])).toBe('pressure');
+  });
+
+  it('deviceMac: mac', () => {
+    expect(resolveField('mac', ['deviceMac'])).toBe('deviceMac');
+  });
+
+  it('detectionState: detected, detect', () => {
+    expect(resolveField('detected', ['detectionState'])).toBe('detectionState');
+    expect(resolveField('detect', ['detectionState'])).toBe('detectionState');
   });
 });
 
