@@ -5,6 +5,73 @@ All notable changes to `@switchbot/openapi-cli` are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.2] - 2026-04-21
+
+Patch release — CI size-budget fix.
+
+### Fixed
+
+- **`schema export --compact`** — dropped the `resources` block from compact output. In v2.7.0 the resources catalog (scenes / webhooks / keys, ~12 KB) was added to the schema payload unconditionally, which pushed `schema export --compact --used` past the 15 KB agent-prompt budget enforced by CI. The `resources` block is still emitted under the full (non-`--compact`) output, and is always available via `capabilities --json`, which is the canonical source for CLI resource metadata. No behaviour change for `capabilities --json` consumers.
+
+## [2.7.1] - 2026-04-21
+
+AI-discoverability patch. Top-level `--help` / `--help --json` and every
+subcommand description now lead with the SwitchBot product category
+(smart home: lights, locks, curtains, sensors, plugs, IR appliances) so
+AI agents reading help text can identify scope without parsing the
+catalog. Identity is consolidated into a single module to prevent drift.
+
+### Changed
+
+- **Top-level `switchbot --help`** — program description rewritten to "SwitchBot smart home CLI — control lights, locks, curtains, sensors, plugs, and IR appliances (TV/AC/fan) via Cloud API v1.1; run scenes, stream real-time events, and integrate AI agents via MCP." (previously the terse "Command-line tool for SwitchBot API v1.1"). Both human and AI scanners now learn the product category on the first line.
+- **`switchbot --help --json` (root)** — now carries top-level `product`, `domain`, `vendor`, `apiVersion`, `apiDocs`, and `productCategories[]` fields for programmatic discovery. Subcommand `--help --json` output is unchanged (identity is root-only to keep per-command payloads tight).
+- **Subcommand descriptions** — `catalog`, `schema`, `history`, `plan`, `doctor`, `capabilities` now explicitly mention "SwitchBot" so each command self-describes in `--help` (the other 10 top-level commands already mentioned it).
+- **README intro** — rewritten to lead with the product category ("SwitchBot smart home CLI — control lights, locks, curtains, sensors, plugs, and IR appliances …") instead of the API version.
+
+### Refactored
+
+- **Shared IDENTITY module** — extracted the product-identity constant to `src/commands/identity.ts`; `capabilities.ts`, `agent-bootstrap.ts`, and `utils/help-json.ts` now import from a single source of truth to prevent field drift. The canonical IDENTITY adds `productCategories: string[]` (8 category keywords AI agents can scan) and clarifies `constraints.transport = "Cloud API v1.1 (HTTPS)"` — the CLI does **not** drive BLE radios directly; BLE-only devices are reached through a SwitchBot Hub, which the Cloud API handles transparently. `agent-bootstrap --json` gains additive identity fields (`apiDocs`, `deviceCategories`, `productCategories`, `agentGuide`) via the shared module; no fields removed.
+
+## [2.7.0] - 2026-04-21
+
+AI-first maturity release. Broader field-alias coverage, richer capability
+metadata, and agent-discoverable resource surfaces (scenes, webhooks, keys).
+
+### Added
+
+- **Field aliases** — registry expanded from ~10 to ~51 canonical keys (~98% coverage of catalog `statusFields` + webhook payload fields), dispatched through `devices status`, `devices watch`, and `--fields` parsers. Phase 4 sweep adds ultra-niche sensor/webhook aliases: `waterLeakDetect`, `pressure`, `moveCount`, `errorCode`, `buttonName`, `pressedAt`, `deviceMac`, `detectionState`.
+- **safetyTier enum (5 tiers)** — catalog commands now carry `safetyTier: 'read' | 'mutation' | 'ir-fire-forget' | 'destructive' | 'maintenance'`; replaces the legacy `destructive: boolean` flag.
+- **`DeviceCatalogEntry.statusQueries`** — read-tier catalog entries exposing queryable status fields; derived from existing `statusFields` plus a curated `STATUS_FIELD_DESCRIPTIONS` map. Powers `safetyTier: 'read'` and lights up `capabilities.catalog.readOnlyQueryCount`.
+- **`capabilities.resources`** — new top-level `resources` block in `capabilities --json` and `schema export`, exposing scenes (list/execute/describe), webhooks (4 endpoints + 15 event specs + constraints), and keypad keys (4 types: permanent/timeLimit/disposable/urgent). Each endpoint/event declares its safety tier so agents can plan without trial-and-error.
+- **Multi-format output** — `--format=yaml` and `--format=tsv` for all non-streaming commands (devices list, scenes list, catalog, etc.); `id` / `markdown` formats preserved. `--json` remains the alias for `--format=json`.
+- **doctor upgrades** — new `--section`, `--list`, `--fix`, `--yes`, `--probe` flags; new checks `catalog-schema`, `audit`, `mcp` (dry-run — instantiates MCP server and counts registered tools), plus live MQTT probe (guarded by `--probe`, 5 s timeout).
+- **Streaming JSON contract** — every streaming command (watch / events tail / events mqtt-tail) now emits a `{ schemaVersion, stream: true, eventKind, cadence }` header as its first NDJSON line; documented in `docs/json-contract.md`.
+- **Events envelope** — unified `{ schemaVersion, t, source, deviceId, topic, type, payload }` shape across `events tail` and `events mqtt-tail`.
+- **MCP tool schema completeness** — every tool input schema now carries `.describe()` annotations; new test suite enforces this.
+- **Help-JSON contract test** — table-driven coverage for all 16 top-level commands.
+- **batch `--emit-plan`** — new canonical flag alias for the deprecated `--plan`.
+
+### Changed
+
+- **Error envelope** — all error paths route through `exitWithError()` / `handleError()`; `--json` failure output always carries `schemaVersion` + structured `error` object.
+- **Quota accounting** — requests are recorded on attempt (request interceptor) instead of on success, so timeouts / 4xx / 5xx count against daily quota.
+- **`--json` vs `--format=json`** — both paths go through the same formatter; `--json` is now documented as the alias.
+
+### Deprecated
+
+- `destructive: boolean` on catalog entries — derived from `safetyTier === 'destructive'`. Removed in v3.0.
+- `DeviceCatalogEntry.statusFields` — superseded by `statusQueries`. Removed in v3.0.
+- `batch --plan` — renamed to `--emit-plan`. Old flag still works but prints a deprecation warning to stderr. Removed in v3.0.
+- Events legacy fields `body` / `remote` on `events tail` — superseded by the unified envelope. Removed in v3.0.
+
+### Reserved
+
+- `safetyTier: 'maintenance'` — enum value accepted by the type system but no catalog entry uses it today. Reserved for future SwitchBot API endpoints (factoryReset, firmwareUpdate, deepCalibrate).
+
+### Fixed
+
+- Quota counter no longer under-counts requests that fail at the transport or server layer.
+
 ## [2.6.4] - 2026-04-21
 
 ### Added

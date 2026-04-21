@@ -125,6 +125,13 @@ describe('capabilities', () => {
     expect(cat.typeCount as number).toBeGreaterThan(10);
   });
 
+  it('P11: catalog.safetyTiersInUse includes "read" and catalog.readOnlyQueryCount > 0', async () => {
+    const out = await runCapabilities();
+    const cat = out.catalog as Record<string, unknown>;
+    expect((cat.safetyTiersInUse as string[])).toContain('read');
+    expect((cat.readOnlyQueryCount as number)).toBeGreaterThan(0);
+  });
+
   it('surfaces.mcp.tools includes send_command, account_overview, get_device_history and query_device_history', async () => {
     const out = await runCapabilities();
     const mcp = (out.surfaces as Record<string, { tools: string[]; resources: string[] }>).mcp;
@@ -238,5 +245,19 @@ describe('capabilities B3/B4', () => {
     expect(metaSet).toBeDefined();
     expect(metaSet!.agentSafetyTier).toBe('action');
     expect(metaSet!.mutating).toBe(true);
+  });
+
+  it('P15: resources catalog exposes scenes / webhooks / keys', async () => {
+    const out = await runCapabilitiesWith([]);
+    const resources = out.resources as Record<string, unknown>;
+    expect(resources).toBeDefined();
+    expect(resources.scenes).toBeDefined();
+    expect(resources.webhooks).toBeDefined();
+    expect(Array.isArray(resources.keys)).toBe(true);
+    const webhooks = resources.webhooks as { events: Array<{ eventType: string }>; endpoints: Array<{ verb: string }> };
+    expect(webhooks.events.length).toBeGreaterThanOrEqual(10);
+    expect(webhooks.endpoints.map((e) => e.verb).sort()).toEqual(['delete', 'query', 'setup', 'update']);
+    const keys = resources.keys as Array<{ keyType: string }>;
+    expect(keys.map((k) => k.keyType).sort()).toEqual(['disposable', 'permanent', 'timeLimit', 'urgent']);
   });
 });

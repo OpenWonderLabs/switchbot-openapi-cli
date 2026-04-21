@@ -103,6 +103,16 @@ export function createClient(): AxiosInstance {
       throw new DryRunSignal(method, url);
     }
 
+    // P8: record the quota attempt BEFORE the request is dispatched so
+    // failures (timeouts / DNS errors / 5xx / aborted) also count. Only
+    // pre-flight refusals (daily-cap, --dry-run) above skip recording
+    // since they never touch the network. Retries re-enter this
+    // interceptor and record again, which matches the SwitchBot API
+    // billing model (every dispatched HTTP request consumes quota).
+    if (quotaEnabled) {
+      recordRequest(method, url);
+    }
+
     return config;
   });
 
@@ -111,11 +121,6 @@ export function createClient(): AxiosInstance {
     (response: AxiosResponse) => {
       if (verbose) {
         process.stderr.write(chalk.grey(`[verbose] ${response.status} ${response.statusText}\n`));
-      }
-      if (quotaEnabled && response.config) {
-        const method = (response.config.method ?? 'get').toUpperCase();
-        const url = `${response.config.baseURL ?? ''}${response.config.url ?? ''}`;
-        recordRequest(method, url);
       }
       const data = response.data as { statusCode?: number; message?: string };
       if (data.statusCode !== undefined && data.statusCode !== 100) {
@@ -210,13 +215,10 @@ export function createClient(): AxiosInstance {
           }
         }
 
-        // Record exhausted/non-retryable HTTP responses too — they count
-        // against the daily quota.
-        if (quotaEnabled && error.response && config) {
-          const method = (config.method ?? 'get').toUpperCase();
-          const url = `${config.baseURL ?? ''}${config.url ?? ''}`;
-          recordRequest(method, url);
-        }
+        // P8: quota already recorded in the request interceptor before
+        // dispatch — no extra bookkeeping needed here on the error path.
+        // Timeouts, DNS failures, 5xx, and exhausted retries all counted
+        // when the attempt was first made.
 
         if (status === 401) {
           throw new ApiError(

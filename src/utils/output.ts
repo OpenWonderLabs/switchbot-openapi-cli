@@ -34,6 +34,29 @@ export function emitJsonError(errorPayload: Record<string, unknown>): void {
   }
 }
 
+/**
+ * P7: emit the stream-header first line for any NDJSON/streaming command
+ * running under `--json`. Downstream JSON consumers can key on
+ * `{ stream: true }` to distinguish the header from subsequent event
+ * lines, and on `eventKind` / `cadence` to pick a parser strategy.
+ *
+ * Non-streaming commands (single-object / array output) do NOT emit this
+ * header — only watch / events tail / events mqtt-tail.
+ */
+export function emitStreamHeader(opts: {
+  eventKind: 'tick' | 'event';
+  cadence: 'poll' | 'push';
+}): void {
+  console.log(
+    JSON.stringify({
+      schemaVersion: '1',
+      stream: true,
+      eventKind: opts.eventKind,
+      cadence: opts.cadence,
+    }),
+  );
+}
+
 interface ExitWithErrorOptions {
   message: string;
   kind?: 'usage' | 'guard' | 'runtime';

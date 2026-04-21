@@ -1,11 +1,12 @@
 import { Command } from 'commander';
-import { printJson, isJsonMode, handleError, UsageError } from '../utils/output.js';
+import { printJson, isJsonMode, handleError, UsageError, emitStreamHeader } from '../utils/output.js';
 import { fetchDeviceStatus } from '../lib/devices.js';
 import { getCachedDevice } from '../devices/cache.js';
 import { parseDurationToMs, getFields } from '../utils/flags.js';
 import { intArg, durationArg, stringArg } from '../utils/arg-parsers.js';
 import { createClient } from '../api/client.js';
 import { resolveDeviceId } from '../utils/name-resolver.js';
+import { resolveFieldList, listAllCanonical } from '../schema/field-aliases.js';
 
 const DEFAULT_INTERVAL_MS = 30_000;
 const MIN_INTERVAL_MS = 1_000;
@@ -137,7 +138,15 @@ Examples:
 
           const forMs = options.for ? parseDurationToMs(options.for) : null;
 
-          const fields: string[] | null = getFields() ?? null;
+          const rawFields: string[] | null = getFields() ?? null;
+          // Resolve aliases upfront against the static canonical registry.
+          // Validating here lets UsageError exit the command before any
+          // polling starts, and keeps mid-loop error handling free of
+          // "misuse" concerns. Unknown fields that are not registered as
+          // aliases but happen to match an API key pass through unchanged.
+          const fields: string[] | null = rawFields
+            ? resolveFieldList(rawFields, listAllCanonical())
+            : null;
 
           const ac = new AbortController();
           const onSig = () => ac.abort();
@@ -146,6 +155,10 @@ Examples:
           const forTimer = forMs !== null && forMs > 0
             ? setTimeout(() => ac.abort(), forMs)
             : null;
+
+          // P7: streaming JSON contract — first line under --json is the
+          // stream header so consumers can route by eventKind/cadence.
+          if (isJsonMode()) emitStreamHeader({ eventKind: 'tick', cadence: 'poll' });
 
           try {
           const prev = new Map<string, Record<string, unknown>>();

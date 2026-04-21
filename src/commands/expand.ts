@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { intArg, stringArg } from '../utils/arg-parsers.js';
-import { handleError, isJsonMode, printJson, UsageError, emitJsonError } from '../utils/output.js';
+import { handleError, isJsonMode, printJson, UsageError, exitWithError } from '../utils/output.js';
 import { getCachedDevice } from '../devices/cache.js';
 import { executeCommand, isDestructiveCommand, getDestructiveReason } from '../lib/devices.js';
 import { isDryRun } from '../utils/flags.js';
@@ -114,18 +114,12 @@ Examples:
 
         if (!options.yes && !isDryRun() && isDestructiveCommand(deviceType, command, 'command')) {
           const reason = getDestructiveReason(deviceType, command, 'command');
-          if (isJsonMode()) {
-            emitJsonError({
-              code: 2,
-              kind: 'guard',
-              message: `"${command}" on ${deviceType || 'device'} is destructive and requires --yes.`,
-              hint: reason ? `Re-run with --yes. Reason: ${reason}` : 'Re-run with --yes to confirm.',
-            });
-          } else {
-            console.error(`Refusing to run destructive command "${command}" without --yes.`);
-            if (reason) console.error(`Reason: ${reason}`);
-          }
-          process.exit(2);
+          exitWithError({
+            code: 2,
+            kind: 'guard',
+            message: `"${command}" on ${deviceType || 'device'} is destructive and requires --yes.`,
+            hint: reason ? `Re-run with --yes. Reason: ${reason}` : 'Re-run with --yes to confirm.',
+          });
         }
 
         const body = await executeCommand(deviceId, command, parameter, 'command');

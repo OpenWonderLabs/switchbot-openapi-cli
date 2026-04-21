@@ -7,6 +7,7 @@ import {
   type InfraredDevice,
 } from '../lib/devices.js';
 import type { DescribeResult } from '../lib/devices.js';
+import type { SafetyTier } from '../devices/catalog.js';
 
 interface ExplainResult {
   deviceId: string;
@@ -17,7 +18,14 @@ interface ExplainResult {
   readOnly: boolean;
   location?: { family?: string; room?: string };
   liveStatus?: Record<string, unknown>;
-  commands: Array<{ command: string; parameter: string; idempotent?: boolean; destructive?: boolean }>;
+  commands: Array<{
+    command: string;
+    parameter: string;
+    idempotent?: boolean;
+    safetyTier?: SafetyTier;
+    /** @deprecated Derived from safetyTier === 'destructive'. Will be removed in v3.0. */
+    destructive?: boolean;
+  }>;
   statusFields: string[];
   children: Array<{ deviceId: string; name: string; type: string }>;
   suggestedActions: Array<{ command: string; parameter?: string; description: string }>;
@@ -71,12 +79,16 @@ Examples:
 
         const caps = desc.capabilities;
         const commands = caps && 'commands' in caps
-          ? caps.commands.map((c) => ({
-              command: c.command,
-              parameter: c.parameter,
-              idempotent: c.idempotent,
-              destructive: c.destructive,
-            }))
+          ? caps.commands.map((c) => {
+              const tier = (c as { safetyTier?: SafetyTier }).safetyTier;
+              return {
+                command: c.command,
+                parameter: c.parameter,
+                idempotent: c.idempotent,
+                ...(tier ? { safetyTier: tier } : {}),
+                destructive: c.destructive,
+              };
+            })
           : [];
         const statusFields = caps && 'statusFields' in caps ? caps.statusFields : [];
         const liveStatus = caps && 'liveStatus' in caps ? caps.liveStatus : undefined;

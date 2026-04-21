@@ -132,8 +132,10 @@ describe('devices watch', () => {
     // Loop exits via --max so parseAsync resolves — exitCode is null.
     expect(res.exitCode).toBeNull();
     const lines = res.stdout.filter((l) => l.trim().startsWith('{'));
-    expect(lines.length).toBe(1);
-    const ev = JSON.parse(lines[0]).data;
+    // P7: first line is the stream header; event is on the second line.
+    expect(lines.length).toBe(2);
+    expect(JSON.parse(lines[0]).stream).toBe(true);
+    const ev = JSON.parse(lines[1]).data;
     expect(ev.deviceId).toBe('BOT1');
     expect(ev.type).toBe('Bot');
     expect(ev.tick).toBe(1);
@@ -155,7 +157,9 @@ describe('devices watch', () => {
 
     const events = res.stdout
       .filter((l) => l.trim().startsWith('{'))
-      .map((l) => JSON.parse(l).data);
+      .map((l) => JSON.parse(l))
+      .filter((j) => !j.stream)
+      .map((j) => j.data);
     expect(events).toHaveLength(2);
     expect(events[0].tick).toBe(1);
     // Tick 2 should only include the power change — battery stayed 90.
@@ -177,7 +181,9 @@ describe('devices watch', () => {
 
     const events = res.stdout
       .filter((l) => l.trim().startsWith('{'))
-      .map((l) => JSON.parse(l).data);
+      .map((l) => JSON.parse(l))
+      .filter((j) => !j.stream)
+      .map((j) => j.data);
     // Only tick 1 should have emitted (tick 2 had zero changes).
     expect(events).toHaveLength(1);
     expect(events[0].tick).toBe(1);
@@ -196,7 +202,9 @@ describe('devices watch', () => {
 
     const events = res.stdout
       .filter((l) => l.trim().startsWith('{'))
-      .map((l) => JSON.parse(l).data);
+      .map((l) => JSON.parse(l))
+      .filter((j) => !j.stream)
+      .map((j) => j.data);
     expect(events).toHaveLength(2);
     expect(Object.keys(events[1].changed)).toHaveLength(0);
   }, 20_000);
@@ -212,10 +220,47 @@ describe('devices watch', () => {
     ]);
     expect(res.exitCode).toBeNull();
 
-    const ev = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{'))[0]).data;
+    const ev = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{') && !l.includes('"stream":true'))[0]).data;
     expect(ev.changed.power).toBeDefined();
     expect(ev.changed.battery).toBeDefined();
     expect(ev.changed.temp).toBeUndefined();
+  });
+
+  // P1 — FIELD_ALIASES dispatch for --fields
+  it('P1: resolves --fields aliases against first API response (batt → battery)', async () => {
+    cacheMock.map.set('BOT1', { type: 'Bot', name: 'K', category: 'physical' });
+    apiMock.__instance.get
+      .mockResolvedValueOnce({ data: { statusCode: 100, body: { power: 'on', battery: 90, humidity: 40 } } });
+    flagsMock.getFields.mockReturnValueOnce(['batt', 'humid']);
+
+    const res = await runCli(registerDevicesCommand, [
+      '--json', 'devices', 'watch', 'BOT1', '--interval', '5s', '--max', '1', '--fields', 'batt,humid',
+    ]);
+    expect(res.exitCode).toBeNull();
+
+    const ev = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{') && !l.includes('"stream":true'))[0]).data;
+    // Only the aliased canonical fields should surface.
+    expect(ev.changed.battery).toEqual({ from: null, to: 90 });
+    expect(ev.changed.humidity).toEqual({ from: null, to: 40 });
+    expect(ev.changed.power).toBeUndefined();
+  });
+
+  it('P1: exits 1 (handleError) when --fields names an unknown alias', async () => {
+    cacheMock.map.set('BOT1', { type: 'Bot', name: 'K', category: 'physical' });
+    apiMock.__instance.get
+      .mockResolvedValueOnce({ data: { statusCode: 100, body: { power: 'on', battery: 90 } } });
+    flagsMock.getFields.mockReturnValueOnce(['zombie']);
+
+    const res = await runCli(registerDevicesCommand, [
+      '--json', 'devices', 'watch', 'BOT1', '--interval', '5s', '--max', '1', '--fields', 'zombie',
+    ]);
+    // UsageError during watch is caught by handleError → exit 2.
+    expect(res.exitCode).toBe(2);
+    // With --json the envelope is routed to stdout (SYS-1 contract).
+    const out = res.stdout.join('\n');
+    expect(out).toMatch(/zombie/);
+    const envelope = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).pop()!);
+    expect(envelope.error.kind).toBe('usage');
   });
 
   it('continues polling other devices when one errors', async () => {
@@ -236,7 +281,10 @@ describe('devices watch', () => {
     const events = [
       ...res.stdout.filter((l) => l.trim().startsWith('{')),
       ...res.stderr.filter((l) => l.trim().startsWith('{')),
-    ].map((l) => JSON.parse(l).data);
+    ]
+      .map((l) => JSON.parse(l))
+      .filter((j) => !j.stream)
+      .map((j) => j.data);
     expect(events).toHaveLength(2);
     const byId = Object.fromEntries(events.map((e) => [e.deviceId, e]));
     expect(byId.BOT1.error).toMatch(/boom/);
@@ -257,5 +305,45 @@ describe('devices watch', () => {
     ]);
     expect(res.exitCode).toBe(2);
     expect(res.stderr.join('\n')).toMatch(/--interval.*(duration|look like)/i);
+  });
+
+  it('P7: emits a streaming JSON header line under --json before any tick', async () => {
+    cacheMock.map.set('BOT1', { type: 'Bot', name: 'Kitchen', category: 'physical' });
+    apiMock.__instance.get.mockResolvedValueOnce({
+      data: { statusCode: 100, body: { power: 'on' } },
+    });
+
+    const res = await runCli(registerDevicesCommand, [
+      '--json', 'devices', 'watch', 'BOT1', '--interval', '5s', '--max', '1',
+    ]);
+    expect(res.exitCode).toBeNull();
+    const lines = res.stdout.filter((l) => l.trim().startsWith('{'));
+    // First line is the stream header; second is the event.
+    expect(lines.length).toBe(2);
+    const header = JSON.parse(lines[0]) as {
+      schemaVersion: string;
+      stream: boolean;
+      eventKind: string;
+      cadence: string;
+    };
+    expect(header.schemaVersion).toBe('1');
+    expect(header.stream).toBe(true);
+    expect(header.eventKind).toBe('tick');
+    expect(header.cadence).toBe('poll');
+  });
+
+  it('P7: does NOT emit the stream header in non-JSON mode', async () => {
+    cacheMock.map.set('BOT1', { type: 'Bot', name: 'Kitchen', category: 'physical' });
+    apiMock.__instance.get.mockResolvedValueOnce({
+      data: { statusCode: 100, body: { power: 'on' } },
+    });
+
+    const res = await runCli(registerDevicesCommand, [
+      'devices', 'watch', 'BOT1', '--interval', '5s', '--max', '1',
+    ]);
+    expect(res.exitCode).toBeNull();
+    // No JSON lines should be present on stdout in human mode.
+    const jsonLines = res.stdout.filter((l) => l.trim().startsWith('{'));
+    expect(jsonLines.length).toBe(0);
   });
 });

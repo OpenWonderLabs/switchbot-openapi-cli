@@ -1,8 +1,36 @@
 import { Command } from 'commander';
-import { getEffectiveCatalog } from '../devices/catalog.js';
+import {
+  getEffectiveCatalog,
+  deriveSafetyTier,
+  deriveStatusQueries,
+  type DeviceCatalogEntry,
+  type SafetyTier,
+} from '../devices/catalog.js';
+import { RESOURCE_CATALOG } from '../devices/resources.js';
 import { loadCache } from '../devices/cache.js';
 import { printJson } from '../utils/output.js';
 import { enumArg, stringArg } from '../utils/arg-parsers.js';
+import { IDENTITY } from './identity.js';
+
+/** Collect the distinct catalog safety tiers actually used across the given entries. Sorted. */
+function collectSafetyTiersInUse(entries: DeviceCatalogEntry[]): SafetyTier[] {
+  const seen = new Set<SafetyTier>();
+  for (const e of entries) {
+    for (const c of e.commands) {
+      seen.add(deriveSafetyTier(c, e));
+    }
+    // P11: statusQueries contribute the 'read' tier.
+    if (deriveStatusQueries(e).length > 0) {
+      seen.add('read');
+    }
+  }
+  return [...seen].sort();
+}
+
+/** P11: total number of read-only queries exposed across the catalog. */
+function countStatusQueries(entries: DeviceCatalogEntry[]): number {
+  return entries.reduce((n, e) => n + deriveStatusQueries(e).length, 0);
+}
 
 export type AgentSafetyTier = 'read' | 'action' | 'destructive';
 export type Verifiability = 'local' | 'deviceConfirmed' | 'deviceDependent' | 'none';
@@ -88,24 +116,6 @@ function metaFor(command: string): CommandMeta | null {
   return COMMAND_META[command] ?? null;
 }
 
-const IDENTITY = {
-  product: 'SwitchBot',
-  domain: 'IoT smart home device control',
-  vendor: 'Wonderlabs, Inc.',
-  apiVersion: 'v1.1',
-  apiDocs: 'https://github.com/OpenWonderLabs/SwitchBotAPI',
-  deviceCategories: {
-    physical: 'Wi-Fi/BLE devices controllable via Cloud API (Hub required for BLE-only)',
-    ir: 'IR remote devices learned by a SwitchBot Hub (TV, AC, etc.)',
-  },
-  constraints: {
-    quotaPerDay: 10000,
-    bleRequiresHub: true,
-    authMethod: 'HMAC-SHA256 token+secret',
-  },
-  agentGuide: 'docs/agent-guide.md',
-};
-
 const MCP_TOOLS = [
   'list_devices',
   'get_device_status',
@@ -179,7 +189,7 @@ export function registerCapabilitiesCommand(program: Command): void {
   const SURFACES = ['cli', 'mcp', 'plan', 'mqtt', 'all'] as const;
   program
     .command('capabilities')
-    .description('Print a machine-readable manifest of CLI capabilities (for agent bootstrap)')
+    .description('Print a machine-readable manifest of SwitchBot CLI capabilities (for AI agent bootstrap)')
     .option('--minimal', 'Omit per-subcommand flag details to reduce output size (alias of --compact)')
     .option('--compact', 'Emit a compact summary: identity + leaf command list with safety metadata only')
     .option('--used', 'Restrict the catalog summary to device types present in the local cache. Mirrors `schema export --used`.')
@@ -286,11 +296,15 @@ export function registerCapabilitiesCommand(program: Command): void {
           typeCount: catalog.length,
           roles,
           destructiveCommandCount: catalog.reduce(
-            (n, e) => n + e.commands.filter((c) => c.destructive).length,
+            (n, e) =>
+              n + e.commands.filter((c) => deriveSafetyTier(c, e) === 'destructive').length,
             0,
           ),
+          safetyTiersInUse: collectSafetyTiersInUse(catalog),
           readOnlyTypeCount: catalog.filter((e) => e.readOnly).length,
+          readOnlyQueryCount: countStatusQueries(catalog),
         },
+        resources: RESOURCE_CATALOG,
       };
       if (!compact) payload.generatedAt = new Date().toISOString();
 
@@ -313,10 +327,13 @@ export function registerCapabilitiesCommand(program: Command): void {
             typeCount: filteredCatalog.length,
             roles: [...new Set(filteredCatalog.map((e) => e.role ?? 'other'))].sort(),
             destructiveCommandCount: filteredCatalog.reduce(
-              (n, e) => n + e.commands.filter((c) => c.destructive).length,
+              (n, e) =>
+                n + e.commands.filter((c) => deriveSafetyTier(c, e) === 'destructive').length,
               0,
             ),
+            safetyTiersInUse: collectSafetyTiersInUse(filteredCatalog),
             readOnlyTypeCount: filteredCatalog.filter((e) => e.readOnly).length,
+            readOnlyQueryCount: countStatusQueries(filteredCatalog),
           };
           payload.usedFilter = { applied: true, typesInCache: [...seen].sort() };
         }

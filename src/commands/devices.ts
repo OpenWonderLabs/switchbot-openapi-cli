@@ -1,8 +1,14 @@
 import { Command } from 'commander';
 import { enumArg, stringArg } from '../utils/arg-parsers.js';
-import { printTable, printKeyValue, printJson, isJsonMode, handleError, UsageError, StructuredUsageError, emitJsonError, exitWithError } from '../utils/output.js';
+import { printTable, printKeyValue, printJson, isJsonMode, handleError, UsageError, StructuredUsageError, exitWithError } from '../utils/output.js';
 import { resolveFormat, resolveFields, renderRows } from '../utils/format.js';
-import { findCatalogEntry, getEffectiveCatalog, DeviceCatalogEntry } from '../devices/catalog.js';
+import {
+  findCatalogEntry,
+  getEffectiveCatalog,
+  deriveSafetyTier,
+  getCommandSafetyReason,
+  DeviceCatalogEntry,
+} from '../devices/catalog.js';
 import { getCachedDevice, loadCache } from '../devices/cache.js';
 import { loadDeviceMeta } from '../devices/device-meta.js';
 import { resolveDeviceId, NameResolveStrategy, ALL_STRATEGIES } from '../utils/name-resolver.js';
@@ -27,7 +33,7 @@ import { registerExpandCommand } from './expand.js';
 import { registerDevicesMetaCommand } from './device-meta.js';
 import { isDryRun } from '../utils/flags.js';
 import { DryRunSignal } from '../api/client.js';
-import { resolveField, listSupportedFieldInputs } from '../schema/field-aliases.js';
+import { resolveField, resolveFieldList, listSupportedFieldInputs } from '../schema/field-aliases.js';
 
 const EXPAND_HINTS: Record<string, { command: string; flags: string }> = {
   'Air Conditioner':  { command: 'setAll',      flags: '--temp 26 --mode cool --fan low --power on' },
@@ -103,7 +109,7 @@ Examples:
 `)
     .option('--wide', 'Show all columns (controlType, family, roomID, room, hub, cloud)')
     .option('--show-hidden', 'Include devices hidden via "devices meta set --hide"')
-    .option('--filter <expr>', 'Filter devices: comma-separated clauses. Each clause is "key=value" (substring; exact for category), "key!=value" (negated substring), "key~value" (explicit substring), or "key=/regex/" (case-insensitive regex). Supported keys: deviceId/id, deviceName/name, deviceType/type, controlType, roomName/room, category.', stringArg('--filter'))
+    .option('--filter <expr>', 'Filter devices: comma-separated clauses. Each clause is "key=value" (substring; exact for category), "key!=value" (negated substring), "key~value" (explicit substring), or "key=/regex/" (case-insensitive regex). Supported keys: deviceId/id, deviceName/name, deviceType/type, controlType, roomName/room, category, familyName/family, hubDeviceId/hub, roomID/roomid, enableCloudService/cloud, alias.', stringArg('--filter'))
     .action(async (options: { wide?: boolean; showHidden?: boolean; filter?: string }) => {
       try {
         const body = await fetchDeviceList();
@@ -115,8 +121,11 @@ Examples:
 
         // Parse --filter into a list of clauses. Shared grammar across
         // `devices list`, `devices batch`, and `events tail` / `mqtt-tail`.
-        const LIST_KEYS = ['deviceId', 'type', 'name', 'category', 'room', 'controlType'] as const;
-        const LIST_FILTER_CANONICAL = ['deviceId', 'deviceName', 'deviceType', 'controlType', 'roomName', 'category'] as const;
+        const LIST_KEYS = ['deviceId', 'type', 'name', 'category', 'room', 'controlType',
+          'family', 'hub', 'roomID', 'cloud', 'alias'] as const;
+        const LIST_FILTER_CANONICAL = ['deviceId', 'deviceName', 'deviceType', 'controlType',
+          'roomName', 'category', 'familyName', 'hubDeviceId', 'roomID',
+          'enableCloudService', 'alias'] as const;
         const LIST_FILTER_TO_RUNTIME: Record<string, (typeof LIST_KEYS)[number]> = {
           deviceId: 'deviceId',
           deviceName: 'name',
@@ -124,6 +133,11 @@ Examples:
           controlType: 'controlType',
           roomName: 'room',
           category: 'category',
+          familyName: 'family',
+          hubDeviceId: 'hub',
+          roomID: 'roomID',
+          enableCloudService: 'cloud',
+          alias: 'alias',
         };
         let listClauses: FilterClause[] | null = null;
         if (options.filter) {
@@ -141,7 +155,11 @@ Examples:
           }
         }
 
-        const matchesFilter = (entry: { deviceId: string; type: string; name: string; category: 'physical' | 'ir'; room: string; controlType: string }) => {
+        const matchesFilter = (entry: {
+          deviceId: string; type: string; name: string; category: 'physical' | 'ir';
+          room: string; controlType: string; family: string; hub: string;
+          roomID: string; cloud: string; alias: string;
+        }) => {
           if (!listClauses || listClauses.length === 0) return true;
           for (const c of listClauses) {
             const fieldVal = (entry as Record<string, string>)[c.key] ?? '';
@@ -153,11 +171,11 @@ Examples:
         if (fmt === 'json' && process.argv.includes('--json')) {
           if (listClauses) {
             const filteredDeviceList = deviceList.filter((d) =>
-              matchesFilter({ deviceId: d.deviceId, type: d.deviceType || '', name: d.deviceName, category: 'physical', room: d.roomName || '', controlType: d.controlType || '' })
+              matchesFilter({ deviceId: d.deviceId, type: d.deviceType || '', name: d.deviceName, category: 'physical', room: d.roomName || '', controlType: d.controlType || '', family: d.familyName || '', hub: d.hubDeviceId || '', roomID: d.roomID || '', cloud: String(d.enableCloudService), alias: deviceMeta.devices[d.deviceId]?.alias || '' })
             );
             const filteredIrList = infraredRemoteList.filter((d) => {
               const inherited = hubLocation.get(d.hubDeviceId);
-              return matchesFilter({ deviceId: d.deviceId, type: d.remoteType, name: d.deviceName, category: 'ir', room: inherited?.room || '', controlType: d.controlType || '' });
+              return matchesFilter({ deviceId: d.deviceId, type: d.remoteType, name: d.deviceName, category: 'ir', room: inherited?.room || '', controlType: d.controlType || '', family: inherited?.family || '', hub: d.hubDeviceId || '', roomID: inherited?.roomID || '', cloud: '', alias: deviceMeta.devices[d.deviceId]?.alias || '' });
             });
             printJson({ ok: true, deviceList: filteredDeviceList, infraredRemoteList: filteredIrList });
           } else {
@@ -174,7 +192,7 @@ Examples:
 
         for (const d of deviceList) {
           if (!options.showHidden && deviceMeta.devices[d.deviceId]?.hidden) continue;
-          if (!matchesFilter({ deviceId: d.deviceId, type: d.deviceType || '', name: d.deviceName, category: 'physical', room: d.roomName || '', controlType: d.controlType || '' })) continue;
+          if (!matchesFilter({ deviceId: d.deviceId, type: d.deviceType || '', name: d.deviceName, category: 'physical', room: d.roomName || '', controlType: d.controlType || '', family: d.familyName || '', hub: d.hubDeviceId || '', roomID: d.roomID || '', cloud: String(d.enableCloudService), alias: deviceMeta.devices[d.deviceId]?.alias || '' })) continue;
           rows.push([
             d.deviceId,
             d.deviceName,
@@ -193,7 +211,7 @@ Examples:
         for (const d of infraredRemoteList) {
           if (!options.showHidden && deviceMeta.devices[d.deviceId]?.hidden) continue;
           const inherited = hubLocation.get(d.hubDeviceId);
-          if (!matchesFilter({ deviceId: d.deviceId, type: d.remoteType, name: d.deviceName, category: 'ir', room: inherited?.room || '', controlType: d.controlType || '' })) continue;
+          if (!matchesFilter({ deviceId: d.deviceId, type: d.remoteType, name: d.deviceName, category: 'ir', room: inherited?.room || '', controlType: d.controlType || '', family: inherited?.family || '', hub: d.hubDeviceId || '', roomID: inherited?.roomID || '', cloud: '', alias: deviceMeta.devices[d.deviceId]?.alias || '' })) continue;
           rows.push([
             d.deviceId,
             d.deviceName,
@@ -295,16 +313,20 @@ Examples:
               console.log(JSON.stringify(entry));
             }
           } else {
-            const fields = resolveFields();
+            const rawFields = resolveFields();
             for (const entry of batch) {
               const { deviceId, ok, error, _fetchedAt: ts, ...status } = entry as Record<string, unknown>;
               console.log(`\n─── ${String(deviceId)} ───`);
               if (!ok) {
                 console.error(`  error: ${String(error)}`);
               } else {
+                const statusMap = status as Record<string, unknown>;
+                const fields = rawFields
+                  ? resolveFieldList(rawFields, Object.keys(statusMap))
+                  : undefined;
                 const displayStatus: Record<string, unknown> = fields
-                  ? Object.fromEntries(fields.map((f) => [f, (status as Record<string, unknown>)[f] ?? null]))
-                  : (status as Record<string, unknown>);
+                  ? Object.fromEntries(fields.map((f) => [f, statusMap[f] ?? null]))
+                  : statusMap;
                 printKeyValue(displayStatus);
                 console.error(`  fetched at ${String(ts)}`);
               }
@@ -332,7 +354,10 @@ Examples:
           const statusWithTs = { ...(body as Record<string, unknown>), _fetchedAt: fetchedAt };
           const allHeaders = Object.keys(statusWithTs);
           const allRows = [Object.values(statusWithTs) as unknown[]];
-          const fields = resolveFields();
+          const rawFields = resolveFields();
+          const fields = rawFields
+            ? resolveFieldList(rawFields, allHeaders)
+            : undefined;
           renderRows(allHeaders, allRows, fmt, fields);
           return;
         }
@@ -475,27 +500,23 @@ Examples:
         const validation = validateCommand(deviceId, cmd, parameter, options.type);
         if (!validation.ok) {
           const err = validation.error;
-          if (isJsonMode()) {
-            const obj: Record<string, unknown> = { code: 2, kind: 'usage', message: err.message };
-            if (err.hint) obj.hint = err.hint;
-            obj.context = { validationKind: err.kind };
-            emitJsonError(obj);
-          } else {
-            console.error(`Error: ${err.message}`);
-            if (err.hint) console.error(err.hint);
-            if (err.kind === 'unknown-command') {
-              const cached = getCachedDevice(deviceId);
-              if (cached) {
-                console.error(
-                  `Run 'switchbot devices commands ${JSON.stringify(cached.type)}' for parameter formats and descriptions.`
-                );
-                console.error(
-                  `(If the catalog is out of date, run 'switchbot devices list' to refresh the local cache, or pass --type customize for custom IR buttons.)`
-                );
-              }
+          let hint = err.hint;
+          if (err.kind === 'unknown-command') {
+            const cached = getCachedDevice(deviceId);
+            if (cached) {
+              const extra =
+                `Run 'switchbot devices commands ${JSON.stringify(cached.type)}' for parameter formats and descriptions.\n` +
+                `(If the catalog is out of date, run 'switchbot devices list' to refresh the local cache, or pass --type customize for custom IR buttons.)`;
+              hint = hint ? `${hint}\n${extra}` : extra;
             }
           }
-          process.exit(2);
+          exitWithError({
+            code: 2,
+            kind: 'usage',
+            message: err.message,
+            hint,
+            context: { validationKind: err.kind },
+          });
         }
 
         // Case-only mismatch: emit a warning and continue with the canonical name.
@@ -535,7 +556,7 @@ Examples:
             hint: reason
               ? `Re-run with --yes to confirm. Reason: ${reason}`
               : 'Re-run with --yes to confirm, or --dry-run to preview without sending.',
-            context: { command: cmd, deviceType: typeLabel, deviceId, ...(reason ? { destructiveReason: reason } : {}) },
+            context: { command: cmd, deviceType: typeLabel, deviceId, ...(reason ? { safetyReason: reason, destructiveReason: reason } : {}) },
           });
         }
 
@@ -682,7 +703,7 @@ Examples:
         const joinedMatch = findCatalogEntry(joined);
         if (joinedMatch && !Array.isArray(joinedMatch)) {
           if (isJsonMode()) {
-            printJson(joinedMatch);
+            printJson(normalizeCatalogForJson(joinedMatch));
           } else {
             renderCatalogEntry(joinedMatch);
           }
@@ -701,7 +722,7 @@ Examples:
           }
           if (individualMatches.length === typeParts.length) {
             if (isJsonMode()) {
-              printJson(individualMatches);
+              printJson(individualMatches.map(normalizeCatalogForJson));
             } else {
               individualMatches.forEach((entry, i) => {
                 if (i > 0) console.log('');
@@ -871,6 +892,22 @@ Examples:
   registerDevicesMetaCommand(devices);
 }
 
+function normalizeCatalogForJson(entry: DeviceCatalogEntry): object {
+  return {
+    ...entry,
+    commands: entry.commands.map((c) => {
+      const tier = deriveSafetyTier(c, entry);
+      const reason = getCommandSafetyReason(c);
+      return {
+        ...c,
+        safetyTier: tier,
+        destructive: tier === 'destructive',
+        ...(reason ? { safetyReason: reason } : {}),
+      };
+    }),
+  };
+}
+
 function renderCatalogEntry(entry: DeviceCatalogEntry): void {
   console.log(`Type:     ${entry.type}`);
   console.log(`Category: ${entry.category === 'ir' ? 'IR remote' : 'Physical device'}`);
@@ -886,9 +923,10 @@ function renderCatalogEntry(entry: DeviceCatalogEntry): void {
     console.log('\nCommands:');
     const hasExamples = entry.commands.some((c) => c.exampleParams && c.exampleParams.length > 0);
     const rows = entry.commands.map((c) => {
+      const tier = deriveSafetyTier(c, entry);
       const flags: string[] = [];
       if (c.commandType === 'customize') flags.push('customize');
-      if (c.destructive) flags.push('!destructive');
+      if (tier === 'destructive') flags.push('!destructive');
       const label = flags.length > 0 ? `${c.command}  [${flags.join(', ')}]` : c.command;
       const base = [label, c.parameter, c.description];
       return hasExamples ? [...base, (c.exampleParams ?? []).join(' | ') || ''] : base;
@@ -897,7 +935,9 @@ function renderCatalogEntry(entry: DeviceCatalogEntry): void {
       ? ['command', 'parameter', 'description', 'example']
       : ['command', 'parameter', 'description'];
     printTable(tableHeaders, rows);
-    const hasDestructive = entry.commands.some((c) => c.destructive);
+    const hasDestructive = entry.commands.some(
+      (c) => deriveSafetyTier(c, entry) === 'destructive',
+    );
     if (hasDestructive) {
       console.log('\n[!destructive] commands have hard-to-reverse real-world effects — confirm before issuing.');
     }

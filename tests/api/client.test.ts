@@ -508,36 +508,84 @@ describe('createClient — 429 retry', () => {
     expect(axiosMock.__instance.request).not.toHaveBeenCalled();
   });
 
-  it('records a quota entry on a successful response', () => {
+  it('records a quota entry on every dispatched request (P8)', () => {
     process.argv = ['node', 'cli', 'devices', 'list'];
     createClient();
-    const response = {
-      data: { statusCode: 100, body: {} },
-      config: {
-        method: 'get',
-        baseURL: 'https://api.switch-bot.com',
-        url: '/v1.1/devices',
-      },
+    const config = {
+      method: 'get',
+      baseURL: 'https://api.switch-bot.com',
+      url: '/v1.1/devices',
+      headers: {},
     };
-    captured.success!(response);
+    // P8: quota is recorded in the request interceptor BEFORE dispatch so
+    // that timeouts, DNS errors, 5xx responses, and aborted calls also
+    // count against the daily cap.
+    captured.request!(config);
     expect(quotaMock.recordRequest).toHaveBeenCalledWith(
       'GET',
       'https://api.switch-bot.com/v1.1/devices'
     );
   });
 
-  it('--no-quota skips quota recording', () => {
+  it('records quota even when the request ultimately 5xxs (P8)', () => {
+    process.argv = ['node', 'cli', 'devices', 'list'];
+    createClient();
+    const config = {
+      method: 'get',
+      baseURL: 'https://api.switch-bot.com',
+      url: '/v1.1/devices',
+      headers: {},
+    };
+    captured.request!(config);
+    expect(quotaMock.recordRequest).toHaveBeenCalledTimes(1);
+    // The response interceptor no longer records — all bookkeeping is in
+    // the request interceptor, so subsequent failure handling must not
+    // bump the counter again.
+    try {
+      captured.failure!({
+        response: { status: 500, headers: {} },
+        config,
+        message: 'server error',
+      });
+    } catch {
+      /* ApiError expected */
+    }
+    expect(quotaMock.recordRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it('records quota even when the request times out (P8)', () => {
+    process.argv = ['node', 'cli', 'devices', 'list', '--retry-on-5xx', '0'];
+    createClient();
+    const config = {
+      method: 'get',
+      baseURL: 'https://api.switch-bot.com',
+      url: '/v1.1/devices',
+      headers: {},
+    };
+    captured.request!(config);
+    expect(quotaMock.recordRequest).toHaveBeenCalledTimes(1);
+    try {
+      captured.failure!({
+        code: 'ETIMEDOUT',
+        config,
+        message: 'timed out',
+      });
+    } catch {
+      /* ApiError expected */
+    }
+    expect(quotaMock.recordRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it('--no-quota skips quota recording (P8)', () => {
     process.argv = ['node', 'cli', 'devices', 'list', '--no-quota'];
     createClient();
-    const response = {
-      data: { statusCode: 100, body: {} },
-      config: {
-        method: 'get',
-        baseURL: 'https://api.switch-bot.com',
-        url: '/v1.1/devices',
-      },
+    const config = {
+      method: 'get',
+      baseURL: 'https://api.switch-bot.com',
+      url: '/v1.1/devices',
+      headers: {},
     };
-    captured.success!(response);
+    captured.request!(config);
     expect(quotaMock.recordRequest).not.toHaveBeenCalled();
   });
 });

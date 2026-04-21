@@ -542,6 +542,38 @@ describe('devices command', () => {
       expect(out.data.deviceList).toHaveLength(2);
       expect(out.data.deviceList.map((d: { deviceId: string }) => d.deviceId)).not.toContain('BLE-001');
     });
+
+    it('--filter family=Home filters by familyName', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list', '--filter', 'family=Home', '--json']);
+      const out = JSON.parse(res.stdout.join('\n'));
+      expect(out.data.deviceList).toHaveLength(3);
+    });
+
+    it('--filter hub=HUB-1 filters by hubDeviceId', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list', '--filter', 'hub=HUB-1', '--json']);
+      const out = JSON.parse(res.stdout.join('\n'));
+      expect(out.data.deviceList).toHaveLength(1);
+      expect(out.data.deviceList[0].deviceId).toBe('ABC123');
+    });
+
+    it('--filter cloud=true filters by enableCloudService', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list', '--filter', 'cloud=true', '--json']);
+      const out = JSON.parse(res.stdout.join('\n'));
+      // ABC123 (true) and NOHUB-1 (true); BLE-001 (false) excluded
+      expect(out.data.deviceList).toHaveLength(2);
+      expect(out.data.deviceList.map((d: { deviceId: string }) => d.deviceId)).not.toContain('BLE-001');
+    });
+
+    it('--filter roomID=R-LIVING filters by roomID', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'list', '--filter', 'roomID=R-LIVING', '--json']);
+      const out = JSON.parse(res.stdout.join('\n'));
+      expect(out.data.deviceList).toHaveLength(2);
+      expect(out.data.deviceList.map((d: { deviceId: string }) => d.deviceId)).not.toContain('BLE-001');
+    });
   });
 
   // =====================================================================
@@ -666,6 +698,91 @@ describe('devices command', () => {
       const lines = res.stdout.join('\n').split('\n');
       // null maps to empty string in cellToString; _fetchedAt column is also present
       expect(lines[1]).toMatch(/^on\t\t/);
+    });
+
+    // P1 — FIELD_ALIASES dispatch on --fields
+    describe('--fields alias resolution (P1)', () => {
+      it('resolves "batt" → battery, "humid" → humidity (tsv)', async () => {
+        apiMock.__instance.get.mockResolvedValue({
+          data: { body: { power: 'on', battery: 87, humidity: 42, temperature: 22 } },
+        });
+        const res = await runCli(registerDevicesCommand, [
+          'devices', 'status', 'D1', '--format', 'tsv', '--fields', 'batt,humid',
+        ]);
+        const lines = res.stdout.join('\n').split('\n');
+        expect(lines[0]).toBe('battery\thumidity');
+        expect(lines[1]).toBe('87\t42');
+      });
+
+      it('resolves "temp" → temperature (not colorTemperature) even when both are present', async () => {
+        apiMock.__instance.get.mockResolvedValue({
+          data: { body: { temperature: 24, colorTemperature: 4000, battery: 50 } },
+        });
+        const res = await runCli(registerDevicesCommand, [
+          'devices', 'status', 'D1', '--format', 'tsv', '--fields', 'temp',
+        ]);
+        const lines = res.stdout.join('\n').split('\n');
+        expect(lines[0]).toBe('temperature');
+        expect(lines[1]).toBe('24');
+      });
+
+      it('resolves "kelvin" → colorTemperature', async () => {
+        apiMock.__instance.get.mockResolvedValue({
+          data: { body: { temperature: 24, colorTemperature: 4000 } },
+        });
+        const res = await runCli(registerDevicesCommand, [
+          'devices', 'status', 'D1', '--format', 'tsv', '--fields', 'kelvin',
+        ]);
+        const lines = res.stdout.join('\n').split('\n');
+        expect(lines[0]).toBe('colorTemperature');
+        expect(lines[1]).toBe('4000');
+      });
+
+      it('is case-insensitive (BATT, Battery, BaTt all resolve the same way)', async () => {
+        apiMock.__instance.get.mockResolvedValue({
+          data: { body: { battery: 77 } },
+        });
+        for (const f of ['BATT', 'Battery', 'BaTt']) {
+          apiMock.__instance.get.mockResolvedValueOnce({ data: { body: { battery: 77 } } });
+          const res = await runCli(registerDevicesCommand, [
+            'devices', 'status', 'D1', '--format', 'tsv', '--fields', f,
+          ]);
+          expect(res.stdout.join('\n').split('\n')[0]).toBe('battery');
+        }
+      });
+
+      it('passes canonical names through unchanged', async () => {
+        apiMock.__instance.get.mockResolvedValue({
+          data: { body: { power: 'on', battery: 90 } },
+        });
+        const res = await runCli(registerDevicesCommand, [
+          'devices', 'status', 'D1', '--format', 'tsv', '--fields', 'power,battery',
+        ]);
+        expect(res.stdout.join('\n').split('\n')[0]).toBe('power\tbattery');
+      });
+
+      it('exits 2 with candidate list on unknown field', async () => {
+        apiMock.__instance.get.mockResolvedValue({
+          data: { body: { power: 'on', battery: 80 } },
+        });
+        const res = await runCli(registerDevicesCommand, [
+          'devices', 'status', 'D1', '--format', 'tsv', '--fields', 'zombie',
+        ]);
+        expect(res.exitCode).toBe(2);
+        const err = res.stderr.join('\n');
+        expect(err).toMatch(/zombie/);
+        expect(err).toMatch(/Supported|power|battery/i);
+      });
+
+      it('preserves user input order in output', async () => {
+        apiMock.__instance.get.mockResolvedValue({
+          data: { body: { power: 'on', battery: 80, humidity: 40 } },
+        });
+        const res = await runCli(registerDevicesCommand, [
+          'devices', 'status', 'D1', '--format', 'tsv', '--fields', 'humid,power,batt',
+        ]);
+        expect(res.stdout.join('\n').split('\n')[0]).toBe('humidity\tpower\tbattery');
+      });
     });
   });
 
@@ -2274,6 +2391,57 @@ describe('devices command', () => {
       const out = res.stdout.join('\n');
       expect(out).toMatch(/dry-run/i);
       expect(out).toContain(DRY_ID);
+    });
+  });
+
+  // =====================================================================
+  // --help --json
+  // =====================================================================
+  describe('--help --json', () => {
+    it('devices list --help --json returns structured JSON', async () => {
+      const res = await runCli(registerDevicesCommand, ['--json', 'devices', 'list', '--help']);
+      expect(res.exitCode).toBe(0);
+      const parsed = JSON.parse(res.stdout.join('\n'));
+      expect(parsed.schemaVersion).toBe('1.1');
+      expect(parsed.data.name).toBe('list');
+      expect(Array.isArray(parsed.data.options)).toBe(true);
+      expect(Array.isArray(parsed.data.arguments)).toBe(true);
+      expect(parsed.data.options.some((o: { flags: string }) => o.flags.includes('--filter'))).toBe(true);
+    });
+
+    it('devices command --help --json includes arguments', async () => {
+      const res = await runCli(registerDevicesCommand, ['--json', 'devices', 'command', '--help']);
+      expect(res.exitCode).toBe(0);
+      const parsed = JSON.parse(res.stdout.join('\n'));
+      expect(parsed.data.name).toBe('command');
+      expect(parsed.data.arguments.length).toBeGreaterThan(0);
+    });
+  });
+
+  // =====================================================================
+  // destructive normalization
+  // =====================================================================
+  describe('devices commands --json destructive normalization', () => {
+    it('every command in Bot catalog has explicit destructive boolean', async () => {
+      const res = await runCli(registerDevicesCommand, ['--json', 'devices', 'commands', 'Bot']);
+      expect(res.exitCode).toBeNull();
+      const parsed = JSON.parse(res.stdout.join('\n'));
+      const cmds: Array<{ destructive?: boolean }> = parsed.data.commands;
+      expect(cmds.length).toBeGreaterThan(0);
+      for (const c of cmds) {
+        expect(typeof c.destructive).toBe('boolean');
+      }
+    });
+
+    it('Smart Lock unlock has destructive:true, lock has destructive:false', async () => {
+      const res = await runCli(registerDevicesCommand, ['--json', 'devices', 'commands', 'Smart Lock']);
+      expect(res.exitCode).toBeNull();
+      const parsed = JSON.parse(res.stdout.join('\n'));
+      const cmds: Array<{ command: string; destructive: boolean }> = parsed.data.commands;
+      const unlock = cmds.find((c) => c.command === 'unlock');
+      const lock = cmds.find((c) => c.command === 'lock');
+      expect(unlock?.destructive).toBe(true);
+      expect(lock?.destructive).toBe(false);
     });
   });
 });

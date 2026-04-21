@@ -6,6 +6,9 @@ import {
   DEVICE_CATALOG,
   findCatalogEntry,
   suggestedActions,
+  deriveSafetyTier,
+  getCommandSafetyReason,
+  type SafetyTier,
 } from '../../src/devices/catalog.js';
 
 describe('devices/catalog', () => {
@@ -48,13 +51,14 @@ describe('devices/catalog', () => {
       }
     });
 
-    it('every destructive command has a destructiveReason', () => {
+    it('every destructive command has a safetyReason (or legacy destructiveReason)', () => {
       for (const entry of DEVICE_CATALOG) {
         for (const cmd of entry.commands) {
-          if (cmd.destructive) {
+          if (deriveSafetyTier(cmd, entry) === 'destructive') {
+            const reason = getCommandSafetyReason(cmd);
             expect(
-              cmd.destructiveReason,
-              `${entry.type}.${cmd.command} is destructive but missing destructiveReason`
+              reason,
+              `${entry.type}.${cmd.command} is destructive but missing safetyReason/destructiveReason`,
             ).toBeTypeOf('string');
           }
         }
@@ -66,6 +70,12 @@ describe('devices/catalog', () => {
     const commandOf = (type: string, cmd: string) => {
       const entry = DEVICE_CATALOG.find((e) => e.type === type);
       return entry?.commands.find((c) => c.command === cmd);
+    };
+
+    const tierOf = (type: string, cmd: string): SafetyTier | undefined => {
+      const entry = DEVICE_CATALOG.find((e) => e.type === type);
+      const spec = entry?.commands.find((c) => c.command === cmd);
+      return entry && spec ? deriveSafetyTier(spec, entry) : undefined;
     };
 
     it('turnOn / turnOff are idempotent across every device type', () => {
@@ -95,24 +105,25 @@ describe('devices/catalog', () => {
       }
     });
 
-    it('Smart Lock unlock is destructive', () => {
-      expect(commandOf('Smart Lock', 'unlock')?.destructive).toBe(true);
-      expect(commandOf('Smart Lock Lite', 'unlock')?.destructive).toBe(true);
-      expect(commandOf('Smart Lock Ultra', 'unlock')?.destructive).toBe(true);
+    it('Smart Lock unlock is safetyTier: destructive', () => {
+      expect(tierOf('Smart Lock', 'unlock')).toBe('destructive');
+      expect(tierOf('Smart Lock Lite', 'unlock')).toBe('destructive');
+      expect(tierOf('Smart Lock Ultra', 'unlock')).toBe('destructive');
     });
 
-    it('Garage Door Opener turnOn and turnOff are both destructive', () => {
-      expect(commandOf('Garage Door Opener', 'turnOn')?.destructive).toBe(true);
-      expect(commandOf('Garage Door Opener', 'turnOff')?.destructive).toBe(true);
+    it('Garage Door Opener turnOn and turnOff are safetyTier: destructive', () => {
+      expect(tierOf('Garage Door Opener', 'turnOn')).toBe('destructive');
+      expect(tierOf('Garage Door Opener', 'turnOff')).toBe('destructive');
     });
 
-    it('Keypad createKey/deleteKey are destructive', () => {
-      expect(commandOf('Keypad', 'createKey')?.destructive).toBe(true);
-      expect(commandOf('Keypad', 'deleteKey')?.destructive).toBe(true);
+    it('Keypad createKey/deleteKey are safetyTier: destructive', () => {
+      expect(tierOf('Keypad', 'createKey')).toBe('destructive');
+      expect(tierOf('Keypad', 'deleteKey')).toBe('destructive');
     });
 
-    it('Smart Lock `lock` is NOT destructive', () => {
-      expect(commandOf('Smart Lock', 'lock')?.destructive).toBeFalsy();
+    it('Smart Lock `lock` is mutation, not destructive', () => {
+      expect(tierOf('Smart Lock', 'lock')).toBe('mutation');
+      expect(commandOf('Smart Lock', 'lock')?.safetyTier).toBeUndefined();
     });
 
     it('setBrightness / setColor / setColorTemperature carry exampleParams', () => {
@@ -126,6 +137,66 @@ describe('devices/catalog', () => {
           }
         }
       }
+    });
+
+    it('every command resolves to one of the 5 safety tiers', () => {
+      const allowed: SafetyTier[] = ['read', 'mutation', 'ir-fire-forget', 'destructive', 'maintenance'];
+      for (const entry of DEVICE_CATALOG) {
+        for (const c of entry.commands) {
+          const tier = deriveSafetyTier(c, entry);
+          expect(
+            allowed.includes(tier),
+            `${entry.type}.${c.command} derived to unknown tier "${tier}"`,
+          ).toBe(true);
+        }
+      }
+    });
+
+    it('every IR entry has ir-fire-forget as its default tier', () => {
+      for (const entry of DEVICE_CATALOG) {
+        if (entry.category !== 'ir') continue;
+        for (const c of entry.commands) {
+          expect(
+            deriveSafetyTier(c, entry),
+            `${entry.type}.${c.command} in IR category should be ir-fire-forget`,
+          ).toBe('ir-fire-forget');
+        }
+      }
+    });
+
+    it('no built-in entry uses "read" or "maintenance" tier today (reserved)', () => {
+      for (const entry of DEVICE_CATALOG) {
+        for (const c of entry.commands) {
+          const tier = deriveSafetyTier(c, entry);
+          expect(tier).not.toBe('read');
+          expect(tier).not.toBe('maintenance');
+        }
+      }
+    });
+
+    it('deriveSafetyTier infers destructive from legacy destructive: true', () => {
+      expect(deriveSafetyTier({ command: 'x', parameter: '-', description: '', destructive: true }))
+        .toBe('destructive');
+    });
+
+    it('deriveSafetyTier infers ir-fire-forget from commandType: customize', () => {
+      expect(deriveSafetyTier({ command: 'x', parameter: '-', description: '', commandType: 'customize' }))
+        .toBe('ir-fire-forget');
+    });
+
+    it('deriveSafetyTier defaults physical to mutation', () => {
+      expect(deriveSafetyTier({ command: 'x', parameter: '-', description: '' }, { category: 'physical' }))
+        .toBe('mutation');
+    });
+
+    it('getCommandSafetyReason falls back to legacy destructiveReason', () => {
+      expect(getCommandSafetyReason({ command: 'x', parameter: '-', description: '', destructiveReason: 'legacy' }))
+        .toBe('legacy');
+      expect(getCommandSafetyReason({ command: 'x', parameter: '-', description: '', safetyReason: 'new' }))
+        .toBe('new');
+      // safetyReason wins over destructiveReason when both are set.
+      expect(getCommandSafetyReason({ command: 'x', parameter: '-', description: '', safetyReason: 'new', destructiveReason: 'legacy' }))
+        .toBe('new');
     });
   });
 
@@ -356,5 +427,45 @@ describe('catalog overlay', () => {
     const { getEffectiveCatalog, DEVICE_CATALOG: builtin } = await freshImport();
     getEffectiveCatalog(); // force overlay application
     expect(builtin.find((e) => e.type === 'Bot')).toBeDefined();
+  });
+
+  // ---------------------------------------------------------------------
+  // P11: ReadOnlyQuerySpec / deriveStatusQueries
+  // ---------------------------------------------------------------------
+  describe('P11: read-tier statusQueries', () => {
+    it('deriveStatusQueries returns one spec per statusFields entry for physical devices', async () => {
+      const { deriveStatusQueries, DEVICE_CATALOG: cat } = await import('../../src/devices/catalog.js');
+      const bot = cat.find((e) => e.type === 'Bot')!;
+      const queries = deriveStatusQueries(bot);
+      expect(queries.length).toBe(bot.statusFields!.length);
+      for (const q of queries) {
+        expect(q.safetyTier).toBe('read');
+        expect(q.endpoint).toBe('status');
+        expect(typeof q.description).toBe('string');
+      }
+    });
+
+    it('deriveStatusQueries returns [] for IR category entries', async () => {
+      const { deriveStatusQueries, DEVICE_CATALOG: cat } = await import('../../src/devices/catalog.js');
+      const tv = cat.find((e) => e.type === 'TV')!;
+      expect(deriveStatusQueries(tv)).toEqual([]);
+    });
+
+    it('deriveStatusQueries returns [] for entries without statusFields', async () => {
+      const { deriveStatusQueries } = await import('../../src/devices/catalog.js');
+      // Synthetic minimal entry.
+      const synthetic = { type: 'X', category: 'physical' as const, commands: [] };
+      expect(deriveStatusQueries(synthetic)).toEqual([]);
+    });
+
+    it('every physical entry with statusFields produces at least one read query', async () => {
+      const { deriveStatusQueries, DEVICE_CATALOG: cat } = await import('../../src/devices/catalog.js');
+      for (const entry of cat) {
+        if (entry.category !== 'physical' || !entry.statusFields?.length) continue;
+        const qs = deriveStatusQueries(entry);
+        expect(qs.length).toBeGreaterThan(0);
+        for (const q of qs) expect(q.safetyTier).toBe('read');
+      }
+    });
   });
 });

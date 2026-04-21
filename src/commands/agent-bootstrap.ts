@@ -1,22 +1,28 @@
 import { Command } from 'commander';
 import { printJson } from '../utils/output.js';
 import { loadCache } from '../devices/cache.js';
-import { getEffectiveCatalog } from '../devices/catalog.js';
+import {
+  getEffectiveCatalog,
+  deriveSafetyTier,
+  CATALOG_SCHEMA_VERSION,
+} from '../devices/catalog.js';
 import { readProfileMeta } from '../config.js';
 import { todayUsage, DAILY_QUOTA } from '../utils/quota.js';
 import { ALL_STRATEGIES } from '../utils/name-resolver.js';
+import { IDENTITY } from './identity.js';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const { version: pkgVersion } = require('../../package.json') as { version: string };
 
-const IDENTITY = {
-  product: 'SwitchBot',
-  domain: 'IoT smart home device control',
-  vendor: 'Wonderlabs, Inc.',
-  apiVersion: 'v1.1',
-  authMethod: 'HMAC-SHA256 token+secret',
-};
+/**
+ * Schema version of the agent-bootstrap payload. Must stay in lockstep
+ * with the catalog schema — bootstrap consumers (AI agents) reason about
+ * catalog-derived fields (safetyTier, destructive flag), so a drift
+ * between the two would silently break their assumptions. `doctor`
+ * fails the `catalog-schema` check when these differ.
+ */
+export const AGENT_BOOTSTRAP_SCHEMA_VERSION = CATALOG_SCHEMA_VERSION;
 
 const SAFETY_TIERS = {
   read: 'No state mutation; safe to call freely.',
@@ -107,18 +113,22 @@ Examples:
           category: e.category,
           role: e.role ?? null,
           readOnly: e.readOnly ?? false,
-          commands: e.commands.map((c) => ({
-            command: c.command,
-            parameter: c.parameter,
-            destructive: Boolean(c.destructive),
-            idempotent: Boolean(c.idempotent),
-          })),
+          commands: e.commands.map((c) => {
+            const tier = deriveSafetyTier(c, e);
+            return {
+              command: c.command,
+              parameter: c.parameter,
+              safetyTier: tier,
+              destructive: tier === 'destructive',
+              idempotent: Boolean(c.idempotent),
+            };
+          }),
           statusFields: e.statusFields ?? [],
         };
       });
 
       const payload: Record<string, unknown> = {
-        schemaVersion: '1.0',
+        schemaVersion: AGENT_BOOTSTRAP_SCHEMA_VERSION,
         generatedAt: new Date().toISOString(),
         cliVersion: pkgVersion,
         identity: IDENTITY,

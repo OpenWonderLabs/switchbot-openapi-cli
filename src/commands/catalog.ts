@@ -9,6 +9,7 @@ import {
   getEffectiveCatalog,
   loadCatalogOverlay,
   resetCatalogOverlayCache,
+  deriveSafetyTier,
   type DeviceCatalogEntry,
 } from '../devices/catalog.js';
 
@@ -16,7 +17,7 @@ export function registerCatalogCommand(program: Command): void {
   const SOURCES = ['built-in', 'overlay', 'effective'] as const;
   const catalog = program
     .command('catalog')
-    .description('Inspect the built-in device catalog and any local overlay')
+    .description('Inspect the SwitchBot device catalog (supported device types + any local overlay)')
     .addHelpText('after', `
 This CLI ships with a static catalog of known SwitchBot device types and
 their commands (see 'switchbot devices types'). You can extend or override
@@ -343,9 +344,10 @@ function renderEntry(entry: DeviceCatalogEntry): void {
   } else {
     console.log('\nCommands:');
     const rows = entry.commands.map((c) => {
+      const tier = deriveSafetyTier(c, entry);
       const flags: string[] = [];
       if (c.commandType === 'customize') flags.push('customize');
-      if (c.destructive) flags.push('!destructive');
+      if (tier === 'destructive') flags.push('!destructive');
       const label = flags.length > 0 ? `${c.command}  [${flags.join(', ')}]` : c.command;
       return [label, c.parameter, c.description];
     });

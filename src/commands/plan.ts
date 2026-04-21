@@ -217,7 +217,7 @@ interface PlanRunResult {
 export function registerPlanCommand(program: Command): void {
   const plan = program
     .command('plan')
-    .description('Agent-authored batch plans: schema, validate, run')
+    .description('Author, validate, and run SwitchBot batch plans (JSON schema for AI agents)')
     .addHelpText('after', `
 A "plan" is a JSON document describing a sequence of commands/scenes/waits.
 The schema is fixed — agents emit plans, the CLI executes them. No LLM inside.

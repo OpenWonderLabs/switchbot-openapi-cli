@@ -10,9 +10,17 @@ export interface HistoryEntry {
 }
 
 export interface ControlEvent {
+  // Legacy type prefix (kept as of v2.7; removed in v3.0).
   type: '__connect' | '__reconnect' | '__disconnect' | '__heartbeat';
   at: string;
   eventId: string;
+  // P6 unified-envelope additive fields — present on records written by
+  // `events mqtt-tail` in v2.7+. Optional so older entries still parse.
+  schemaVersion?: string;
+  source?: 'mqtt';
+  kind?: 'control';
+  controlKind?: 'connect' | 'reconnect' | 'disconnect' | 'heartbeat';
+  t?: string;
 }
 
 export interface DeviceHistory {

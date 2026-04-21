@@ -64,6 +64,11 @@ describe('agent-bootstrap', () => {
     expect(payload.schemaVersion).toBeDefined();
     const data = payload.data as Record<string, unknown>;
     expect(data.identity).toBeDefined();
+    const identity = data.identity as Record<string, unknown>;
+    expect(identity.product).toBe('SwitchBot');
+    // v2.7.1: agent-bootstrap shares the canonical IDENTITY — carries apiDocs + productCategories.
+    expect(identity.apiDocs).toMatch(/OpenWonderLabs/);
+    expect(Array.isArray(identity.productCategories)).toBe(true);
     expect(data.safetyTiers).toBeDefined();
     expect(data.quickReference).toBeDefined();
     expect(Array.isArray(data.nameStrategies)).toBe(true);
