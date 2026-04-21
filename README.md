@@ -184,7 +184,10 @@ switchbot devices command --help
 
 Intercepts every non-GET request: the CLI prints the URL/body it would have
 sent, then exits `0` without contacting the API. `GET` requests (list, status,
-query) are still executed so you can preview the state involved.
+query) are still executed so you can preview the state involved. Dry-run also
+validates command names against the device catalog and rejects unknown commands
+(exit 2) when the device type has a known catalog entry. Commands sent to
+read-only sensors (e.g. Meter) are likewise rejected.
 
 ```bash
 switchbot devices command ABC123 turnOn --dry-run
@@ -305,7 +308,7 @@ Generic parameter shapes (which one applies is decided by the device — see the
 
 Parameters for `setAll` (Air Conditioner), `setPosition` (Curtain / Blind Tilt), `setMode` (Relay Switch), `setBrightness` (dimmable lights), and `setColor` (Color Bulb / Strip Light / Ceiling Light) are validated client-side before the request — malformed shapes, out-of-range values, and JSON for CSV fields all fail fast with exit 2. `setColor` accepts `R:G:B`, `R,G,B`, `#RRGGBB`, `#RGB`, and CSS named colors (`red`, `blue`, …); all normalize to `R:G:B` before hitting the API. Pass `--skip-param-validation` to bypass (escape hatch — prefer fixing the argument). Command names are also case-normalized against the catalog (e.g. `turnon` is auto-corrected to `turnOn` with a stderr warning); unknown names still exit 2 with the supported-commands list.
 
-Unknown deviceIds (not in the local cache) exit 2 by default so `--dry-run` is a reliable pre-flight gate. Run `switchbot devices list` first, or pass `--allow-unknown-device` for scripted pass-through.
+Unknown deviceIds (not in the local cache) exit 2 by default so `--dry-run` is a reliable pre-flight gate. Unknown command names and commands on read-only sensors are also rejected during dry-run when the device type has a catalog entry. Run `switchbot devices list` first, or pass `--allow-unknown-device` for scripted pass-through.
 
 Negative numeric parameters (e.g. `setBrightness -1` for a probe) are passed through to the command validator instead of being swallowed by the flag parser as an unknown option.
 
@@ -717,7 +720,7 @@ switchbot cache clear --key status
 
 | Code | Meaning                                                                                                                   |
 | ---- | ------------------------------------------------------------------------------------------------------------------------- |
-| `0`  | Success (including `--dry-run` intercept)                                                                                 |
+| `0`  | Success (including `--dry-run` intercept when validation passes)                                                           |
 | `1`  | Runtime error — API error, network failure, missing credentials                                                           |
 | `2`  | Usage error — bad flag, missing/invalid argument, unknown subcommand, unknown device type, invalid URL, conflicting flags |
 

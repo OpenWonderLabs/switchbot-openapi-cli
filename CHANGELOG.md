@@ -5,6 +5,14 @@ All notable changes to `@switchbot/openapi-cli` are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.3] - 2026-04-21
+
+### Fixed
+
+- MCP `send_command` dry-run now strictly rejects unknown command names when catalog has a definitive match (#55)
+- MCP `send_command` dry-run rejects commands sent to read-only sensors (e.g. Meter)
+- Previous v2.6.2 fix used lenient `validateCommand` which silently passed when catalog lookup was ambiguous
+
 ## [2.6.2] - 2026-04-21
 
 ### Fixed
