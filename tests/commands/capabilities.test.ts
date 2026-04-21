@@ -246,4 +246,18 @@ describe('capabilities B3/B4', () => {
     expect(metaSet!.agentSafetyTier).toBe('action');
     expect(metaSet!.mutating).toBe(true);
   });
+
+  it('P15: resources catalog exposes scenes / webhooks / keys', async () => {
+    const out = await runCapabilitiesWith([]);
+    const resources = out.resources as Record<string, unknown>;
+    expect(resources).toBeDefined();
+    expect(resources.scenes).toBeDefined();
+    expect(resources.webhooks).toBeDefined();
+    expect(Array.isArray(resources.keys)).toBe(true);
+    const webhooks = resources.webhooks as { events: Array<{ eventType: string }>; endpoints: Array<{ verb: string }> };
+    expect(webhooks.events.length).toBeGreaterThanOrEqual(10);
+    expect(webhooks.endpoints.map((e) => e.verb).sort()).toEqual(['delete', 'query', 'setup', 'update']);
+    const keys = resources.keys as Array<{ keyType: string }>;
+    expect(keys.map((k) => k.keyType).sort()).toEqual(['disposable', 'permanent', 'timeLimit', 'urgent']);
+  });
 });

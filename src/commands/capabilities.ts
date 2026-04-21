@@ -6,6 +6,7 @@ import {
   type DeviceCatalogEntry,
   type SafetyTier,
 } from '../devices/catalog.js';
+import { RESOURCE_CATALOG } from '../devices/resources.js';
 import { loadCache } from '../devices/cache.js';
 import { printJson } from '../utils/output.js';
 import { enumArg, stringArg } from '../utils/arg-parsers.js';
@@ -320,6 +321,7 @@ export function registerCapabilitiesCommand(program: Command): void {
           readOnlyTypeCount: catalog.filter((e) => e.readOnly).length,
           readOnlyQueryCount: countStatusQueries(catalog),
         },
+        resources: RESOURCE_CATALOG,
       };
       if (!compact) payload.generatedAt = new Date().toISOString();
 

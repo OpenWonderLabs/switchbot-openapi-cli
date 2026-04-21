@@ -9,6 +9,7 @@ import {
   type DeviceCatalogEntry,
   type SafetyTier,
 } from '../devices/catalog.js';
+import { RESOURCE_CATALOG } from '../devices/resources.js';
 import { loadCache } from '../devices/cache.js';
 
 interface SchemaEntry {
@@ -207,6 +208,7 @@ Examples:
       const payload: Record<string, unknown> = {
         version: '1.0',
         types: projected,
+        resources: RESOURCE_CATALOG,
       };
       if (!options.compact) {
         payload.generatedAt = new Date().toISOString();
