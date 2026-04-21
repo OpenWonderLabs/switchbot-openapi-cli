@@ -4,13 +4,14 @@ import type { Device, InfraredDevice } from '../lib/devices.js';
  * A parsed filter clause. Each clause is an (op, key, value) triple that runs
  * against a candidate string. All clauses from a single expression are AND-ed.
  *
- * Three operators (shared across `devices list`, `devices batch`,
+ * Four operators (shared across `devices list`, `devices batch`,
  * `events tail` / `mqtt-tail`):
  *   key=value      — case-insensitive substring (exact for `category`)
+ *   key!=value     — negated substring (exact-negated for `category`)
  *   key~value      — explicit case-insensitive substring
  *   key=/pattern/  — case-insensitive regex
  */
-export type FilterOp = 'eq' | 'sub' | 'regex';
+export type FilterOp = 'eq' | 'neq' | 'sub' | 'regex';
 
 export interface FilterClause {
   key: string;
@@ -31,8 +32,10 @@ export class FilterSyntaxError extends Error {
  *
  * Grammar (per clause, recognition order):
  *   1. key=/pattern/   → regex (case-insensitive); invalid regex throws.
- *   2. key~value       → substring (case-insensitive).
- *   3. key=value       → 'eq' op (substring; caller decides whether to treat
+ *   2. key!=value      → 'neq' op (negated substring; exact-negated for keys
+ *                        listed in matchClause's `exactKeys` option).
+ *   3. key~value       → substring (case-insensitive).
+ *   4. key=value       → 'eq' op (substring; caller decides whether to treat
  *                        as exact for specific keys via matchClause's
  *                        `exactKeys` option).
  *
@@ -49,7 +52,8 @@ export function parseFilterExpr(
   const clauses: FilterClause[] = [];
 
   for (const part of parts) {
-    const regexMatch = /^([^=~]+)=\/(.*)\/$/.exec(part);
+    const regexMatch = /^([^=~!]+)=\/(.*)\/$/.exec(part);
+    const neqIdx = part.indexOf('!=');
     const tildeIdx = part.indexOf('~');
     const eqIdx = part.indexOf('=');
 
@@ -69,6 +73,10 @@ export function parseFilterExpr(
           `Invalid regex in --filter "${part}": ${(err as Error).message}`,
         );
       }
+    } else if (neqIdx !== -1 && (tildeIdx === -1 || neqIdx < tildeIdx)) {
+      key = part.slice(0, neqIdx).trim();
+      op = 'neq';
+      raw = part.slice(neqIdx + 2).trim();
     } else if (tildeIdx !== -1 && (eqIdx === -1 || tildeIdx < eqIdx)) {
       key = part.slice(0, tildeIdx).trim();
       op = 'sub';
@@ -84,7 +92,7 @@ export function parseFilterExpr(
       raw = part.slice(eqIdx + 1).trim();
     } else {
       throw new FilterSyntaxError(
-        `Invalid filter clause "${part}" — expected "<key>=<value>", "<key>~<value>", or "<key>=/<regex>/"`,
+        `Invalid filter clause "${part}" — expected "<key>=<value>", "<key>!=<value>", "<key>~<value>", or "<key>=/<regex>/"`,
       );
     }
 
@@ -115,13 +123,20 @@ export function parseFilterExpr(
  *             `exactKeys`, which get case-insensitive exact comparison.
  *             Default `exactKeys` is `['category']` to preserve the existing
  *             list/batch behavior for that key.
+ * - `neq`   → logical inverse of `eq` (negated substring; exact-negated for
+ *             `exactKeys`). `undefined` candidates remain non-matching so a
+ *             `neq` clause does NOT accidentally match missing data.
  */
 export function matchClause(
   candidate: string | undefined,
   clause: FilterClause,
   options?: { exactKeys?: readonly string[] },
 ): boolean {
-  if (candidate === undefined) return false;
+  if (candidate === undefined) {
+    // Missing field: `neq` treats absence as "definitely not X"; everything
+    // else treats it as "no evidence — don't match".
+    return clause.op === 'neq';
+  }
   if (clause.op === 'regex') {
     return clause.regex!.test(candidate);
   }
@@ -131,7 +146,11 @@ export function matchClause(
     return cLower.includes(vLower);
   }
   const exactKeys = options?.exactKeys ?? ['category'];
-  if (exactKeys.includes(clause.key)) {
+  const exact = exactKeys.includes(clause.key);
+  if (clause.op === 'neq') {
+    return exact ? cLower !== vLower : !cLower.includes(vLower);
+  }
+  if (exact) {
     return cLower === vLower;
   }
   return cLower.includes(vLower);

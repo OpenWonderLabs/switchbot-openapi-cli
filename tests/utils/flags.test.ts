@@ -5,6 +5,8 @@ import {
   getTimeout,
   getConfigPath,
   parseDurationToMs,
+  getFormat,
+  getFields,
 } from '../../src/utils/flags.js';
 
 describe('utils/flags', () => {
@@ -80,6 +82,38 @@ describe('utils/flags', () => {
     it('returns undefined when --config is at the very end with no value', () => {
       process.argv.push('--config');
       expect(getConfigPath()).toBeUndefined();
+    });
+  });
+
+  describe('--flag=value equals form (B-6 regression, 2.6.0)', () => {
+    it('getFormat recognizes --format json (space form)', () => {
+      process.argv.push('--format', 'json');
+      expect(getFormat()).toBe('json');
+    });
+
+    it('getFormat recognizes --format=json (equals form)', () => {
+      process.argv.push('--format=json');
+      expect(getFormat()).toBe('json');
+    });
+
+    it('getTimeout recognizes --timeout=5000 (equals form)', () => {
+      process.argv.push('--timeout=5000');
+      expect(getTimeout()).toBe(5_000);
+    });
+
+    it('getConfigPath recognizes --config=/tmp/x.json (equals form)', () => {
+      process.argv.push('--config=/tmp/x.json');
+      expect(getConfigPath()).toBe('/tmp/x.json');
+    });
+
+    it('getFields recognizes --fields=a,b,c (equals form)', () => {
+      process.argv.push('--fields=deviceId,name,type');
+      expect(getFields()).toEqual(['deviceId', 'name', 'type']);
+    });
+
+    it('equals form with empty value returns empty string', () => {
+      process.argv.push('--format=');
+      expect(getFormat()).toBe('');
     });
   });
 

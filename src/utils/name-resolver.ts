@@ -168,9 +168,12 @@ export function resolveDeviceId(
     if (!opts.type) narrow.push('--type');
     if (!opts.category) narrow.push('--category');
     if (!opts.room) narrow.push('--room');
+    const strategyHint = opts.strategy === 'fuzzy'
+      ? `pass --name-strategy=first to pick the best match`
+      : `pass --name-strategy=fuzzy or --name-strategy=first to pick the best match`;
     const hint = narrow.length > 0
-      ? `Narrow with ${narrow.join(' / ')} or use the deviceId directly, or pass --name-strategy first to pick the best match.`
-      : `Use the deviceId directly, or pass --name-strategy first to pick the best match.`;
+      ? `Narrow with ${narrow.join(' / ')}, refine the name, use the deviceId directly, or ${strategyHint}.`
+      : `Refine the name, use the deviceId directly, or ${strategyHint}.`;
     throw new StructuredUsageError(
       `"${nameQuery}" is ambiguous — ${candidates.length} devices match.`,
       {

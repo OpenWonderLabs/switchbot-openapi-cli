@@ -41,8 +41,19 @@ import { updateCacheFromDeviceList, resetListCache } from '../../src/devices/cac
 // ---- Helpers -----------------------------------------------------------
 const DID = 'DEV-ID';
 
+// v2.6.0: unknown deviceId now exits 2 by default (B-3). The top-level describe
+// exercises generic command wiring for a device we deliberately *don't* seed in
+// the cache — append --allow-unknown-device so those tests keep exercising the
+// pass-through path. Tests that specifically assert the new strict behavior
+// call runCli directly without this helper.
 async function runCmd(...extra: string[]) {
-  return runCli(registerDevicesCommand, ['devices', 'command', DID, ...extra]);
+  return runCli(registerDevicesCommand, [
+    'devices',
+    'command',
+    DID,
+    ...extra,
+    '--allow-unknown-device',
+  ]);
 }
 
 function expectPost(command: string, parameter: unknown, commandType = 'command') {
@@ -677,11 +688,24 @@ describe('devices command', () => {
       expect(res.stderr.join('\n')).toContain('Device offline');
     });
 
-    it('prints a soft cache-miss hint when the device is not in the local cache', async () => {
-      const res = await runCmd('turnOn');
+    it('exits 2 when deviceId is not in the local cache (B-3, 2.6.0)', async () => {
+      const res = await runCli(registerDevicesCommand, [
+        'devices', 'command', DID, 'turnOn',
+      ]);
+      expect(res.exitCode).toBe(2);
+      expect(res.stderr.join('\n')).toMatch(/not in local cache/i);
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
+    });
+
+    it('passes through with a soft note when --allow-unknown-device is set', async () => {
+      const res = await runCli(registerDevicesCommand, [
+        'devices', 'command', DID, 'turnOn', '--allow-unknown-device',
+      ]);
+      expect(res.exitCode).toBeNull();
       expect(res.stderr.join('\n')).toMatch(
         /not in the local cache.*switchbot devices list/i,
       );
+      expect(apiMock.__instance.post).toHaveBeenCalled();
     });
 
     it('does not print the cache-miss hint when the device is in the local cache', async () => {
@@ -691,7 +715,9 @@ describe('devices command', () => {
         ],
         infraredRemoteList: [],
       });
-      const res = await runCmd('turnOn');
+      const res = await runCli(registerDevicesCommand, [
+        'devices', 'command', DID, 'turnOn',
+      ]);
       expect(res.stderr.join('\n')).not.toMatch(/not in the local cache/i);
     });
   });
@@ -1771,9 +1797,18 @@ describe('devices command', () => {
       expect(apiMock.__instance.post).not.toHaveBeenCalled();
     });
 
-    it('passes through commands for devices not in the cache', async () => {
+    it('rejects devices not in the cache without --allow-unknown-device (B-3, 2.6.0)', async () => {
       const res = await runCli(registerDevicesCommand, [
         'devices', 'command', 'UNKNOWN-ID', 'anyCommand',
+      ]);
+      expect(res.exitCode).toBe(2);
+      expect(res.stderr.join('\n')).toMatch(/not in local cache/i);
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
+    });
+
+    it('passes through commands for unknown devices with --allow-unknown-device', async () => {
+      const res = await runCli(registerDevicesCommand, [
+        'devices', 'command', 'UNKNOWN-ID', 'anyCommand', '--allow-unknown-device',
       ]);
       expect(res.exitCode).toBeNull();
       expect(apiMock.__instance.post).toHaveBeenCalledWith(
@@ -2123,6 +2158,14 @@ describe('devices command', () => {
     const DRY_ID = 'DRY-DEV-1';
 
     beforeEach(() => {
+      // Seed DRY_ID so B-3's unknown-device gate doesn't shadow the dry-run
+      // plumbing we're actually testing here.
+      updateCacheFromDeviceList({
+        deviceList: [
+          { deviceId: DRY_ID, deviceName: 'Dry Run Bot', deviceType: 'Bot', hubDeviceId: 'HUB-1', enableCloudService: true },
+        ],
+        infraredRemoteList: [],
+      });
       // Make post throw DryRunSignal (simulates --dry-run interceptor)
       apiMock.__instance.post.mockImplementation(async () => {
         throw new apiMock.DryRunSignal('POST', `/v1.1/devices/${DRY_ID}/commands`);

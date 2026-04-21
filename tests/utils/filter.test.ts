@@ -46,6 +46,18 @@ describe('parseFilter (batch-key default)', () => {
     ]);
   });
 
+  it('parses "key!=value" as a neq clause (2.6.0)', () => {
+    expect(parseFilter('type!=Meter')).toEqual([
+      { key: 'type', op: 'neq', raw: 'Meter', regex: undefined },
+    ]);
+  });
+
+  it('!= takes precedence over = when both appear (not-equals is the intended op)', () => {
+    const [c] = parseFilter('type!=Bot');
+    expect(c.op).toBe('neq');
+    expect(c.raw).toBe('Bot');
+  });
+
   it('parses "key=/pattern/" as a regex clause with case-insensitive RegExp', () => {
     const [c] = parseFilter('type=/Bot.*/');
     expect(c.key).toBe('type');
@@ -169,6 +181,33 @@ describe('applyFilter', () => {
   it('type=Bot is now a substring match (was exact in <=2.5.0) — also hits Bot Plus', () => {
     const matched = applyFilter(parseFilter('type=Bot'), devices, irRemotes, hubLoc);
     expect(matched.map((d) => d.deviceId).sort()).toEqual(['BOT1', 'BOT2', 'BOT3']);
+  });
+
+  it('type!=Meter (2.6.0) excludes Meter devices via negated substring', () => {
+    const matched = applyFilter(parseFilter('type!=Meter'), devices, irRemotes, hubLoc);
+    expect(matched.map((d) => d.deviceId)).not.toContain('METER');
+    expect(matched.map((d) => d.deviceId).sort()).toEqual(
+      ['AC1', 'BOT1', 'BOT2', 'BOT3', 'LAMP', 'TV1'],
+    );
+  });
+
+  it('category!=ir is exact-negated (never substring) — physical only', () => {
+    const matched = applyFilter(parseFilter('category!=ir'), devices, irRemotes, hubLoc);
+    expect(matched.map((d) => d.deviceId).sort()).toEqual(
+      ['BOT1', 'BOT2', 'BOT3', 'LAMP', 'METER'],
+    );
+  });
+
+  it('combines != with = (AND)', () => {
+    const matched = applyFilter(
+      parseFilter('type!=Meter,family=Home'),
+      devices,
+      irRemotes,
+      hubLoc,
+    );
+    expect(matched.map((d) => d.deviceId).sort()).toEqual(
+      ['BOT1', 'BOT2', 'BOT3', 'LAMP', 'TV1'],
+    );
   });
 
   it('substring match with ~ is case-insensitive', () => {

@@ -9,6 +9,14 @@ function getFlagValue(...flagNames: string[]): string | undefined {
     if (idx !== -1 && idx + 1 < process.argv.length) {
       return process.argv[idx + 1];
     }
+    // Also accept the `--flag=value` token form. Commander.js recognizes it at
+    // the option layer but global-flag scans like this one used to miss it,
+    // so `--format=json` silently fell back to the default (table).
+    const prefix = `${flag}=`;
+    const combined = process.argv.find((arg) => arg.startsWith(prefix));
+    if (combined !== undefined) {
+      return combined.slice(prefix.length);
+    }
   }
   return undefined;
 }
@@ -83,6 +91,20 @@ export function getBackoffStrategy(): 'linear' | 'exponential' {
   const v = getFlagValue('--backoff');
   if (v === 'linear') return 'linear';
   return 'exponential';
+}
+
+/**
+ * Max retries on 5xx / gateway-timeout responses for idempotent (GET) reads.
+ * Default 2. `--no-retry` disables retries entirely. POSTs are not retried
+ * automatically — use --idempotency-key and let the server dedupe.
+ */
+export function getRetryOn5xx(): number {
+  if (process.argv.includes('--no-retry')) return 0;
+  const v = getFlagValue('--retry-on-5xx');
+  if (v === undefined) return 2;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0) return 2;
+  return Math.floor(n);
 }
 
 /**

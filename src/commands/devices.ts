@@ -1,9 +1,9 @@
 import { Command } from 'commander';
 import { enumArg, stringArg } from '../utils/arg-parsers.js';
-import { printTable, printKeyValue, printJson, isJsonMode, handleError, UsageError, emitJsonError } from '../utils/output.js';
+import { printTable, printKeyValue, printJson, isJsonMode, handleError, UsageError, StructuredUsageError, emitJsonError } from '../utils/output.js';
 import { resolveFormat, resolveFields, renderRows } from '../utils/format.js';
 import { findCatalogEntry, getEffectiveCatalog, DeviceCatalogEntry } from '../devices/catalog.js';
-import { getCachedDevice } from '../devices/cache.js';
+import { getCachedDevice, loadCache } from '../devices/cache.js';
 import { loadDeviceMeta } from '../devices/device-meta.js';
 import { resolveDeviceId, NameResolveStrategy, ALL_STRATEGIES } from '../utils/name-resolver.js';
 import {
@@ -18,6 +18,7 @@ import {
   DeviceNotFoundError,
   type Device,
 } from '../lib/devices.js';
+import { parseFilterExpr, matchClause, FilterSyntaxError, type FilterClause } from '../utils/filter.js';
 import { validateParameter } from '../devices/param-validator.js';
 import { registerBatchCommand } from './batch.js';
 import { registerWatchCommand } from './watch.js';
@@ -93,7 +94,7 @@ Examples:
 `)
     .option('--wide', 'Show all columns (controlType, family, roomID, room, hub, cloud)')
     .option('--show-hidden', 'Include devices hidden via "devices meta set --hide"')
-    .option('--filter <expr>', 'Filter devices: comma-separated clauses. Each clause is "key=value" (substring; exact for category), "key~value" (explicit substring), or "key=/regex/" (case-insensitive regex). Supported keys: type, name, category, room.', stringArg('--filter'))
+    .option('--filter <expr>', 'Filter devices: comma-separated clauses. Each clause is "key=value" (substring; exact for category), "key!=value" (negated substring), "key~value" (explicit substring), or "key=/regex/" (case-insensitive regex). Supported keys: type, name, category, room.', stringArg('--filter'))
     .action(async (options: { wide?: boolean; showHidden?: boolean; filter?: string }) => {
       try {
         const body = await fetchDeviceList();
@@ -103,61 +104,16 @@ Examples:
 
         const hubLocation = buildHubLocationMap(deviceList);
 
-        // Parse --filter into a list of clauses. Each comma-separated pair is
-        // one of three shapes:
-        //   key=value      — current behavior (substring; exact for category)
-        //   key~value      — explicit case-insensitive substring
-        //   key=/pattern/  — case-insensitive regex
-        interface FilterClause {
-          key: 'type' | 'name' | 'category' | 'room';
-          op: 'eq' | 'sub' | 'regex';
-          raw: string;
-          regex?: RegExp;
-        }
-        const SUPPORTED_KEYS = ['type', 'name', 'category', 'room'] as const;
+        // Parse --filter into a list of clauses. Shared grammar across
+        // `devices list`, `devices batch`, and `events tail` / `mqtt-tail`.
+        const LIST_KEYS = ['type', 'name', 'category', 'room'] as const;
         let listClauses: FilterClause[] | null = null;
         if (options.filter) {
-          listClauses = [];
-          for (const pair of options.filter.split(',')) {
-            const trimmed = pair.trim();
-            if (!trimmed) continue;
-            const regexMatch = /^([^=~]+)=\/(.*)\/$/.exec(trimmed);
-            const tildeIdx = trimmed.indexOf('~');
-            const eqIdx = trimmed.indexOf('=');
-            let key: string;
-            let op: 'eq' | 'sub' | 'regex';
-            let raw: string;
-            let regex: RegExp | undefined;
-            if (regexMatch) {
-              key = regexMatch[1].trim();
-              op = 'regex';
-              raw = regexMatch[2];
-              try {
-                regex = new RegExp(raw, 'i');
-              } catch (err) {
-                throw new UsageError(
-                  `Invalid regex in --filter "${trimmed}": ${(err as Error).message}`,
-                );
-              }
-            } else if (tildeIdx !== -1 && (eqIdx === -1 || tildeIdx < eqIdx)) {
-              key = trimmed.slice(0, tildeIdx).trim();
-              op = 'sub';
-              raw = trimmed.slice(tildeIdx + 1).trim().toLowerCase();
-            } else if (eqIdx !== -1) {
-              key = trimmed.slice(0, eqIdx).trim();
-              op = 'eq';
-              raw = trimmed.slice(eqIdx + 1).trim().toLowerCase();
-            } else {
-              throw new UsageError(
-                `Invalid --filter pair "${trimmed}". Expected key=value, key~value, or key=/regex/.`,
-              );
-            }
-            if (!(SUPPORTED_KEYS as readonly string[]).includes(key)) {
-              throw new UsageError(
-                `Unknown --filter key "${key}". Supported: ${SUPPORTED_KEYS.join(', ')}.`,
-              );
-            }
-            listClauses.push({ key: key as FilterClause['key'], op, raw, regex });
+          try {
+            listClauses = parseFilterExpr(options.filter, LIST_KEYS);
+          } catch (err) {
+            if (err instanceof FilterSyntaxError) throw new UsageError(err.message);
+            throw err;
           }
         }
 
@@ -165,18 +121,7 @@ Examples:
           if (!listClauses || listClauses.length === 0) return true;
           for (const c of listClauses) {
             const fieldVal = (entry as Record<string, string>)[c.key] ?? '';
-            const lower = fieldVal.toLowerCase();
-            let ok: boolean;
-            if (c.op === 'regex') {
-              ok = c.regex!.test(fieldVal);
-            } else if (c.op === 'sub') {
-              ok = lower.includes(c.raw);
-            } else if (c.key === 'category') {
-              ok = lower === c.raw;
-            } else {
-              ok = lower.includes(c.raw);
-            }
-            if (!ok) return false;
+            if (!matchClause(fieldVal, c)) return false;
           }
           return true;
         };
@@ -380,6 +325,8 @@ Examples:
     .option('--name-room <room>', 'Narrow --name by room name (substring match)', stringArg('--name-room'))
     .option('--type <commandType>', 'Command type: "command" for built-in commands (default), "customize" for user-defined IR buttons', enumArg('--type', COMMAND_TYPES), 'command')
     .option('--yes', 'Confirm a destructive command (Smart Lock unlock, Garage open, …). --dry-run is always allowed without --yes.')
+    .option('--allow-unknown-device', 'Allow targeting a deviceId that is not in the local cache. By default unknown IDs exit 2 so --dry-run is a reliable pre-flight gate; use this flag for scripted pass-through.')
+    .option('--skip-param-validation', 'Skip client-side parameter validation (escape hatch — prefer fixing the argument over using this).')
     .option('--idempotency-key <key>', 'Client-supplied key to dedupe retries. process-local 60s window; cache is per Node process (MCP session, batch run, plan run). Independent CLI invocations do not share cache.', stringArg('--idempotency-key'))
     .addHelpText('after', `
 ────────────────────────────────────────────────────────────────────────
@@ -426,7 +373,7 @@ Examples:
   $ switchbot devices command ABC123 "MyButton" --type customize
   $ switchbot devices command <lockId> unlock --yes
 `)
-    .action(async (deviceIdArg: string | undefined, cmdArg: string | undefined, parameter: string | undefined, options: { name?: string; nameStrategy?: string; nameType?: string; nameCategory?: 'physical' | 'ir'; nameRoom?: string; type: string; yes?: boolean; idempotencyKey?: string }) => {
+    .action(async (deviceIdArg: string | undefined, cmdArg: string | undefined, parameter: string | undefined, options: { name?: string; nameStrategy?: string; nameType?: string; nameCategory?: 'physical' | 'ir'; nameRoom?: string; type: string; yes?: boolean; allowUnknownDevice?: boolean; skipParamValidation?: boolean; idempotencyKey?: string }) => {
       // Declared outside try so the DryRunSignal catch branch can reference them.
       let _deviceId: string | undefined;
       let _cmd: string | undefined;
@@ -466,9 +413,30 @@ Examples:
         });
         _deviceId = deviceId;
         if (!getCachedDevice(deviceId)) {
-          console.error(
-            `Note: device ${deviceId} is not in the local cache — run 'switchbot devices list' first to enable command validation.`,
-          );
+          if (options.allowUnknownDevice) {
+            console.error(
+              `Note: device ${deviceId} is not in the local cache — run 'switchbot devices list' first to enable command validation. (--allow-unknown-device is set, continuing.)`,
+            );
+          } else {
+            const cache = loadCache();
+            const allIds = cache ? Object.keys(cache.devices) : [];
+            const candidates = allIds
+              .filter((id) => id.toLowerCase().includes(deviceId.toLowerCase()) || id.startsWith(deviceId.slice(0, 4)))
+              .slice(0, 5)
+              .map((id) => {
+                const dev = cache!.devices[id];
+                return { deviceId: id, name: dev.name, type: dev.type };
+              });
+            throw new StructuredUsageError(
+              `Unknown deviceId "${deviceId}" — not in local cache. Run 'switchbot devices list' first, or pass --allow-unknown-device to bypass this check.`,
+              {
+                error: 'unknown_device_id',
+                deviceId,
+                candidates,
+                hint: `Pass --allow-unknown-device to skip this check (and rely on the API for validation).`,
+              },
+            );
+          }
         }
         const validation = validateCommand(deviceId, cmd, parameter, options.type);
       if (!validation.ok) {
@@ -508,7 +476,7 @@ Examples:
 
       // Raw-parameter validation (runs for known (deviceType, command) pairs only).
       const cachedForParam = getCachedDevice(deviceId);
-      if (cachedForParam && options.type === 'command') {
+      if (cachedForParam && options.type === 'command' && !options.skipParamValidation) {
         const paramCheck = validateParameter(cachedForParam.type, cmd, parameter);
         if (!paramCheck.ok) {
           if (isJsonMode()) {
@@ -516,7 +484,7 @@ Examples:
               code: 2,
               kind: 'usage',
               message: paramCheck.error,
-              context: { command: cmd, deviceType: cachedForParam.type, deviceId },
+              context: { command: cmd, deviceType: cachedForParam.type, deviceId, humanHint: paramCheck.error },
             });
           } else {
             console.error(`Error: ${paramCheck.error}`);
@@ -690,23 +658,53 @@ Examples:
   $ switchbot devices commands Robot --json
 `)
     .action((typeParts: string[]) => {
-      const type = typeParts.join(' ');
       try {
-        const match = findCatalogEntry(type);
-        if (!match) {
-          throw new UsageError(
-            `No device type matches "${type}". Try 'switchbot devices types' to see the full list.`
-          );
-        }
-        if (Array.isArray(match)) {
-          const types = match.map((m) => m.type).join(', ');
-          throw new UsageError(`"${type}" matches multiple types: ${types}. Be more specific.`);
-        }
-        if (isJsonMode()) {
-          printJson(match);
+        // First try the joined form so legacy multi-word unquoted input still
+        // works (`devices commands Air Conditioner` → "Air Conditioner"). If
+        // that doesn't match and every individual token resolves on its own,
+        // treat it as variadic and emit a section per type.
+        const joined = typeParts.join(' ');
+        const joinedMatch = findCatalogEntry(joined);
+        if (joinedMatch && !Array.isArray(joinedMatch)) {
+          if (isJsonMode()) {
+            printJson(joinedMatch);
+          } else {
+            renderCatalogEntry(joinedMatch);
+          }
           return;
         }
-        renderCatalogEntry(match);
+
+        if (typeParts.length > 1) {
+          const individualMatches: DeviceCatalogEntry[] = [];
+          for (const t of typeParts) {
+            const m = findCatalogEntry(t);
+            if (!m || Array.isArray(m)) {
+              individualMatches.length = 0;
+              break;
+            }
+            individualMatches.push(m);
+          }
+          if (individualMatches.length === typeParts.length) {
+            if (isJsonMode()) {
+              printJson(individualMatches);
+            } else {
+              individualMatches.forEach((entry, i) => {
+                if (i > 0) console.log('');
+                renderCatalogEntry(entry);
+              });
+            }
+            return;
+          }
+        }
+
+        if (!joinedMatch) {
+          throw new UsageError(
+            `No device type matches "${joined}". Try 'switchbot devices types' to see the full list.`
+          );
+        }
+        // joinedMatch is an ambiguous-match array here
+        const types = (joinedMatch as DeviceCatalogEntry[]).map((m) => m.type).join(', ');
+        throw new UsageError(`"${joined}" matches multiple types: ${types}. Be more specific.`);
       } catch (error) {
         handleError(error);
       }

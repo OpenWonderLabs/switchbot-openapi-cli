@@ -11,6 +11,7 @@ import {
   isDryRun,
   getTimeout,
   getRetryOn429,
+  getRetryOn5xx,
   getBackoffStrategy,
   isQuotaDisabled,
 } from '../utils/flags.js';
@@ -54,6 +55,7 @@ export function createClient(): AxiosInstance {
   const verbose = isVerbose();
   const dryRun = isDryRun();
   const maxRetries = getRetryOn429();
+  const max5xxRetries = getRetryOn5xx();
   const backoff = getBackoffStrategy();
   const quotaEnabled = !isQuotaDisabled();
   const profile = getActiveProfile();
@@ -128,15 +130,34 @@ export function createClient(): AxiosInstance {
     (error) => {
       if (error instanceof DryRunSignal) throw error;
       if (axios.isAxiosError(error)) {
+        const config = error.config as RetryableConfig | undefined;
+        const method = (config?.method ?? 'get').toUpperCase();
+        const isIdempotentRead = method === 'GET';
+
         if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
+          // Retry idempotent GETs on timeout up to `max5xxRetries` times.
+          if (isIdempotentRead && config && max5xxRetries > 0) {
+            const attempt = config.__retryCount ?? 0;
+            if (attempt < max5xxRetries) {
+              config.__retryCount = attempt + 1;
+              const delay = nextRetryDelayMs(attempt, backoff, undefined);
+              if (verbose) {
+                process.stderr.write(
+                  chalk.grey(
+                    `[verbose] timeout — retry ${attempt + 1}/${max5xxRetries} in ${delay}ms\n`,
+                  ),
+                );
+              }
+              return sleep(delay).then(() => client.request(config));
+            }
+          }
           throw new ApiError(
             `Request timed out after ${getTimeout()}ms (override with --timeout <ms>)`,
             0,
-            { transient: true, retryable: false }
+            { transient: true, retryable: isIdempotentRead }
           );
         }
         const status = error.response?.status;
-        const config = error.config as RetryableConfig | undefined;
 
         // 429 → transparent retry with Retry-After / exponential backoff.
         // Skipped when: no config (shouldn't happen for real axios errors),
@@ -155,6 +176,34 @@ export function createClient(): AxiosInstance {
                 chalk.grey(
                   `[verbose] 429 received — retry ${attempt + 1}/${maxRetries} in ${delay}ms\n`
                 )
+              );
+            }
+            return sleep(delay).then(() => client.request(config));
+          }
+        }
+
+        // 502/503/504 on idempotent GETs → transparent retry. Mutating calls
+        // never auto-retry; use --idempotency-key for safe POST retries.
+        if (
+          isIdempotentRead &&
+          status !== undefined &&
+          (status === 502 || status === 503 || status === 504) &&
+          config &&
+          max5xxRetries > 0
+        ) {
+          const attempt = config.__retryCount ?? 0;
+          if (attempt < max5xxRetries) {
+            config.__retryCount = attempt + 1;
+            const delay = nextRetryDelayMs(
+              attempt,
+              backoff,
+              error.response?.headers?.['retry-after'],
+            );
+            if (verbose) {
+              process.stderr.write(
+                chalk.grey(
+                  `[verbose] ${status} received — retry ${attempt + 1}/${max5xxRetries} in ${delay}ms\n`,
+                ),
               );
             }
             return sleep(delay).then(() => client.request(config));

@@ -50,6 +50,9 @@ function formatCell(cell: string | number | boolean | null | undefined, style: T
 }
 
 function renderMarkdownTable(headers: string[], rows: (string | number | boolean | null | undefined)[][]): string {
+  if (rows.length === 0) {
+    return '_(empty)_';
+  }
   const head = `| ${headers.map(escapeMarkdownCell).join(' | ')} |`;
   const sep = `| ${headers.map(() => '---').join(' | ')} |`;
   const body = rows.map(
@@ -291,6 +294,30 @@ export function handleError(error: unknown): never {
 
   if (payload.kind === 'usage') {
     console.error(payload.message);
+    const ctx = payload.context;
+    if (ctx && Array.isArray(ctx.candidates) && ctx.candidates.length > 0) {
+      const names = ctx.candidates
+        .map((c) => {
+          if (typeof c === 'string') return c;
+          if (c && typeof c === 'object') {
+            const o = c as Record<string, unknown>;
+            const name = typeof o.name === 'string'
+              ? o.name
+              : typeof o.sceneName === 'string' ? o.sceneName : undefined;
+            const id = typeof o.deviceId === 'string'
+              ? o.deviceId
+              : typeof o.sceneId === 'string' ? o.sceneId : typeof o.id === 'string' ? o.id : undefined;
+            if (name && id) return `${name} (${id})`;
+            return name ?? id ?? JSON.stringify(c);
+          }
+          return String(c);
+        })
+        .slice(0, 6);
+      console.error(`Did you mean: ${names.join(', ')}?`);
+    }
+    if (ctx && typeof ctx.hint === 'string') {
+      console.error(ctx.hint);
+    }
     process.exit(2);
   }
 
