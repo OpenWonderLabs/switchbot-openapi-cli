@@ -148,6 +148,44 @@ describe('scenes command', () => {
       expect(parsed.error?.context?.error).toBe('scene_not_found');
       expect(parsed.error?.context?.sceneId).toBe('BOGUS-ID');
     });
+
+    it('--dry-run --json returns structured wouldSend on stdout (bug #54)', async () => {
+      apiMock.__instance.get.mockResolvedValue({
+        data: { body: [{ sceneId: 'SCENE-1', sceneName: 'Morning' }] },
+      });
+      const res = await runCli(registerScenesCommand, ['scenes', 'execute', 'SCENE-1', '--dry-run', '--json']);
+      expect(res.exitCode).toBeNull();
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
+      const out = res.stdout.join('\n');
+      const parsed = JSON.parse(out);
+      expect(parsed.data.dryRun).toBe(true);
+      expect(parsed.data.wouldSend.sceneId).toBe('SCENE-1');
+      expect(parsed.data.wouldSend.sceneName).toBe('Morning');
+    });
+
+    it('--dry-run plaintext prints Would POST on stdout (bug #54)', async () => {
+      apiMock.__instance.get.mockResolvedValue({
+        data: { body: [{ sceneId: 'SCENE-1', sceneName: 'Morning' }] },
+      });
+      const res = await runCli(registerScenesCommand, ['scenes', 'execute', 'SCENE-1', '--dry-run']);
+      expect(res.exitCode).toBeNull();
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
+      const out = res.stdout.join('\n');
+      expect(out).toContain('[dry-run]');
+      expect(out).toContain('SCENE-1');
+    });
+
+    it('--dry-run with bogus sceneId still exits 2 with scene_not_found (bug #54)', async () => {
+      apiMock.__instance.get.mockResolvedValue({
+        data: { body: [{ sceneId: 'S1', sceneName: 'Good Morning' }] },
+      });
+      const res = await runCli(registerScenesCommand, ['scenes', 'execute', 'BOGUS', '--dry-run', '--json']);
+      expect(res.exitCode).toBe(2);
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
+      const out = res.stdout.join('\n');
+      const parsed = JSON.parse(out);
+      expect(parsed.error?.context?.error).toBe('scene_not_found');
+    });
   });
 
   describe('describe', () => {
