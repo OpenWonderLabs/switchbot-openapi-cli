@@ -187,20 +187,20 @@ describe('resolveDeviceId require-unique exact-match edge cases (bug #1)', () =>
   });
 
   it('require-unique: exact match + substring match → ambiguous (reporter scenario)', () => {
-    // Device A has name exactly '空调'; device B has '空调' as a substring.
+    // Device A has name exactly 'AC'; device B has 'AC' as a substring.
     // Under require-unique the caller expects a unique match, but since B also
     // matches (substring) the result must be ambiguous — NOT a silent pick of A.
     updateCacheFromDeviceList({
       deviceList: [],
       infraredRemoteList: [
-        { deviceId: 'A', deviceName: '空调',   remoteType: 'Air Conditioner', hubDeviceId: 'H1' },
-        { deviceId: 'B', deviceName: '卧室空调', remoteType: 'Air Conditioner', hubDeviceId: 'H1' },
+        { deviceId: 'A', deviceName: 'AC',         remoteType: 'Air Conditioner', hubDeviceId: 'H1' },
+        { deviceId: 'B', deviceName: 'Bedroom AC', remoteType: 'Air Conditioner', hubDeviceId: 'H1' },
       ],
     });
 
     let err: Error | null = null;
     try {
-      resolveDeviceId(undefined, '空调', { strategy: 'require-unique' });
+      resolveDeviceId(undefined, 'AC', { strategy: 'require-unique' });
     } catch (e) {
       err = e as Error;
     }
@@ -216,14 +216,14 @@ describe('resolveDeviceId require-unique exact-match edge cases (bug #1)', () =>
     updateCacheFromDeviceList({
       deviceList: [],
       infraredRemoteList: [
-        { deviceId: 'A', deviceName: '空调', remoteType: 'Air Conditioner', hubDeviceId: 'H1' },
-        { deviceId: 'B', deviceName: '空调', remoteType: 'Air Conditioner', hubDeviceId: 'H1' },
+        { deviceId: 'A', deviceName: 'AC', remoteType: 'Air Conditioner', hubDeviceId: 'H1' },
+        { deviceId: 'B', deviceName: 'AC', remoteType: 'Air Conditioner', hubDeviceId: 'H1' },
       ],
     });
 
     let err: Error | null = null;
     try {
-      resolveDeviceId(undefined, '空调', { strategy: 'require-unique' });
+      resolveDeviceId(undefined, 'AC', { strategy: 'require-unique' });
     } catch (e) {
       err = e as Error;
     }
@@ -237,12 +237,12 @@ describe('resolveDeviceId require-unique exact-match edge cases (bug #1)', () =>
     updateCacheFromDeviceList({
       deviceList: [],
       infraredRemoteList: [
-        { deviceId: 'A', deviceName: '空调',   remoteType: 'Air Conditioner', hubDeviceId: 'H1' },
-        { deviceId: 'B', deviceName: '风扇',   remoteType: 'Fan',             hubDeviceId: 'H1' },
+        { deviceId: 'A', deviceName: 'AC',         remoteType: 'Air Conditioner', hubDeviceId: 'H1' },
+        { deviceId: 'B', deviceName: 'Fan Remote', remoteType: 'Fan',             hubDeviceId: 'H1' },
       ],
     });
 
-    expect(resolveDeviceId(undefined, '空调', { strategy: 'require-unique' })).toBe('A');
+    expect(resolveDeviceId(undefined, 'AC', { strategy: 'require-unique' })).toBe('A');
   });
 
   it('fuzzy: exact match short-circuits even with a substring match elsewhere (no regression)', () => {
@@ -250,13 +250,13 @@ describe('resolveDeviceId require-unique exact-match edge cases (bug #1)', () =>
     updateCacheFromDeviceList({
       deviceList: [],
       infraredRemoteList: [
-        { deviceId: 'A', deviceName: '空调',   remoteType: 'Air Conditioner', hubDeviceId: 'H1' },
-        { deviceId: 'B', deviceName: '卧室空调', remoteType: 'Air Conditioner', hubDeviceId: 'H1' },
+        { deviceId: 'A', deviceName: 'AC',         remoteType: 'Air Conditioner', hubDeviceId: 'H1' },
+        { deviceId: 'B', deviceName: 'Bedroom AC', remoteType: 'Air Conditioner', hubDeviceId: 'H1' },
       ],
     });
 
     // fuzzy: exact-match wins immediately → returns A, no ambiguity error
-    const id = resolveDeviceId(undefined, '空调', { strategy: 'fuzzy' });
+    const id = resolveDeviceId(undefined, 'AC', { strategy: 'fuzzy' });
     expect(id).toBe('A');
   });
 });

@@ -97,7 +97,7 @@ Examples:
   $ switchbot devices watch ABC123 --fields battery,power --interval 1m
   $ switchbot devices watch ABC123 DEF456 --interval 30s --max 10
   $ switchbot devices watch ABC123 --json | jq 'select(.changed.power)'
-  $ switchbot devices watch --name "客厅空调" --interval 10s
+  $ switchbot devices watch --name "Living Room AC" --interval 10s
 `,
     )
     .action(

@@ -194,7 +194,7 @@ Safety:
   hitting the API.
 
 Examples:
-  $ switchbot devices batch turnOff --filter 'type~=Light,family=家里'
+  $ switchbot devices batch turnOff --filter 'type~=Light,family=home'
   $ switchbot devices batch turnOn --ids ID1,ID2,ID3
   $ switchbot devices list --format=id --filter 'type=Bot' | switchbot devices batch toggle -
   $ switchbot devices batch unlock --filter 'type=Smart Lock' --yes

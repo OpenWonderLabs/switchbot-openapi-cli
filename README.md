@@ -238,7 +238,7 @@ switchbot devices status <deviceId>
 switchbot devices status <deviceId> --json
 
 # Resolve device by fuzzy name instead of ID (status, command, describe, expand, watch)
-switchbot devices status --name "客厅空调"
+switchbot devices status --name "Living Room AC"
 switchbot devices command --name "Office Light" turnOn
 switchbot devices describe --name "Kitchen Bot"
 
@@ -276,6 +276,9 @@ but each exposes its own key set:
 Clauses are comma-separated and AND-ed. No OR across clauses — use regex
 alternation (`=/A|B/`) for that. `category` is the one key that stays exact
 under `=` / `!=` to preserve `category=physical` / `category!=ir` semantics.
+A clause with an empty value (e.g. `name~`, `type=`) is rejected with exit 2 —
+the parser refuses to guess whether an empty value means "no constraint" or
+"match empty string". Drop the clause outright to remove the constraint.
 
 #### Parameter formats
 
@@ -316,7 +319,7 @@ Some commands require a packed string like `"26,2,2,on"`. `devices expand` build
 # Air Conditioner — setAll
 switchbot devices expand <acId> setAll --temp 26 --mode cool --fan low --power on
 # Resolve by name
-switchbot devices expand --name "客厅空调" setAll --temp 26 --mode cool --fan low --power on
+switchbot devices expand --name "Living Room AC" setAll --temp 26 --mode cool --fan low --power on
 
 # Curtain / Roller Shade — setPosition
 switchbot devices expand <curtainId> setPosition --position 50 --mode silent

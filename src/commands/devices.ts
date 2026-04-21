@@ -84,7 +84,7 @@ Examples:
   $ switchbot devices list
   $ switchbot devices list --wide
   $ switchbot devices list --format tsv --fields deviceId,deviceName,type,category
-  $ switchbot devices list --json | jq '.deviceList[] | select(.familyName == "家里")'
+  $ switchbot devices list --json | jq '.deviceList[] | select(.familyName == "home")'
   $ switchbot devices list --json | jq '[.deviceList[], .infraredRemoteList[]] | group_by(.familyName)'
   $ switchbot devices list --filter type="Air Conditioner"
   $ switchbot devices list --filter category=ir
@@ -231,7 +231,7 @@ all field names returned by your specific device, then narrow with --fields.
 
 Examples:
   $ switchbot devices status ABC123DEF456
-  $ switchbot devices status --name "客厅空调"
+  $ switchbot devices status --name "Living Room AC"
   $ switchbot devices status ABC123DEF456 --json
   $ switchbot devices status ABC123DEF456 --format yaml
   $ switchbot devices status ABC123DEF456 --format tsv --fields power,battery

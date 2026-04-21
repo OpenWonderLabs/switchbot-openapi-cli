@@ -58,7 +58,7 @@ Examples:
   $ switchbot devices expand <blindId>   setPosition  --direction up --angle 50
   $ switchbot devices expand <relayId>   setMode      --channel 1 --mode edge
   $ switchbot devices expand <acId>      setAll       --temp 22 --mode heat --fan auto --power on --dry-run
-  $ switchbot devices expand --name "客厅空调" setAll --temp 26 --mode cool --fan low --power on
+  $ switchbot devices expand --name "Living Room AC" setAll --temp 26 --mode cool --fan low --power on
 `)
     .action(async (
       deviceIdArg: string | undefined,
