@@ -346,6 +346,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
     },
     async ({ deviceId, command, parameter, commandType, confirm, idempotencyKey, dryRun }) => {
       const effectiveType = commandType ?? 'command';
+      let effectiveCommand = command;
       let effectiveParameter: unknown = parameter;
 
       // stringifiedParam mirrors the CLI form that validateCommand /
@@ -366,51 +367,42 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
             context: { deviceId },
           });
         }
+        const dryValidation = validateCommand(deviceId, effectiveCommand, stringifiedParam, effectiveType);
+        if (!dryValidation.ok) {
+          return mcpError(
+            'usage',
+            2,
+            dryValidation.error.message,
+            {
+              hint: dryValidation.error.hint,
+              context: {
+                validationKind: dryValidation.error.kind,
+                deviceType: cached.type,
+                command: effectiveCommand,
+              },
+            },
+          );
+        }
+        if (dryValidation.normalized) {
+          effectiveCommand = dryValidation.normalized;
+        }
         // R-2: run B-1 param validation in dry-run too, so dry-run doesn't
         // falsely accept inputs the live API would reject.
         if (effectiveType !== 'customize') {
-          const pv = validateParameter(cached.type, command, stringifiedParam);
+          const pv = validateParameter(cached.type, effectiveCommand, stringifiedParam);
           if (!pv.ok) {
             return mcpError('usage', 2, pv.error, {
               hint: 'Dry-run rejected the parameter client-side; the API would reject it too.',
-              context: { deviceType: cached.type, command, parameter: stringifiedParam },
+              context: { deviceType: cached.type, command: effectiveCommand, parameter: stringifiedParam },
             });
           }
           if (pv.normalized !== undefined) {
             effectiveParameter = pv.normalized;
           }
         }
-        // Bug #55: validateCommand is lenient by design (passes unknown device
-        // types, ambiguous catalog matches). For dry-run we need stricter
-        // checking — query the catalog directly and reject unknown commands
-        // when the catalog has a definitive match.
-        if (effectiveType !== 'customize') {
-          const catalogMatch = findCatalogEntry(cached.type);
-          if (catalogMatch && !Array.isArray(catalogMatch)) {
-            const builtinCmds = catalogMatch.commands.filter((c) => c.commandType !== 'customize');
-            if (builtinCmds.length > 0) {
-              const exactMatch = builtinCmds.find((c) => c.command === command);
-              const caseMatch = !exactMatch
-                ? builtinCmds.find((c) => c.command.toLowerCase() === command.toLowerCase())
-                : null;
-              if (!exactMatch && !caseMatch) {
-                const supported = [...new Set(builtinCmds.map((c) => c.command))].join(', ');
-                return mcpError('usage', 2, `"${command}" is not a supported command for ${cached.name} (${cached.type}).`, {
-                  hint: `Supported commands: ${supported}`,
-                  context: { validationKind: 'unknown-command', deviceType: cached.type, command },
-                });
-              }
-            } else if (catalogMatch.readOnly) {
-              return mcpError('usage', 2, `${cached.name} (${cached.type}) is a read-only sensor — it has no control commands.`, {
-                hint: "Use 'get_device_status' to read this device instead.",
-                context: { validationKind: 'read-only-device', deviceType: cached.type, command },
-              });
-            }
-          }
-        }
         const wouldSend = {
           deviceId,
-          command,
+          command: effectiveCommand,
           parameter: effectiveParameter ?? 'default',
           commandType: effectiveType,
         };
@@ -437,23 +429,23 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         typeName = physical ? physical.deviceType : ir!.remoteType;
       }
 
-      if (isDestructiveCommand(typeName, command, effectiveType) && !confirm) {
-        const reason = getDestructiveReason(typeName, command, effectiveType);
+      if (isDestructiveCommand(typeName, effectiveCommand, effectiveType) && !confirm) {
+        const reason = getDestructiveReason(typeName, effectiveCommand, effectiveType);
         const entry = typeName ? findCatalogEntry(typeName) : null;
         const spec =
           entry && !Array.isArray(entry)
-            ? entry.commands.find((c) => c.command === command)
+            ? entry.commands.find((c) => c.command === effectiveCommand)
             : undefined;
         const hint = reason
           ? `Re-issue with confirm:true after confirming with the user. Reason: ${reason}`
           : 'Re-issue the call with confirm:true to proceed.';
         return mcpError(
           'guard', 3,
-          `Command "${command}" on device type "${typeName}" is destructive and requires confirm:true.`,
+          `Command "${effectiveCommand}" on device type "${typeName}" is destructive and requires confirm:true.`,
           {
             hint,
             context: {
-              command,
+              command: effectiveCommand,
               deviceType: typeName,
               description: spec?.description ?? null,
               ...(reason ? { destructiveReason: reason } : {}),
@@ -465,23 +457,29 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
       // validateCommand covers command existence + required/unexpected-parameter.
       // stringifiedParam was computed once at the top of the handler so dry-run
       // and live paths share the same shape.
-      const validation = validateCommand(deviceId, command, stringifiedParam, effectiveType);
+      const validation = validateCommand(deviceId, effectiveCommand, stringifiedParam, effectiveType);
       if (!validation.ok) {
         return mcpError(
           'usage', 2,
           validation.error.message,
-          { hint: validation.error.hint, context: { validationKind: validation.error.kind } },
+          {
+            hint: validation.error.hint,
+            context: { validationKind: validation.error.kind, deviceType: typeName, command: effectiveCommand },
+          },
         );
+      }
+      if (validation.normalized) {
+        effectiveCommand = validation.normalized;
       }
 
       // R-2: run B-1 client-side parameter validator (range/format checks).
       // Customize commands (user-defined IR buttons) opt out — the catalog
       // cannot know their expected shape.
       if (effectiveType !== 'customize') {
-        const pv = validateParameter(typeName, command, stringifiedParam);
+        const pv = validateParameter(typeName, effectiveCommand, stringifiedParam);
         if (!pv.ok) {
           return mcpError('usage', 2, pv.error, {
-            context: { deviceType: typeName, command, parameter: stringifiedParam, validationKind: 'param-out-of-range' },
+            context: { deviceType: typeName, command: effectiveCommand, parameter: stringifiedParam, validationKind: 'param-out-of-range' },
           });
         }
         if (pv.normalized !== undefined) {
@@ -491,7 +489,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
 
       let result: unknown;
       try {
-        result = await executeCommand(deviceId, command, effectiveParameter, effectiveType, undefined, {
+        result = await executeCommand(deviceId, effectiveCommand, effectiveParameter, effectiveType, undefined, {
           idempotencyKey,
         });
       } catch (err) {
@@ -517,7 +515,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
           reason: string;
           suggestedFollowup: string;
         };
-      } = { ok: true as const, command, deviceId, result };
+      } = { ok: true as const, command: effectiveCommand, deviceId, result };
       if (isIr) {
         structured.verification = {
           verifiable: false,
@@ -932,6 +930,13 @@ Inspect locally:
     .option('--auth-token <token>', 'Bearer token for HTTP requests (required for --bind 0.0.0.0; falls back to SWITCHBOT_MCP_TOKEN env var)', stringArg('--auth-token'))
     .option('--cors-origin <url>', 'Allowed CORS origin(s) for HTTP (repeatable)', stringArg('--cors-origin'))
     .option('--rate-limit <n>', 'Max requests per minute per profile (default 60)', intArg('--rate-limit', { min: 1 }), '60')
+    .addHelpText('after', `
+Examples:
+  $ switchbot mcp serve
+  $ switchbot mcp serve --port 8787
+  $ switchbot mcp serve --port 8787 --bind 127.0.0.1 --auth-token your-token
+  $ switchbot mcp serve --port 8787 --bind 0.0.0.0 --auth-token your-token
+`)
     .action(async (options: { port?: string; bind?: string; authToken?: string; corsOrigin?: string | string[]; rateLimit?: string }) => {
       try {
         if (options.port) {
@@ -1188,6 +1193,14 @@ process_uptime_seconds ${Math.floor(process.uptime())}
         const server = createSwitchBotMcpServer({ eventManager });
         const transport = new StdioServerTransport();
         await server.connect(transport);
+        let eofHandled = false;
+        process.stdin.on('end', () => {
+          if (eofHandled) return;
+          eofHandled = true;
+          setTimeout(() => {
+            eventManager.shutdown().finally(() => process.exit(0));
+          }, 500);
+        });
       } catch (error) {
         handleError(error);
       }

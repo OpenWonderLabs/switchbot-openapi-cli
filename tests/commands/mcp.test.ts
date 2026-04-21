@@ -179,6 +179,22 @@ describe('mcp server', () => {
     expect(apiMock.__instance.post).not.toHaveBeenCalled();
   });
 
+  it('send_command rejects read-only device commands before calling the API', async () => {
+    cacheMock.map.set('METER1', { type: 'Meter', name: 'Bedroom Meter', category: 'physical' });
+    const { client } = await pair();
+
+    const res = await client.callTool({
+      name: 'send_command',
+      arguments: { deviceId: 'METER1', command: 'turnOn' },
+    });
+
+    expect(res.isError).toBe(true);
+    const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    expect(parsed.error.kind).toBe('usage');
+    expect(parsed.error.context.validationKind).toBe('read-only-device');
+    expect(apiMock.__instance.post).not.toHaveBeenCalled();
+  });
+
   it('send_command sends non-destructive commands through without confirm', async () => {
     cacheMock.map.set('BULB1', { type: 'Color Bulb', name: 'Desk Lamp', category: 'physical' });
     apiMock.__instance.post.mockResolvedValueOnce({
