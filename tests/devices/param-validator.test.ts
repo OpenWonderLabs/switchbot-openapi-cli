@@ -178,7 +178,7 @@ describe('validateParameter (raw wire-format validator)', () => {
 
   // ---- Passthrough ----
   it('passes through unknown (type, command) combos', () => {
-    const r = validateParameter('Color Bulb', 'setColor', '255:0:0');
+    const r = validateParameter('Smart Lock', 'setColor', '255:0:0');
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.normalized).toBeUndefined();
   });
@@ -193,5 +193,86 @@ describe('validateParameter (raw wire-format validator)', () => {
     const r = validateParameter('Air Conditioner', 'customButton', 'xyz');
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.normalized).toBeUndefined();
+  });
+});
+
+describe('validateParameter — setBrightness (2.6.0, B-1)', () => {
+  it('accepts integer 1-100 on Color Bulb', () => {
+    const r = validateParameter('Color Bulb', 'setBrightness', '50');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.normalized).toBe('50');
+  });
+
+  it('accepts boundary values 1 and 100', () => {
+    expect(validateParameter('Color Bulb', 'setBrightness', '1').ok).toBe(true);
+    expect(validateParameter('Color Bulb', 'setBrightness', '100').ok).toBe(true);
+  });
+
+  it('rejects 0, 101, negative, and floats', () => {
+    expect(validateParameter('Color Bulb', 'setBrightness', '0').ok).toBe(false);
+    expect(validateParameter('Color Bulb', 'setBrightness', '101').ok).toBe(false);
+    expect(validateParameter('Color Bulb', 'setBrightness', '-1').ok).toBe(false);
+    expect(validateParameter('Color Bulb', 'setBrightness', '50.5').ok).toBe(false);
+  });
+
+  it('rejects non-numeric strings', () => {
+    expect(validateParameter('Color Bulb', 'setBrightness', 'half').ok).toBe(false);
+    expect(validateParameter('Color Bulb', 'setBrightness', '').ok).toBe(false);
+  });
+
+  it('passes through on device types that do not expose brightness', () => {
+    const r = validateParameter('Bot', 'setBrightness', '999');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.normalized).toBeUndefined();
+  });
+});
+
+describe('validateParameter — setColor (2.6.0, B-1 + B-12)', () => {
+  it('accepts R:G:B form and passes through unchanged', () => {
+    const r = validateParameter('Color Bulb', 'setColor', '255:128:0');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.normalized).toBe('255:128:0');
+  });
+
+  it('accepts R,G,B and normalizes to R:G:B', () => {
+    const r = validateParameter('Color Bulb', 'setColor', '0,255,0');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.normalized).toBe('0:255:0');
+  });
+
+  it('accepts #RRGGBB and normalizes to decimal R:G:B', () => {
+    const r = validateParameter('Color Bulb', 'setColor', '#FF0000');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.normalized).toBe('255:0:0');
+  });
+
+  it('accepts short #RGB hex', () => {
+    const r = validateParameter('Color Bulb', 'setColor', '#F00');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.normalized).toBe('255:0:0');
+  });
+
+  it('accepts named colors', () => {
+    const red = validateParameter('Color Bulb', 'setColor', 'red');
+    expect(red.ok).toBe(true);
+    if (red.ok) expect(red.normalized).toBe('255:0:0');
+    const blue = validateParameter('Color Bulb', 'setColor', 'BLUE');
+    expect(blue.ok).toBe(true);
+    if (blue.ok) expect(blue.normalized).toBe('0:0:255');
+  });
+
+  it('rejects out-of-range components', () => {
+    expect(validateParameter('Color Bulb', 'setColor', '999:0:0').ok).toBe(false);
+    expect(validateParameter('Color Bulb', 'setColor', '-1:0:0').ok).toBe(false);
+  });
+
+  it('rejects wrong number of components', () => {
+    expect(validateParameter('Color Bulb', 'setColor', '255:0').ok).toBe(false);
+    expect(validateParameter('Color Bulb', 'setColor', '255:0:0:0').ok).toBe(false);
+  });
+
+  it('rejects unknown named color / garbage', () => {
+    expect(validateParameter('Color Bulb', 'setColor', 'mauve').ok).toBe(false);
+    expect(validateParameter('Color Bulb', 'setColor', '#GGGGGG').ok).toBe(false);
   });
 });

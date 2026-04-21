@@ -33,14 +33,18 @@ Overlay rules (applied in order):
 
 Subcommands:
   path        Print the overlay file path and whether it exists
-  show        Show the effective catalog (or one entry)
+  show        Show the effective catalog (or one entry).  Alias: list
+  list        Alias of show (matches the muscle-memory spelling)
+  search      Fuzzy search types/aliases/roles/commands for a keyword
   diff        Show what the overlay changes vs the built-in catalog
   refresh     Re-read the overlay file (clears in-process cache)
 
 Examples:
   $ switchbot catalog path
+  $ switchbot catalog list
   $ switchbot catalog show
   $ switchbot catalog show "Smart Lock"
+  $ switchbot catalog search Hub
   $ switchbot catalog show --source built-in
   $ switchbot catalog diff
   $ switchbot catalog refresh
@@ -76,7 +80,8 @@ Examples:
 
   catalog
     .command('show')
-    .description("Show the effective catalog (or one entry). Defaults to 'effective' source.")
+    .alias('list')
+    .description("Show the effective catalog (or one entry). Alias: 'list'. Defaults to 'effective' source.")
     .argument('[type...]', 'Optional device type/alias (case-insensitive, partial match)')
     .option('--source <source>', 'Which catalog to show: built-in | overlay | effective (default)', enumArg('--source', SOURCES), 'effective')
     .action((typeParts: string[], options: { source: string }) => {
@@ -146,6 +151,51 @@ Examples:
         } else {
           renderRows(headers, rows, 'table', resolveFields());
           console.log(`\nTotal: ${entries.length} device type(s)  (source: ${source})`);
+        }
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  catalog
+    .command('search')
+    .description('Fuzzy search the effective catalog by type name, alias, role, or command name')
+    .argument('<keyword>', 'Substring to match (case-insensitive) against type, alias, role, or command')
+    .action((keyword: string) => {
+      try {
+        const q = keyword.toLowerCase();
+        const entries = getEffectiveCatalog();
+        const hits = entries.filter((e) => {
+          if (e.type.toLowerCase().includes(q)) return true;
+          if ((e.role ?? '').toLowerCase().includes(q)) return true;
+          if ((e.aliases ?? []).some((a) => a.toLowerCase().includes(q))) return true;
+          if (e.commands.some((c) => c.command.toLowerCase().includes(q))) return true;
+          return false;
+        });
+        if (isJsonMode()) {
+          printJson({ query: keyword, matches: hits });
+          return;
+        }
+        if (hits.length === 0) {
+          console.log(`No catalog entries match "${keyword}".`);
+          return;
+        }
+        const fmt = resolveFormat();
+        const headers = ['type', 'category', 'role', 'matched'];
+        const rows = hits.map((e) => {
+          const matched: string[] = [];
+          if (e.type.toLowerCase().includes(q)) matched.push('type');
+          if ((e.aliases ?? []).some((a) => a.toLowerCase().includes(q))) matched.push('alias');
+          if ((e.role ?? '').toLowerCase().includes(q)) matched.push('role');
+          const cmdMatches = e.commands
+            .filter((c) => c.command.toLowerCase().includes(q))
+            .map((c) => c.command);
+          if (cmdMatches.length > 0) matched.push(`commands[${cmdMatches.join(',')}]`);
+          return [e.type, e.category, e.role ?? '—', matched.join(', ') || '—'];
+        });
+        renderRows(headers, rows, fmt, resolveFields());
+        if (fmt === 'table') {
+          console.log(`\n${hits.length} match${hits.length === 1 ? '' : 'es'} for "${keyword}"`);
         }
       } catch (error) {
         handleError(error);

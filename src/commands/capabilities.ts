@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { getEffectiveCatalog } from '../devices/catalog.js';
+import { loadCache } from '../devices/cache.js';
 import { printJson } from '../utils/output.js';
 import { enumArg, stringArg } from '../utils/arg-parsers.js';
 
@@ -181,9 +182,10 @@ export function registerCapabilitiesCommand(program: Command): void {
     .description('Print a machine-readable manifest of CLI capabilities (for agent bootstrap)')
     .option('--minimal', 'Omit per-subcommand flag details to reduce output size (alias of --compact)')
     .option('--compact', 'Emit a compact summary: identity + leaf command list with safety metadata only')
+    .option('--used', 'Restrict the catalog summary to device types present in the local cache. Mirrors `schema export --used`.')
     .option('--surface <s>', 'Restrict surfaces block to one of: cli, mcp, plan, mqtt, all (default: all)', enumArg('--surface', SURFACES))
     .option('--project <csv>', 'Project top-level fields (e.g. --project identity,commands,agentGuide)', stringArg('--project'))
-    .action((opts: { minimal?: boolean; compact?: boolean; surface?: string; project?: string }) => {
+    .action((opts: { minimal?: boolean; compact?: boolean; used?: boolean; surface?: string; project?: string }) => {
       const compact = Boolean(opts.minimal || opts.compact);
       const catalog = getEffectiveCatalog();
       const leaves = enumerateLeaves(program);
@@ -274,6 +276,11 @@ export function registerCapabilitiesCommand(program: Command): void {
         identity: IDENTITY,
         surfaces: filteredSurfaces,
         commands: compact ? leaves : fullCommands,
+        // Flat command → meta map keyed by full command path. Published in
+        // addition to the tree (where every leaf `subcommands[*]` already
+        // carries the same fields via spread) so agents can do O(1) lookup
+        // without walking the tree.
+        commandMeta: COMMAND_META,
         ...(globalFlags ? { globalFlags } : {}),
         catalog: {
           typeCount: catalog.length,
@@ -286,6 +293,34 @@ export function registerCapabilitiesCommand(program: Command): void {
         },
       };
       if (!compact) payload.generatedAt = new Date().toISOString();
+
+      if (opts.used) {
+        const cache = loadCache();
+        if (!cache || Object.keys(cache.devices).length === 0) {
+          // No cache → return the payload unchanged but add a `usedFilter` note
+          // so agents know the filter was requested but noop'd.
+          payload.usedFilter = { applied: false, reason: 'no local cache — run `switchbot devices list` first' };
+        } else {
+          const seen = new Set<string>();
+          for (const id of Object.keys(cache.devices)) {
+            const t = cache.devices[id].type;
+            if (t) seen.add(t);
+          }
+          const filteredCatalog = catalog.filter((e) =>
+            seen.has(e.type) || (e.aliases ?? []).some((a) => seen.has(a)),
+          );
+          payload.catalog = {
+            typeCount: filteredCatalog.length,
+            roles: [...new Set(filteredCatalog.map((e) => e.role ?? 'other'))].sort(),
+            destructiveCommandCount: filteredCatalog.reduce(
+              (n, e) => n + e.commands.filter((c) => c.destructive).length,
+              0,
+            ),
+            readOnlyTypeCount: filteredCatalog.filter((e) => e.readOnly).length,
+          };
+          payload.usedFilter = { applied: true, typesInCache: [...seen].sort() };
+        }
+      }
 
       const projected = opts.project
         ? projectObject(payload, opts.project.split(',').map((s) => s.trim()).filter(Boolean))

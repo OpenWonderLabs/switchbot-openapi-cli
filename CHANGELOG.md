@@ -5,6 +5,84 @@ All notable changes to `@switchbot/openapi-cli` are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.0] - 2026-04-21
+
+Addresses 14 findings from the OpenClaw v2.5.1 audit (B-1 … B-16, minus
+the two declined-as-misread items and four P3 items parked for v3.x).
+All in a single minor bump — no staged releases.
+
+### Added
+
+- **`--filter key!=value`** (negated clause) across `devices list`,
+  `devices batch`, and `events tail` / `mqtt-tail`. `neq` is a negated
+  substring by default; `category` stays exact. (B-5)
+- **`--allow-unknown-device`** and **`--skip-param-validation`** on
+  `devices command`. Escape hatches for the stricter defaults below. (B-1, B-3)
+- **`capabilities --used`** filters the per-type summary to devices
+  present in the local cache. Same semantics as `schema export --used`. (B-9)
+- **`catalog list`** (alias for `show`) and **`catalog search <keyword>`**
+  (fuzzy match across type, aliases, role, commands). (B-8)
+- **`--retry-on-5xx <n>`** (default `2`) transparently retries `502`/`503`/
+  `504` and request timeouts on idempotent `GET`s with exponential backoff.
+  Mutating calls still never auto-retry — use `--idempotency-key` for
+  safe `POST` retries. (B-11)
+- **`commandMeta` flat manifest** in `capabilities --json`: each subcommand
+  leaf now carries
+  `{mutating, consumesQuota, idempotencySupported, agentSafetyTier, verifiability, typicalLatencyMs}`,
+  and a path-keyed lookup table is published at the top level so agents
+  don't have to walk the tree. (B-4)
+
+### Fixed
+
+- **`--flag=value` equals form** is now recognized everywhere.
+  `--format=json`, `--timeout=5000`, `--config=/path`, `--fields=a,b,c`
+  etc. previously dropped silently through `getFlagValue`; they now work
+  identically to the space form. (B-6)
+- **`devices commands <type...>`** iterates truly variadic:
+  `devices commands Bot Curtain` prints both sections instead of joining
+  the tokens as one type name. Multi-word unquoted form still works. (B-7)
+- **`scenes describe <unknown>`** plaintext branch now renders
+  `Did you mean: …?` candidates — previously only the `--json` branch
+  did. (B-10)
+- **`setColor`** accepts `R:G:B`, `R,G,B`, `#RRGGBB`, `#RGB`, and 16 CSS
+  named colors (`red`, `blue`, `orange`, …); all normalize to `R:G:B`
+  before hitting the API. (B-12)
+- **Ambiguous `--name` hint** now explicitly lists
+  `--name-strategy=fuzzy` / `--name-strategy=first` so users know how to
+  break ties. (B-15)
+- **Empty results under `--table-style markdown`** render as `_(empty)_`
+  rather than a header-only skeleton. (B-16)
+- **Error-path formatting** is consistent with `--format=json`: every
+  terminal error path now routes through `emitJsonError` / `handleError`,
+  so piped consumers can always `JSON.parse` stderr (or stdout in JSON
+  mode) without string parsing. (B-14)
+
+### Changed
+
+- **`setBrightness`, `setColor`, and Curtain `setPosition` single-value
+  form** are now validated client-side. `setBrightness` requires integer
+  `1-100`; `setColor` validates each component `0-255`; `setPosition`
+  validates `0-100`. Invalid input exits 2 *before* hitting the network.
+  **Soft-breaking**: scripts that relied on the API silently rejecting
+  bad input will now see exit 2 earlier. Pass `--skip-param-validation`
+  as a narrow escape hatch. (B-1)
+- **Unknown `deviceId`** in `devices command` now exits 2 by default with
+  a candidate list, rather than warning-and-passing-through. This makes
+  `--dry-run` a reliable pre-flight gate for agents and plans.
+  **Soft-breaking**: pass `--allow-unknown-device` to restore
+  pass-through behavior for scripted workflows. (B-3)
+
+### Documentation
+
+- Roadmap section at the bottom of README for the v3.x track
+  (daemon mode, standalone `npx` MCP package, `self-test` harness,
+  record/replay) — OpenClaw B-17 / B-18 / B-19 / B-21 are parked there
+  rather than folded into this minor.
+- Clarified that `devices expand` is intentionally limited to
+  multi-parameter commands (`setAll`, `setPosition`, `setMode`);
+  single-parameter commands like `setBrightness 50` or `setColor #FF0000`
+  don't need semantic flags. (B-13)
+
 ## [2.5.1] - 2026-04-20
 
 Round-2 + Round-3 smoke-test response: 24 bugs closed across three groups —
