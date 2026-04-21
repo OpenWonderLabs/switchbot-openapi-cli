@@ -242,7 +242,7 @@ Use `switchbot doctor` to confirm the CLI is healthy before orchestrating anythi
 ## Safety rails
 
 1. **Destructive-command guard**: Smart Lock `unlock`, Garage Door `open`, and anything else tagged `destructive: true` in the catalog **refuses to run** without `--yes` (or `confirm: true` in MCP, or explicit dev intent). There is no bypass flag for autonomous agents beyond `--yes` — that's by design.
-2. **Dry-run**: Global `--dry-run` short-circuits every mutating HTTP request. GETs still execute. Use it for any "what would this do?" flow before letting the agent commit.
+2. **Dry-run**: Global `--dry-run` short-circuits every mutating HTTP request. GETs still execute. Command names are validated against the device catalog — unknown commands exit 2 when the device type has a known catalog entry, as do commands on read-only sensors. Use it for any "what would this do?" flow before letting the agent commit.
 3. **Quota**: The SwitchBot API has a per-account daily quota. `--retry-on-429 <n>` and `--backoff <linear|exponential>` handle throttling; `~/.switchbot/quota.json` tracks daily counts.
 4. **Audit log**: `--audit-log [path]` appends every mutating command (including dry-runs) to JSONL for post-hoc review.
 5. **Non-zero exit codes are stable**: `0` success, `1` runtime error, `2` usage error (bad flag, invalid plan schema).
