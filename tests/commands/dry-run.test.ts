@@ -146,6 +146,38 @@ describe('dryRun support on mutating tools', () => {
     expect(apiMock.__instance.post).toHaveBeenCalledTimes(1);
   });
 
+  // ---- send_command command-name validation in dry-run (bug #55) --------------
+
+  it('send_command dryRun:true rejects unknown command name (bug #55)', async () => {
+    cacheMock.map.set('BULB3', { type: 'Color Bulb', name: 'Desk Lamp', category: 'physical' });
+    const { client } = await pair();
+
+    const res = await client.callTool({
+      name: 'send_command',
+      arguments: { deviceId: 'BULB3', command: 'fakeCmd', dryRun: true },
+    });
+
+    expect(res.isError).toBe(true);
+    const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    expect(parsed.error.context?.validationKind).toBe('unknown-command');
+    expect(apiMock.__instance.post).not.toHaveBeenCalled();
+  });
+
+  it('send_command dryRun:true accepts case-normalized command name (bug #55)', async () => {
+    cacheMock.map.set('BULB4', { type: 'Color Bulb', name: 'Ceiling', category: 'physical' });
+    const { client } = await pair();
+
+    const res = await client.callTool({
+      name: 'send_command',
+      arguments: { deviceId: 'BULB4', command: 'turnon', dryRun: true },
+    });
+
+    expect(res.isError).toBeFalsy();
+    const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    expect(parsed.dryRun).toBe(true);
+    expect(apiMock.__instance.post).not.toHaveBeenCalled();
+  });
+
   // ---- run_scene ------------------------------------------------------------
 
   it('run_scene dryRun:true returns wouldSend without calling the API', async () => {
@@ -176,5 +208,44 @@ describe('dryRun support on mutating tools', () => {
 
     expect(res.isError).toBeFalsy();
     expect(apiMock.__instance.post).toHaveBeenCalledWith('/v1.1/scenes/S123/execute');
+  });
+
+  // ---- run_scene sceneId validation in dry-run (bug #56) --------------------
+
+  it('run_scene dryRun:true rejects unknown sceneId (bug #56)', async () => {
+    apiMock.__instance.get.mockResolvedValueOnce({
+      data: { body: [{ sceneId: 'S1', sceneName: 'Good Morning' }] },
+    });
+    const { client } = await pair();
+
+    const res = await client.callTool({
+      name: 'run_scene',
+      arguments: { sceneId: 'FAKE', dryRun: true },
+    });
+
+    expect(res.isError).toBe(true);
+    const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    expect(parsed.error.subKind).toBe('scene-not-found');
+    expect(parsed.error.message).toContain('FAKE');
+    expect(apiMock.__instance.post).not.toHaveBeenCalled();
+  });
+
+  it('run_scene dryRun:true returns sceneName in wouldSend for valid sceneId (bug #56)', async () => {
+    apiMock.__instance.get.mockResolvedValueOnce({
+      data: { body: [{ sceneId: 'S1', sceneName: 'Good Morning' }] },
+    });
+    const { client } = await pair();
+
+    const res = await client.callTool({
+      name: 'run_scene',
+      arguments: { sceneId: 'S1', dryRun: true },
+    });
+
+    expect(res.isError).toBeFalsy();
+    const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    expect(parsed.dryRun).toBe(true);
+    expect(parsed.wouldSend.sceneId).toBe('S1');
+    expect(parsed.wouldSend.sceneName).toBe('Good Morning');
+    expect(apiMock.__instance.post).not.toHaveBeenCalled();
   });
 });

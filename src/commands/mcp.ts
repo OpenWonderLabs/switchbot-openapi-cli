@@ -380,6 +380,13 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
             effectiveParameter = pv.normalized;
           }
         }
+        const cmdVal = validateCommand(deviceId, command, stringifiedParam, effectiveType);
+        if (!cmdVal.ok) {
+          return mcpError('usage', 2, cmdVal.error.message, {
+            hint: cmdVal.error.hint,
+            context: { validationKind: cmdVal.error.kind },
+          });
+        }
         const wouldSend = {
           deviceId,
           command,
@@ -529,7 +536,21 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
     },
     async ({ sceneId, dryRun }) => {
       if (dryRun) {
-        const wouldSend = { sceneId };
+        let scenes: Array<{ sceneId: string; sceneName: string }> = [];
+        try {
+          scenes = await fetchScenes();
+        } catch {
+          // network failure — degrade gracefully, skip validation
+        }
+        const found = scenes.find((s) => s.sceneId === sceneId);
+        if (scenes.length > 0 && !found) {
+          return mcpError('usage', 2, `Scene not found: ${sceneId}`, {
+            subKind: 'scene-not-found',
+            hint: "Check the sceneId with 'list_scenes' (IDs are case-sensitive).",
+            context: { sceneId, candidates: scenes.map((s) => ({ sceneId: s.sceneId, sceneName: s.sceneName })).slice(0, 5) },
+          });
+        }
+        const wouldSend = { sceneId, sceneName: found?.sceneName ?? null };
         const structured = { ok: true as const, dryRun: true as const, wouldSend };
         return {
           content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],

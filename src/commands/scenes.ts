@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { printJson, isJsonMode, handleError, StructuredUsageError } from '../utils/output.js';
 import { resolveFormat, resolveFields, renderRows } from '../utils/format.js';
 import { fetchScenes, executeScene } from '../lib/scenes.js';
+import { isDryRun } from '../utils/flags.js';
 
 export function registerScenesCommand(program: Command): void {
   const scenes = program
@@ -66,6 +67,15 @@ Example:
             sceneId,
             candidates: sceneList.map((s) => ({ sceneId: s.sceneId, sceneName: s.sceneName })),
           });
+        }
+        if (isDryRun()) {
+          const wouldSend = { method: 'POST', url: `/v1.1/scenes/${sceneId}/execute`, sceneId, sceneName: found.sceneName };
+          if (isJsonMode()) {
+            printJson({ dryRun: true, wouldSend });
+          } else {
+            console.log(`[dry-run] Would POST /v1.1/scenes/${sceneId}/execute (${found.sceneName})`);
+          }
+          return;
         }
         await executeScene(sceneId);
         if (isJsonMode()) {

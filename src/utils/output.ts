@@ -158,6 +158,7 @@ export class UsageError extends Error {
 export type ErrorSubKind =
   | 'device-offline'
   | 'device-not-found'
+  | 'scene-not-found'
   | 'command-not-supported'
   | 'auth-failed'
   | 'quota-exceeded'
