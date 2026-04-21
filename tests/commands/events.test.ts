@@ -361,13 +361,23 @@ describe('events mqtt-tail', () => {
     expect(res.exitCode).toBe(null);
     const jsonLines = res.stdout
       .filter((l) => l.trim().startsWith('{'))
-      .map((l) => JSON.parse(l) as { schemaVersion: string; data: { type?: string; topic?: string } });
+      .map(
+        (l) =>
+          JSON.parse(l) as {
+            stream?: boolean;
+            schemaVersion?: string;
+            data?: { type?: string; topic?: string };
+          },
+      );
+    // P7: skip the stream header; __session_start also excluded via its type prefix.
     const events = jsonLines.filter(
-      (j) => typeof j.data?.type !== 'string' || !j.data.type.startsWith('__'),
+      (j) =>
+        j.stream !== true &&
+        (typeof j.data?.type !== 'string' || !j.data.type.startsWith('__')),
     );
     expect(events).toHaveLength(1);
     expect(events[0].schemaVersion).toBe('1.1');
-    expect(events[0].data.topic).toBe('test/topic');
+    expect(events[0].data!.topic).toBe('test/topic');
   });
 
   it('exits 2 when --max is not a positive integer', async () => {
@@ -423,15 +433,27 @@ describe('events mqtt-tail', () => {
     const res = await runCli(registerEventsCommand, ['--json', 'events', 'mqtt-tail', '--max', '1']);
     const jsonLines = res.stdout
       .filter((l) => l.trim().startsWith('{'))
-      .map((l) => JSON.parse(l) as { data: { type?: string; state?: string; at?: string; eventId?: string } });
+      .map(
+        (l) =>
+          JSON.parse(l) as {
+            stream?: boolean;
+            eventKind?: string;
+            cadence?: string;
+            data?: { type?: string; state?: string; at?: string; eventId?: string };
+          },
+      );
     const sessionStart = jsonLines.find((j) => j.data?.type === '__session_start');
     expect(sessionStart).toBeDefined();
-    expect(sessionStart!.data.state).toBe('connecting');
-    expect(typeof sessionStart!.data.at).toBe('string');
-    expect(typeof sessionStart!.data.eventId).toBe('string');
-    // Must be the FIRST JSON line emitted so consumers see it even if broker
-    // never connects.
-    expect((jsonLines[0] as { data: { type?: string } }).data.type).toBe('__session_start');
+    expect(sessionStart!.data!.state).toBe('connecting');
+    expect(typeof sessionStart!.data!.at).toBe('string');
+    expect(typeof sessionStart!.data!.eventId).toBe('string');
+    // P7: the very first JSON line under --json is the stream header;
+    // __session_start is now the second line but still precedes any
+    // broker activity so consumers still learn we're "connecting".
+    expect(jsonLines[0].stream).toBe(true);
+    expect(jsonLines[0].eventKind).toBe('event');
+    expect(jsonLines[0].cadence).toBe('push');
+    expect(jsonLines[1].data?.type).toBe('__session_start');
   });
 
   it('P6: mqtt event record carries unified envelope (source/kind/schemaVersion/deviceId)', async () => {
@@ -489,6 +511,23 @@ describe('events mqtt-tail', () => {
     expect(disconnect!.controlKind).toBe('disconnect');
     // Legacy field `at` mirrors the unified `t`.
     expect(disconnect!.at).toBe(disconnect!.t);
+  });
+
+  it('P7: mqtt-tail emits a streaming JSON header as the first JSON line under --json', async () => {
+    mqttMock.connectShouldFireMessage = true;
+    const res = await runCli(registerEventsCommand, ['--json', 'events', 'mqtt-tail', '--max', '1']);
+    const firstJson = res.stdout.find((l) => l.trim().startsWith('{'));
+    expect(firstJson).toBeDefined();
+    const header = JSON.parse(firstJson!) as {
+      schemaVersion: string;
+      stream: boolean;
+      eventKind: string;
+      cadence: string;
+    };
+    expect(header.schemaVersion).toBe('1');
+    expect(header.stream).toBe(true);
+    expect(header.eventKind).toBe('event');
+    expect(header.cadence).toBe('push');
   });
 });
 

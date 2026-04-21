@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { printJson, isJsonMode, handleError, UsageError } from '../utils/output.js';
+import { printJson, isJsonMode, handleError, UsageError, emitStreamHeader } from '../utils/output.js';
 import { fetchDeviceStatus } from '../lib/devices.js';
 import { getCachedDevice } from '../devices/cache.js';
 import { parseDurationToMs, getFields } from '../utils/flags.js';
@@ -155,6 +155,10 @@ Examples:
           const forTimer = forMs !== null && forMs > 0
             ? setTimeout(() => ac.abort(), forMs)
             : null;
+
+          // P7: streaming JSON contract — first line under --json is the
+          // stream header so consumers can route by eventKind/cadence.
+          if (isJsonMode()) emitStreamHeader({ eventKind: 'tick', cadence: 'poll' });
 
           try {
           const prev = new Map<string, Record<string, unknown>>();

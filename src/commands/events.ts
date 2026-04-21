@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import http from 'node:http';
 import crypto from 'node:crypto';
-import { printJson, isJsonMode, handleError, UsageError } from '../utils/output.js';
+import { printJson, isJsonMode, handleError, UsageError, emitStreamHeader } from '../utils/output.js';
 import { intArg, stringArg, durationArg } from '../utils/arg-parsers.js';
 import { parseDurationToMs } from '../utils/flags.js';
 import { parseFilterExpr, matchClause, FilterSyntaxError, type FilterClause } from '../utils/filter.js';
@@ -252,6 +252,9 @@ Examples:
         const forTimer = forMs !== null && forMs > 0
           ? setTimeout(() => ac.abort(), forMs)
           : null;
+        // P7: streaming JSON contract — first line under --json is the
+        // stream header (webhook events arrive via push cadence).
+        if (isJsonMode()) emitStreamHeader({ eventKind: 'event', cadence: 'push' });
         await new Promise<void>((resolve, reject) => {
           let server: http.Server | null = null;
           try {
@@ -445,6 +448,10 @@ Examples:
         if (!isJsonMode()) {
           console.error('Fetching MQTT credentials from SwitchBot service…');
         }
+        // P7: streaming JSON contract — first line under --json is the stream
+        // header (mqtt events arrive via push cadence). Must emit BEFORE
+        // __session_start so header is always the very first line.
+        if (isJsonMode()) emitStreamHeader({ eventKind: 'event', cadence: 'push' });
         // Emit a __session_start envelope immediately (before any credential
         // fetch) so JSON consumers can distinguish "connecting" from "never
         // connected" even when mqtt-tail exits before the broker connects.
