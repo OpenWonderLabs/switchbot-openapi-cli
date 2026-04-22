@@ -1,6 +1,11 @@
 # Phase 4 — rule engine design
 
-> Status: **design-only**. No runtime code yet. Companion to
+> Status: **PoC shipped (v0.2, MQTT-only preview)**. The engine is
+> implemented in `src/rules/engine.ts` and wired to the CLI via
+> `switchbot rules lint | list | run`. MQTT triggers + `time_between`
+> conditions + `throttle` + `dry_run` all fire end-to-end; cron and
+> webhook triggers parse but do not run (lint reports them as
+> `trigger-unsupported`). Companion to
 > `docs/design/phase4-rules-schema.md`, which specifies the
 > `automation.rules[]` shape in `policy.yaml`.
 

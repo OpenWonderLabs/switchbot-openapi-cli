@@ -1,17 +1,20 @@
 # Example policy files
 
-Four annotated `policy.yaml` shapes for common setups. Every file
-validates against the v0.1 schema; every file documents *why* the
-particular shape fits its use case, not just *what* the fields mean.
+Five annotated `policy.yaml` shapes for common setups. The first four
+validate against v0.1 (the current default for `switchbot policy new`).
+`automation.yaml` is v0.2 — it's the shape you migrate to when you want
+the `switchbot rules run` engine (preview). Every file documents *why*
+the particular shape fits its use case, not just *what* the fields mean.
 Field-level reference lives in
 [`../../docs/policy-reference.md`](../../docs/policy-reference.md).
 
-| File | Use case | Confirm posture |
-|---|---|---|
-| [`minimal.yaml`](./minimal.yaml) | Trust the defaults; just declare "policy is here" | CLI defaults (destructive always confirms) |
-| [`cautious.yaml`](./cautious.yaml) | Shared household; confirm every mutation | Aggressive — turnOn/Off also confirm |
-| [`permissive.yaml`](./permissive.yaml) | Solo power user; speed over prompts | Loose — reversible actions pre-approved |
-| [`rental.yaml`](./rental.yaml) | Short-term rental / guest environment | Guest-safe — HVAC + scenes all confirm |
+| File | Schema | Use case | Confirm posture |
+|---|---|---|---|
+| [`minimal.yaml`](./minimal.yaml) | v0.1 | Trust the defaults; just declare "policy is here" | CLI defaults (destructive always confirms) |
+| [`cautious.yaml`](./cautious.yaml) | v0.1 | Shared household; confirm every mutation | Aggressive — turnOn/Off also confirm |
+| [`permissive.yaml`](./permissive.yaml) | v0.1 | Solo power user; speed over prompts | Loose — reversible actions pre-approved |
+| [`rental.yaml`](./rental.yaml) | v0.1 | Short-term rental / guest environment | Guest-safe — HVAC + scenes all confirm |
+| [`automation.yaml`](./automation.yaml) | v0.2 | Rule engine preview (`switchbot rules run`) | Defaults; every rule in `dry_run` mode |
 
 ## Picking one
 

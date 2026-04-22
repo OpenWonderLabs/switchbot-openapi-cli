@@ -188,9 +188,39 @@ removes the ambiguity.
 
 Full field-by-field reference, validation flow, and error catalogue:
 [`docs/policy-reference.md`](./docs/policy-reference.md).
-Four annotated starter files covering common setups
-(solo / shared household / rental / defaults-only) live in
-[`examples/policies/`](./examples/policies/).
+Five annotated starter files covering common setups
+(solo / shared household / rental / defaults-only / rules-engine preview)
+live in [`examples/policies/`](./examples/policies/).
+
+### Rules engine (preview)
+
+With a v0.2 policy file you can declare MQTT-triggered automations that
+the CLI executes for you. The engine is a **preview** — today it fires
+MQTT rules with `time_between` conditions, per-rule `throttle`, and
+per-rule `dry_run`. Cron and webhook triggers are recognised by the
+schema but not wired yet; `rules lint` flags them as
+`status: unsupported`. Every fire is recorded in
+`~/.switchbot/audit.log`.
+
+```bash
+# 1. Migrate your existing policy.yaml to v0.2 (preserves comments).
+switchbot policy migrate
+
+# 2. Author rules under `automation.rules`. See examples/policies/automation.yaml
+#    for a walkthrough covering the three trigger sources.
+
+# 3. Static-check before running.
+switchbot rules lint                       # exit 0 valid, 1 error
+switchbot rules list --json | jq .         # structured summary
+
+# 4. Run the engine. --dry-run overrides every rule into audit-only mode;
+#    --max-firings bounds a demo session.
+switchbot rules run --dry-run --max-firings 5
+```
+
+See [`docs/design/phase4-rules.md`](./docs/design/phase4-rules.md) for
+the engine's pipeline (subscribe → classify → match → conditions →
+throttle → action → audit) and roadmap to cron/webhook triggers.
 
 ## Global options
 
