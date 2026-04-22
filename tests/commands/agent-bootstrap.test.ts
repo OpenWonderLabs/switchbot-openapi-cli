@@ -131,4 +131,79 @@ describe('agent-bootstrap', () => {
       expect.arrayContaining(['policy validate', 'policy new', 'policy migrate']),
     );
   });
+
+  it('policyStatus reports present:false when no policy file is configured', () => {
+    // Point at a path under tmpDir that intentionally doesn't exist.
+    const policyPath = path.join(tmpDir, '.config', 'openclaw', 'switchbot', 'policy.yaml');
+    process.env.SWITCHBOT_POLICY_PATH = policyPath;
+    try {
+      process.argv = ['node', 'cli', 'agent-bootstrap', '--compact', '--json'];
+      const program = new Command();
+      program.exitOverride();
+      registerAgentBootstrapCommand(program);
+      const payload = captureJson(() => {
+        program.parse(['node', 'cli', 'agent-bootstrap', '--compact']);
+      }) as { data?: Record<string, unknown> };
+      const data = payload.data as Record<string, unknown>;
+      const status = data.policyStatus as Record<string, unknown>;
+      expect(status).toBeDefined();
+      expect(status.present).toBe(false);
+      expect(status.valid).toBeNull();
+      expect(status.path).toBe(policyPath);
+    } finally {
+      delete process.env.SWITCHBOT_POLICY_PATH;
+    }
+  });
+
+  it('policyStatus reports present:true + valid:true for a minimal v0.1 file', () => {
+    const policyDir = path.join(tmpDir, '.config', 'openclaw', 'switchbot');
+    const policyPath = path.join(policyDir, 'policy.yaml');
+    fs.mkdirSync(policyDir, { recursive: true });
+    fs.writeFileSync(policyPath, 'version: "0.1"\n');
+    process.env.SWITCHBOT_POLICY_PATH = policyPath;
+    try {
+      process.argv = ['node', 'cli', 'agent-bootstrap', '--compact', '--json'];
+      const program = new Command();
+      program.exitOverride();
+      registerAgentBootstrapCommand(program);
+      const payload = captureJson(() => {
+        program.parse(['node', 'cli', 'agent-bootstrap', '--compact']);
+      }) as { data?: Record<string, unknown> };
+      const data = payload.data as Record<string, unknown>;
+      const status = data.policyStatus as Record<string, unknown>;
+      expect(status.present).toBe(true);
+      expect(status.valid).toBe(true);
+      expect(status.schemaVersion).toBe('0.1');
+      expect(status.errorCount).toBe(0);
+    } finally {
+      delete process.env.SWITCHBOT_POLICY_PATH;
+    }
+  });
+
+  it('policyStatus reports present:true + valid:false + errorCount when schema rejects', () => {
+    const policyDir = path.join(tmpDir, '.config', 'openclaw', 'switchbot');
+    const policyPath = path.join(policyDir, 'policy.yaml');
+    fs.mkdirSync(policyDir, { recursive: true });
+    fs.writeFileSync(
+      policyPath,
+      'version: "0.1"\naliases:\n  "bedroom ac": "02-abc-lowercase"\n',
+    );
+    process.env.SWITCHBOT_POLICY_PATH = policyPath;
+    try {
+      process.argv = ['node', 'cli', 'agent-bootstrap', '--compact', '--json'];
+      const program = new Command();
+      program.exitOverride();
+      registerAgentBootstrapCommand(program);
+      const payload = captureJson(() => {
+        program.parse(['node', 'cli', 'agent-bootstrap', '--compact']);
+      }) as { data?: Record<string, unknown> };
+      const data = payload.data as Record<string, unknown>;
+      const status = data.policyStatus as Record<string, unknown>;
+      expect(status.present).toBe(true);
+      expect(status.valid).toBe(false);
+      expect(status.errorCount).toBeGreaterThan(0);
+    } finally {
+      delete process.env.SWITCHBOT_POLICY_PATH;
+    }
+  });
 });

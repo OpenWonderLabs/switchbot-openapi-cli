@@ -10,6 +10,13 @@ import { readProfileMeta } from '../config.js';
 import { todayUsage, DAILY_QUOTA } from '../utils/quota.js';
 import { ALL_STRATEGIES } from '../utils/name-resolver.js';
 import { IDENTITY } from './identity.js';
+import {
+  resolvePolicyPath,
+  loadPolicyFile,
+  PolicyFileNotFoundError,
+  PolicyYamlParseError,
+} from '../policy/load.js';
+import { validateLoadedPolicy } from '../policy/validate.js';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
@@ -39,6 +46,42 @@ const QUICK_REFERENCE = {
   meta: ['devices meta set <id> --alias <name>', 'devices meta list', 'devices meta get <id>'],
   policy: ['policy validate', 'policy new', 'policy migrate'],
 };
+
+interface PolicyStatus {
+  present: boolean;
+  valid: boolean | null;
+  path: string;
+  schemaVersion?: string;
+  errorCount?: number;
+}
+
+function readPolicyStatus(): PolicyStatus {
+  // Lightweight read — used by the bootstrap payload so agents know whether
+  // a policy file exists and is healthy without shelling out to
+  // `switchbot policy validate`. Parallel to `checkPolicy` in doctor but
+  // returns a more compact shape (no first-error drill-down; agents who
+  // want that run the dedicated command).
+  const policyPath = resolvePolicyPath();
+  try {
+    const loaded = loadPolicyFile(policyPath);
+    const result = validateLoadedPolicy(loaded);
+    return {
+      present: true,
+      valid: result.valid,
+      path: policyPath,
+      schemaVersion: result.schemaVersion,
+      errorCount: result.valid ? 0 : result.errors.length,
+    };
+  } catch (err) {
+    if (err instanceof PolicyFileNotFoundError) {
+      return { present: false, valid: null, path: policyPath };
+    }
+    if (err instanceof PolicyYamlParseError) {
+      return { present: true, valid: false, path: policyPath, errorCount: 1 };
+    }
+    return { present: false, valid: null, path: policyPath };
+  }
+}
 
 interface BootstrapOptions {
   compact?: boolean;
@@ -150,6 +193,7 @@ Examples:
           remaining: usage.remaining,
           dailyLimit: DAILY_QUOTA,
         },
+        policyStatus: readPolicyStatus(),
         devices: cachedDevices,
         catalog: {
           scope: cachedDevices.length > 0 ? 'used' : 'all',
