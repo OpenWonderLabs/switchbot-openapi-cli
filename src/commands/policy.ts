@@ -15,7 +15,15 @@ import { formatValidationResult } from '../policy/format.js';
 import {
   CURRENT_POLICY_SCHEMA_VERSION,
   SUPPORTED_POLICY_SCHEMA_VERSIONS,
+  type PolicySchemaVersion,
 } from '../policy/schema.js';
+import { planMigration, PolicyMigrationError } from '../policy/migrate.js';
+
+// Latest version the CLI knows how to migrate *to*. Distinct from
+// CURRENT_POLICY_SCHEMA_VERSION (the version `policy new` emits), which stays
+// conservative so fresh files don't leap ahead of what users have adopted.
+const LATEST_SUPPORTED_VERSION: PolicySchemaVersion =
+  SUPPORTED_POLICY_SCHEMA_VERSIONS[SUPPORTED_POLICY_SCHEMA_VERSIONS.length - 1];
 
 function readEmbeddedTemplate(): string {
   const url = new URL('../policy/examples/policy.example.yaml', import.meta.url);
@@ -49,8 +57,8 @@ Default location: ${DEFAULT_POLICY_PATH}
 Subcommands:
   validate [path]   Check a policy file against the embedded schema
   new [path]        Write a starter policy to the default location (or a given path)
-  migrate [path]    Upgrade a policy file to the current schema version
-                    (no-op today; the only supported version is ${CURRENT_POLICY_SCHEMA_VERSION})
+  migrate [path]    Upgrade a policy file to the latest supported schema
+                    (v${CURRENT_POLICY_SCHEMA_VERSION} → v${LATEST_SUPPORTED_VERSION} today; no-op if already current)
 
 Exit codes (validate):
   0  valid
@@ -58,6 +66,13 @@ Exit codes (validate):
   2  file not found
   3  YAML parse error
   4  internal error
+
+Exit codes (migrate):
+  0  no-op (already on the target version) or successful migration
+  2  file not found
+  3  YAML parse error
+  6  source version unsupported by this CLI
+  7  migration precheck failed (the upgraded file would not validate)
 
 Examples:
   $ switchbot policy validate
@@ -156,8 +171,14 @@ Examples:
 
   policy
     .command('migrate [path]')
-    .description('Upgrade a policy file to the current schema version (no-op today)')
-    .action((pathArg: string | undefined) => {
+    .description(`Upgrade a policy file to the latest supported schema (currently v${LATEST_SUPPORTED_VERSION})`)
+    .option('--dry-run', 'show what would change without writing the file')
+    .option(
+      '--to <version>',
+      `target schema version (default: ${LATEST_SUPPORTED_VERSION})`,
+      LATEST_SUPPORTED_VERSION,
+    )
+    .action((pathArg: string | undefined, opts: { dryRun?: boolean; to?: string }) => {
       const policyPath = resolvePolicyPath({ flag: pathArg });
 
       let loaded;
@@ -180,45 +201,108 @@ Examples:
 
       const data = loaded.data as { version?: unknown } | null;
       const fileVersion = typeof data?.version === 'string' ? data.version : undefined;
+      const target = opts.to ?? LATEST_SUPPORTED_VERSION;
 
-      const payload: Record<string, unknown> = {
+      const basePayload: Record<string, unknown> = {
         policyPath,
         fileVersion,
-        currentVersion: CURRENT_POLICY_SCHEMA_VERSION,
+        targetVersion: target,
         supportedVersions: SUPPORTED_POLICY_SCHEMA_VERSIONS,
       };
 
       if (!fileVersion) {
-        payload.status = 'no-version-field';
-        payload.message = `policy has no \`version\` field — add \`version: "${CURRENT_POLICY_SCHEMA_VERSION}"\` and run \`switchbot policy validate\``;
+        const message = `policy has no \`version\` field — add \`version: "${CURRENT_POLICY_SCHEMA_VERSION}"\` and run \`switchbot policy validate\``;
+        const payload = { ...basePayload, status: 'no-version-field', message };
         if (isJsonMode()) printJson(payload);
+        else console.log(`! ${message}`);
+        return;
+      }
+
+      if (!SUPPORTED_POLICY_SCHEMA_VERSIONS.includes(fileVersion as PolicySchemaVersion)) {
+        const message = `policy schema v${fileVersion} is not supported by this CLI (supports: ${SUPPORTED_POLICY_SCHEMA_VERSIONS.join(', ')})`;
+        const hint = 'upgrade @switchbot/openapi-cli, or downgrade the policy file to a supported version';
+        if (isJsonMode())
+          emitJsonError({ code: 6, kind: 'unsupported-version', ...basePayload, message, hint });
         else {
-          console.log(`! ${payload.message as string}`);
+          console.error(message);
+          console.error(`hint: ${hint}`);
         }
-        return;
+        process.exit(6);
       }
 
-      if (SUPPORTED_POLICY_SCHEMA_VERSIONS.includes(fileVersion as typeof SUPPORTED_POLICY_SCHEMA_VERSIONS[number])) {
-        if (fileVersion === CURRENT_POLICY_SCHEMA_VERSION) {
-          payload.status = 'already-current';
-          payload.message = `already on schema v${CURRENT_POLICY_SCHEMA_VERSION}; no migration needed`;
-        } else {
-          payload.status = 'older-but-supported';
-          payload.message = `schema v${fileVersion} is still supported by this CLI; no migration needed`;
-        }
+      if (!SUPPORTED_POLICY_SCHEMA_VERSIONS.includes(target as PolicySchemaVersion)) {
+        const message = `--to ${target}: unknown target version (supports: ${SUPPORTED_POLICY_SCHEMA_VERSIONS.join(', ')})`;
+        if (isJsonMode()) emitJsonError({ code: 6, kind: 'unsupported-target', ...basePayload, message });
+        else console.error(message);
+        process.exit(6);
+      }
+
+      if (fileVersion === target) {
+        const message = `already on schema v${target}; no migration needed`;
+        const payload = { ...basePayload, status: 'already-current', message, bytesWritten: 0 };
         if (isJsonMode()) printJson(payload);
-        else console.log(`✓ ${payload.message as string}`);
+        else console.log(`✓ ${message}`);
         return;
       }
 
-      payload.status = 'unsupported';
-      payload.message = `policy schema v${fileVersion} is not supported by this CLI (supports: ${SUPPORTED_POLICY_SCHEMA_VERSIONS.join(', ')})`;
-      payload.hint = 'upgrade @switchbot/openapi-cli, or downgrade the policy file to a supported version';
-      if (isJsonMode()) emitJsonError({ code: 6, kind: 'unsupported-version', ...payload });
-      else {
-        console.error(payload.message);
-        console.error(`hint: ${payload.hint as string}`);
+      let plan;
+      try {
+        plan = planMigration(
+          loaded,
+          fileVersion as PolicySchemaVersion,
+          target as PolicySchemaVersion,
+        );
+      } catch (err) {
+        if (err instanceof PolicyMigrationError) {
+          const payload = { ...basePayload, status: 'migration-error', kind: err.code, message: err.message };
+          if (isJsonMode()) emitJsonError({ code: 4, ...payload });
+          else console.error(err.message);
+          process.exit(4);
+        }
+        throw err;
       }
-      process.exit(6);
+
+      if (!plan.precheck.valid) {
+        const message = `migrated policy fails schema v${target} precheck; file not written`;
+        const payload = {
+          ...basePayload,
+          status: 'precheck-failed',
+          message,
+          errors: plan.precheck.errors,
+        };
+        if (isJsonMode()) emitJsonError({ code: 7, kind: 'migration-precheck-failed', ...payload });
+        else {
+          console.error(message);
+          console.error(formatValidationResult(plan.precheck, plan.nextSource, { color: true }));
+          console.error('hint: fix the validation errors above in the current file, then re-run `switchbot policy migrate`.');
+        }
+        process.exit(7);
+      }
+
+      const bytesWritten = Buffer.byteLength(plan.nextSource, 'utf-8');
+      const finalPayload = {
+        ...basePayload,
+        status: opts.dryRun ? 'dry-run' : 'migrated',
+        from: plan.fromVersion,
+        to: plan.toVersion,
+        bytesWritten: opts.dryRun ? 0 : bytesWritten,
+      };
+
+      if (opts.dryRun) {
+        if (isJsonMode()) printJson(finalPayload);
+        else {
+          console.log(`• dry-run: would upgrade ${policyPath} (v${plan.fromVersion} → v${plan.toVersion})`);
+          console.log(`  bytes: ${bytesWritten}`);
+          console.log(`  precheck: valid against v${target}`);
+        }
+        return;
+      }
+
+      writeFileSync(policyPath, plan.nextSource, { encoding: 'utf-8' });
+      if (isJsonMode()) printJson(finalPayload);
+      else {
+        console.log(`✓ migrated ${policyPath} to schema v${plan.toVersion} (from v${plan.fromVersion})`);
+        console.log(`  bytes written: ${bytesWritten}`);
+      }
     });
 }

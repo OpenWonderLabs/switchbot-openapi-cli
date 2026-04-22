@@ -721,9 +721,9 @@ describe('mcp server', () => {
       expect(thirdSc.overwritten).toBe(true);
     });
 
-    it('policy_migrate reports already-current on a v0.1 file', async () => {
+    it('policy_migrate reports already-current on a v0.2 file', async () => {
       const policyPath = path.join(tmp, 'policy.yaml');
-      fs.writeFileSync(policyPath, 'version: "0.1"\n');
+      fs.writeFileSync(policyPath, 'version: "0.2"\n');
       const { client } = await pair();
       const res = await client.callTool({
         name: 'policy_migrate',
@@ -732,8 +732,70 @@ describe('mcp server', () => {
       expect(res.isError).toBeFalsy();
       const sc = (res as { structuredContent?: Record<string, unknown> }).structuredContent!;
       expect(sc.status).toBe('already-current');
-      expect(sc.fileVersion).toBe('0.1');
-      expect(sc.currentVersion).toBe('0.1');
+      expect(sc.fileVersion).toBe('0.2');
+      expect(sc.targetVersion).toBe('0.2');
+    });
+
+    it('policy_migrate upgrades v0.1 → v0.2 and preserves comments', async () => {
+      const policyPath = path.join(tmp, 'policy.yaml');
+      const original = [
+        '# my policy',
+        'version: "0.1"',
+        '',
+        'aliases:',
+        '  "lamp": "01-202407090924-26354212"',
+        '',
+      ].join('\n');
+      fs.writeFileSync(policyPath, original);
+      const { client } = await pair();
+      const res = await client.callTool({
+        name: 'policy_migrate',
+        arguments: { path: policyPath },
+      });
+      expect(res.isError).toBeFalsy();
+      const sc = (res as { structuredContent?: Record<string, unknown> }).structuredContent!;
+      expect(sc.status).toBe('migrated');
+      expect(sc.from).toBe('0.1');
+      expect(sc.to).toBe('0.2');
+      expect(sc.bytesWritten).toBeGreaterThan(0);
+      const after = fs.readFileSync(policyPath, 'utf-8');
+      expect(after).toContain('# my policy');
+      expect(after).toMatch(/version:\s*"0\.2"/);
+    });
+
+    it('policy_migrate dryRun reports changes without writing', async () => {
+      const policyPath = path.join(tmp, 'policy.yaml');
+      fs.writeFileSync(policyPath, 'version: "0.1"\n');
+      const before = fs.readFileSync(policyPath, 'utf-8');
+      const { client } = await pair();
+      const res = await client.callTool({
+        name: 'policy_migrate',
+        arguments: { path: policyPath, dryRun: true },
+      });
+      const sc = (res as { structuredContent?: Record<string, unknown> }).structuredContent!;
+      expect(sc.status).toBe('dry-run');
+      expect(sc.bytesWritten).toBe(0);
+      expect(fs.readFileSync(policyPath, 'utf-8')).toBe(before);
+    });
+
+    it('policy_migrate refuses to write when the upgraded file would fail validation', async () => {
+      // A v0.1 automation.rules entry with a loose shape; v0.2 rejects it.
+      const policyPath = path.join(tmp, 'policy.yaml');
+      fs.writeFileSync(
+        policyPath,
+        ['version: "0.1"', 'automation:', '  rules:', '    - foo: bar', ''].join('\n'),
+      );
+      const before = fs.readFileSync(policyPath, 'utf-8');
+      const { client } = await pair();
+      const res = await client.callTool({
+        name: 'policy_migrate',
+        arguments: { path: policyPath },
+      });
+      const sc = (res as { structuredContent?: Record<string, unknown> }).structuredContent!;
+      expect(sc.status).toBe('precheck-failed');
+      expect(Array.isArray(sc.errors)).toBe(true);
+      expect((sc.errors as unknown[]).length).toBeGreaterThan(0);
+      expect(fs.readFileSync(policyPath, 'utf-8')).toBe(before);
     });
 
     it('policy_migrate reports file-not-found when the file does not exist', async () => {

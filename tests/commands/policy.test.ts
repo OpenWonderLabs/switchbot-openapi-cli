@@ -221,12 +221,54 @@ describe('switchbot policy (commander surface)', () => {
       return p;
     }
 
-    it('reports "already-current" on v0.1 with exit 0', () => {
-      const p = seed('policy.yaml', '0.1');
+    it('reports "already-current" on v0.2 with exit 0', () => {
+      // LATEST supported is v0.2; seeding v0.2 hits the no-op path.
+      const p = seed('policy.yaml', '0.2');
       const { stdout, exitCode } = runCli(['--json', 'policy', 'migrate', p]);
       expect(exitCode).toBe(0);
       const parsed = JSON.parse(stdout[0]) as { data: { status: string } };
       expect(parsed.data.status).toBe('already-current');
+    });
+
+    it('upgrades v0.1 → v0.2 in place and preserves comments + aliases', () => {
+      const p = path.join(tmpDir, 'policy.yaml');
+      const original = [
+        '# My SwitchBot policy',
+        'version: "0.1"',
+        '',
+        '# Friendly names map to deviceIds',
+        'aliases:',
+        '  "lamp": "01-202407090924-26354212"',
+        '',
+      ].join('\n');
+      fs.writeFileSync(p, original, 'utf-8');
+
+      const { stdout, exitCode } = runCli(['--json', 'policy', 'migrate', p]);
+      expect(exitCode).toBe(0);
+      const parsed = JSON.parse(stdout[0]) as {
+        data: { status: string; from: string; to: string; bytesWritten: number };
+      };
+      expect(parsed.data.status).toBe('migrated');
+      expect(parsed.data.from).toBe('0.1');
+      expect(parsed.data.to).toBe('0.2');
+      expect(parsed.data.bytesWritten).toBeGreaterThan(0);
+
+      const after = fs.readFileSync(p, 'utf-8');
+      expect(after).toContain('# My SwitchBot policy');
+      expect(after).toContain('# Friendly names map to deviceIds');
+      expect(after).toMatch(/version:\s*"0\.2"/);
+      expect(after).toContain('01-202407090924-26354212');
+    });
+
+    it('--dry-run reports what would change without writing the file', () => {
+      const p = seed('policy.yaml', '0.1');
+      const before = fs.readFileSync(p, 'utf-8');
+      const { stdout, exitCode } = runCli(['--json', 'policy', 'migrate', p, '--dry-run']);
+      expect(exitCode).toBe(0);
+      const parsed = JSON.parse(stdout[0]) as { data: { status: string; bytesWritten: number } };
+      expect(parsed.data.status).toBe('dry-run');
+      expect(parsed.data.bytesWritten).toBe(0);
+      expect(fs.readFileSync(p, 'utf-8')).toBe(before);
     });
 
     it('reports "no-version-field" when version is absent (exit 0)', () => {
@@ -247,6 +289,36 @@ describe('switchbot policy (commander surface)', () => {
       expect(parsed.error.code).toBe(6);
       expect(parsed.error.kind).toBe('unsupported-version');
       expect(parsed.error.hint).toContain('downgrade');
+    });
+
+    it('exits 7 when the migrated file would fail v0.2 schema precheck', () => {
+      // Seed a file that's valid v0.1 but breaks under v0.2 — an automation
+      // block with a loose rule shape (v0.1 accepts it, v0.2 requires
+      // {name, when, then}). The migration bumps version but leaves the
+      // body alone, so the precheck surfaces the structural gap.
+      const p = path.join(tmpDir, 'policy.yaml');
+      fs.writeFileSync(
+        p,
+        [
+          'version: "0.1"',
+          'automation:',
+          '  rules:',
+          '    - foo: bar',
+          '',
+        ].join('\n'),
+        'utf-8',
+      );
+      const before = fs.readFileSync(p, 'utf-8');
+      const { stdout, exitCode } = runCli(['--json', 'policy', 'migrate', p]);
+      expect(exitCode).toBe(7);
+      const parsed = JSON.parse(stdout[0]) as {
+        error: { code: number; kind: string; errors: Array<{ keyword: string }> };
+      };
+      expect(parsed.error.code).toBe(7);
+      expect(parsed.error.kind).toBe('migration-precheck-failed');
+      expect(parsed.error.errors.length).toBeGreaterThan(0);
+      // File must stay untouched on precheck failure.
+      expect(fs.readFileSync(p, 'utf-8')).toBe(before);
     });
 
     it('exits 2 when the file does not exist', () => {

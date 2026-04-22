@@ -52,7 +52,13 @@ import { validateLoadedPolicy } from '../policy/validate.js';
 import {
   CURRENT_POLICY_SCHEMA_VERSION,
   SUPPORTED_POLICY_SCHEMA_VERSIONS,
+  type PolicySchemaVersion,
 } from '../policy/schema.js';
+import { planMigration } from '../policy/migrate.js';
+import { writeFileSync } from 'node:fs';
+
+const LATEST_SUPPORTED_VERSION: PolicySchemaVersion =
+  SUPPORTED_POLICY_SCHEMA_VERSIONS[SUPPORTED_POLICY_SCHEMA_VERSIONS.length - 1];
 import { fileURLToPath } from 'node:url';
 import { dirname as pathDirname } from 'node:path';
 import fs from 'node:fs';
@@ -1079,25 +1085,46 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
   server.registerTool(
     'policy_migrate',
     {
-      title: 'Report policy file migration status',
+      title: 'Migrate a policy file to the latest supported schema',
       description:
-        'Inspect the policy file\'s `version` field and report whether it matches the CLI\'s current schema version. ' +
-        'No-op today (only one schema version is published); will rewrite the version constant when v0.2 ships.',
-      _meta: { agentSafetyTier: 'read' },
+        'Upgrades the policy file\'s schema version in place while preserving comments. ' +
+        'Safe by default: if the migrated document would fail schema validation, the file is NOT rewritten ' +
+        'and the tool returns status="precheck-failed" with the list of errors. ' +
+        'Pass dryRun=true to preview without touching the file. ' +
+        'Currently the only supported upgrade path is v0.1 → v0.2.',
+      _meta: { agentSafetyTier: 'action' },
       inputSchema: z.object({
         path: z.string().optional().describe('Optional policy file path; defaults to the resolved default path'),
+        dryRun: z.boolean().optional().describe('When true, report what would change without writing'),
+        to: z.string().optional().describe(`Target schema version (default: latest supported, "${LATEST_SUPPORTED_VERSION}")`),
       }).strict(),
       outputSchema: {
         policyPath: z.string(),
         fileVersion: z.string().optional(),
-        currentVersion: z.string(),
+        targetVersion: z.string(),
         supportedVersions: z.array(z.string()),
-        status: z.enum(['already-current', 'older-but-supported', 'unsupported', 'no-version-field', 'file-not-found']),
+        status: z.enum([
+          'already-current',
+          'migrated',
+          'dry-run',
+          'no-version-field',
+          'unsupported',
+          'precheck-failed',
+          'file-not-found',
+        ]),
+        from: z.string().optional(),
+        to: z.string().optional(),
+        bytesWritten: z.number().optional(),
         message: z.string(),
+        errors: z
+          .array(z.object({ path: z.string(), keyword: z.string(), message: z.string() }))
+          .optional(),
       },
     },
-    async ({ path: pathArg }) => {
+    async ({ path: pathArg, dryRun, to }) => {
       const policyPath = resolvePolicyPath({ flag: pathArg });
+      const target = (to ?? LATEST_SUPPORTED_VERSION) as PolicySchemaVersion;
+
       let loaded;
       try {
         loaded = loadPolicyFile(policyPath);
@@ -1105,7 +1132,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         if (err instanceof PolicyFileNotFoundError) {
           const structured = {
             policyPath,
-            currentVersion: CURRENT_POLICY_SCHEMA_VERSION,
+            targetVersion: target,
             supportedVersions: [...SUPPORTED_POLICY_SCHEMA_VERSIONS],
             status: 'file-not-found' as const,
             message: `policy file not found: ${policyPath}`,
@@ -1117,32 +1144,92 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         }
         throw err;
       }
+
       const data = loaded.data as { version?: unknown } | null;
       const fileVersion = typeof data?.version === 'string' ? data.version : undefined;
       const base = {
         policyPath,
         fileVersion,
-        currentVersion: CURRENT_POLICY_SCHEMA_VERSION,
+        targetVersion: target,
         supportedVersions: [...SUPPORTED_POLICY_SCHEMA_VERSIONS],
       };
-      let status: 'already-current' | 'older-but-supported' | 'unsupported' | 'no-version-field';
-      let message: string;
+
       if (!fileVersion) {
-        status = 'no-version-field';
-        message = `policy has no \`version\` field — add \`version: "${CURRENT_POLICY_SCHEMA_VERSION}"\``;
-      } else if (SUPPORTED_POLICY_SCHEMA_VERSIONS.includes(fileVersion as typeof SUPPORTED_POLICY_SCHEMA_VERSIONS[number])) {
-        if (fileVersion === CURRENT_POLICY_SCHEMA_VERSION) {
-          status = 'already-current';
-          message = `already on schema v${CURRENT_POLICY_SCHEMA_VERSION}; no migration needed`;
-        } else {
-          status = 'older-but-supported';
-          message = `schema v${fileVersion} is still supported; no migration needed`;
-        }
-      } else {
-        status = 'unsupported';
-        message = `policy schema v${fileVersion} is not supported (supports: ${SUPPORTED_POLICY_SCHEMA_VERSIONS.join(', ')})`;
+        const structured = {
+          ...base,
+          status: 'no-version-field' as const,
+          message: `policy has no \`version\` field — add \`version: "${CURRENT_POLICY_SCHEMA_VERSION}"\``,
+        };
+        return {
+          content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+          structuredContent: structured,
+        };
       }
-      const structured = { ...base, status, message };
+
+      if (!SUPPORTED_POLICY_SCHEMA_VERSIONS.includes(fileVersion as PolicySchemaVersion)) {
+        const structured = {
+          ...base,
+          status: 'unsupported' as const,
+          message: `policy schema v${fileVersion} is not supported (supports: ${SUPPORTED_POLICY_SCHEMA_VERSIONS.join(', ')})`,
+        };
+        return {
+          content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+          structuredContent: structured,
+        };
+      }
+
+      if (fileVersion === target) {
+        const structured = {
+          ...base,
+          status: 'already-current' as const,
+          message: `already on schema v${target}; no migration needed`,
+          bytesWritten: 0,
+        };
+        return {
+          content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+          structuredContent: structured,
+        };
+      }
+
+      const plan = planMigration(loaded, fileVersion as PolicySchemaVersion, target);
+      if (!plan.precheck.valid) {
+        const structured = {
+          ...base,
+          status: 'precheck-failed' as const,
+          message: `migrated policy fails schema v${target} precheck; file not written`,
+          errors: plan.precheck.errors.map((e) => ({ path: e.path, keyword: e.keyword, message: e.message })),
+        };
+        return {
+          content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+          structuredContent: structured,
+        };
+      }
+
+      const bytes = Buffer.byteLength(plan.nextSource, 'utf-8');
+      if (dryRun) {
+        const structured = {
+          ...base,
+          status: 'dry-run' as const,
+          from: plan.fromVersion,
+          to: plan.toVersion,
+          bytesWritten: 0,
+          message: `dry-run: would upgrade v${plan.fromVersion} → v${plan.toVersion} (${bytes} bytes)`,
+        };
+        return {
+          content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+          structuredContent: structured,
+        };
+      }
+
+      writeFileSync(policyPath, plan.nextSource, { encoding: 'utf-8' });
+      const structured = {
+        ...base,
+        status: 'migrated' as const,
+        from: plan.fromVersion,
+        to: plan.toVersion,
+        bytesWritten: bytes,
+        message: `migrated ${policyPath} to schema v${plan.toVersion} (from v${plan.fromVersion})`,
+      };
       return {
         content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
         structuredContent: structured,
