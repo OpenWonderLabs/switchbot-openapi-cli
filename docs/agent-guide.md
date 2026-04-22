@@ -14,6 +14,7 @@ If you're a human looking for a tour, start with the [top-level README](../READM
 - [Surface 3: Direct JSON invocation](#surface-3-direct-json-invocation)
 - [Catalog: the shared contract](#catalog-the-shared-contract)
 - [Safety rails](#safety-rails)
+- [Policy awareness](#policy-awareness)
 - [Observability](#observability)
 - [Performance and token budget](#performance-and-token-budget)
 
@@ -246,6 +247,39 @@ Use `switchbot doctor` to confirm the CLI is healthy before orchestrating anythi
 3. **Quota**: The SwitchBot API has a per-account daily quota. `--retry-on-429 <n>` and `--backoff <linear|exponential>` handle throttling; `~/.switchbot/quota.json` tracks daily counts.
 4. **Audit log**: `--audit-log [path]` appends every mutating command (including dry-runs) to JSONL for post-hoc review.
 5. **Non-zero exit codes are stable**: `0` success, `1` runtime error, `2` usage error (bad flag, invalid plan schema).
+
+---
+
+## Policy awareness
+
+Users can declare per-account preferences in a `policy.yaml` file
+(`~/.config/openclaw/switchbot/policy.yaml` by default). Agents should
+read it at session start — it holds the aliases, quiet-hours window,
+and confirmation overrides the user wants honoured.
+
+```bash
+switchbot policy validate            # exit 0 if the file is healthy
+switchbot policy validate --json     # machine-readable error envelope
+```
+
+Do **not** attempt to parse the YAML directly; let `policy validate`
+parse it and surface the result. If validation fails, relay the
+compiler-style error (file:line:col + hint) to the user — the CLI
+already produces agent-friendly output.
+
+Concepts an agent should honour:
+
+- `aliases.<name>` → deviceId mapping. Prefer this over the CLI's
+  match-by-name fallback, which can pick the wrong device when two
+  names collide.
+- `confirmations.always_confirm[]` / `confirmations.never_confirm[]` —
+  per-action overrides of the tier-based confirmation default. The
+  schema refuses to pre-approve destructive actions, so you can
+  trust `never_confirm` not to contain `unlock` etc.
+- `quiet_hours.start / end` — during this window, even `mutation`-tier
+  actions require explicit user confirmation.
+
+Full field-level reference: [`docs/policy-reference.md`](./policy-reference.md).
 
 ---
 

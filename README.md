@@ -37,6 +37,7 @@ Under the hood every surface shares the same catalog, cache, and HMAC client —
 - [Installation](#installation)
 - [Quick start](#quick-start)
 - [Credentials](#credentials)
+- [Policy](#policy)
 - [Global options](#global-options)
 - [Commands](#commands)
   - [`config`](#config--credential-management)
@@ -146,6 +147,34 @@ export SWITCHBOT_SECRET=...
 # Confirm which source is active and see the masked secret
 switchbot config show
 ```
+
+## Policy
+
+`policy.yaml` is an optional per-user file that declares preferences
+the CLI (and any connected AI agent) should honour: device aliases,
+quiet-hours, confirmation overrides, audit-log location, and CLI
+profile. The file lives at:
+
+- Linux / macOS: `~/.config/openclaw/switchbot/policy.yaml`
+- Windows: `%USERPROFILE%\.config\openclaw\switchbot\policy.yaml`
+
+Everything in it is optional — if the file is missing, safe defaults
+apply. Scaffold, edit, and validate:
+
+```bash
+switchbot policy new        # write a commented starter template
+$EDITOR ~/.config/openclaw/switchbot/policy.yaml
+switchbot policy validate   # exit 0 if OK, otherwise line-accurate error
+```
+
+Why most users want a policy file: it makes name resolution
+deterministic. Without it, "turn on the bedroom light" falls through
+the CLI's prefix/substring/fuzzy match strategies and can pick the
+wrong device when two names collide. A one-line `aliases` entry
+removes the ambiguity.
+
+Full field-by-field reference, validation flow, and error catalogue:
+[`docs/policy-reference.md`](./docs/policy-reference.md).
 
 ## Global options
 
