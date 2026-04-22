@@ -368,12 +368,7 @@ describe('policy validator (v0.2)', () => {
     expect(result.errors[0].message).toContain('0.3');
   });
 
-  it('flags destructive commands in rules (placeholder — wired in C3)', () => {
-    // Once C3 lands, `then[].command: "devices command <id> unlock"` should
-    // produce a `rule-destructive-action` error. Today ajv accepts it because
-    // `command` is a free-form string. This test pins the current behavior so
-    // C3 can flip it into an assertion on the new keyword without needing to
-    // remember to add a fresh test.
+  it('rejects destructive verbs inside automation.rules[].then[].command', () => {
     const loaded = writeAndLoad(
       tmpDir,
       [
@@ -391,9 +386,58 @@ describe('policy validator (v0.2)', () => {
       ].join('\n'),
     );
     const result = validateLoadedPolicy(loaded);
-    // TODO(C3): flip expectations to `valid === false` with a
-    // `rule-destructive-action` error once the post-hook ships.
-    expect(result.valid).toBe(true);
-    expect(result.schemaVersion).toBe('0.2');
+    expect(result.valid).toBe(false);
+    const ruleErr = result.errors.find((e) => e.keyword === 'rule-destructive-action');
+    expect(ruleErr).toBeDefined();
+    expect(ruleErr!.message).toContain('unlock');
+    expect(ruleErr!.path).toBe('/automation/rules/0/then/0/command');
+    expect(ruleErr!.hint).toMatch(/confirmation gate/);
+  });
+
+  it.each([
+    'devices command <id> lock',
+    'devices command <id> factoryReset',
+    'webhooks delete <id>',
+    'scenes delete <id>',
+  ])('flags destructive command shape %s', (cmd) => {
+    const loaded = writeAndLoad(
+      tmpDir,
+      [
+        'version: "0.2"',
+        'automation:',
+        '  rules:',
+        '    - name: "bad rule"',
+        '      when:',
+        '        source: mqtt',
+        '        event: x.y',
+        '      then:',
+        `        - command: "${cmd}"`,
+        '',
+      ].join('\n'),
+    );
+    const result = validateLoadedPolicy(loaded);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.keyword === 'rule-destructive-action')).toBe(true);
+  });
+
+  it('allows non-destructive verbs like turnOn / setMode', () => {
+    const loaded = writeAndLoad(
+      tmpDir,
+      [
+        'version: "0.2"',
+        'automation:',
+        '  rules:',
+        '    - name: "nightlight"',
+        '      when:',
+        '        source: mqtt',
+        '        event: motion.detected',
+        '      then:',
+        '        - command: "devices command <id> turnOn"',
+        '          device: "hall-light"',
+        '',
+      ].join('\n'),
+    );
+    const result = validateLoadedPolicy(loaded);
+    expect(result.valid, JSON.stringify(result.errors)).toBe(true);
   });
 });

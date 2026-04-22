@@ -10,6 +10,7 @@ import {
   isSupportedPolicySchemaVersion,
   type PolicySchemaVersion,
 } from './schema.js';
+import { destructiveVerbOf, DESTRUCTIVE_COMMANDS } from '../rules/destructive.js';
 
 const require = createRequire(import.meta.url);
 type AddFormatsFn = (ajv: Ajv2020Type) => Ajv2020Type;
@@ -196,6 +197,60 @@ function unsupportedVersionResult(loaded: LoadedPolicy, declared: string): Polic
   };
 }
 
+/**
+ * Walk `automation.rules[].then[]` and flag any command string whose verb
+ * appears in DESTRUCTIVE_COMMANDS. Uses the YAML doc (not the data tree) to
+ * get accurate line/col on the offending node.
+ *
+ * This is deliberately a post-ajv pass rather than a schema rule because
+ * JSON Schema cannot parse a command string and compare the verb slot to a
+ * blocklist. Keeping it in JS also lets `src/rules/destructive.ts` be the
+ * single source of truth shared with the runtime executor.
+ */
+function collectDestructiveRuleErrors(loaded: LoadedPolicy): PolicyValidationError[] {
+  const data = loaded.data as
+    | { automation?: { rules?: Array<{ name?: string; then?: Array<{ command?: string }> }> } }
+    | null
+    | undefined;
+  const rules = data?.automation?.rules;
+  if (!Array.isArray(rules)) return [];
+
+  const out: PolicyValidationError[] = [];
+  for (let ri = 0; ri < rules.length; ri++) {
+    const rule = rules[ri];
+    const actions = Array.isArray(rule?.then) ? rule.then : [];
+    for (let ai = 0; ai < actions.length; ai++) {
+      const cmd = actions[ai]?.command;
+      if (typeof cmd !== 'string') continue;
+      const verb = destructiveVerbOf(cmd);
+      if (!verb) continue;
+
+      const instancePath = `/automation/rules/${ri}/then/${ai}/command`;
+      const segments = instancePath.slice(1).split('/');
+      const node = getNodeAt(loaded.doc, segments);
+      const range = (node as { range?: [number, number, number] } | null)?.range;
+      let line: number | undefined;
+      let col: number | undefined;
+      if (range) {
+        const pos = loaded.lineCounter.linePos(range[0]);
+        line = pos.line;
+        col = pos.col;
+      }
+      const ruleName = typeof rule?.name === 'string' ? rule.name : `#${ri}`;
+      out.push({
+        path: instancePath,
+        line,
+        col,
+        keyword: 'rule-destructive-action',
+        message: `rule "${ruleName}" action #${ai} uses destructive command "${verb}"`,
+        hint: `destructive verbs (${DESTRUCTIVE_COMMANDS.join(', ')}) cannot be pre-approved in automation rules; run them via the interactive CLI so the confirmation gate fires`,
+        schemaPath: '#/properties/automation/properties/rules/items/properties/then/items/properties/command',
+      });
+    }
+  }
+  return out;
+}
+
 export function validateLoadedPolicy(loaded: LoadedPolicy): PolicyValidationResult {
   const declared = readDeclaredVersion(loaded.data);
 
@@ -226,10 +281,21 @@ export function validateLoadedPolicy(loaded: LoadedPolicy): PolicyValidationResu
     }
   }
 
+  // v0.2-only post-hook: destructive verbs like `unlock` / `factoryReset`
+  // cannot be pre-approved via rules, even if ajv considers the command
+  // string well-formed. Schema can't express this because `command` is a
+  // free-form string; we parse the verb in JS and append errors.
+  if (version === '0.2') {
+    const ruleErrors = collectDestructiveRuleErrors(loaded);
+    errors.push(...ruleErrors);
+  }
+
+  const valid = ok === true && errors.length === 0;
+
   return {
     policyPath: loaded.path,
     schemaVersion: version,
-    valid: ok === true,
+    valid,
     errors,
   };
 }
