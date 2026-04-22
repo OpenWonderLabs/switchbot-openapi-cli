@@ -24,6 +24,7 @@ import { registerPlanCommand } from './commands/plan.js';
 import { registerCapabilitiesCommand } from './commands/capabilities.js';
 import { registerAgentBootstrapCommand } from './commands/agent-bootstrap.js';
 import { registerPolicyCommand } from './commands/policy.js';
+import { registerRulesCommand } from './commands/rules.js';
 
 const require = createRequire(import.meta.url);
 const { version: pkgVersion } = require('../package.json') as { version: string };
@@ -105,6 +106,7 @@ registerPlanCommand(program);
 registerCapabilitiesCommand(program);
 registerAgentBootstrapCommand(program);
 registerPolicyCommand(program);
+registerRulesCommand(program);
 
 program.addHelpText('after', `
 Credentials:
