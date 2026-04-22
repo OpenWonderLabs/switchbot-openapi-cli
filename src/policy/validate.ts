@@ -73,15 +73,39 @@ function getNodeAt(doc: Document.Parsed, segments: string[]): Node | null {
   return (current as Node) ?? null;
 }
 
+function getKeyNodeAt(doc: Document.Parsed, parentSegments: string[], key: string): Node | null {
+  const parent = parentSegments.length === 0 ? doc.contents : getNodeAt(doc, parentSegments);
+  if (!parent || !isMap(parent)) return null;
+  const pair = parent.items.find((p) => isScalar(p.key) && String((p.key as { value: unknown }).value) === key);
+  return (pair?.key as Node | undefined) ?? null;
+}
+
 function locateError(doc: Document.Parsed, lineCounter: LineCounter, err: ErrorObject): { line?: number; col?: number } {
   const segments = instancePathToSegments(err.instancePath);
-  let node = getNodeAt(doc, segments);
-  if (!node && err.keyword === 'required' && typeof err.params === 'object' && err.params) {
-    const missingProp = (err.params as { missingProperty?: string }).missingProperty;
-    if (missingProp) {
-      node = getNodeAt(doc, segments);
+
+  if (err.keyword === 'additionalProperties') {
+    const bad = (err.params as { additionalProperty?: string }).additionalProperty;
+    if (bad) {
+      const keyNode = getKeyNodeAt(doc, segments, bad);
+      const range = (keyNode as { range?: [number, number, number] } | null)?.range;
+      if (range) {
+        const pos = lineCounter.linePos(range[0]);
+        return { line: pos.line, col: pos.col };
+      }
     }
   }
+
+  if (err.keyword === 'required' || err.keyword === 'dependentRequired') {
+    const node = getNodeAt(doc, segments);
+    const range = (node as { range?: [number, number, number] } | null)?.range;
+    if (range) {
+      const pos = lineCounter.linePos(range[0]);
+      return { line: pos.line, col: pos.col };
+    }
+    return { line: 1, col: 1 };
+  }
+
+  const node = getNodeAt(doc, segments);
   const range = (node as { range?: [number, number, number] } | null)?.range;
   if (!range) return {};
   const pos = lineCounter.linePos(range[0]);
@@ -95,6 +119,11 @@ function humanMessage(err: ErrorObject): string {
       return `missing required property "${(err.params as { missingProperty: string }).missingProperty}"`;
     case 'additionalProperties':
       return `unknown property "${(err.params as { additionalProperty: string }).additionalProperty}"`;
+    case 'dependentRequired': {
+      const { property, missingProperty } = err.params as { property: string; missingProperty: string };
+      const parent = path === '(root)' ? '' : `${path}: `;
+      return `${parent}when "${property}" is set, "${missingProperty}" is also required`;
+    }
     case 'pattern':
       return `${path} does not match pattern ${(err.params as { pattern: string }).pattern}`;
     case 'const':
