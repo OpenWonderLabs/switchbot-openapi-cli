@@ -36,8 +36,8 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc",
-    "build:prod": "tsc -p tsconfig.build.json",
+    "build": "tsc && node scripts/copy-assets.mjs",
+    "build:prod": "tsc -p tsconfig.build.json && node scripts/copy-assets.mjs",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
@@ -48,6 +48,8 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "ajv": "^8.18.0",
+    "ajv-formats": "^3.0.1",
     "axios": "^1.7.9",
     "chalk": "^5.4.1",
     "cli-table3": "^0.6.5",
@@ -55,7 +57,8 @@
     "js-yaml": "^4.1.1",
     "mqtt": "^5.3.0",
     "pino": "^9.0.0",
-    "uuid": "^11.0.5"
+    "uuid": "^11.0.5",
+    "yaml": "^2.8.3"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
