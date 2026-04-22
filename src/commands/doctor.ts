@@ -17,6 +17,8 @@ import {
   PolicyYamlParseError,
 } from '../policy/load.js';
 import { validateLoadedPolicy } from '../policy/validate.js';
+import { selectCredentialStore } from '../credentials/keychain.js';
+import { getActiveProfile } from '../lib/request-context.js';
 
 interface Check {
   name: string;
@@ -28,27 +30,120 @@ export const DOCTOR_SCHEMA_VERSION = 1;
 
 async function checkCredentials(): Promise<Check> {
   const envOk = Boolean(process.env.SWITCHBOT_TOKEN && process.env.SWITCHBOT_SECRET);
-  if (envOk) return { name: 'credentials', status: 'ok', detail: 'env: SWITCHBOT_TOKEN + SWITCHBOT_SECRET' };
+  const profile = getActiveProfile() ?? 'default';
+
+  let backendName: string = 'file';
+  let backendLabel: string = 'file';
+  let writable = true;
+  let keychainHasProfile = false;
+  try {
+    const store = await selectCredentialStore();
+    const desc = store.describe();
+    backendName = store.name;
+    backendLabel = desc.backend;
+    writable = desc.writable;
+    try {
+      const creds = await store.get(profile);
+      keychainHasProfile = Boolean(creds && creds.token && creds.secret);
+    } catch {
+      keychainHasProfile = false;
+    }
+  } catch {
+    // selectCredentialStore falls back to file; a throw here is unexpected but
+    // non-fatal — downstream callers degrade to the file path.
+  }
+
+  if (envOk) {
+    return {
+      name: 'credentials',
+      status: 'ok',
+      detail: {
+        source: 'env',
+        backend: backendName,
+        backendLabel,
+        writable,
+        profile,
+        message: 'env: SWITCHBOT_TOKEN + SWITCHBOT_SECRET',
+      },
+    };
+  }
+
+  if (keychainHasProfile && backendName !== 'file') {
+    return {
+      name: 'credentials',
+      status: 'ok',
+      detail: {
+        source: 'keychain',
+        backend: backendName,
+        backendLabel,
+        writable,
+        profile,
+        message: `keychain (${backendLabel}) has credentials for profile "${profile}"`,
+      },
+    };
+  }
+
   const file = configFilePath();
   if (!fs.existsSync(file)) {
     return {
       name: 'credentials',
       status: 'fail',
-      detail: `No env vars and no config at ${file}. Run 'switchbot config set-token'.`,
+      detail: {
+        source: 'none',
+        backend: backendName,
+        backendLabel,
+        writable,
+        profile,
+        message: `No env vars, no keychain entry for profile "${profile}", and no config at ${file}. Run 'switchbot config set-token' or 'switchbot auth keychain set'.`,
+      },
     };
   }
   try {
     const raw = fs.readFileSync(file, 'utf-8');
     const cfg = JSON.parse(raw);
     if (!cfg.token || !cfg.secret) {
-      return { name: 'credentials', status: 'fail', detail: `Config ${file} missing token/secret.` };
+      return {
+        name: 'credentials',
+        status: 'fail',
+        detail: {
+          source: 'file',
+          backend: backendName,
+          backendLabel,
+          writable,
+          profile,
+          message: `Config ${file} missing token/secret.`,
+        },
+      };
     }
-    return { name: 'credentials', status: 'ok', detail: `file: ${file}` };
+    const status = writable && backendName !== 'file' ? 'warn' : 'ok';
+    const hint = status === 'warn'
+      ? `Consider running 'switchbot auth keychain migrate' to move credentials into ${backendLabel}.`
+      : undefined;
+    return {
+      name: 'credentials',
+      status,
+      detail: {
+        source: 'file',
+        backend: backendName,
+        backendLabel,
+        writable,
+        profile,
+        message: `file: ${file}`,
+        ...(hint ? { hint } : {}),
+      },
+    };
   } catch (err) {
     return {
       name: 'credentials',
       status: 'fail',
-      detail: `Unreadable config ${file}: ${err instanceof Error ? err.message : String(err)}`,
+      detail: {
+        source: 'file',
+        backend: backendName,
+        backendLabel,
+        writable,
+        profile,
+        message: `Unreadable config ${file}: ${err instanceof Error ? err.message : String(err)}`,
+      },
     };
   }
 }
@@ -717,7 +812,12 @@ Examples:
       } else {
         for (const c of checks) {
           const icon = c.status === 'ok' ? '✓' : c.status === 'warn' ? '!' : '✗';
-          const detailStr = typeof c.detail === 'string' ? c.detail : JSON.stringify(c.detail);
+          const detailStr =
+            typeof c.detail === 'string'
+              ? c.detail
+              : (typeof (c.detail as { message?: unknown }).message === 'string'
+                  ? ((c.detail as { message: string }).message)
+                  : JSON.stringify(c.detail));
           console.log(`${icon} ${c.name.padEnd(12)} ${detailStr}`);
         }
         console.log('');

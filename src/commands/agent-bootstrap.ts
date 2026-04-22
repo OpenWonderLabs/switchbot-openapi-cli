@@ -17,6 +17,7 @@ import {
   PolicyYamlParseError,
 } from '../policy/load.js';
 import { validateLoadedPolicy } from '../policy/validate.js';
+import { selectCredentialStore, CredentialBackendName } from '../credentials/keychain.js';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
@@ -45,6 +46,7 @@ const QUICK_REFERENCE = {
   history: ['history range <id> --since 7d', 'history stats <id>'],
   meta: ['devices meta set <id> --alias <name>', 'devices meta list', 'devices meta get <id>'],
   policy: ['policy validate', 'policy new', 'policy migrate'],
+  auth: ['auth keychain describe', 'auth keychain migrate', 'auth keychain get'],
 };
 
 interface PolicyStatus {
@@ -83,6 +85,22 @@ function readPolicyStatus(): PolicyStatus {
   }
 }
 
+interface CredentialsBackend {
+  name: CredentialBackendName;
+  label: string;
+  writable: boolean;
+}
+
+async function readCredentialsBackend(): Promise<CredentialsBackend> {
+  try {
+    const store = await selectCredentialStore();
+    const desc = store.describe();
+    return { name: store.name, label: desc.backend, writable: desc.writable };
+  } catch {
+    return { name: 'file', label: 'File (~/.switchbot/config.json)', writable: true };
+  }
+}
+
 interface BootstrapOptions {
   compact?: boolean;
 }
@@ -115,12 +133,13 @@ Examples:
   $ switchbot agent-bootstrap --compact | jq '.quickReference'
 `,
     )
-    .action((opts: BootstrapOptions) => {
+    .action(async (opts: BootstrapOptions) => {
       const compact = Boolean(opts.compact);
       const cache = loadCache();
       const catalog = getEffectiveCatalog();
       const usage = todayUsage();
       const meta = readProfileMeta(undefined);
+      const credentialsBackend = await readCredentialsBackend();
 
       const cachedDevices = cache
         ? Object.entries(cache.devices).map(([id, d]) => ({
@@ -194,6 +213,7 @@ Examples:
           dailyLimit: DAILY_QUOTA,
         },
         policyStatus: readPolicyStatus(),
+        credentialsBackend,
         devices: cachedDevices,
         catalog: {
           scope: cachedDevices.length > 0 ? 'used' : 'all',

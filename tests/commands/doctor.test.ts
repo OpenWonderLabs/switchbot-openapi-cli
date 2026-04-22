@@ -28,7 +28,8 @@ describe('doctor command', () => {
     expect(payload.data.overall).toBe('fail');
     const creds = payload.data.checks.find((c: { name: string }) => c.name === 'credentials');
     expect(creds.status).toBe('fail');
-    expect(creds.detail).toMatch(/config set-token/);
+    expect(creds.detail.message).toMatch(/config set-token|auth keychain set/);
+    expect(creds.detail.backend).toBeDefined();
   });
 
   it('reports credentials:ok when env vars are set', async () => {
@@ -39,10 +40,11 @@ describe('doctor command', () => {
     const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
     const creds = payload.data.checks.find((c: { name: string }) => c.name === 'credentials');
     expect(creds.status).toBe('ok');
-    expect(creds.detail).toMatch(/env/);
+    expect(creds.detail.source).toBe('env');
+    expect(creds.detail.message).toMatch(/env/);
   });
 
-  it('reports credentials:ok when the config file is valid', async () => {
+  it('reports credentials with file source when only the config file is present', async () => {
     fs.mkdirSync(path.join(tmp, '.switchbot'), { recursive: true });
     fs.writeFileSync(
       path.join(tmp, '.switchbot', 'config.json'),
@@ -51,8 +53,22 @@ describe('doctor command', () => {
     const res = await runCli(registerDoctorCommand, ['--json', 'doctor']);
     const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
     const creds = payload.data.checks.find((c: { name: string }) => c.name === 'credentials');
-    expect(creds.status).toBe('ok');
-    expect(creds.detail).toMatch(/config\.json/);
+    // status is 'ok' on file backends, 'warn' on native keychain backends
+    // (file creds + writable keychain → recommend migration).
+    expect(['ok', 'warn']).toContain(creds.status);
+    expect(creds.detail.source).toBe('file');
+    expect(creds.detail.message).toMatch(/config\.json/);
+  });
+
+  it('credentials check exposes backend metadata (name + writable)', async () => {
+    process.env.SWITCHBOT_TOKEN = 't';
+    process.env.SWITCHBOT_SECRET = 's';
+    const res = await runCli(registerDoctorCommand, ['--json', 'doctor']);
+    const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    const creds = payload.data.checks.find((c: { name: string }) => c.name === 'credentials');
+    expect(creds.detail.backend).toMatch(/keychain|credman|secret-service|file/);
+    expect(typeof creds.detail.writable).toBe('boolean');
+    expect(creds.detail.profile).toBe('default');
   });
 
   it('enumerates profiles when ~/.switchbot/profiles exists', async () => {
