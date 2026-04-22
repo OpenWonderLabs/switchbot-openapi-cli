@@ -137,7 +137,11 @@ describe('switchbot policy (commander surface)', () => {
     }
     function seedInvalid(name = 'policy.yaml'): string {
       const p = path.join(tmpDir, name);
-      fs.writeFileSync(p, 'version: "0.2"\n', 'utf-8');
+      // "0.9" is not a supported schema version — the validator short-circuits
+      // with an `unsupported-version` error. Using a truly unsupported version
+      // keeps this fixture invalid across future CLI releases that expand
+      // SUPPORTED_POLICY_SCHEMA_VERSIONS.
+      fs.writeFileSync(p, 'version: "0.9"\n', 'utf-8');
       return p;
     }
 
@@ -193,7 +197,7 @@ describe('switchbot policy (commander surface)', () => {
         data: { valid: boolean; errors: Array<{ keyword: string }> };
       };
       expect(parsed.data.valid).toBe(false);
-      expect(parsed.data.errors.some((e) => e.keyword === 'const')).toBe(true);
+      expect(parsed.data.errors.some((e) => e.keyword === 'unsupported-version')).toBe(true);
     });
 
     it('emits a file-not-found envelope in --json mode (exit 2)', () => {

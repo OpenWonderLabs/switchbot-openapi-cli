@@ -100,13 +100,17 @@ describe('policy validator (v0.1)', () => {
     expect(missing!.hint).toContain('0.1');
   });
 
-  it('rejects a wrong version constant and hints at migrate', () => {
-    const loaded = writeAndLoad(tmpDir, 'version: "0.2"\n');
+  it('rejects an unsupported schema version with a helpful hint', () => {
+    // "0.9" is not in SUPPORTED_POLICY_SCHEMA_VERSIONS — the validator short-
+    // circuits before dispatching to a schema and returns a single
+    // unsupported-version error.
+    const loaded = writeAndLoad(tmpDir, 'version: "0.9"\n');
     const result = validateLoadedPolicy(loaded);
     expect(result.valid).toBe(false);
-    const versionErr = result.errors.find((e) => e.path === '/version' && e.keyword === 'const');
+    const versionErr = result.errors.find((e) => e.keyword === 'unsupported-version');
     expect(versionErr).toBeDefined();
-    expect(versionErr!.hint).toContain('migrate');
+    expect(versionErr!.path).toBe('/version');
+    expect(versionErr!.hint).toMatch(/supported versions/i);
   });
 
   it('rejects an unknown top-level key and points to it', () => {
@@ -272,5 +276,124 @@ describe('policy validator (v0.1)', () => {
     expect(patternErr).toBeDefined();
     expect(patternErr!.line).toBe(3);
     expect(typeof patternErr!.col).toBe('number');
+  });
+});
+
+describe('policy validator (v0.2)', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'switchbot-policy-v02-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('accepts a minimal v0.2 policy with only the version field', () => {
+    const loaded = writeAndLoad(tmpDir, 'version: "0.2"\n');
+    const result = validateLoadedPolicy(loaded);
+    expect(result.valid, JSON.stringify(result.errors)).toBe(true);
+    expect(result.schemaVersion).toBe('0.2');
+  });
+
+  it('accepts a v0.2 policy with a well-formed MQTT rule', () => {
+    const loaded = writeAndLoad(
+      tmpDir,
+      [
+        'version: "0.2"',
+        'automation:',
+        '  enabled: true',
+        '  rules:',
+        '    - name: "motion at night"',
+        '      when:',
+        '        source: mqtt',
+        '        event: motion.detected',
+        '      conditions:',
+        '        - time_between: ["22:00", "06:00"]',
+        '      then:',
+        '        - command: "devices command <id> turnOn"',
+        '          device: "hallway-light"',
+        '      throttle:',
+        '        max_per: "10m"',
+        '      dry_run: true',
+        '',
+      ].join('\n'),
+    );
+    const result = validateLoadedPolicy(loaded);
+    expect(result.valid, JSON.stringify(result.errors)).toBe(true);
+    expect(result.schemaVersion).toBe('0.2');
+  });
+
+  it('rejects a rule missing the required `when` trigger', () => {
+    const loaded = writeAndLoad(
+      tmpDir,
+      [
+        'version: "0.2"',
+        'automation:',
+        '  rules:',
+        '    - name: "incomplete"',
+        '      then:',
+        '        - command: "devices command <id> turnOn"',
+        '',
+      ].join('\n'),
+    );
+    const result = validateLoadedPolicy(loaded);
+    expect(result.valid).toBe(false);
+    const req = result.errors.find(
+      (e) => e.keyword === 'required' && e.message.includes('when'),
+    );
+    expect(req).toBeDefined();
+  });
+
+  it('falls back to v0.1 validation when version is missing', () => {
+    // Declared version is undefined → dispatch to CURRENT (0.1). The resulting
+    // error is the v0.1 "required: version" gate, not an unsupported-version
+    // short-circuit.
+    const loaded = writeAndLoad(tmpDir, 'aliases:\n  "lamp": "01-ABC-12345"\n');
+    const result = validateLoadedPolicy(loaded);
+    expect(result.schemaVersion).toBe('0.1');
+    expect(result.valid).toBe(false);
+    const req = result.errors.find((e) => e.keyword === 'required');
+    expect(req).toBeDefined();
+    expect(req!.message).toContain('version');
+  });
+
+  it('returns unsupported-version (does not throw) for a future version', () => {
+    const loaded = writeAndLoad(tmpDir, 'version: "0.3"\n');
+    const result = validateLoadedPolicy(loaded);
+    expect(result.valid).toBe(false);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0].keyword).toBe('unsupported-version');
+    expect(result.errors[0].message).toContain('0.3');
+  });
+
+  it('flags destructive commands in rules (placeholder — wired in C3)', () => {
+    // Once C3 lands, `then[].command: "devices command <id> unlock"` should
+    // produce a `rule-destructive-action` error. Today ajv accepts it because
+    // `command` is a free-form string. This test pins the current behavior so
+    // C3 can flip it into an assertion on the new keyword without needing to
+    // remember to add a fresh test.
+    const loaded = writeAndLoad(
+      tmpDir,
+      [
+        'version: "0.2"',
+        'automation:',
+        '  rules:',
+        '    - name: "unlock on arrival"',
+        '      when:',
+        '        source: mqtt',
+        '        event: presence.home',
+        '      then:',
+        '        - command: "devices command <id> unlock"',
+        '          device: "front-door-lock"',
+        '',
+      ].join('\n'),
+    );
+    const result = validateLoadedPolicy(loaded);
+    // TODO(C3): flip expectations to `valid === false` with a
+    // `rule-destructive-action` error once the post-hook ships.
+    expect(result.valid).toBe(true);
+    expect(result.schemaVersion).toBe('0.2');
   });
 });

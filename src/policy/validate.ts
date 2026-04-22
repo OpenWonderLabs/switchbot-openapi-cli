@@ -3,7 +3,13 @@ import { Ajv2020 } from 'ajv/dist/2020.js';
 import type { ErrorObject } from 'ajv';
 import { isMap, isSeq, isScalar, type Node, type LineCounter, type Document } from 'yaml';
 import { loadPolicyFile, type LoadedPolicy } from './load.js';
-import { loadPolicySchema, CURRENT_POLICY_SCHEMA_VERSION, type PolicySchemaVersion } from './schema.js';
+import {
+  loadPolicySchema,
+  CURRENT_POLICY_SCHEMA_VERSION,
+  SUPPORTED_POLICY_SCHEMA_VERSIONS,
+  isSupportedPolicySchemaVersion,
+  type PolicySchemaVersion,
+} from './schema.js';
 
 const require = createRequire(import.meta.url);
 type AddFormatsFn = (ajv: Ajv2020Type) => Ajv2020Type;
@@ -29,18 +35,23 @@ export interface PolicyValidationResult {
   errors: PolicyValidationError[];
 }
 
-let cachedAjv: Ajv2020Type | null = null;
-let cachedValidator: ValidateFn | null = null;
+interface CompiledValidator {
+  ajv: Ajv2020Type;
+  validate: ValidateFn;
+}
 
-function getValidator() {
-  if (cachedValidator) return { ajv: cachedAjv!, validate: cachedValidator };
+const validators = new Map<PolicySchemaVersion, CompiledValidator>();
+
+function getValidator(version: PolicySchemaVersion): CompiledValidator {
+  const cached = validators.get(version);
+  if (cached) return cached;
   const ajv = new Ajv2020({ allErrors: true, strict: false, allowUnionTypes: true });
   addFormats(ajv);
-  const schema = loadPolicySchema(CURRENT_POLICY_SCHEMA_VERSION);
+  const schema = loadPolicySchema(version);
   const validate = ajv.compile(schema);
-  cachedAjv = ajv;
-  cachedValidator = validate;
-  return { ajv, validate };
+  const compiled = { ajv, validate };
+  validators.set(version, compiled);
+  return compiled;
 }
 
 function instancePathToSegments(instancePath: string): string[] {
@@ -147,7 +158,8 @@ function hintFor(err: ErrorObject): string | undefined {
     return 'destructive actions (lock/unlock/delete*/factoryReset) cannot be pre-approved in policy.yaml';
   }
   if (err.keyword === 'const' && err.instancePath === '/version') {
-    return `this CLI supports policy schema version "${CURRENT_POLICY_SCHEMA_VERSION}" only; run \`switchbot policy migrate\` once newer versions are released`;
+    const supported = SUPPORTED_POLICY_SCHEMA_VERSIONS.map((v) => `"${v}"`).join(' / ');
+    return `this CLI supports policy schema versions ${supported}; run \`switchbot policy migrate\` to upgrade an older file`;
   }
   if (err.keyword === 'required' && err.instancePath === '') {
     const missing = (err.params as { missingProperty: string }).missingProperty;
@@ -156,8 +168,46 @@ function hintFor(err: ErrorObject): string | undefined {
   return undefined;
 }
 
+function readDeclaredVersion(data: unknown): string | undefined {
+  if (data && typeof data === 'object' && 'version' in data) {
+    const v = (data as { version: unknown }).version;
+    if (typeof v === 'string') return v;
+  }
+  return undefined;
+}
+
+function unsupportedVersionResult(loaded: LoadedPolicy, declared: string): PolicyValidationResult {
+  const supported = SUPPORTED_POLICY_SCHEMA_VERSIONS.map((v) => `"${v}"`).join(' / ');
+  return {
+    policyPath: loaded.path,
+    schemaVersion: CURRENT_POLICY_SCHEMA_VERSION,
+    valid: false,
+    errors: [
+      {
+        path: '/version',
+        line: 1,
+        col: 1,
+        keyword: 'unsupported-version',
+        message: `policy schema version "${declared}" is not supported by this CLI`,
+        hint: `supported versions: ${supported}. upgrade the CLI or downgrade the file.`,
+        schemaPath: '#/properties/version',
+      },
+    ],
+  };
+}
+
 export function validateLoadedPolicy(loaded: LoadedPolicy): PolicyValidationResult {
-  const { validate } = getValidator();
+  const declared = readDeclaredVersion(loaded.data);
+
+  if (declared !== undefined && !isSupportedPolicySchemaVersion(declared)) {
+    return unsupportedVersionResult(loaded, declared);
+  }
+
+  const version: PolicySchemaVersion = isSupportedPolicySchemaVersion(declared)
+    ? declared
+    : CURRENT_POLICY_SCHEMA_VERSION;
+
+  const { validate } = getValidator(version);
   const ok = validate(loaded.data);
   const errors: PolicyValidationError[] = [];
 
@@ -178,7 +228,7 @@ export function validateLoadedPolicy(loaded: LoadedPolicy): PolicyValidationResu
 
   return {
     policyPath: loaded.path,
-    schemaVersion: CURRENT_POLICY_SCHEMA_VERSION,
+    schemaVersion: version,
     valid: ok === true,
     errors,
   };

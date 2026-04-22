@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://schemas.openclaw.ai/switchbot/v0.2/policy.draft.json",
-  "title": "OpenClaw SwitchBot policy v0.2 (DRAFT)",
-  "description": "NOT YET ACTIVE. This draft tightens the `automation.rules[]` shape that v0.1 left as a loose `array of object`. It is NOT read by the validator. See docs/design/phase4-rules-schema.md.",
+  "$id": "https://schemas.openclaw.ai/switchbot/v0.2/policy.json",
+  "title": "OpenClaw SwitchBot policy v0.2",
+  "description": "Tightens the `automation.rules[]` shape that v0.1 left as a loose `array of object`. Validator reads this when the policy file's top-level `version` field is \"0.2\". See docs/design/phase4-rules-schema.md for the field-level rationale.",
   "type": "object",
   "additionalProperties": false,
   "required": ["version"],
@@ -197,8 +197,7 @@
 
     "condition": {
       "type": "object",
-      "additionalProperties": false,
-      "description": "Predicate evaluated after the trigger matches. Supports two shapes: a time window, or a device-state comparison.",
+      "description": "Predicate evaluated after the trigger matches. Supports two shapes: a time window, or a device-state comparison. `additionalProperties: false` lives on each `oneOf` branch below — putting it here would reject every key because this schema has no top-level `properties`.",
       "oneOf": [
         {
           "type": "object",
