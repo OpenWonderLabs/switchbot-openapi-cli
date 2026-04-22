@@ -175,6 +175,9 @@ removes the ambiguity.
 
 Full field-by-field reference, validation flow, and error catalogue:
 [`docs/policy-reference.md`](./docs/policy-reference.md).
+Four annotated starter files covering common setups
+(solo / shared household / rental / defaults-only) live in
+[`examples/policies/`](./examples/policies/).
 
 ## Global options
 

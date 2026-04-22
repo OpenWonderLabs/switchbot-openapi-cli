@@ -288,6 +288,9 @@ already current.
 
 ## See also
 
+- [`examples/policies/`](../examples/policies/) — four annotated
+  starter files (minimal / cautious / permissive / rental), each with
+  a rationale for when to pick it.
 - [`docs/agent-guide.md`](./agent-guide.md) — how an AI agent should
   read and honour `policy.yaml`.
 - [`docs/audit-log.md`](./audit-log.md) — the format of the audit log

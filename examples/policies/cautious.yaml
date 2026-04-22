@@ -1,0 +1,75 @@
+# ============================================================================
+#  cautious.yaml — confirm-by-default household
+# ============================================================================
+#
+#  Why this shape:
+#    Aimed at a shared-home setup where any mutation could disturb someone
+#    else in the house. The agent is allowed to *read* freely, but every
+#    action that changes state — including routine turnOn/turnOff — prompts
+#    for confirmation. At night, the confirmation gate widens to the full
+#    quiet-hours window so a half-asleep voice command can't flip lights
+#    downstairs.
+#
+#    Aliases are filled in for the four or five devices you actually
+#    address by name, because confirm-first only works if the agent can
+#    identify the right device unambiguously.
+#
+#  When to pick this:
+#    - Multiple people share the account.
+#    - You have IR-controlled AC/heaters where a mistaken command is
+#      expensive to reverse (wrong-setpoint climate run all night).
+#    - You want an audit trail with generous retention.
+#
+#  Trade-off:
+#    - Every mutation prompts. If you batch a lot of actions in one
+#      conversation, you will approve a lot of prompts. That's the point.
+#
+#  Copy to install:
+#    cp cautious.yaml ~/.config/openclaw/switchbot/policy.yaml
+#    switchbot policy validate
+#
+# ============================================================================
+
+version: "0.1"
+
+aliases:
+  # Replace these with your real deviceIds. `switchbot devices list --format=tsv`
+  # prints them in uppercase, which is what the schema requires.
+  "living room light": "01-202407090924-26354212"
+  "bedroom AC":        "02-202502111234-85411230"
+  "front door lock":   "03-202501201700-99887766"
+  "kitchen plug":      "04-202503081500-55443322"
+
+confirmations:
+  # Extra actions that need explicit approval on top of the built-in
+  # destructive list. turnOn/turnOff are cheap but noisy — asking once
+  # saves a family argument.
+  always_confirm:
+    - "turnOn"
+    - "turnOff"
+    - "setTargetTemperature"
+    - "setThermostatMode"
+    - "setColor"
+    - "setBrightness"
+
+  # never_confirm is intentionally empty — we're not pre-approving anything.
+  # (The schema forbids putting lock/unlock/deleteScene/factoryReset here
+  # regardless, so this is belt-and-braces.)
+  never_confirm: []
+
+# Overnight window: every mutation requires confirmation from 22:00 local
+# until 08:00 the next morning. `start > end` means the window crosses
+# midnight — the schema explicitly supports that.
+quiet_hours:
+  start: "22:00"
+  end:   "08:00"
+
+audit:
+  log_path: "~/.switchbot/audit.log"
+  # Keep the trail long. If something misbehaves we want to trace it.
+  retention: "180d"
+
+# Phase 4 rule engine stays off — cautious users don't want declarative
+# automations running without a human in the loop.
+automation:
+  enabled: false

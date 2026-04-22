@@ -1,0 +1,31 @@
+# ============================================================================
+#  minimal.yaml — the bare floor a policy file can sit on
+# ============================================================================
+#
+#  Why this shape:
+#    Sometimes you want the agent to know "yes, there is a policy here, and
+#    I've accepted the defaults." This file does exactly that. Every
+#    omitted block resolves to the built-in defaults:
+#      - no aliases (names fall through to the CLI's match strategies)
+#      - default confirmations (destructive actions always confirm)
+#      - no quiet hours
+#      - audit log at ~/.switchbot/audit.log, retention 90d
+#      - automation disabled
+#
+#  When to pick this:
+#    - You trust the CLI's defaults and want to avoid configuration drift.
+#    - You use the skill mainly for read-only status questions.
+#    - You're new to the CLI and want the skill to "just work."
+#
+#  When NOT to pick this:
+#    - You have more than one device the agent will address by name
+#      (add `aliases`).
+#    - You want the agent to hold back after bedtime (add `quiet_hours`).
+#
+#  Copy to install:
+#    cp minimal.yaml ~/.config/openclaw/switchbot/policy.yaml
+#    switchbot policy validate
+#
+# ============================================================================
+
+version: "0.1"

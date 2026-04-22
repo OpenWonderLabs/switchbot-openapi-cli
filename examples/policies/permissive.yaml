@@ -1,0 +1,67 @@
+# ============================================================================
+#  permissive.yaml — solo power-user setup
+# ============================================================================
+#
+#  Why this shape:
+#    One person, one account, mostly smart lights and plugs, tired of
+#    approving every turnOn/turnOff. This policy tells the skill: "the
+#    reversible stuff is fine, just do it; the destructive stuff still
+#    needs my approval." Destructive actions (lock/unlock/deleteScene/
+#    deleteWebhook/factoryReset) are NOT in `never_confirm` — the schema
+#    forbids it, and we agree with the schema.
+#
+#    No quiet hours — the user explicitly wants no time-of-day gates.
+#    Aliases cover the devices you refer to by name; everything else
+#    falls back to name-matching against the cache.
+#
+#  When to pick this:
+#    - Single user on the account.
+#    - Mostly non-destructive devices (bulbs, plugs, Bot, Curtain).
+#    - You have an audit log you actually review; that's where you catch
+#      "wait, why did that turn off at 3am?" after the fact rather than
+#      preventing it up front.
+#
+#  Trade-off:
+#    - Agent mistakes happen silently. If your LLM decides "turnOff" is a
+#      sensible response to a question about the plug, it just happens.
+#      The audit log has receipts, but you won't be prompted in the moment.
+#    - Do NOT use this shape on a shared account. See cautious.yaml.
+#
+#  Copy to install:
+#    cp permissive.yaml ~/.config/openclaw/switchbot/policy.yaml
+#    switchbot policy validate
+#
+# ============================================================================
+
+version: "0.1"
+
+aliases:
+  "desk lamp":       "01-202407090924-26354212"
+  "kitchen plug":    "04-202503081500-55443322"
+  "living room bot": "05-202406120001-11223344"
+
+confirmations:
+  # Actions you've pre-approved. The skill will run these without asking.
+  # Destructive actions are NOT allowed here — the schema rejects this
+  # file at validation time if you try, and that's a feature.
+  never_confirm:
+    - "turnOn"
+    - "turnOff"
+    - "setBrightness"
+    - "setColor"
+    - "setColorTemperature"
+    - "press"    # Bot: tap-and-release
+
+  # Empty — we're not tightening anything beyond the built-in defaults.
+  always_confirm: []
+
+# No quiet hours block at all — the solo user wants automations to behave
+# the same at 3am as at 3pm.
+
+audit:
+  log_path: "~/.switchbot/audit.log"
+  # Shorter retention because you scan the log frequently anyway.
+  retention: "30d"
+
+automation:
+  enabled: false
