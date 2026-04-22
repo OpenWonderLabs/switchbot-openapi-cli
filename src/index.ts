@@ -25,6 +25,7 @@ import { registerCapabilitiesCommand } from './commands/capabilities.js';
 import { registerAgentBootstrapCommand } from './commands/agent-bootstrap.js';
 import { registerPolicyCommand } from './commands/policy.js';
 import { registerRulesCommand } from './commands/rules.js';
+import { registerAuthCommand } from './commands/auth.js';
 import { primeCredentials } from './credentials/prime.js';
 import { getActiveProfile } from './lib/request-context.js';
 
@@ -109,6 +110,7 @@ registerCapabilitiesCommand(program);
 registerAgentBootstrapCommand(program);
 registerPolicyCommand(program);
 registerRulesCommand(program);
+registerAuthCommand(program);
 
 // Prime keychain-stored credentials before any command runs. This is a
 // best-effort probe: failures are silently swallowed inside primeCredentials,
