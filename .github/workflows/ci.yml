@@ -75,3 +75,27 @@ jobs:
             echo "FAIL: budget is 15000, got $BYTES"
             exit 1
           fi
+
+  policy-schema-sync:
+    name: Policy schema sync with skill repo
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch skill repo's mirrored schema
+        run: |
+          curl -fsSL --retry 3 \
+            https://raw.githubusercontent.com/OpenWonderLabs/openclaw-switchbot-skill/main/examples/policy.schema.json \
+            -o /tmp/skill-policy.schema.json
+      - name: Diff skill mirror against CLI source of truth
+        run: |
+          if ! diff -u /tmp/skill-policy.schema.json src/policy/schema/v0.1.json; then
+            echo ""
+            echo "FAIL: policy schema drift detected."
+            echo "  CLI source: src/policy/schema/v0.1.json"
+            echo "  Skill copy: https://github.com/OpenWonderLabs/openclaw-switchbot-skill/blob/main/examples/policy.schema.json"
+            echo ""
+            echo "Sync the skill's examples/policy.schema.json from the CLI file and cut a matching skill release."
+            exit 1
+          fi
+          echo "OK: policy schema matches skill repo."

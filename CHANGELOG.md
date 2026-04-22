@@ -5,6 +5,29 @@ All notable changes to `@switchbot/openapi-cli` are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.0] - 2026-04-22
+
+Feature release — `switchbot policy` command group.
+
+The OpenClaw SwitchBot skill reads its behaviour from `~/.config/openclaw/switchbot/policy.yaml` (aliases, confirmations, quiet hours, audit path). Until this release, a typo in that file failed silently — the skill would load whatever YAML parsed and use defaults for anything it didn't understand, leaving the user to wonder why "bedroom light" didn't work. This release ships a dedicated command group that turns those silent failures into compiler-style errors with line numbers, carets, and fix hints, and eliminates the hand-crafted starter template step from the skill's Quickstart.
+
+### Added
+
+- **`switchbot policy validate [path]`** — validates the policy file against the embedded schema v0.1 (JSON Schema 2020-12). Reports each error with its path, YAML line:col, a source-line snippet + caret, and an action-specific hint (e.g. "paste the deviceId from `switchbot devices list --format=tsv`" on alias pattern mismatches; "destructive actions (lock/unlock/delete*/factoryReset) cannot be pre-approved in policy.yaml" on a forbidden `never_confirm` entry). Supports `--json` for programmatic consumers, `--no-snippet` to drop source preview, `--no-color` for piped output.
+- **`switchbot policy new [path]`** — writes a 99-line annotated starter template to the given path (or the default `~/.config/openclaw/switchbot/policy.yaml`). Refuses to overwrite an existing file unless `--force` is passed. Creates the parent directory if needed.
+- **`switchbot policy migrate [path]`** — reports the policy file's schema version against what this CLI supports. No-op today (only v0.1 exists); wired so future releases can run structural upgrades without breaking existing policies.
+- **Path resolution precedence**: `[path]` argument > `SWITCHBOT_POLICY_PATH` env var > default `~/.config/openclaw/switchbot/policy.yaml`. The same resolver is exported for the Phase 3 `agent-bootstrap` install flow to reuse.
+- **Exit-code taxonomy** (scriptable): `0` valid / `1` invalid / `2` file-not-found / `3` yaml-parse / `4` internal / `5` exists (on `new` without `--force`) / `6` unsupported-version (on `migrate`). `--json` mode emits the usual `{schemaVersion, error}` or `{schemaVersion, data}` envelope.
+- **Embedded schema asset** — `src/policy/schema/v0.1.json` ships in the npm package via a post-build `copy-assets.mjs` step. The skill repository's `examples/policy.schema.json` is the mirror copy; a CI job diffs the two on every push to prevent drift.
+
+### Dependencies
+
+- Added `yaml@^2` (source-map-preserving parser), `ajv@^8` + `ajv-formats@^3` (JSON Schema 2020-12 validator via `ajv/dist/2020`).
+
+### Skill-side impact
+
+- OpenClaw SwitchBot skill v0.2.0 declares `authority.cli: "@switchbot/openapi-cli@>=2.8.0 <3.0.0"` and replaces the manual "edit this file by hand" Quickstart step with `switchbot policy new` + `switchbot policy validate`. See the skill repo's `CHANGELOG.md` for the matching entry.
+
 ## [2.7.2] - 2026-04-21
 
 Patch release — CI size-budget fix.

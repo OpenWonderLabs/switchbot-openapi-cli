@@ -55,6 +55,7 @@ Under the hood every surface shares the same catalog, cache, and HMAC client —
   - [`schema`](#schema--export-catalog-as-json)
   - [`capabilities`](#capabilities--cli-manifest)
   - [`cache`](#cache--inspect-and-clear-local-cache)
+  - [`policy`](#policy--validate-scaffold-and-migrate-policyyaml)
   - [`completion`](#completion--shell-tab-completion)
 - [Output modes](#output-modes)
 - [Cache](#cache-1)
@@ -653,6 +654,44 @@ switchbot cache clear
 switchbot cache clear --key list
 switchbot cache clear --key status
 ```
+
+### `policy` — validate, scaffold, and migrate policy.yaml
+
+Companion to the [OpenClaw SwitchBot skill](https://github.com/OpenWonderLabs/openclaw-switchbot-skill). The skill reads behaviour (aliases, confirmations, quiet hours, audit path) from `~/.config/openclaw/switchbot/policy.yaml`. This command group checks that file before the skill ever sees it, turning what used to be silent failures into line-accurate errors.
+
+```bash
+# Write a starter policy at the default location
+switchbot policy new                              # → ~/.config/openclaw/switchbot/policy.yaml
+switchbot policy new ./custom/policy.yaml --force
+
+# Validate (compiler-style errors with line:col + caret + hints)
+switchbot policy validate
+switchbot policy validate ./custom/policy.yaml
+switchbot policy validate --json | jq '.data.errors'
+switchbot policy validate --no-snippet             # plain error list, no source preview
+
+# Report the schema version the file declares
+switchbot policy migrate
+```
+
+Path resolution order: positional `[path]` > `SWITCHBOT_POLICY_PATH` env var > default `~/.config/openclaw/switchbot/policy.yaml`.
+
+**Exit codes:** `0` valid / `1` invalid / `2` file-not-found / `3` yaml-parse / `4` internal / `5` file already exists (on `new`, overridden with `--force`) / `6` unsupported schema version (on `migrate`).
+
+Example — editing an alias without quoting the deviceId:
+
+```console
+$ switchbot policy validate
+~/.config/openclaw/switchbot/policy.yaml:14:11
+  14 |   bedroom light: 01-abc-12345
+                 ^^^^^^^^^^^^^
+error: /aliases/bedroom light does not match pattern ^[A-Z0-9]{2,}-[A-Z0-9-]+$
+hint:  paste the deviceId from `switchbot devices list --format=tsv`, e.g. 01-202407090924-26354212
+
+✗ 1 error in ~/.config/openclaw/switchbot/policy.yaml (schema v0.1)
+```
+
+The schema shipped with the CLI (`src/policy/schema/v0.1.json`) is mirrored as `examples/policy.schema.json` in the skill repo; a CI job on every push diffs the two to prevent drift.
 
 
 
