@@ -1,8 +1,10 @@
 # Policy schema v0.2 — design notes
 
-> Status: **draft**. The schema lives at `src/policy/schema/v0.2.draft.json`
-> and is **not** wired into `switchbot policy validate`. This document
-> explains the intent so Phase 4 implementation work has a fixed target.
+> Status: **active (v0.2)**. The schema lives at
+> `src/policy/schema/v0.2.json` and is wired into
+> `switchbot policy validate`. New policies default to v0.1; run
+> `switchbot policy migrate` to upgrade opt-in. This document is kept as
+> the historical rationale for the shape.
 
 ## Why draft now
 

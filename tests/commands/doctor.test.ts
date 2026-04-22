@@ -471,4 +471,40 @@ describe('doctor command', () => {
       delete process.env.SWITCHBOT_POLICY_PATH;
     }
   });
+
+  it('policy check reports schemaVersion 0.2 for v0.2 policies with rules', async () => {
+    const policyDir = path.join(tmp, '.config', 'openclaw', 'switchbot');
+    const policyPath = path.join(policyDir, 'policy.yaml');
+    fs.mkdirSync(policyDir, { recursive: true });
+    fs.writeFileSync(
+      policyPath,
+      [
+        'version: "0.2"',
+        'automation:',
+        '  enabled: true',
+        '  rules:',
+        '    - name: "nightlight"',
+        '      when:',
+        '        source: mqtt',
+        '        event: motion.detected',
+        '      then:',
+        '        - command: "devices command <id> turnOn"',
+        '          device: "hall-light"',
+        '',
+      ].join('\n'),
+    );
+    process.env.SWITCHBOT_POLICY_PATH = policyPath;
+    process.env.SWITCHBOT_TOKEN = 't';
+    process.env.SWITCHBOT_SECRET = 's';
+    try {
+      const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--section', 'policy']);
+      const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+      const policy = payload.data.checks.find((c: { name: string }) => c.name === 'policy');
+      expect(policy.status).toBe('ok');
+      expect(policy.detail.valid).toBe(true);
+      expect(policy.detail.schemaVersion).toBe('0.2');
+    } finally {
+      delete process.env.SWITCHBOT_POLICY_PATH;
+    }
+  });
 });

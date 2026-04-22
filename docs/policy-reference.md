@@ -34,13 +34,25 @@ memory, and writes back.
 
 ## Schema version
 
-The top-level `version` field is **required** and must be the string
-`"0.1"` for this release. Any other value fails validation with a
-named error. When policy schema v0.2 ships (Phase 4, rule engine),
-`switchbot policy migrate` will rewrite `0.1 → 0.2` in place.
+The top-level `version` field is **required**. The CLI currently
+supports two schemas:
+
+| Version | Emitted by `policy new` | What it adds |
+|---|---|---|
+| `"0.1"` | Default (today) | aliases, confirmations, quiet_hours, audit, cli |
+| `"0.2"` | Opt-in via `policy migrate` | typed `automation.rules[]` for the preview rules engine |
+
+A file with anything other than `"0.1"` or `"0.2"` fails validation
+with a named `unsupported-version` error. When the rules engine exits
+preview and v0.2 becomes the default, `switchbot policy migrate` will
+continue to be an opt-in upgrade — comments and non-version blocks
+are preserved verbatim, and the command refuses to rewrite the file
+if the upgraded document would not validate (exit code 7).
 
 ```yaml
-version: "0.1"
+version: "0.1"  # stable today
+# or
+version: "0.2"  # opt-in for rules engine preview
 ```
 
 ---

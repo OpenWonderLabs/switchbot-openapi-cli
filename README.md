@@ -173,6 +173,19 @@ the CLI's prefix/substring/fuzzy match strategies and can pick the
 wrong device when two names collide. A one-line `aliases` entry
 removes the ambiguity.
 
+**Schema versions.** The CLI understands two schemas:
+
+- **v0.1** — the stable shape covering aliases, confirmations,
+  quiet hours, audit, and CLI profile. `switchbot policy new` emits
+  this by default so fresh files stay compatible with older CLI
+  builds on other machines.
+- **v0.2** — adds a typed `automation.rules[]` block (triggers,
+  conditions, throttles, dry-run) used by the preview rules engine.
+  Opt in via `switchbot policy migrate` when you are ready to author
+  rules; the migration is in place and preserves comments, and
+  refuses to touch the file if the upgraded document would not
+  validate.
+
 Full field-by-field reference, validation flow, and error catalogue:
 [`docs/policy-reference.md`](./docs/policy-reference.md).
 Four annotated starter files covering common setups

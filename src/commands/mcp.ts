@@ -957,7 +957,8 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
     {
       title: 'Validate a policy.yaml file',
       description:
-        'Check a policy file against the embedded JSON Schema. Returns the validation result with per-error line/col and a hint. ' +
+        'Check a policy file against the embedded JSON Schema (supports v0.1 and v0.2). ' +
+        'Returns the validation result with per-error line/col and a hint. ' +
         'When no path is given, reads the resolved default (${SWITCHBOT_POLICY_PATH} or ~/.config/openclaw/switchbot/policy.yaml). ' +
         'Use before relying on aliases/quiet_hours/confirmations so the agent never acts on a broken policy.',
       _meta: { agentSafetyTier: 'read' },
@@ -1297,9 +1298,9 @@ The MCP server exposes fourteen tools:
   - get_device_history      fetch raw JSONL history records for a device
   - query_device_history    filter + page history records with field/time predicates
   - aggregate_device_history compute count/min/max/avg/sum/p50/p95 over history records
-  - policy_validate         check policy.yaml against the embedded schema
+  - policy_validate         check policy.yaml against the embedded schema (v0.1 / v0.2)
   - policy_new              scaffold a starter policy.yaml (action — confirm first)
-  - policy_migrate          report policy schema migration status
+  - policy_migrate          upgrade policy.yaml to the latest schema (action — preserves comments)
 
 Resource (read-only):
   - switchbot://events    snapshot of recent MQTT shadow events from the ring buffer
