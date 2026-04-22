@@ -37,6 +37,7 @@ const QUICK_REFERENCE = {
   observability: ['doctor --json', 'quota status', 'cache status', 'events mqtt-tail'],
   history: ['history range <id> --since 7d', 'history stats <id>'],
   meta: ['devices meta set <id> --alias <name>', 'devices meta list', 'devices meta get <id>'],
+  policy: ['policy validate', 'policy new', 'policy migrate'],
 };
 
 interface BootstrapOptions {
