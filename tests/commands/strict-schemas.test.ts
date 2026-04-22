@@ -84,7 +84,7 @@ async function assertRejectsUnknownKey(
   );
 }
 
-describe('MCP strict schemas — all 11 tools reject unknown keys', () => {
+describe('MCP strict schemas — all 14 tools reject unknown keys', () => {
   beforeEach(() => {
     apiMock.__instance.get.mockReset();
     apiMock.__instance.post.mockReset();
@@ -151,5 +151,20 @@ describe('MCP strict schemas — all 11 tools reject unknown keys', () => {
   it('account_overview rejects unknown keys', async () => {
     const { client } = await pair();
     await assertRejectsUnknownKey(client, 'account_overview', {});
+  });
+
+  it('policy_validate rejects unknown keys', async () => {
+    const { client } = await pair();
+    await assertRejectsUnknownKey(client, 'policy_validate', {});
+  });
+
+  it('policy_new rejects unknown keys', async () => {
+    const { client } = await pair();
+    await assertRejectsUnknownKey(client, 'policy_new', {});
+  });
+
+  it('policy_migrate rejects unknown keys', async () => {
+    const { client } = await pair();
+    await assertRejectsUnknownKey(client, 'policy_migrate', {});
   });
 });

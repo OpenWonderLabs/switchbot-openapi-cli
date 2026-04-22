@@ -42,6 +42,19 @@ import { todayUsage } from '../utils/quota.js';
 import { describeCache } from '../devices/cache.js';
 import { withRequestContext } from '../lib/request-context.js';
 import { profileFilePath, tryLoadConfig } from '../config.js';
+import {
+  loadPolicyFile,
+  resolvePolicyPath,
+  PolicyFileNotFoundError,
+  PolicyYamlParseError,
+} from '../policy/load.js';
+import { validateLoadedPolicy } from '../policy/validate.js';
+import {
+  CURRENT_POLICY_SCHEMA_VERSION,
+  SUPPORTED_POLICY_SCHEMA_VERSIONS,
+} from '../policy/schema.js';
+import { fileURLToPath } from 'node:url';
+import { dirname as pathDirname } from 'node:path';
 import fs from 'node:fs';
 
 /**
@@ -932,6 +945,211 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
     }
   );
 
+  // ---- policy_validate -----------------------------------------------------
+  server.registerTool(
+    'policy_validate',
+    {
+      title: 'Validate a policy.yaml file',
+      description:
+        'Check a policy file against the embedded JSON Schema. Returns the validation result with per-error line/col and a hint. ' +
+        'When no path is given, reads the resolved default (${SWITCHBOT_POLICY_PATH} or ~/.config/openclaw/switchbot/policy.yaml). ' +
+        'Use before relying on aliases/quiet_hours/confirmations so the agent never acts on a broken policy.',
+      _meta: { agentSafetyTier: 'read' },
+      inputSchema: z.object({
+        path: z.string().optional().describe('Optional policy file path; defaults to the resolved default path'),
+      }).strict(),
+      outputSchema: {
+        policyPath: z.string(),
+        schemaVersion: z.string(),
+        present: z.boolean().describe('false when the file does not exist'),
+        valid: z.boolean().nullable().describe('null when present=false'),
+        errors: z.array(z.object({
+          path: z.string(),
+          line: z.number().optional(),
+          col: z.number().optional(),
+          keyword: z.string(),
+          message: z.string(),
+          hint: z.string().optional(),
+          schemaPath: z.string(),
+        })).describe('Empty when valid or when the file is missing'),
+      },
+    },
+    async ({ path: pathArg }) => {
+      const policyPath = resolvePolicyPath({ flag: pathArg });
+      try {
+        const loaded = loadPolicyFile(policyPath);
+        const result = validateLoadedPolicy(loaded);
+        const structured = {
+          policyPath: result.policyPath,
+          schemaVersion: result.schemaVersion,
+          present: true,
+          valid: result.valid,
+          errors: result.errors,
+        };
+        return {
+          content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+          structuredContent: structured,
+        };
+      } catch (err) {
+        if (err instanceof PolicyFileNotFoundError) {
+          const structured = {
+            policyPath,
+            schemaVersion: CURRENT_POLICY_SCHEMA_VERSION,
+            present: false,
+            valid: null,
+            errors: [],
+          };
+          return {
+            content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+            structuredContent: structured,
+          };
+        }
+        if (err instanceof PolicyYamlParseError) {
+          const structured = {
+            policyPath,
+            schemaVersion: CURRENT_POLICY_SCHEMA_VERSION,
+            present: true,
+            valid: false,
+            errors: err.yamlErrors.map((e) => ({
+              path: '',
+              line: e.line,
+              col: e.col,
+              keyword: 'yaml-parse',
+              message: e.message,
+              schemaPath: '',
+            })),
+          };
+          return {
+            content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+            structuredContent: structured,
+          };
+        }
+        throw err;
+      }
+    }
+  );
+
+  // ---- policy_new ----------------------------------------------------------
+  server.registerTool(
+    'policy_new',
+    {
+      title: 'Scaffold a starter policy.yaml',
+      description:
+        'Write a starter policy file to the resolved default path (or a given path). Refuses to overwrite unless force=true. ' +
+        'This is a write action: the agent should only call it after confirming with the user.',
+      _meta: { agentSafetyTier: 'action' },
+      inputSchema: z.object({
+        path: z.string().optional().describe('Optional target path; defaults to the resolved default'),
+        force: z.boolean().optional().describe('When true, overwrite an existing file'),
+      }).strict(),
+      outputSchema: {
+        policyPath: z.string(),
+        schemaVersion: z.string(),
+        bytesWritten: z.number(),
+        overwritten: z.boolean(),
+      },
+    },
+    async ({ path: pathArg, force }) => {
+      const policyPath = resolvePolicyPath({ flag: pathArg });
+      const doForce = force === true;
+      if (fs.existsSync(policyPath) && !doForce) {
+        return mcpError('guard', 5, `refusing to overwrite existing policy at ${policyPath}`, {
+          hint: 'pass force=true to overwrite, or choose a different path',
+          context: { policyPath },
+        });
+      }
+      const templateUrl = new URL('../policy/examples/policy.example.yaml', import.meta.url);
+      const template = fs.readFileSync(fileURLToPath(templateUrl), 'utf-8');
+      fs.mkdirSync(pathDirname(policyPath), { recursive: true });
+      fs.writeFileSync(policyPath, template, { encoding: 'utf-8' });
+      const structured = {
+        policyPath,
+        schemaVersion: CURRENT_POLICY_SCHEMA_VERSION,
+        bytesWritten: Buffer.byteLength(template, 'utf-8'),
+        overwritten: doForce,
+      };
+      return {
+        content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+        structuredContent: structured,
+      };
+    }
+  );
+
+  // ---- policy_migrate ------------------------------------------------------
+  server.registerTool(
+    'policy_migrate',
+    {
+      title: 'Report policy file migration status',
+      description:
+        'Inspect the policy file\'s `version` field and report whether it matches the CLI\'s current schema version. ' +
+        'No-op today (only one schema version is published); will rewrite the version constant when v0.2 ships.',
+      _meta: { agentSafetyTier: 'read' },
+      inputSchema: z.object({
+        path: z.string().optional().describe('Optional policy file path; defaults to the resolved default path'),
+      }).strict(),
+      outputSchema: {
+        policyPath: z.string(),
+        fileVersion: z.string().optional(),
+        currentVersion: z.string(),
+        supportedVersions: z.array(z.string()),
+        status: z.enum(['already-current', 'older-but-supported', 'unsupported', 'no-version-field', 'file-not-found']),
+        message: z.string(),
+      },
+    },
+    async ({ path: pathArg }) => {
+      const policyPath = resolvePolicyPath({ flag: pathArg });
+      let loaded;
+      try {
+        loaded = loadPolicyFile(policyPath);
+      } catch (err) {
+        if (err instanceof PolicyFileNotFoundError) {
+          const structured = {
+            policyPath,
+            currentVersion: CURRENT_POLICY_SCHEMA_VERSION,
+            supportedVersions: [...SUPPORTED_POLICY_SCHEMA_VERSIONS],
+            status: 'file-not-found' as const,
+            message: `policy file not found: ${policyPath}`,
+          };
+          return {
+            content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+            structuredContent: structured,
+          };
+        }
+        throw err;
+      }
+      const data = loaded.data as { version?: unknown } | null;
+      const fileVersion = typeof data?.version === 'string' ? data.version : undefined;
+      const base = {
+        policyPath,
+        fileVersion,
+        currentVersion: CURRENT_POLICY_SCHEMA_VERSION,
+        supportedVersions: [...SUPPORTED_POLICY_SCHEMA_VERSIONS],
+      };
+      let status: 'already-current' | 'older-but-supported' | 'unsupported' | 'no-version-field';
+      let message: string;
+      if (!fileVersion) {
+        status = 'no-version-field';
+        message = `policy has no \`version\` field — add \`version: "${CURRENT_POLICY_SCHEMA_VERSION}"\``;
+      } else if (SUPPORTED_POLICY_SCHEMA_VERSIONS.includes(fileVersion as typeof SUPPORTED_POLICY_SCHEMA_VERSIONS[number])) {
+        if (fileVersion === CURRENT_POLICY_SCHEMA_VERSION) {
+          status = 'already-current';
+          message = `already on schema v${CURRENT_POLICY_SCHEMA_VERSION}; no migration needed`;
+        } else {
+          status = 'older-but-supported';
+          message = `schema v${fileVersion} is still supported; no migration needed`;
+        }
+      } else {
+        status = 'unsupported';
+        message = `policy schema v${fileVersion} is not supported (supports: ${SUPPORTED_POLICY_SCHEMA_VERSIONS.join(', ')})`;
+      }
+      const structured = { ...base, status, message };
+      return {
+        content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+        structuredContent: structured,
+      };
+    }
+  );
+
   // switchbot://events resource — snapshot of recent shadow events from the ring buffer.
   // Returns up to 100 recent events. When MQTT is disabled, returns an empty list with a state note.
   // URI: switchbot://events  (optional query: ?filter=<expression>  ?limit=<n>)
@@ -980,7 +1198,7 @@ export function registerMcpCommand(program: Command): void {
     .command('mcp')
     .description('Run as a Model Context Protocol server so AI agents can call SwitchBot tools')
     .addHelpText('after', `
-The MCP server exposes eleven tools:
+The MCP server exposes fourteen tools:
   - list_devices            fetch all physical + IR devices
   - get_device_status       live status for a physical device
   - send_command            control a device (destructive commands need confirm:true)
@@ -992,6 +1210,9 @@ The MCP server exposes eleven tools:
   - get_device_history      fetch raw JSONL history records for a device
   - query_device_history    filter + page history records with field/time predicates
   - aggregate_device_history compute count/min/max/avg/sum/p50/p95 over history records
+  - policy_validate         check policy.yaml against the embedded schema
+  - policy_new              scaffold a starter policy.yaml (action — confirm first)
+  - policy_migrate          report policy schema migration status
 
 Resource (read-only):
   - switchbot://events    snapshot of recent MQTT shadow events from the ring buffer

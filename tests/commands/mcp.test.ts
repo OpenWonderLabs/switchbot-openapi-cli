@@ -92,7 +92,7 @@ describe('mcp server', () => {
     cacheMock.updateCacheFromDeviceList.mockClear();
   });
 
-  it('exposes the eleven tools with titles and input schemas', async () => {
+  it('exposes the fourteen tools with titles and input schemas', async () => {
     const { client } = await pair();
     const { tools } = await client.listTools();
 
@@ -106,6 +106,9 @@ describe('mcp server', () => {
         'get_device_status',
         'list_devices',
         'list_scenes',
+        'policy_migrate',
+        'policy_new',
+        'policy_validate',
         'query_device_history',
         'run_scene',
         'search_catalog',
@@ -629,5 +632,119 @@ describe('mcp server', () => {
       | { error?: { subKind?: string } }
       | undefined;
     expect(sc?.error?.subKind).toBe('device-internal-error');
+  });
+
+  // ---- policy_validate / policy_new / policy_migrate -----------------------
+  describe('policy tools', () => {
+    let tmp: string;
+    beforeEach(() => {
+      tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sbmcp-policy-'));
+    });
+
+    it('policy_validate returns present:false when the file does not exist', async () => {
+      const { client } = await pair();
+      const missing = path.join(tmp, 'nope.yaml');
+      const res = await client.callTool({
+        name: 'policy_validate',
+        arguments: { path: missing },
+      });
+      expect(res.isError).toBeFalsy();
+      const sc = (res as { structuredContent?: Record<string, unknown> }).structuredContent!;
+      expect(sc.present).toBe(false);
+      expect(sc.valid).toBeNull();
+      expect(sc.policyPath).toBe(missing);
+    });
+
+    it('policy_validate returns valid:true on a minimal v0.1 file', async () => {
+      const policyPath = path.join(tmp, 'policy.yaml');
+      fs.writeFileSync(policyPath, 'version: "0.1"\n');
+      const { client } = await pair();
+      const res = await client.callTool({
+        name: 'policy_validate',
+        arguments: { path: policyPath },
+      });
+      expect(res.isError).toBeFalsy();
+      const sc = (res as { structuredContent?: Record<string, unknown> }).structuredContent!;
+      expect(sc.present).toBe(true);
+      expect(sc.valid).toBe(true);
+      expect(sc.schemaVersion).toBe('0.1');
+      expect(Array.isArray(sc.errors)).toBe(true);
+      expect((sc.errors as unknown[]).length).toBe(0);
+    });
+
+    it('policy_validate returns valid:false + errors when schema rejects', async () => {
+      const policyPath = path.join(tmp, 'bad.yaml');
+      fs.writeFileSync(
+        policyPath,
+        'version: "0.1"\naliases:\n  "bedroom ac": "02-abc-lowercase"\n',
+      );
+      const { client } = await pair();
+      const res = await client.callTool({
+        name: 'policy_validate',
+        arguments: { path: policyPath },
+      });
+      const sc = (res as { structuredContent?: Record<string, unknown> }).structuredContent!;
+      expect(sc.present).toBe(true);
+      expect(sc.valid).toBe(false);
+      expect((sc.errors as unknown[]).length).toBeGreaterThan(0);
+    });
+
+    it('policy_new writes a starter file and refuses to overwrite without force', async () => {
+      const policyPath = path.join(tmp, 'policy.yaml');
+      const { client } = await pair();
+      const first = await client.callTool({
+        name: 'policy_new',
+        arguments: { path: policyPath },
+      });
+      expect(first.isError).toBeFalsy();
+      expect(fs.existsSync(policyPath)).toBe(true);
+      const firstSc = (first as { structuredContent?: Record<string, unknown> }).structuredContent!;
+      expect(firstSc.overwritten).toBe(false);
+      expect((firstSc.bytesWritten as number) > 0).toBe(true);
+
+      // Second call without force must error-guard.
+      const second = await client.callTool({
+        name: 'policy_new',
+        arguments: { path: policyPath },
+      });
+      expect(second.isError).toBe(true);
+      const text = (second.content as Array<{ type: string; text: string }>)[0].text;
+      expect(text).toMatch(/refusing to overwrite/i);
+
+      // With force:true it succeeds.
+      const third = await client.callTool({
+        name: 'policy_new',
+        arguments: { path: policyPath, force: true },
+      });
+      expect(third.isError).toBeFalsy();
+      const thirdSc = (third as { structuredContent?: Record<string, unknown> }).structuredContent!;
+      expect(thirdSc.overwritten).toBe(true);
+    });
+
+    it('policy_migrate reports already-current on a v0.1 file', async () => {
+      const policyPath = path.join(tmp, 'policy.yaml');
+      fs.writeFileSync(policyPath, 'version: "0.1"\n');
+      const { client } = await pair();
+      const res = await client.callTool({
+        name: 'policy_migrate',
+        arguments: { path: policyPath },
+      });
+      expect(res.isError).toBeFalsy();
+      const sc = (res as { structuredContent?: Record<string, unknown> }).structuredContent!;
+      expect(sc.status).toBe('already-current');
+      expect(sc.fileVersion).toBe('0.1');
+      expect(sc.currentVersion).toBe('0.1');
+    });
+
+    it('policy_migrate reports file-not-found when the file does not exist', async () => {
+      const missing = path.join(tmp, 'missing.yaml');
+      const { client } = await pair();
+      const res = await client.callTool({
+        name: 'policy_migrate',
+        arguments: { path: missing },
+      });
+      const sc = (res as { structuredContent?: Record<string, unknown> }).structuredContent!;
+      expect(sc.status).toBe('file-not-found');
+    });
   });
 });
