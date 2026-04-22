@@ -380,4 +380,95 @@ describe('doctor command', () => {
     const mqtt = payload.data.checks.find((c: { name: string }) => c.name === 'mqtt');
     expect(mqtt.detail.probe).toBe('skipped');
   });
+
+  // Policy check (doctor --section policy) — optional file, valid when present,
+  // fail when the schema rejects it. See docs/design/phase4-rules-schema.md
+  // for why the doctor surface reports this as an independent section rather
+  // than wedging it into credentials/catalog.
+  it('policy check is ok with present:false when no policy file exists', async () => {
+    const policyPath = path.join(tmp, '.config', 'openclaw', 'switchbot', 'policy.yaml');
+    process.env.SWITCHBOT_POLICY_PATH = policyPath;
+    process.env.SWITCHBOT_TOKEN = 't';
+    process.env.SWITCHBOT_SECRET = 's';
+    try {
+      const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--section', 'policy']);
+      const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+      const policy = payload.data.checks.find((c: { name: string }) => c.name === 'policy');
+      expect(policy.status).toBe('ok');
+      expect(policy.detail.present).toBe(false);
+      expect(policy.detail.path).toBe(policyPath);
+      expect(policy.detail.message).toMatch(/policy new/);
+    } finally {
+      delete process.env.SWITCHBOT_POLICY_PATH;
+    }
+  });
+
+  it('policy check is ok when the file is valid against the v0.1 schema', async () => {
+    const policyDir = path.join(tmp, '.config', 'openclaw', 'switchbot');
+    const policyPath = path.join(policyDir, 'policy.yaml');
+    fs.mkdirSync(policyDir, { recursive: true });
+    fs.writeFileSync(policyPath, 'version: "0.1"\n');
+    process.env.SWITCHBOT_POLICY_PATH = policyPath;
+    process.env.SWITCHBOT_TOKEN = 't';
+    process.env.SWITCHBOT_SECRET = 's';
+    try {
+      const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--section', 'policy']);
+      const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+      const policy = payload.data.checks.find((c: { name: string }) => c.name === 'policy');
+      expect(policy.status).toBe('ok');
+      expect(policy.detail.present).toBe(true);
+      expect(policy.detail.valid).toBe(true);
+      expect(policy.detail.schemaVersion).toBe('0.1');
+    } finally {
+      delete process.env.SWITCHBOT_POLICY_PATH;
+    }
+  });
+
+  it('policy check is fail when the schema rejects the file', async () => {
+    const policyDir = path.join(tmp, '.config', 'openclaw', 'switchbot');
+    const policyPath = path.join(policyDir, 'policy.yaml');
+    fs.mkdirSync(policyDir, { recursive: true });
+    // lowercase deviceId violates the aliases pattern (the #1 real-world bug)
+    fs.writeFileSync(
+      policyPath,
+      'version: "0.1"\naliases:\n  "bedroom ac": "02-202502111234-abc123"\n',
+    );
+    process.env.SWITCHBOT_POLICY_PATH = policyPath;
+    process.env.SWITCHBOT_TOKEN = 't';
+    process.env.SWITCHBOT_SECRET = 's';
+    try {
+      const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--section', 'policy']);
+      expect(res.exitCode).toBe(1);
+      const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+      const policy = payload.data.checks.find((c: { name: string }) => c.name === 'policy');
+      expect(policy.status).toBe('fail');
+      expect(policy.detail.present).toBe(true);
+      expect(policy.detail.valid).toBe(false);
+      expect(policy.detail.errorCount).toBeGreaterThan(0);
+      expect(policy.detail.message).toMatch(/policy validate/);
+    } finally {
+      delete process.env.SWITCHBOT_POLICY_PATH;
+    }
+  });
+
+  it('policy check is fail when the YAML itself is malformed', async () => {
+    const policyDir = path.join(tmp, '.config', 'openclaw', 'switchbot');
+    const policyPath = path.join(policyDir, 'policy.yaml');
+    fs.mkdirSync(policyDir, { recursive: true });
+    fs.writeFileSync(policyPath, 'version: "0.1"\naliases: {unterminated\n');
+    process.env.SWITCHBOT_POLICY_PATH = policyPath;
+    process.env.SWITCHBOT_TOKEN = 't';
+    process.env.SWITCHBOT_SECRET = 's';
+    try {
+      const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--section', 'policy']);
+      expect(res.exitCode).toBe(1);
+      const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+      const policy = payload.data.checks.find((c: { name: string }) => c.name === 'policy');
+      expect(policy.status).toBe('fail');
+      expect(policy.detail.parseError).toBe(true);
+      expect(typeof policy.detail.message).toBe('string');
+    } finally {
+      delete process.env.SWITCHBOT_POLICY_PATH;
+    }
+  });
 });

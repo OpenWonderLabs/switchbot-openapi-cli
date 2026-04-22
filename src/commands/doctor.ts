@@ -10,6 +10,13 @@ import { DAILY_QUOTA, todayUsage } from '../utils/quota.js';
 import { AGENT_BOOTSTRAP_SCHEMA_VERSION } from './agent-bootstrap.js';
 import { CATALOG_SCHEMA_VERSION } from '../devices/catalog.js';
 import { createSwitchBotMcpServer, listRegisteredTools } from './mcp.js';
+import {
+  resolvePolicyPath,
+  loadPolicyFile,
+  PolicyFileNotFoundError,
+  PolicyYamlParseError,
+} from '../policy/load.js';
+import { validateLoadedPolicy } from '../policy/validate.js';
 
 interface Check {
   name: string;
@@ -325,6 +332,84 @@ function checkAudit(): Check {
   }
 }
 
+function checkPolicy(): Check {
+  // A policy file is optional — many users run the CLI without one. Report
+  // `ok` with `present: false` so agents can tell the difference between
+  // "no policy configured" (fine) and "policy broken" (needs attention).
+  const policyPath = resolvePolicyPath();
+  try {
+    const loaded = loadPolicyFile(policyPath);
+    const result = validateLoadedPolicy(loaded);
+    if (result.valid) {
+      return {
+        name: 'policy',
+        status: 'ok',
+        detail: {
+          path: policyPath,
+          present: true,
+          valid: true,
+          schemaVersion: result.schemaVersion,
+        },
+      };
+    }
+    return {
+      name: 'policy',
+      status: 'fail',
+      detail: {
+        path: policyPath,
+        present: true,
+        valid: false,
+        schemaVersion: result.schemaVersion,
+        errorCount: result.errors.length,
+        firstError: result.errors[0]
+          ? {
+              path: result.errors[0].path,
+              line: result.errors[0].line,
+              message: result.errors[0].message,
+            }
+          : undefined,
+        message: "run 'switchbot policy validate' for full diagnostics",
+      },
+    };
+  } catch (err) {
+    if (err instanceof PolicyFileNotFoundError) {
+      return {
+        name: 'policy',
+        status: 'ok',
+        detail: {
+          path: policyPath,
+          present: false,
+          message: "no policy file (optional — run 'switchbot policy new' to scaffold one)",
+        },
+      };
+    }
+    if (err instanceof PolicyYamlParseError) {
+      const first = err.yamlErrors[0];
+      return {
+        name: 'policy',
+        status: 'fail',
+        detail: {
+          path: policyPath,
+          present: true,
+          valid: false,
+          parseError: true,
+          line: first?.line,
+          col: first?.col,
+          message: first?.message ?? err.message,
+        },
+      };
+    }
+    return {
+      name: 'policy',
+      status: 'warn',
+      detail: {
+        path: policyPath,
+        message: `could not read policy file: ${err instanceof Error ? err.message : String(err)}`,
+      },
+    };
+  }
+}
+
 function checkNodeVersion(): Check {
   const major = Number(process.versions.node.split('.')[0]);
   if (Number.isFinite(major) && major < 18) {
@@ -474,6 +559,7 @@ const CHECK_REGISTRY: CheckDef[] = [
     run: ({ probe }) => (probe ? checkMqttProbe() : checkMqtt()),
   },
   { name: 'mcp', description: 'MCP server instantiable + tool count', run: () => checkMcp() },
+  { name: 'policy', description: 'policy.yaml present + schema-valid (if configured)', run: () => checkPolicy() },
   { name: 'audit', description: 'recent command errors (last 24h)', run: () => checkAudit() },
 ];
 
