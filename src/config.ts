@@ -4,6 +4,7 @@ import os from 'node:os';
 import { getConfigPath } from './utils/flags.js';
 import { getActiveProfile } from './lib/request-context.js';
 import { emitJsonError, isJsonMode } from './utils/output.js';
+import { getPrimedCredentials } from './credentials/prime.js';
 
 export interface SwitchBotConfig {
   token: string;
@@ -69,6 +70,14 @@ export function loadConfig(): SwitchBotConfig {
     return { token: envToken, secret: envSecret };
   }
 
+  // After env, try the OS keychain (via the priming cache populated at
+  // command start). When --config is passed we skip the keychain so the
+  // override remains authoritative.
+  if (!getConfigPath()) {
+    const primed = getPrimedCredentials(getActiveProfile() ?? 'default');
+    if (primed) return primed;
+  }
+
   const file = configFilePath();
   if (!fs.existsSync(file)) {
     const profile = getActiveProfile();
@@ -114,6 +123,11 @@ export function tryLoadConfig(): SwitchBotConfig | null {
   const envToken = process.env.SWITCHBOT_TOKEN;
   const envSecret = process.env.SWITCHBOT_SECRET;
   if (envToken && envSecret) return { token: envToken, secret: envSecret };
+
+  if (!getConfigPath()) {
+    const primed = getPrimedCredentials(getActiveProfile() ?? 'default');
+    if (primed) return primed;
+  }
 
   const file = configFilePath();
   if (!fs.existsSync(file)) return null;

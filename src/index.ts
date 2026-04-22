@@ -25,6 +25,8 @@ import { registerCapabilitiesCommand } from './commands/capabilities.js';
 import { registerAgentBootstrapCommand } from './commands/agent-bootstrap.js';
 import { registerPolicyCommand } from './commands/policy.js';
 import { registerRulesCommand } from './commands/rules.js';
+import { primeCredentials } from './credentials/prime.js';
+import { getActiveProfile } from './lib/request-context.js';
 
 const require = createRequire(import.meta.url);
 const { version: pkgVersion } = require('../package.json') as { version: string };
@@ -107,6 +109,14 @@ registerCapabilitiesCommand(program);
 registerAgentBootstrapCommand(program);
 registerPolicyCommand(program);
 registerRulesCommand(program);
+
+// Prime keychain-stored credentials before any command runs. This is a
+// best-effort probe: failures are silently swallowed inside primeCredentials,
+// so the existing file-based path remains the safety net. We probe once per
+// invocation (even for --help and --version, which is harmless).
+program.hook('preAction', async () => {
+  await primeCredentials(getActiveProfile() ?? 'default');
+});
 
 program.addHelpText('after', `
 Credentials:
