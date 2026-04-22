@@ -128,4 +128,16 @@ describe('resolvePolicyPath', () => {
     const resolved = resolvePolicyPath({ env: {} });
     expect(resolved).toBe(DEFAULT_POLICY_PATH);
   });
+
+  // Deliberate gap pin: resolvePolicyPath has no awareness of the CLI's
+  // --profile flag today. If profile-aware policy paths ever land (e.g.
+  // ~/.config/openclaw/switchbot/profiles/<profile>/policy.yaml), this
+  // assertion needs updating alongside the "File location" section in
+  // docs/policy-reference.md.
+  it('does not derive the path from a profile hint (current behavior)', () => {
+    const resolved = resolvePolicyPath({ env: { SWITCHBOT_PROFILE: 'work' } });
+    expect(resolved).toBe(DEFAULT_POLICY_PATH);
+    expect(resolved).not.toContain('work');
+    expect(resolved).not.toContain('profiles');
+  });
 });

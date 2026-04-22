@@ -97,4 +97,38 @@ describe('agent-bootstrap', () => {
     const bytes = Buffer.byteLength(lines.join('\n'), 'utf8');
     expect(bytes).toBeLessThan(20_000);
   });
+
+  it('quickReference surfaces every command group agents need', () => {
+    // Guard against future commands being added without being surfaced
+    // here. If a new top-level command group is wired up (policy in
+    // 2.8.0 was the last gap) it must appear in quickReference or
+    // agents won't discover it from the compact bootstrap alone.
+    process.argv = ['node', 'cli', 'agent-bootstrap', '--compact', '--json'];
+    const program = new Command();
+    program.exitOverride();
+    registerAgentBootstrapCommand(program);
+    const payload = captureJson(() => {
+      program.parse(['node', 'cli', 'agent-bootstrap', '--compact']);
+    }) as { data?: Record<string, unknown> };
+    const data = payload.data as Record<string, unknown>;
+    const quick = data.quickReference as Record<string, unknown>;
+    const expectedKeys = [
+      'discovery',
+      'action',
+      'safety',
+      'observability',
+      'history',
+      'meta',
+      'policy',
+    ];
+    for (const key of expectedKeys) {
+      expect(quick[key], `quickReference.${key} is missing`).toBeDefined();
+      expect(Array.isArray(quick[key]), `quickReference.${key} should be an array`).toBe(true);
+      expect((quick[key] as unknown[]).length, `quickReference.${key} is empty`).toBeGreaterThan(0);
+    }
+    // policy specifically must mention the three subcommands
+    expect(quick.policy).toEqual(
+      expect.arrayContaining(['policy validate', 'policy new', 'policy migrate']),
+    );
+  });
 });

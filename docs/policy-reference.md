@@ -198,6 +198,12 @@ cli:
 `profile` must match a profile you've configured with
 `switchbot config set-token --profile <name>`.
 
+> **Note:** the policy file path is **not** profile-aware today —
+> every profile shares the same `~/.config/openclaw/switchbot/policy.yaml`.
+> If you need separate policies per profile, point each to its own
+> file via the `$SWITCHBOT_POLICY_PATH` environment variable when you
+> run the CLI. Tracking profile-scoped paths as a future enhancement.
+
 ---
 
 ## Validation flow

@@ -71,6 +71,25 @@ describe('policy validator (v0.1)', () => {
     expect(result.valid).toBe(true);
   });
 
+  // Per-block null regression. The combined test above would pass even if
+  // only one of the six blocks nulled out correctly (one error is still
+  // `valid === false`). These tests pin each block independently so a
+  // future `"type": ["object"]` (without `"null"`) regression on any
+  // single block surfaces with a clear failing name.
+  it.each([
+    ['aliases'],
+    ['confirmations'],
+    ['quiet_hours'],
+    ['audit'],
+    ['automation'],
+    ['cli'],
+  ])('accepts null on only the %s block', (block) => {
+    const loaded = writeAndLoad(tmpDir, `version: "0.1"\n${block}:\n`);
+    const result = validateLoadedPolicy(loaded);
+    expect(result.valid, `${block}: null should be accepted`).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
+
   it('flags a missing version field with a clear hint', () => {
     const loaded = writeAndLoad(tmpDir, 'aliases:\n  "lamp": "01-ABC-12345"\n');
     const result = validateLoadedPolicy(loaded);
