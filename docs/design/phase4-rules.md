@@ -1,13 +1,13 @@
 # Phase 4 — rule engine design
 
-> Status: **PoC shipped (v0.2, MQTT-only preview)**. The engine is
-> implemented in `src/rules/engine.ts` and wired to the CLI via
-> `switchbot rules lint | list | run`. MQTT triggers + `time_between`
-> conditions + `throttle` + `dry_run` all fire end-to-end; cron and
-> webhook triggers parse but do not run (lint reports them as
-> `trigger-unsupported`). Companion to
-> `docs/design/phase4-rules-schema.md`, which specifies the
-> `automation.rules[]` shape in `policy.yaml`.
+> Status: **Shipped (v0.2)**. The engine is implemented in
+> `src/rules/engine.ts` and wired to the CLI via
+> `switchbot rules lint | list | run | reload | tail | replay`. All
+> three triggers (MQTT / cron / webhook) + `time_between` and
+> `device_state` conditions + per-rule `throttle` + `dry_run` fire
+> end-to-end. Hot-reload via SIGHUP (Unix) or a pid-file sentinel
+> (Windows). Companion to `docs/design/phase4-rules-schema.md`,
+> which specifies the `automation.rules[]` shape in `policy.yaml`.
 
 ## Goal
 

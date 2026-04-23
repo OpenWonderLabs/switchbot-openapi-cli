@@ -78,7 +78,7 @@ Under the hood every surface shares the same catalog, cache, and HMAC client —
 - 🎨 **Dual output modes** — colorized tables by default; `--json` passthrough for `jq` and scripting
 - 🔐 **Secure credentials** — HMAC-SHA256 signed requests; config file written with `0600`; env-var override for CI
 - 🔍 **Dry-run mode** — preview every mutating request before it hits the API
-- 🧪 **Fully tested** — 1315 Vitest tests, mocked axios, zero network in CI
+- 🧪 **Fully tested** — 1624 Vitest tests, mocked axios, zero network in CI
 - ⚡ **Shell completion** — Bash / Zsh / Fish / PowerShell
 
 ## Requirements
@@ -221,13 +221,13 @@ live in [`examples/policies/`](./examples/policies/).
 
 ### Rules engine (preview)
 
-With a v0.2 policy file you can declare MQTT-triggered automations that
-the CLI executes for you. The engine is a **preview** — today it fires
-MQTT rules with `time_between` conditions, per-rule `throttle`, and
-per-rule `dry_run`. Cron and webhook triggers are recognised by the
-schema but not wired yet; `rules lint` flags them as
-`status: unsupported`. Every fire is recorded in
-`~/.switchbot/audit.log`.
+With a v0.2 policy file you can declare automations that the CLI
+executes for you. Supported triggers: **MQTT** (device events),
+**cron** (schedule-driven), and **webhook** (local HTTP POST).
+Supported conditions: `time_between` (quiet hours) and `device_state`
+(live API check with per-tick dedup). Every fire is recorded in
+`~/.switchbot/audit.log`. `rules run` is long-running; use
+`rules reload` to hot-reload policy without dropping listeners.
 
 ```bash
 # 1. Migrate your existing policy.yaml to v0.2 (preserves comments).
@@ -243,11 +243,18 @@ switchbot rules list --json | jq .         # structured summary
 # 4. Run the engine. --dry-run overrides every rule into audit-only mode;
 #    --max-firings bounds a demo session.
 switchbot rules run --dry-run --max-firings 5
+
+# 5. Edit policy.yaml in another shell, then hot-reload without restart.
+switchbot rules reload                     # SIGHUP on Unix, sentinel file on Windows
+
+# 6. Review recorded fires.
+switchbot rules tail --follow              # stream rule-* audit lines
+switchbot rules replay --since 1h --json   # per-rule fires/dries/throttled/errors
 ```
 
 See [`docs/design/phase4-rules.md`](./docs/design/phase4-rules.md) for
 the engine's pipeline (subscribe → classify → match → conditions →
-throttle → action → audit) and roadmap to cron/webhook triggers.
+throttle → action → audit).
 
 ## Global options
 
@@ -907,7 +914,7 @@ npm install
 
 npm run dev -- <args>       # Run from TypeScript sources via tsx
 npm run build               # Compile to dist/
-npm test                    # Run the Vitest suite (1543 tests)
+npm test                    # Run the Vitest suite (1624 tests)
 npm run test:watch          # Watch mode
 npm run test:coverage       # Coverage report (v8, HTML + text)
 ```
@@ -952,7 +959,7 @@ src/
     ├── format.ts         # renderRows / filterFields / output-format dispatch
     ├── audit.ts          # JSONL audit log writer
     └── quota.ts          # Local daily-quota counter
-tests/                    # Vitest suite (1543 tests, mocked axios, no network)
+tests/                    # Vitest suite (1624 tests, mocked axios, no network)
 ```
 
 ### Release flow
