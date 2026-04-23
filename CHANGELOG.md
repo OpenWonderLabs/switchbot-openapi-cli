@@ -5,6 +5,111 @@ All notable changes to `@switchbot/openapi-cli` are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.0] - 2026-04-23
+
+Feature release — Policy v0.2, the Phase 4 rules engine, Phase 3A
+keychain support, and the install orchestrator library. This is the
+release that makes the CLI feel like a single integrated product
+instead of a collection of commands that happen to share a binary.
+
+### Added — Policy v0.2 schema (Phase 2 continuation)
+
+- **`policy new --version 0.2`** emits a v0.2 starter file carrying
+  the new `automation.rules[]` block. `policy new` still defaults to
+  v0.1 so existing CLI builds keep parsing the output — the default
+  flip is tracked on the Roadmap for v3.0.
+- **`policy validate`** dispatches the validator by schema version
+  (`0.1` or `0.2`), so a mixed install can hold two policy files at
+  different versions without false-positive errors.
+- **`policy migrate 0.1 → 0.2`** walks the YAML with `yaml@2`'s CST,
+  rewrites the `version:` scalar, and appends an `automation:` block
+  stub. Comments and key order are preserved byte-for-byte.
+- **Destructive-command validator hook** — the v0.2 schema rejects
+  rules whose `then.command` would fire `unlock`, `garage-door open`,
+  `keypad createKey`, or other destructive actions. The rejection is
+  a schema error, not a runtime surprise.
+- **`doctor`, `agent-bootstrap --compact`, MCP `policy_validate`**
+  now surface the detected policy schema version.
+
+### Added — Rules engine v0.2 (Phase 4)
+
+- **`switchbot rules lint`** — static checks against `policy.yaml`:
+  schema, alias resolution, cron expression validity, duplicate rule
+  names, destructive-command guard. Exit code 0/1/2/3.
+- **`switchbot rules list [--json]`** — prints every rule's name,
+  trigger summary, `dry_run` state, and throttle window.
+- **`switchbot rules run [--dry-run] [--max-firings N]`** — the
+  engine proper. Composes three triggers (`mqtt` / `cron` / `webhook`),
+  two conditions (`time_between` / `device_state`), and the
+  per-rule `throttle` and `dry_run` blocks.
+- **`switchbot rules reload`** — sends SIGHUP on Unix, writes a
+  pid-file sentinel on Windows. The engine reloads the policy without
+  restarting the process; in-flight firings complete on the old
+  policy.
+- **`switchbot rules tail [--follow]`** — tails the audit log
+  filtered to `rule-*` entries.
+- **`switchbot rules replay --since <duration> --dry-run`** — reads
+  past MQTT shadow events from the cache and replays them against
+  the current rule set without firing commands, for verifying rule
+  changes before enabling them.
+- **Audit log v2** — `rule-fire`, `rule-fire-dry`, `rule-throttled`,
+  and `rule-webhook-rejected` record types. Format is documented in
+  `docs/audit-log.md`.
+- **MQTT trigger** — subscribes to the cloud-issued broker, uses the
+  same `extractShadowEvent` helper as `events mqtt-tail`.
+- **Cron trigger** — runs on local time, quiet-hours aware.
+- **Webhook trigger** — bearer-token HTTP ingest on a configurable
+  port; tokens stored in the keychain, never in `policy.yaml`.
+- **`device_state` condition** — per-tick cached lookups so a single
+  firing doesn't hit the API N times for N conditions.
+
+### Added — Phase 3A: keychain + install orchestrator
+
+- **`src/credentials/keychain.ts`** abstraction with four backends:
+  macOS `security`, Windows `cmdkey`, Linux `secret-tool` (libsecret),
+  and a `0600`-permissioned JSON file fallback. The CLI picks the
+  first backend that works on the running platform.
+- **`switchbot auth keychain describe | get | set | delete | migrate`**
+  — explicit management of credentials in the chosen backend.
+  `migrate` moves a value from the file fallback to the OS keychain
+  and removes the file entry on success.
+- **`doctor`** and **`agent-bootstrap --compact`** report the active
+  credential source in a field named `credentialSource`.
+- **`src/install/`** — in-repo preflight + rollback-aware step runner
+  library that the external `openclaw plugins install` command
+  (Phase 3B) can call into. Library only; no top-level install
+  subcommand ships in this release (that is Track β).
+
+### Added — Docs
+
+- **`docs/design/roadmap.md`** — authoritative Phase 1-4 table with
+  the skill repo's orthogonal `autonomyLevel` L1/L2/L3 mapping.
+- **`docs/ux-principles.md`** — 10 principles the CLI, MCP server,
+  rules engine, and skill all obey.
+- **`docs/phase-1-manual-orchestration.md`** — frames Phase 1 as the
+  complete manual-orchestration contract, not a transitional state.
+- **`examples/quickstart/`** — 7-step walkthrough + `policy.yaml.example`,
+  `config.env.example`, and a systemd unit template for running
+  `events mqtt-tail` as a long-lived service.
+
+### Changed
+
+- **README Roadmap section** now points at
+  `docs/design/roadmap.md` and lists reserved tracks β / γ / δ / ε
+  alongside the existing long-term backlog.
+- **README header** — the skill-pointer blockquote now links directly
+  to the sibling
+  [`openclaw-switchbot-skill`](https://github.com/OpenWonderLabs/openclaw-switchbot-skill)
+  repo instead of saying "published separately".
+
+### Skill-side impact
+
+- The companion skill is bumped to **0.3.0** in
+  `openclaw-switchbot-skill` with `authority.cli: ">=2.9.0 <3.0.0"`,
+  `policy.version: "0.2"`, and `autonomyLevel: "L1"`. The skill's
+  Authoritative command table adds the `switchbot rules *` and
+  `switchbot auth keychain *` groups shipped in this release.
+
 ## [2.8.0] - 2026-04-22
 
 Feature release — `switchbot policy` command group.
