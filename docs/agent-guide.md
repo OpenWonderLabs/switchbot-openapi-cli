@@ -4,6 +4,17 @@ This guide covers everything an LLM agent (Claude, GPT, Cursor, Zed, OpenClaw, a
 
 If you're a human looking for a tour, start with the [top-level README](../README.md). This file assumes you're writing code that *calls* the CLI or embeds the MCP server.
 
+> **Skill packaging.** This CLI is the authoritative machine-readable surface.
+> The conversational skill that wraps it (Claude Desktop / OpenClaw / ClawHub
+> entry point) is tracked as Phase 3B and published out of a separate repo
+> — the skill has no private contract with the CLI, only the documented
+> surfaces below (`mcp serve`, `agent-bootstrap`, `schema export`,
+> `capabilities --json`). To detect CLI ↔ agent-bootstrap schema drift before
+> a session starts, run
+> `switchbot doctor --json | jq '.checks[] | select(.name=="catalog-schema")'`
+> — any status other than `ok` means the skill and CLI have diverged and
+> should be upgraded in lockstep.
+
 ---
 
 ## Table of contents

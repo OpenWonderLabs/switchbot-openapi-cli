@@ -1,0 +1,51 @@
+# ============================================================================
+#  mqtt-tail.service.example — run `switchbot events mqtt-tail` as a service
+# ============================================================================
+#
+#  Keeps the MQTT subscriber alive in the background so device shadow
+#  updates land in a JSONL stream even when your shell is closed.
+#  Output is consumed by `switchbot mcp` (for the `get_device_history`
+#  tool) and by the rules engine.
+#
+#  Install:
+#    sudo cp examples/quickstart/mqtt-tail.service.example \
+#            /etc/systemd/system/switchbot-mqtt-tail.service
+#    sudo vim /etc/systemd/system/switchbot-mqtt-tail.service
+#      # update User=, Environment=SWITCHBOT_TOKEN/SECRET, ExecStart
+#    sudo systemctl daemon-reload
+#    sudo systemctl enable --now switchbot-mqtt-tail.service
+#    journalctl -u switchbot-mqtt-tail.service -f
+#
+#  On Windows: schedule `switchbot events mqtt-tail` via Task Scheduler
+#  with trigger "At startup" and action running the same command with
+#  `--sink file --sink-file %USERPROFILE%\.switchbot\mqtt.log`.
+# ============================================================================
+
+[Unit]
+Description=SwitchBot MQTT shadow-event tail
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=switchbot
+Group=switchbot
+Environment=SWITCHBOT_TOKEN=
+Environment=SWITCHBOT_SECRET=
+# Append every event as JSONL so downstream tools can tail the file.
+ExecStart=/usr/bin/env switchbot events mqtt-tail --json \
+          --sink file --sink-file /var/lib/switchbot/mqtt-events.jsonl
+Restart=on-failure
+RestartSec=5s
+# Non-root service: keep state under a dedicated directory.
+StateDirectory=switchbot
+WorkingDirectory=/var/lib/switchbot
+# Hardening.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/switchbot
+
+[Install]
+WantedBy=multi-user.target

@@ -14,6 +14,13 @@ Run scenes, stream real-time events over MQTT, and plug AI agents into your home
 - **Releases / changelog:** [GitHub Releases](https://github.com/OpenWonderLabs/switchbot-openapi-cli/releases)
 - **Issues / feature requests:** [GitHub Issues](https://github.com/OpenWonderLabs/switchbot-openapi-cli/issues)
 
+> Looking for the **conversational skill** that drives this CLI from a chat
+> agent? The companion skill (Claude Desktop / OpenClaw / ClawHub) is
+> published separately — see [`docs/agent-guide.md`](./docs/agent-guide.md)
+> for the authoritative surfaces (MCP, `agent-bootstrap`, `schema export`,
+> `capabilities --json`) the skill consumes. The dedicated skill repo
+> distribution is tracked as Phase 3B (ClawHub registry).
+
 ---
 
 ## Who is this for?
@@ -122,9 +129,33 @@ switchbot config set-token <token> <secret>
 # 2. List every device on your account
 switchbot devices list
 
-# 3. Control a device
-switchbot devices command <deviceId> turnOn
+# 3. Control a device, writing a structured entry to the audit log
+switchbot devices command <deviceId> turnOn --audit-log
+
+# 4. Confirm everything is healthy — network, catalog, credentials, cache.
+#    Any non-"ok" check prints with a hint; fix those first.
+switchbot doctor --json | jq '.checks[] | select(.status!="ok")'
 ```
+
+Adding an AI agent or declarative automation? A few more one-liners
+round out the first-day path:
+
+```bash
+# 5. Cold-start snapshot an LLM can read before its first tool call.
+switchbot agent-bootstrap --compact | jq '.identity, .devices.total'
+
+# 6. Scaffold a policy.yaml (aliases, quiet hours, confirmations) and
+#    validate it. Safe to run — defaults apply if you never edit it.
+switchbot policy new
+switchbot policy validate
+
+# 7. Stream real-time device events over MQTT (events land as JSONL).
+switchbot events mqtt-tail --max 3 --json
+```
+
+See [Policy](#policy) for the authoring flow, [Rules engine](#rules-engine-v02-opt-in)
+for automations, and [`docs/agent-guide.md`](./docs/agent-guide.md)
+for the agent surface.
 
 ## Credentials
 
@@ -207,7 +238,8 @@ removes the ambiguity.
   this by default so fresh files stay compatible with older CLI
   builds on other machines.
 - **v0.2** — adds a typed `automation.rules[]` block (triggers,
-  conditions, throttles, dry-run) used by the preview rules engine.
+  conditions, throttles, dry-run) used by the rules engine (see
+  [Rules engine](#rules-engine-v02-opt-in)).
   Opt in via `switchbot policy migrate` when you are ready to author
   rules; the migration is in place and preserves comments, and
   refuses to touch the file if the upgraded document would not
@@ -216,10 +248,10 @@ removes the ambiguity.
 Full field-by-field reference, validation flow, and error catalogue:
 [`docs/policy-reference.md`](./docs/policy-reference.md).
 Five annotated starter files covering common setups
-(solo / shared household / rental / defaults-only / rules-engine preview)
+(solo / shared household / rental / defaults-only / rules-engine v0.2)
 live in [`examples/policies/`](./examples/policies/).
 
-### Rules engine (preview)
+### Rules engine (v0.2, opt-in)
 
 With a v0.2 policy file you can declare automations that the CLI
 executes for you. Supported triggers: **MQTT** (device events),
@@ -228,6 +260,11 @@ Supported conditions: `time_between` (quiet hours) and `device_state`
 (live API check with per-tick dedup). Every fire is recorded in
 `~/.switchbot/audit.log`. `rules run` is long-running; use
 `rules reload` to hot-reload policy without dropping listeners.
+
+v0.2 is opt-in today: `policy new` still writes v0.1 so fresh files
+stay compatible with older CLI builds. Run `switchbot policy migrate`
+on a copy when you're ready to author rules. v0.2 is scheduled to
+become the default schema in the next major CLI release.
 
 ```bash
 # 1. Migrate your existing policy.yaml to v0.2 (preserves comments).
@@ -987,6 +1024,9 @@ Bug reports, feature requests, and PRs are welcome.
 Tracked for a future v3.x line (OpenClaw B-17 / B-18 / B-19 / B-21) — each is a
 standalone track rather than a bug fix:
 
+- **Policy v0.2 as the default schema** — `policy new` currently emits v0.1 so
+  fresh files stay compatible with older CLI builds; v3.0 flips the default to
+  v0.2 and ships a deprecation window for v0.1.
 - **Daemon mode** — long-running local process with a Unix/named-pipe socket so
   repeated MCP or plan invocations don't pay fresh-process startup every call.
 - **`npx @switchbot/mcp-server`** — split the MCP server into its own tiny
