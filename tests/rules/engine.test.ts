@@ -559,3 +559,138 @@ describe('RulesEngine', () => {
     expect(fires[0].reason).toContain('network down');
   });
 });
+
+describe('RulesEngine.reload', () => {
+  let mqtt: FakeMqttClient;
+
+  beforeEach(() => {
+    mqtt = new FakeMqttClient();
+  });
+
+  it('refuses to reload when automation.enabled is false', async () => {
+    const engine = new RulesEngine({
+      automation: automation([mqttRule()]),
+      aliases: {},
+      mqttClient: mqtt as unknown as SwitchBotMqttClient,
+      mqttCredential: fakeCredential,
+      skipApiCall: true,
+    });
+    await engine.start();
+
+    const result = await engine.reload(automation([mqttRule()], false), {});
+    expect(result.changed).toBe(false);
+    expect(result.errors.join(' ')).toMatch(/enabled is not true/);
+    expect(engine.getStats().rulesActive).toBe(1);
+  });
+
+  it('refuses to reload when the new policy fails lint (destructive action)', async () => {
+    const engine = new RulesEngine({
+      automation: automation([mqttRule()]),
+      aliases: {},
+      mqttClient: mqtt as unknown as SwitchBotMqttClient,
+      mqttCredential: fakeCredential,
+      skipApiCall: true,
+    });
+    await engine.start();
+
+    const bad = automation([
+      mqttRule({ then: [{ command: 'devices command LOCK-1 unlock' }] }),
+    ]);
+    const result = await engine.reload(bad, {});
+    expect(result.changed).toBe(false);
+    expect(result.errors.some((e) => e.includes('destructive-action'))).toBe(true);
+    // Old ruleset still live.
+    expect(engine.getStats().rulesActive).toBe(1);
+  });
+
+  it('swaps rules atomically by name and updates rulesActive count', async () => {
+    const engine = new RulesEngine({
+      automation: automation([mqttRule({ name: 'old-one' })]),
+      aliases: { 'hallway lamp': 'AA-BB-CC' },
+      mqttClient: mqtt as unknown as SwitchBotMqttClient,
+      mqttCredential: fakeCredential,
+      skipApiCall: true,
+    });
+    await engine.start();
+    expect(engine.getStats().rulesActive).toBe(1);
+
+    const result = await engine.reload(
+      automation([
+        mqttRule({ name: 'new-a' }),
+        mqttRule({ name: 'new-b' }),
+      ]),
+      { 'hallway lamp': 'AA-BB-CC' },
+    );
+    expect(result.changed).toBe(true);
+    expect(result.errors).toEqual([]);
+    expect(engine.getStats().rulesActive).toBe(2);
+  });
+
+  it('preserves throttle state for rules whose name survives the reload', async () => {
+    const rule = mqttRule({
+      name: 'once-per-hour',
+      throttle: { max_per: '1h' },
+    });
+    const fires: EngineFireEntry[] = [];
+    const engine = new RulesEngine({
+      automation: automation([rule]),
+      aliases: { 'hallway lamp': 'AA-BB-CC' },
+      mqttClient: mqtt as unknown as SwitchBotMqttClient,
+      mqttCredential: fakeCredential,
+      skipApiCall: true,
+      onFire: (e) => fires.push(e),
+    });
+    await engine.start();
+
+    mqtt.emitMessage({ context: { deviceMac: 'AA-BB-CC', detectionState: 'DETECTED' } });
+    await engine.drainForTest();
+    expect(fires.map((f) => f.status)).toEqual(['dry']);
+
+    // Reload with the same rule name — throttle window should still block.
+    const result = await engine.reload(automation([rule]), {
+      'hallway lamp': 'AA-BB-CC',
+    });
+    expect(result.changed).toBe(true);
+
+    mqtt.emitMessage({ context: { deviceMac: 'AA-BB-CC', detectionState: 'DETECTED' } });
+    await engine.drainForTest();
+    expect(fires.map((f) => f.status)).toEqual(['dry', 'throttled']);
+  });
+
+  it('warns when webhook rules are added via reload on an engine that never started a listener', async () => {
+    const engine = new RulesEngine({
+      automation: automation([mqttRule()]),
+      aliases: {},
+      mqttClient: mqtt as unknown as SwitchBotMqttClient,
+      mqttCredential: fakeCredential,
+      skipApiCall: true,
+    });
+    await engine.start();
+
+    const withWebhook = automation([
+      mqttRule({ name: 'keep-mqtt' }),
+      {
+        name: 'new-webhook',
+        when: { source: 'webhook', path: '/ring' },
+        then: [{ command: 'devices command <id> turnOn', device: 'hallway lamp' }],
+        dry_run: true,
+      },
+    ]);
+    const result = await engine.reload(withWebhook, {});
+    expect(result.changed).toBe(true);
+    expect(result.warnings.join(' ')).toMatch(/webhook rules added via reload/);
+  });
+
+  it('refuses to reload before start', async () => {
+    const engine = new RulesEngine({
+      automation: automation([mqttRule()]),
+      aliases: {},
+      mqttClient: mqtt as unknown as SwitchBotMqttClient,
+      mqttCredential: fakeCredential,
+      skipApiCall: true,
+    });
+    const result = await engine.reload(automation([mqttRule()]), {});
+    expect(result.changed).toBe(false);
+    expect(result.errors.join(' ')).toMatch(/engine not running/);
+  });
+});

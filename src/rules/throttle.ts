@@ -73,6 +73,20 @@ export class ThrottleGate {
     }
   }
 
+  /**
+   * Drop every window whose rule name isn't in the given set — used by
+   * `engine.reload` after a policy swap. Entries for names that survive
+   * the reload are preserved so unchanged rules don't get a free
+   * one-fire amnesty.
+   */
+  retainOnly(ruleNames: Set<string>): void {
+    for (const k of this.lastFireAt.keys()) {
+      const sep = k.indexOf('::');
+      const ruleName = sep === -1 ? k : k.slice(0, sep);
+      if (!ruleNames.has(ruleName)) this.lastFireAt.delete(k);
+    }
+  }
+
   /** Test helper — exposes the underlying size. */
   size(): number {
     return this.lastFireAt.size;

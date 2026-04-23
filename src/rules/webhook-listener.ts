@@ -121,6 +121,27 @@ export class WebhookListener {
     return [...this.pathIndex.keys()].sort();
   }
 
+  /**
+   * Replace the current rule → path index. Used by `engine.reload`: the
+   * listener keeps its open port and accepted connections, but routes
+   * subsequent requests against the fresh policy.
+   */
+  updateRules(rules: Rule[]): void {
+    const next = new Map<string, Rule>();
+    for (const rule of rules) {
+      if (!isWebhookTrigger(rule.when)) continue;
+      const normalised = normalisePath(rule.when.path);
+      if (next.has(normalised)) {
+        throw new Error(
+          `WebhookListener.updateRules: duplicate webhook path "${normalised}"`,
+        );
+      }
+      next.set(normalised, rule);
+    }
+    this.pathIndex.clear();
+    for (const [k, v] of next) this.pathIndex.set(k, v);
+  }
+
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     // Auth gate first — reject everything else so a wrong token never
     // reveals which paths exist.

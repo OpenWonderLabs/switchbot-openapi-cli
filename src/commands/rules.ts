@@ -15,6 +15,16 @@ import { tryLoadConfig } from '../config.js';
 import { fetchMqttCredential } from '../mqtt/credential.js';
 import { SwitchBotMqttClient } from '../mqtt/client.js';
 import { WebhookTokenStore } from '../rules/webhook-token.js';
+import {
+  getDefaultPidFilePaths,
+  writePidFile,
+  clearPidFile,
+  consumeReloadSentinel,
+  writeReloadSentinel,
+  readPidFile,
+  sighupSupported,
+  isPidAlive,
+} from '../rules/pid-file.js';
 
 interface LoadedAutomation {
   path: string;
@@ -226,6 +236,13 @@ function registerRun(rules: Command): void {
       });
 
       let stopping = false;
+      const pidPaths = getDefaultPidFilePaths();
+      writePidFile(pidPaths.pidFile);
+      const cleanup = () => {
+        clearPidFile(pidPaths.pidFile);
+        // Drop any stale reload sentinel too — this process won't see it.
+        consumeReloadSentinel(pidPaths.reloadFile);
+      };
       const stop = async (code: number) => {
         if (stopping) return;
         stopping = true;
@@ -233,6 +250,7 @@ function registerRun(rules: Command): void {
           await engine.stop();
           await client.disconnect();
         } finally {
+          cleanup();
           process.exit(code);
         }
       };
@@ -241,10 +259,55 @@ function registerRun(rules: Command): void {
 
       await client.connect();
       await engine.start();
+
+      const doReload = async (trigger: 'signal' | 'sentinel'): Promise<void> => {
+        try {
+          const fresh = loadAutomation(pathArg);
+          if (!fresh) return;
+          const result = await engine.reload(fresh.automation, fresh.aliases);
+          if (result.changed) {
+            if (!isJsonMode()) {
+              console.error(
+                `rules: reloaded (${trigger}) — ${engine.getStats().rulesActive} active rule(s)`,
+              );
+              for (const w of result.warnings) console.error(`  warning: ${w}`);
+            } else {
+              printJson({
+                kind: 'control',
+                controlKind: 'reloaded',
+                t: new Date().toISOString(),
+                trigger,
+                rulesActive: engine.getStats().rulesActive,
+                warnings: result.warnings,
+              });
+            }
+          } else {
+            const msg = `rules: reload refused — ${result.errors.join(', ')}`;
+            if (!isJsonMode()) console.error(msg);
+            else printJson({ kind: 'control', controlKind: 'reload-refused', errors: result.errors });
+          }
+        } catch (err) {
+          const msg = `rules: reload failed — ${err instanceof Error ? err.message : String(err)}`;
+          if (!isJsonMode()) console.error(msg);
+          else printJson({ kind: 'control', controlKind: 'reload-failed', error: msg });
+        }
+      };
+
+      if (sighupSupported()) {
+        process.on('SIGHUP', () => { doReload('signal').catch(() => undefined); });
+      }
+      const reloadPoll = setInterval(() => {
+        if (consumeReloadSentinel(pidPaths.reloadFile)) {
+          doReload('sentinel').catch(() => undefined);
+        }
+      }, 2000);
+      reloadPoll.unref();
+
       if (!isJsonMode()) {
         console.error(
           `Rules engine started — ${engine.getStats().rulesActive} active rule(s), ${opts.dryRun ? 'global dry-run' : 'live'}.`,
         );
+        console.error(`pid ${process.pid} (${pidPaths.pidFile}); reload: \`switchbot rules reload\`.`);
         if (needsWebhook) {
           const boundPort = engine.getWebhookPort();
           console.error(
@@ -256,6 +319,8 @@ function registerRun(rules: Command): void {
           kind: 'control',
           controlKind: 'session_start',
           t: new Date().toISOString(),
+          pid: process.pid,
+          pidFile: pidPaths.pidFile,
           rulesActive: engine.getStats().rulesActive,
           globalDryRun: opts.dryRun === true,
           webhookPort: needsWebhook ? engine.getWebhookPort() : null,
@@ -270,11 +335,61 @@ function registerRun(rules: Command): void {
           const s = engine.getStats();
           if (!s.started) {
             clearInterval(tick);
+            clearInterval(reloadPoll);
             resolve();
           }
         }, 1000);
       });
       await stop(0);
+    });
+}
+
+function registerReload(rules: Command): void {
+  rules
+    .command('reload')
+    .description('Trigger a policy hot-reload on the running `rules run` process.')
+    .action(() => {
+      const pidPaths = getDefaultPidFilePaths();
+      const pid = readPidFile(pidPaths.pidFile);
+      if (pid === null || !isPidAlive(pid)) {
+        exitWithError({
+          code: 2,
+          kind: 'usage',
+          message: `no running rules engine (pid file: ${pidPaths.pidFile}).`,
+          extra: { subKind: 'no-engine', pidFile: pidPaths.pidFile },
+        });
+      }
+      if (sighupSupported()) {
+        try {
+          process.kill(pid, 'SIGHUP');
+        } catch (err) {
+          exitWithError({
+            code: 1,
+            kind: 'runtime',
+            message: `failed to send SIGHUP to pid ${pid}: ${err instanceof Error ? err.message : String(err)}`,
+            extra: { subKind: 'signal-failed', pid },
+          });
+        }
+        if (isJsonMode()) {
+          printJson({ status: 'signalled', pid, method: 'SIGHUP' });
+        } else {
+          console.log(`Sent SIGHUP to pid ${pid}.`);
+        }
+      } else {
+        writeReloadSentinel(pidPaths.reloadFile);
+        if (isJsonMode()) {
+          printJson({
+            status: 'signalled',
+            pid,
+            method: 'sentinel',
+            file: pidPaths.reloadFile,
+          });
+        } else {
+          console.log(
+            `Wrote reload sentinel ${pidPaths.reloadFile}; engine polls every 2 s.`,
+          );
+        }
+      }
     });
 }
 
@@ -321,13 +436,16 @@ Reads the same policy file as \`switchbot policy\` (${DEFAULT_POLICY_PATH} by
 default; override with --policy or $SWITCHBOT_POLICY_PATH).
 
 Subcommands:
-  lint [path]      Static-check rule definitions; no MQTT, no API calls.
-  list [path]      Print a human/JSON summary of each rule's trigger + actions.
-  run  [path]      Subscribe to MQTT and execute matching rules (long-running).
+  lint [path]               Static-check rule definitions; no MQTT, no API calls.
+  list [path]               Print a human/JSON summary of each rule's trigger + actions.
+  run  [path]               Subscribe to MQTT (+ cron/webhook) and execute matching rules.
+  reload                    Hot-reload the running engine's policy (SIGHUP on Unix,
+                            pid-file sentinel on Windows).
+  webhook-rotate-token      Rotate the bearer token used for webhook triggers.
+  webhook-show-token        Print the current bearer token (creating one if absent).
 
-The engine is a preview (policy schema v0.2). Cron + webhook triggers
-are recognised but not wired — \`rules lint\` flags them as
-\`trigger-unsupported\` until E1/E2 ship.
+MQTT, cron, and webhook triggers are all wired. Destructive commands (lock /
+unlock / deleteWebhook / deleteScene / factoryReset) are rejected at lint.
 
 Exit codes (lint):
   0  valid
@@ -340,6 +458,7 @@ Exit codes (lint):
   registerLint(rules);
   registerList(rules);
   registerRun(rules);
+  registerReload(rules);
   registerWebhookRotateToken(rules);
   registerWebhookShowToken(rules);
 }

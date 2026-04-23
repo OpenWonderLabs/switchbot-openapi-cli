@@ -254,4 +254,22 @@ describe('switchbot rules (commander surface)', () => {
       expect(stderr.join('\n')).toContain('automation.enabled is not true');
     });
   });
+
+  describe('rules reload', () => {
+    it('exits 2 with usage error when no engine is running', async () => {
+      const { stdout, stderr, exitCode } = await runCli(['rules', 'reload']);
+      expect(exitCode).toBe(2);
+      // The error goes through exitWithError → stderr for usage errors.
+      const combined = [...stdout, ...stderr].join('\n');
+      expect(combined).toMatch(/no running rules engine/);
+    });
+
+    it('emits structured JSON when --json is set and no engine is running', async () => {
+      const { stdout, exitCode } = await runCli(['--json', 'rules', 'reload']);
+      expect(exitCode).toBe(2);
+      const parsed = JSON.parse(stdout[stdout.length - 1]);
+      expect(parsed.error?.subKind).toBe('no-engine');
+      expect(parsed.error?.code).toBe(2);
+    });
+  });
 });

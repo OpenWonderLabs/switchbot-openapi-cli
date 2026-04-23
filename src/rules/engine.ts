@@ -220,7 +220,8 @@ export interface EngineStats {
 
 export class RulesEngine {
   private readonly opts: RulesEngineOptions;
-  private readonly rules: Rule[];
+  private rules: Rule[];
+  private aliases: Record<string, string>;
   private readonly throttle = new ThrottleGate();
   private unsubscribeMessage: (() => void) | null = null;
   private unsubscribeState: (() => void) | null = null;
@@ -249,6 +250,7 @@ export class RulesEngine {
   constructor(opts: RulesEngineOptions) {
     this.opts = opts;
     this.rules = (opts.automation?.rules ?? []).filter((r) => r.enabled !== false);
+    this.aliases = opts.aliases ?? {};
     this.stats.rulesLoaded = opts.automation?.rules?.length ?? 0;
     this.stats.rulesActive = this.rules.length;
   }
@@ -350,6 +352,107 @@ export class RulesEngine {
   }
 
   /**
+   * Hot-reload the running engine with a fresh automation block and
+   * alias map — typically triggered by SIGHUP or by the `rules reload`
+   * subcommand writing the reload sentinel file.
+   *
+   * Semantics:
+   *   - Rejects (and keeps the old ruleset) when the new automation is
+   *     disabled or fails lint. The engine never silently degrades.
+   *   - Diffs cron registrations by `rule.name` + `schedule`: unchanged
+   *     entries keep their armed timer, changed/removed entries are
+   *     unregistered, new entries are registered and armed.
+   *   - Hands the fresh webhook rule list to the live listener (keeps
+   *     the bound port / open connections). If the reload removes every
+   *     webhook rule the listener is torn down; if it adds the first
+   *     webhook rule we refuse — spinning up a new listener mid-run
+   *     would silently change the security surface.
+   *   - `ThrottleGate` state is retained for surviving rule names and
+   *     dropped for removed ones. A rule that was throttled before the
+   *     reload stays throttled after it (same name = same window), but
+   *     a renamed rule resets.
+   */
+  async reload(
+    nextAutomation: AutomationBlock | null | undefined,
+    nextAliases: Record<string, string> = {},
+  ): Promise<{ changed: boolean; errors: string[]; warnings: string[] }> {
+    if (!this.started || this.stopped) {
+      return { changed: false, errors: ['engine not running'], warnings: [] };
+    }
+    if (nextAutomation?.enabled !== true) {
+      return {
+        changed: false,
+        errors: ['automation.enabled is not true in the new policy — refusing to reload'],
+        warnings: [],
+      };
+    }
+    const lint = lintRules(nextAutomation);
+    if (!lint.valid) {
+      const errs = lint.rules.flatMap((r) =>
+        r.issues.filter((i) => i.severity === 'error').map((i) => `${i.rule}:${i.code}`),
+      );
+      return { changed: false, errors: errs, warnings: [] };
+    }
+
+    const warnings: string[] = [];
+    const nextActive = (nextAutomation.rules ?? []).filter((r) => r.enabled !== false);
+    const nextByName = new Map(nextActive.map((r) => [r.name, r]));
+    const oldByName = new Map(this.rules.map((r) => [r.name, r]));
+
+    // Cron diff
+    if (this.cronScheduler) {
+      for (const [name, oldRule] of oldByName) {
+        if (!isCronTrigger(oldRule.when)) continue;
+        const next = nextByName.get(name);
+        const same =
+          next &&
+          isCronTrigger(next.when) &&
+          next.when.schedule === oldRule.when.schedule;
+        if (!same) this.cronScheduler.unregister(name);
+      }
+      for (const [name, newRule] of nextByName) {
+        if (!isCronTrigger(newRule.when)) continue;
+        if (this.cronScheduler.hasRegistered(name)) continue;
+        this.cronScheduler.register(newRule);
+      }
+    } else {
+      // No scheduler yet but now we have cron rules — stand one up.
+      const cronRules = nextActive.filter((r) => isCronTrigger(r.when));
+      if (cronRules.length > 0) {
+        this.cronScheduler = new CronScheduler({
+          dispatch: (rule, event) => this.enqueue(() => this.onCronFire(rule, event)),
+        });
+        for (const r of cronRules) this.cronScheduler.register(r);
+        this.cronScheduler.start();
+      }
+    }
+
+    // Webhook diff — keep the listener alive if possible.
+    const newWebhookRules = nextActive.filter((r) => isWebhookTrigger(r.when));
+    if (this.webhookListener) {
+      if (newWebhookRules.length === 0) {
+        await this.webhookListener.stop();
+        this.webhookListener = null;
+      } else {
+        this.webhookListener.updateRules(newWebhookRules);
+      }
+    } else if (newWebhookRules.length > 0) {
+      warnings.push(
+        'webhook rules added via reload — full restart required for the listener to bind. Skipping activation.',
+      );
+    }
+
+    // Swap ruleset + aliases atomically relative to the next event.
+    this.rules = nextActive;
+    this.aliases = nextAliases;
+    this.stats.rulesLoaded = nextAutomation.rules?.length ?? 0;
+    this.stats.rulesActive = nextActive.length;
+    this.throttle.retainOnly(new Set(nextByName.keys()));
+
+    return { changed: true, errors: [], warnings };
+  }
+
+  /**
    * Expose the MQTT pipeline for direct invocation from tests — feeds a
    * synthetic payload through the same matcher/throttle/action chain.
    */
@@ -444,7 +547,7 @@ export class RulesEngine {
     for (const rule of this.rules) {
       if (!isMqttTrigger(rule.when)) continue;
       const resolvedFilter = rule.when.device
-        ? this.opts.aliases[rule.when.device] ?? rule.when.device
+        ? this.aliases[rule.when.device] ?? rule.when.device
         : undefined;
       if (!matchesMqttTrigger(rule.when, event, resolvedFilter)) continue;
       await this.dispatchRule(rule, event);
@@ -494,7 +597,7 @@ export class RulesEngine {
       return p;
     };
     const cond = await evaluateConditions(rule.conditions, event.t, {
-      aliases: this.opts.aliases,
+      aliases: this.aliases,
       fetchStatus,
     });
     if (!cond.matched) {
@@ -559,7 +662,7 @@ export class RulesEngine {
       const result = await executeRuleAction(action, {
         rule,
         fireId,
-        aliases: this.opts.aliases,
+        aliases: this.aliases,
         httpClient: this.opts.httpClient,
         globalDryRun: this.opts.globalDryRun,
         skipApiCall: this.opts.skipApiCall,

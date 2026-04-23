@@ -53,6 +53,10 @@ export class CronScheduler {
     return { schedule: s.schedule, nextAt: s.nextAt };
   }
 
+  hasRegistered(ruleName: string): boolean {
+    return this.entries.has(ruleName);
+  }
+
   /**
    * Register a cron rule. Validates the pattern eagerly — an invalid
    * schedule throws synchronously so engine start can surface the error.
