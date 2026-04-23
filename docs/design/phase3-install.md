@@ -11,6 +11,23 @@
 > wrapper and the ClawHub registry entry remain Phase 3B proper and
 > live outside this repo.
 
+## Implementation delta (what changed from this design)
+
+This document was written before `switchbot install` shipped. The body
+below describes the original design intent (`openclaw plugins install`
+surface). What actually landed in v2.10.0 differs in three ways:
+
+| Design doc says | What shipped |
+|---|---|
+| Entry point: `openclaw plugins install clawhub:switchbot` | Built-in: `switchbot install` (no ClawHub dependency) |
+| Step 2: `npm i -g @switchbot/openapi-cli` | Skipped — CLI already in PATH is the precondition |
+| Step 8: `switchbot doctor` failure → full rollback | `--verify` flag makes doctor a warn-only post-step; failure never triggers rollback |
+| Uninstall: `openclaw plugins uninstall` | Built-in: `switchbot uninstall [--purge]` |
+
+Additional flags not in this design: `--force` (replace existing
+symlink), `--verify` (opt-in post-install doctor check), `--purge`
+(shorthand for `--yes --remove-creds --remove-policy`).
+
 ## Goal
 
 Today, getting an AI agent to drive SwitchBot is a 15-minute manual

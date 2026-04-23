@@ -1,11 +1,12 @@
 # Roadmap — Phase 1 through Phase 4
 
 > **Status as of 2026-04-23:** Phase 1 complete, Phase 2 complete,
-> Phase 3A complete (keychain + install library), Phase 3B tracked in
-> the separate
+> Phase 3A complete (keychain + install library + built-in CLI install
+> command), Phase 3B tracked in the separate
 > [`openclaw-switchbot-skill`](https://github.com/OpenWonderLabs/openclaw-switchbot-skill)
 > repo, Phase 4 shipped at v0.2 (rules engine with MQTT + cron +
-> webhook triggers). Track β / γ / δ are reserved for post-v2.9.0 work.
+> webhook triggers, condition composition, weekday filter).
+> Tracks β / γ / δ / ε all shipped between v2.10.0 and v2.12.0.
 
 This file is the **single source of truth** for phase numbering across
 the two repos in this project:
@@ -77,15 +78,18 @@ Surfaces:
 Phase 3 is **split in two**, with 3A shipped in this repo and 3B
 published as a separate skill repo.
 
-**Phase 3A — Keychain + install orchestrator library *(shipped, v2.8.x)*:**
+**Phase 3A — Keychain + install CLI *(shipped, v2.8.x → v2.10.0)*:**
 
 - `src/credentials/keychain.ts` abstraction with four backends: macOS
-  `security`, Windows `cmdkey`, Linux `secret-tool` (libsecret), and a
-  `0600` file fallback
+  `security(1)`, Windows PowerShell + Win32 `CredRead`/`CredWrite`,
+  Linux `secret-tool` (libsecret), and a `0600` file fallback
 - `switchbot auth keychain describe | get | set | delete | migrate`
 - `doctor` + `agent-bootstrap` report the active credential source
-- `src/install/` preflight + rollback-aware step runner (library only;
-  external `openclaw plugins install` calls into it)
+- `src/install/` preflight + rollback-aware step runner (library)
+- `switchbot install` / `switchbot uninstall` built-in CLI commands
+  (v2.10.0): one-command Quickstart → doctor → all-green; rollback on
+  any step failure. `--agent claude-code` auto-symlinks the skill;
+  other agents print a recipe. `--purge` for one-flag full teardown.
 
 **Phase 3B — Skill packaging + ClawHub registry:**
 
@@ -95,18 +99,18 @@ published as a separate skill repo.
 - `SKILL.md` + `manifest.json` + skill-side examples
 - Publishing to ClawHub / Claude Desktop / other agent surfaces
 
-### Phase 4 — Rules engine v0.2 *(shipped, v2.8.x → v2.9.0)*
+### Phase 4 — Rules engine v0.2 *(shipped, v2.8.x → v2.11.0)*
 
 **What it is:** the declarative leap. Rules live in the same
 `policy.yaml`, and the engine executes them without a separate daemon.
 
-Surfaces:
+Surfaces (v2.9.0 baseline + v2.11.0 additions):
 
 - `switchbot rules lint | list | run | reload | tail | replay`
-- Triggers: `mqtt` (shadow events), `cron` (local time), `webhook`
-  (bearer-token HTTP ingest)
+- Triggers: `mqtt` (shadow events), `cron` (local time, optional
+  `days` weekday filter), `webhook` (bearer-token HTTP ingest)
 - Conditions: `time_between` (quiet-hours-aware), `device_state`
-  (per-tick cache)
+  (per-tick cache), `all` / `any` / `not` logical composition
 - Per-rule `throttle` (`max_per: "10m"` style)
 - Per-rule `dry_run` (plan without firing)
 - Hot reload: `SIGHUP` on Unix, pid-file sentinel on Windows
@@ -134,26 +138,23 @@ the skill's `manifest.json` `roadmap` block, which points back here.
 
 ---
 
-## Reserved tracks (not yet started)
+## Completed tracks (shipped post-v2.9.0)
 
-These are the next candidates after v2.9.0. Each is a standalone
-track, not a dependency of another:
-
-- **Track β — one-command install surface.** A top-level
-  `switchbot install` wrapper around the Phase 3A library. Requires
-  ClawHub registry infra (Phase 3B) to be callable end-to-end.
-- **Track γ — rules v0.3.** User-reported missing pieces:
-  `day_of_week`, `and`/`or` composition, per-trigger debounce,
-  profile-scoped rules, templating in `then.command`.
-- **Track δ — semi-autonomous workflow (L2).** A `plan suggest` →
-  `plan run --require-approval` pairing so an agent can draft a
-  multi-step plan, surface the full diff, and fire on a single Y/N.
-- **Track ε — cross-OS CI matrix for keychain.** The four backends
-  are unit-tested; end-to-end matrix (macOS GH runner + Windows GH
-  runner + Linux libsecret container) is still deferred.
-
-None of β/γ/δ/ε ship in v2.9.0. They are listed here so future
-planning uses the same labels.
+- **Track β — one-command install surface *(shipped, v2.10.0)*.**
+  Top-level `switchbot install` / `switchbot uninstall` wrapping the
+  Phase 3A library. CLI assumed already in PATH; doctor runs as
+  warn-only post-step. Phase 3B (ClawHub registry entry) still external.
+- **Track γ — rules v0.3 *(shipped, v2.11.0)*.**
+  `day_of_week` filter on cron triggers; `all` / `any` / `not`
+  condition composition. Per-trigger debounce and profile-scoped rules
+  remain deferred.
+- **Track δ — semi-autonomous workflow L2 *(shipped, v2.12.0)*.**
+  `plan suggest --intent <text> --device <id>...` scaffolds a Plan
+  JSON from natural language. `plan run --require-approval` gates each
+  destructive step with a TTY prompt. MCP tool `plan_suggest` available.
+- **Track ε — cross-OS CI matrix for keychain *(shipped, v2.11.0)*.**
+  GitHub Actions matrix: macOS (temp keychain), Linux (D-Bus +
+  gnome-keyring), Windows (native Credential Manager).
 
 ---
 

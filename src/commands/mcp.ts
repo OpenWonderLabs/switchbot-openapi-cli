@@ -55,6 +55,7 @@ import {
   type PolicySchemaVersion,
 } from '../policy/schema.js';
 import { planMigration } from '../policy/migrate.js';
+import { suggestPlan } from './plan.js';
 import { writeFileSync } from 'node:fs';
 
 const LATEST_SUPPORTED_VERSION: PolicySchemaVersion =
@@ -1265,6 +1266,43 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
       },
     );
   }
+
+  // ---- plan_suggest ---------------------------------------------------------
+  server.registerTool(
+    'plan_suggest',
+    {
+      title: 'Draft a SwitchBot execution plan from intent',
+      description:
+        'Generate a candidate Plan JSON from a natural language intent and a list of device IDs. ' +
+        'Uses keyword heuristics (no LLM) to pick the command. The returned plan is ready to pass to ' +
+        '`plan run` — review and edit before executing. Recognised commands: turnOn, turnOff, press, ' +
+        'lock, unlock, open, close, pause. Falls back to turnOn with a warning when intent is unclear.',
+      _meta: { agentSafetyTier: 'read' },
+      inputSchema: z.object({
+        intent: z.string().min(1).describe('Natural language description of what to do (e.g. "turn off all lights").'),
+        device_ids: z.array(z.string().min(1)).min(1).describe('Device IDs to act on.'),
+      }).strict(),
+      outputSchema: {
+        plan: z.unknown().describe('Candidate Plan JSON (version 1.0) ready to pass to plan run.'),
+        warnings: z.array(z.string()).describe('Informational warnings (e.g. unrecognized intent defaulted to turnOn).'),
+      },
+    },
+    ({ intent, device_ids }) => {
+      const devices = device_ids.map((id) => {
+        const cached = getCachedDevice(id);
+        return { id, name: cached?.name, type: cached?.type };
+      });
+      try {
+        const { plan, warnings } = suggestPlan({ intent, devices });
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ plan, warnings }, null, 2) }],
+          structuredContent: { plan, warnings },
+        };
+      } catch (err) {
+        return apiErrorToMcpError(err);
+      }
+    },
+  );
 
   return server;
 }

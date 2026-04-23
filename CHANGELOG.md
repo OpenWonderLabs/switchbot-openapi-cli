@@ -5,7 +5,38 @@ All notable changes to `@switchbot/openapi-cli` are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.11.0] - 2026-04-23
+## [2.12.0] - 2026-04-23
+
+Feature release — semi-autonomous L2 workflow for agents.
+
+### Added — `plan suggest`
+
+- New subcommand `switchbot plan suggest --intent <text> --device <id>...`
+  scaffolds a candidate Plan JSON from natural language intent + device list.
+  No LLM involved — uses keyword heuristics to match the intent against 8
+  command patterns (`turnOn`, `turnOff`, `press`, `lock`, `unlock`, `open`,
+  `close`, `pause`). Defaults to `turnOn` with a warning when unrecognised.
+  Output goes to stdout (or `--out <file>`); warnings go to stderr.
+- Exported `suggestPlan(opts)` pure function for programmatic use.
+
+### Added — `plan run --require-approval`
+
+- New flag `--require-approval` on `plan run` enables per-step TTY
+  confirmation for destructive steps: the CLI prints the step details and
+  prompts `[y/N]` before executing. Rejecting a step marks it `skipped`
+  with `decision: "rejected"` in the JSON output.
+- Non-TTY environments (CI, pipes) auto-reject destructive steps.
+- `--require-approval` is mutually exclusive with `--json` (exits with an
+  error if both are passed).
+- `--yes` takes precedence over `--require-approval` as blanket approval.
+
+### Added — MCP `plan_suggest` tool
+
+- New read-only MCP tool `plan_suggest({ intent, device_ids })` wraps
+  `suggestPlan()` for agents that prefer to stay in the MCP session.
+  Returns `{ plan, warnings }` structured content.
+
+
 
 Feature release — install/uninstall UX polish, cross-OS keychain CI,
 and two rules engine enhancements.

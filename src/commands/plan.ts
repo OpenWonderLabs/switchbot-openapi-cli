@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import fs from 'node:fs';
+import readline from 'node:readline';
 import { printJson, isJsonMode, handleError } from '../utils/output.js';
 import { executeCommand, isDestructiveCommand } from '../lib/devices.js';
 import { executeScene } from '../lib/scenes.js';
@@ -176,6 +177,54 @@ export function validatePlan(raw: unknown): {
   return { ok: true, plan: raw as Plan };
 }
 
+// ---------------------------------------------------------------------------
+// Plan suggestion (heuristic, no LLM)
+// ---------------------------------------------------------------------------
+
+export interface SuggestOptions {
+  intent: string;
+  devices: Array<{ id: string; name?: string; type?: string }>;
+}
+
+export interface SuggestResult {
+  plan: Plan;
+  warnings: string[];
+}
+
+const COMMAND_KEYWORDS: Array<{ pattern: RegExp; command: string }> = [
+  { pattern: /\boff\b|\bturn.?off\b|\bstop\b/i, command: 'turnOff' },
+  { pattern: /\bon\b|\bturn.?on\b|\bstart\b/i, command: 'turnOn' },
+  { pattern: /\bpress\b|\bclick\b|\btap\b/i, command: 'press' },
+  { pattern: /\block\b/i, command: 'lock' },
+  { pattern: /\bunlock\b/i, command: 'unlock' },
+  { pattern: /\bopen\b|\braise\b|\bup\b/i, command: 'open' },
+  { pattern: /\bclose\b|\blower\b|\bdown\b/i, command: 'close' },
+  { pattern: /\bpause\b/i, command: 'pause' },
+];
+
+export function suggestPlan(opts: SuggestOptions): SuggestResult {
+  const warnings: string[] = [];
+  let command = '';
+  for (const k of COMMAND_KEYWORDS) {
+    if (k.pattern.test(opts.intent)) {
+      command = k.command;
+      break;
+    }
+  }
+  if (!command) {
+    command = 'turnOn';
+    warnings.push(
+      `Could not infer command from intent "${opts.intent}" — defaulted to "turnOn". Edit the generated plan to set the correct command.`,
+    );
+  }
+  const steps: PlanStep[] = opts.devices.map((d): PlanCommandStep => ({
+    type: 'command',
+    deviceId: d.id,
+    command,
+  }));
+  return { plan: { version: '1.0', description: opts.intent, steps }, warnings };
+}
+
 async function readPlanSource(file: string | undefined): Promise<unknown> {
   const text = file === undefined || file === '-'
     ? await readStdin()
@@ -204,10 +253,21 @@ function readStdin(): Promise<string> {
   });
 }
 
+async function promptApproval(stepIdx: number, command: string, deviceId: string): Promise<boolean> {
+  if (!process.stdin.isTTY) return false;
+  const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
+  return new Promise<boolean>((resolve) => {
+    rl.question(`  Approve step ${stepIdx} — ${command} on ${deviceId}? [y/N] `, (answer) => {
+      rl.close();
+      resolve(answer.trim().toLowerCase() === 'y');
+    });
+  });
+}
+
 interface PlanRunResult {
   plan: Plan;
   results: Array<
-    | { step: number; type: 'command'; deviceId: string; command: string; status: 'ok' | 'error' | 'skipped'; error?: string }
+    | { step: number; type: 'command'; deviceId: string; command: string; status: 'ok' | 'error' | 'skipped'; error?: string; decision?: 'approved' | 'rejected' }
     | { step: number; type: 'scene'; sceneId: string; status: 'ok' | 'error' | 'skipped'; error?: string }
     | { step: number; type: 'wait'; ms: number; status: 'ok' | 'skipped' }
   >;
@@ -291,16 +351,54 @@ against the live API without executing any mutations.
     });
 
   plan
+    .command('suggest')
+    .description('Generate a candidate Plan JSON from intent + devices (heuristic, no LLM)')
+    .requiredOption('--intent <text>', 'Natural language description (e.g. "turn off all lights")')
+    .option(
+      '--device <id>',
+      'Device ID to include (repeatable)',
+      (v: string, prev: string[]) => [...prev, v],
+      [] as string[],
+    )
+    .option('--out <file>', 'Write plan JSON to file instead of stdout')
+    .action((opts: { intent: string; device: string[]; out?: string }) => {
+      if (opts.device.length === 0) {
+        console.error('error: at least one --device is required');
+        process.exit(1);
+      }
+      const devices = opts.device.map((ref) => {
+        const cached = getCachedDevice(ref);
+        return { id: ref, name: cached?.name, type: cached?.type };
+      });
+      const { plan: suggested, warnings } = suggestPlan({ intent: opts.intent, devices });
+      for (const w of warnings) process.stderr.write(`warning: ${w}\n`);
+      const json = JSON.stringify(suggested, null, 2);
+      if (opts.out) {
+        fs.writeFileSync(opts.out, json + '\n', 'utf8');
+        if (!isJsonMode()) console.log(`✓ plan written to ${opts.out}`);
+      } else if (isJsonMode()) {
+        printJson({ plan: suggested, warnings });
+      } else {
+        console.log(json);
+      }
+    });
+
+  plan
     .command('run')
     .description('Validate + execute a plan. Respects --dry-run; destructive steps require --yes')
     .argument('[file]', 'Path to plan.json, or "-" / omit to read stdin')
     .option('--yes', 'Authorize destructive commands (e.g. Smart Lock unlock, Garage open)')
+    .option('--require-approval', 'Prompt for confirmation before each destructive step (TTY only; mutually exclusive with --json)')
     .option('--continue-on-error', 'Keep running after a failed step (default: stop at first error)')
     .action(
       async (
         file: string | undefined,
-        options: { yes?: boolean; continueOnError?: boolean },
+        options: { yes?: boolean; requireApproval?: boolean; continueOnError?: boolean },
       ) => {
+        if (options.requireApproval && isJsonMode()) {
+          console.error('error: --require-approval cannot be used with --json (no TTY available for prompts)');
+          process.exit(1);
+        }
         let raw: unknown;
         try {
           raw = await readPlanSource(file);
@@ -355,20 +453,43 @@ against the live API without executing any mutations.
             const deviceType = getCachedDevice(resolvedDeviceId)?.type;
             const commandType = step.commandType ?? 'command';
             const destructive = isDestructiveCommand(deviceType, step.command, commandType);
+            let approvalDecision: 'approved' | undefined;
             if (destructive && !options.yes) {
-              out.results.push({
-                step: idx,
-                type: 'command',
-                deviceId: resolvedDeviceId,
-                command: step.command,
-                status: 'skipped',
-                error: 'destructive — rerun with --yes',
-              });
-              out.summary.skipped++;
-              if (!isJsonMode())
-                console.log(`  ${idx}. ⚠ skipped ${step.command} on ${resolvedDeviceId} (destructive — pass --yes)`);
-              if (!options.continueOnError) break;
-              continue;
+              if (options.requireApproval) {
+                const approved = await promptApproval(idx, step.command, resolvedDeviceId);
+                if (approved) {
+                  approvalDecision = 'approved';
+                } else {
+                  out.results.push({
+                    step: idx,
+                    type: 'command',
+                    deviceId: resolvedDeviceId,
+                    command: step.command,
+                    status: 'skipped',
+                    error: 'destructive — rejected at prompt',
+                    decision: 'rejected',
+                  });
+                  out.summary.skipped++;
+                  if (!isJsonMode())
+                    console.log(`  ${idx}. ✗ skipped ${step.command} on ${resolvedDeviceId} (rejected)`);
+                  if (!options.continueOnError) break;
+                  continue;
+                }
+              } else {
+                out.results.push({
+                  step: idx,
+                  type: 'command',
+                  deviceId: resolvedDeviceId,
+                  command: step.command,
+                  status: 'skipped',
+                  error: 'destructive — rerun with --yes',
+                });
+                out.summary.skipped++;
+                if (!isJsonMode())
+                  console.log(`  ${idx}. ⚠ skipped ${step.command} on ${resolvedDeviceId} (destructive — pass --yes)`);
+                if (!options.continueOnError) break;
+                continue;
+              }
             }
             try {
               await executeCommand(resolvedDeviceId, step.command, step.parameter, commandType);
@@ -378,6 +499,7 @@ against the live API without executing any mutations.
                 deviceId: resolvedDeviceId,
                 command: step.command,
                 status: 'ok',
+                ...(approvalDecision ? { decision: approvalDecision } : {}),
               });
               out.summary.ok++;
               if (!isJsonMode())

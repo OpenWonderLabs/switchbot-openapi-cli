@@ -68,8 +68,10 @@ Fields:
 
 1. **mqtt**: `{ source: mqtt, event: <type>, device?: <alias|id> }`
    — consumed from the `switchbot events mqtt-tail --json` stream.
-2. **cron**: `{ source: cron, schedule: <5-field expression> }` — local
-   system timezone.
+2. **cron**: `{ source: cron, schedule: <5-field expression>,
+   days?: <weekday[]> }` — local system timezone. `days` is an
+   optional list of weekday names (`mon`–`sun` or `monday`–`sunday`,
+   case-insensitive) added in v2.11.0.
 3. **webhook**: `{ source: webhook, path: /foo }` — local HTTP path.
    Transport/auth are Phase 3 concerns.
 
@@ -79,9 +81,15 @@ Fields:
    start).
 2. **device_state**: `{ device, field, op, value }` for comparing a
    status field (e.g. `online == true`, `brightness > 50`).
+3. **all**: `{ all: [condition, ...] }` — all sub-conditions must pass
+   (v2.11.0).
+4. **any**: `{ any: [condition, ...] }` — at least one must pass
+   (v2.11.0).
+5. **not**: `{ not: condition }` — inverts a single condition
+   (v2.11.0).
 
-More shapes (cron within conditions, group membership, etc.) can be
-added later without breaking v0.2.
+Conditions 3–5 nest recursively via `$ref: "#/$defs/condition"` in the
+JSON Schema. The top-level `conditions[]` array is AND-joined.
 
 ### `then[]` — actions
 
@@ -125,22 +133,23 @@ Because v0.2 is purely additive, a v0.1 file with `automation.rules:
 []` or `automation: { enabled: false }` migrates without any user-
 visible change except the version constant.
 
-## Validator wiring (when Phase 4 ships)
+## Validator wiring (as shipped)
 
-1. Rename `v0.2.draft.json` → `v0.2.json` in `src/policy/schema/`.
-2. Mirror to `examples/policy.schema.json` in the skill repo (CI
-   already diffs these).
-3. Update `src/policy/validate.ts` to dispatch on `version` and pick
-   the right schema (`0.1` or `0.2`).
-4. Add a v0.2-specific test matrix under `tests/policy/validate-v0.2.test.ts`.
-5. Bump CLI minor: `2.x.y → 2.(x+1).0`. Policy schema versions track
-   independently of CLI semver but major CLI releases are a natural
-   time to drop old schema support.
+The steps below are recorded for historical context — all have been
+completed:
+
+1. ~~Rename `v0.2.draft.json` → `v0.2.json`~~ — done; active schema
+   is at `src/policy/schema/v0.2.json`.
+2. ~~Mirror to `examples/policy.schema.json` in the skill repo~~ — CI
+   already diffs these.
+3. `src/policy/validate.ts` dispatches on `version` and picks `0.1`
+   or `0.2` schema. Active.
+4. v0.2 test matrix at `tests/policy/validate-v0.2.test.ts`. Active.
+5. CLI version bumped at Phase 4 ship.
 
 ## References
 
-- `src/policy/schema/v0.1.json` — the current active schema
-- `src/policy/schema/v0.2.draft.json` — this draft
-- `docs/design/phase4-rules.md` — the runtime behavior side (not yet
-  written)
-- `docs/policy-reference.md` — user-facing v0.1 field reference
+- `src/policy/schema/v0.1.json` — the v0.1 schema
+- `src/policy/schema/v0.2.json` — the active v0.2 schema
+- `docs/design/phase4-rules.md` — the runtime behavior side
+- `docs/policy-reference.md` — user-facing field reference

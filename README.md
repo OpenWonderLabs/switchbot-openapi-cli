@@ -699,6 +699,9 @@ Supported shells: `bash`, `zsh`, `fish`, `powershell` (`pwsh` is accepted as an 
 # Print the plan JSON Schema (give to your agent framework)
 switchbot plan schema
 
+# Draft a candidate plan from natural language intent
+switchbot plan suggest --intent "turn off all lights" --device <id1> --device <id2>
+
 # Validate a plan file without running it
 switchbot plan validate plan.json
 
@@ -708,9 +711,12 @@ switchbot --dry-run plan run plan.json
 # Run — pass --yes to allow destructive steps
 switchbot plan run plan.json --yes
 switchbot plan run plan.json --continue-on-error
+
+# Run with per-step TTY confirmation for destructive steps (human-in-the-loop)
+switchbot plan run plan.json --require-approval
 ```
 
-A plan file is a JSON document with `version`, `description`, and a `steps` array of `command`, `scene`, or `wait` steps. Steps execute sequentially; a failed step stops the run unless `--continue-on-error` is set. See [`docs/agent-guide.md`](./docs/agent-guide.md) for the full schema and agent integration patterns.
+A plan file is a JSON document with `version`, `description`, and a `steps` array of `command`, `scene`, or `wait` steps. Steps execute sequentially; a failed step stops the run unless `--continue-on-error` is set. `--require-approval` prompts for each destructive step individually, letting you approve or reject without re-running the whole plan. See [`docs/agent-guide.md`](./docs/agent-guide.md) for the full schema and agent integration patterns.
 
 ### `devices watch` — poll status
 
@@ -1047,9 +1053,9 @@ same labels the roadmap doc uses:
 - **Track γ — rules v0.3.** `day_of_week`, `and`/`or` composition,
   per-trigger debounce, profile-scoped rules, templating in
   `then.command`.
-- **Track δ — semi-autonomous workflow (L2).** `plan suggest` paired
+- **Track δ — semi-autonomous workflow (L2).** ✅ `plan suggest` paired
   with `plan run --require-approval` so agents can draft and confirm
-  multi-step plans in one round-trip.
+  multi-step plans in one round-trip. MCP tool `plan_suggest` available.
 - **Track ε — cross-OS CI matrix for keychain.** End-to-end matrix
   (macOS + Windows + Linux libsecret) instead of unit-tested backends
   only.

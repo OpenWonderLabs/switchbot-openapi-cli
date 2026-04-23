@@ -146,6 +146,20 @@ Give that file to your agent framework (OpenAI tool schema, Anthropic JSON mode,
 }
 ```
 
+### Draft a plan from intent (heuristic scaffold)
+
+```bash
+# CLI — produces a candidate plan JSON on stdout
+switchbot plan suggest --intent "turn off all lights" --device D1 --device D2
+
+# MCP — agents can call plan_suggest({intent, device_ids}) without leaving the session
+```
+
+`plan suggest` uses keyword heuristics (no LLM) to pick a command from the intent text and generate
+one step per device. Recognised verbs: `turnOn`, `turnOff`, `press`, `lock`, `unlock`, `open`, `close`,
+`pause`. Defaults to `turnOn` with a warning when the intent is unclear. Always review and edit the
+output before running.
+
 ### Validate first, run later
 
 ```bash
@@ -160,6 +174,7 @@ cat plan.json | switchbot --json plan run -         # machine-readable outcome
 - Steps execute sequentially. A failed step stops the run (exit 1) unless you pass `--continue-on-error`.
 - `wait` uses `setTimeout`; `ms` is capped at 600 000 so a malformed plan can't hang the agent.
 - Destructive commands are **skipped** (not failed) without `--yes`, so an agent that omits the flag gets a clean "needs confirmation" summary.
+- `--require-approval` enables per-step TTY confirmation for destructive steps — approve with `y`, reject with any other key. Non-TTY environments (CI, pipes) auto-reject. Mutually exclusive with `--json`. `--yes` takes precedence.
 - Every successful/failed step lands in `--audit-log` (see [Observability](#observability)).
 
 ---

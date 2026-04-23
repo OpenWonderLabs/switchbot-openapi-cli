@@ -1,8 +1,13 @@
 # Phase 4 — rule engine design
 
-> Status: **Shipped (v0.2)**. The engine is implemented in
-> `src/rules/engine.ts` and wired to the CLI via
+> Status: **Shipped (v0.2, extended in v2.11.0)**. The engine is
+> implemented in `src/rules/engine.ts` and wired to the CLI via
 > `switchbot rules lint | list | run | reload | tail | replay`. All
+> three triggers (MQTT / cron / webhook) + conditions (see below) +
+> per-rule `throttle` + `dry_run` fire end-to-end. v2.11.0 added
+> `days` weekday filter on cron triggers and `all`/`any`/`not`
+> condition composition. Companion to
+> `docs/design/phase4-rules-schema.md`.
 > three triggers (MQTT / cron / webhook) + `time_between` and
 > `device_state` conditions + per-rule `throttle` + `dry_run` fire
 > end-to-end. Hot-reload via SIGHUP (Unix) or a pid-file sentinel
@@ -104,6 +109,12 @@ Standard 5-field cron, evaluated in the local system timezone. Uses
 "run twice on fall-back, skipped on spring-forward" behavior — we
 don't silently paper over this).
 
+Optional `days` filter (v2.11.0): a list of weekday names
+(`mon`–`sun` or `monday`–`sunday`, case-insensitive) applied *after*
+the cron fires. Firings on unlisted weekdays are suppressed before
+dispatch — throttle counters and audit entries are not written for
+suppressed firings.
+
 ### `source: webhook`
 
 The engine binds an HTTP listener on localhost (port from CLI config,
@@ -115,18 +126,26 @@ payload available to `conditions`.
 
 ## Conditions
 
-Evaluated in order, short-circuiting on first failure. Two shapes in
-v0.2:
+Evaluated and AND-joined at the top level; all failures are collected
+and surfaced together (not short-circuited on the first). Four shapes:
 
 - **`time_between: [start, end]`** — HH:MM, local system time.
   Overnight crossing supported.
 - **`{ device, field, op, value }`** — reads `switchbot devices status
   <device> --json` (cached per-tick; see performance below) and
-  applies the comparison.
+  applies the comparison. Operators: `==`, `!=`, `<`, `>`, `<=`, `>=`.
+- **`all: [condition, ...]`** *(v2.11.0)* — all sub-conditions must
+  pass (logical AND over a sub-list).
+- **`any: [condition, ...]`** *(v2.11.0)* — at least one sub-condition
+  must pass (logical OR).
+- **`not: condition`** *(v2.11.0)* — inverts a single condition.
 
-A future v0.3 might add more shapes (`day_of_week`, `and`/`or`
-composition, simple math), but v0.2 is intentionally spare. Most
-useful automations turn out to need only time + state.
+Composites nest arbitrarily. The top-level `conditions[]` array remains
+AND-joined across its entries, so `conditions: [A, any: [B, C]]`
+means `A AND (B OR C)`.
+
+A future v0.3 might add more leaf shapes (`and`/`or` at the leaf level
+were folded into the composite nodes above).
 
 ## Actions
 
