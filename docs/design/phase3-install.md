@@ -1,8 +1,13 @@
 # Phase 3 — one-command install design
 
-> Status: **design-only**. No code lives yet. This document pins the
-> shape the Phase 3 delivery should take so that implementation work
-> can proceed without bikeshedding.
+> Status: **partially shipped (3A)**. Phase 3A landed in v2.8.x:
+> `src/credentials/keychain.ts` abstraction with four backends,
+> the `switchbot auth keychain` subcommand group, doctor +
+> agent-bootstrap integration, and an in-repo `src/install/` library
+> (preflight + rollback-aware step runner) that Phase 3B's external
+> `openclaw plugins install` command can call into. The external
+> installer itself and the ClawHub registry entry are Phase 3B and
+> live outside this repo.
 
 ## Goal
 

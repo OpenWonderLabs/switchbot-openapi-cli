@@ -131,7 +131,8 @@ switchbot devices command <deviceId> turnOn
 The CLI reads credentials in this order (first match wins):
 
 1. **Environment variables** — `SWITCHBOT_TOKEN` and `SWITCHBOT_SECRET`
-2. **Config file** — `~/.switchbot/config.json` (written by `config set-token`, mode `0600`)
+2. **OS keychain** — native keychain (macOS Keychain / Windows Credential Manager / libsecret on Linux) when populated via `switchbot auth keychain set`
+3. **Config file** — `~/.switchbot/config.json` (written by `config set-token`, mode `0600`)
 
 Obtain the token and secret from the SwitchBot mobile app:
 **Profile → Preferences → Developer Options → Get Token**.
@@ -147,6 +148,32 @@ export SWITCHBOT_SECRET=...
 # Confirm which source is active and see the masked secret
 switchbot config show
 ```
+
+### OS keychain (preview)
+
+Prefer native OS storage over the `0600` JSON on disk:
+
+```bash
+# See which backend is active on this machine
+switchbot auth keychain describe
+
+# Move existing ~/.switchbot/config.json into the keychain
+#   (pass --delete-file to remove the source after a successful migration)
+switchbot auth keychain migrate
+
+# Or write credentials directly (TTY prompt or --stdin-file <path>)
+switchbot auth keychain set
+
+# Verify a profile has credentials without leaking the material
+switchbot auth keychain get
+```
+
+Backends: `security(1)` on macOS, `libsecret` / `secret-tool` on Linux,
+Credential Manager (via PowerShell + Win32 `CredReadW`/`CredWriteW`) on
+Windows. If no native backend is available, the file backend takes
+over transparently so the CLI keeps working. `switchbot doctor`
+surfaces which backend is active and warns when file-stored credentials
+could be moved into a writable keychain.
 
 ## Policy
 
@@ -880,7 +907,7 @@ npm install
 
 npm run dev -- <args>       # Run from TypeScript sources via tsx
 npm run build               # Compile to dist/
-npm test                    # Run the Vitest suite (1315 tests)
+npm test                    # Run the Vitest suite (1543 tests)
 npm run test:watch          # Watch mode
 npm run test:coverage       # Coverage report (v8, HTML + text)
 ```
@@ -925,7 +952,7 @@ src/
     ├── format.ts         # renderRows / filterFields / output-format dispatch
     ├── audit.ts          # JSONL audit log writer
     └── quota.ts          # Local daily-quota counter
-tests/                    # Vitest suite (1315 tests, mocked axios, no network)
+tests/                    # Vitest suite (1543 tests, mocked axios, no network)
 ```
 
 ### Release flow
