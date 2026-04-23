@@ -11,6 +11,7 @@ import {
   skillLinkPathFor,
   type InstallContext,
   type DoctorSpawner,
+  type SymlinkSkillOptions,
 } from '../../src/install/default-steps.js';
 import type { CredentialStore, CredentialBundle } from '../../src/credentials/keychain.js';
 
@@ -205,11 +206,30 @@ describe('stepSymlinkSkill', () => {
     expect(() => step.execute(ctx)).toThrow(/does not exist/);
   });
 
+  it('A2: throws if skillPath has no SKILL.md', () => {
+    const ctx = baseCtx({ agent: 'claude-code', skillPath: skillDir });
+    const step = stepSymlinkSkill(); // no force
+    expect(() => step.execute(ctx)).toThrow(/SKILL\.md/);
+  });
+
+  it('A2: --force bypasses SKILL.md check', () => {
+    const fakeHome = path.join(tmpDir, 'home');
+    fs.mkdirSync(fakeHome);
+    const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const ctx = baseCtx({ agent: 'claude-code', skillPath: skillDir });
+    const step = stepSymlinkSkill({ force: true });
+    step.execute(ctx); // must not throw
+    expect(ctx.skillLinkCreated).toBe(true);
+    homeSpy.mockRestore();
+  });
+
   it('creates a symlink/junction under the agent-specific path', () => {
     // Redirect HOME so the test does not touch the user's real ~/.claude.
     const fakeHome = path.join(tmpDir, 'home');
     fs.mkdirSync(fakeHome);
     const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    // Add SKILL.md so the step does not complain.
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '# skill\n');
 
     const ctx = baseCtx({ agent: 'claude-code', skillPath: skillDir });
     const step = stepSymlinkSkill();
@@ -223,6 +243,63 @@ describe('stepSymlinkSkill', () => {
     step.undo(ctx);
     expect(fs.existsSync(expected)).toBe(false);
 
+    homeSpy.mockRestore();
+  });
+
+  it('A3: is idempotent when existing symlink points at the same target', () => {
+    const fakeHome = path.join(tmpDir, 'home');
+    fs.mkdirSync(fakeHome);
+    const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '# skill\n');
+
+    const ctx = baseCtx({ agent: 'claude-code', skillPath: skillDir });
+    const step = stepSymlinkSkill();
+    step.execute(ctx); // first run creates the link
+    ctx.skillLinkCreated = undefined;
+    step.execute(ctx); // second run: same target → idempotent
+    expect(ctx.skillLinkCreated).toBe(false); // did not recreate
+    homeSpy.mockRestore();
+  });
+
+  it('A3: throws when existing symlink points at a different target without --force', () => {
+    const fakeHome = path.join(tmpDir, 'home');
+    fs.mkdirSync(fakeHome);
+    const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+
+    const otherSkill = path.join(tmpDir, 'other-skill');
+    fs.mkdirSync(otherSkill);
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '# skill\n');
+
+    // Pre-create a symlink pointing at otherSkill.
+    const linkPath = path.join(fakeHome, '.claude', 'skills', 'switchbot');
+    fs.mkdirSync(path.dirname(linkPath), { recursive: true });
+    const linkType = process.platform === 'win32' ? 'junction' : 'dir';
+    fs.symlinkSync(path.resolve(otherSkill), linkPath, linkType);
+
+    const ctx = baseCtx({ agent: 'claude-code', skillPath: skillDir });
+    const step = stepSymlinkSkill();
+    expect(() => step.execute(ctx)).toThrow(/already links/);
+    homeSpy.mockRestore();
+  });
+
+  it('A3: --force replaces a symlink pointing at a different target', () => {
+    const fakeHome = path.join(tmpDir, 'home');
+    fs.mkdirSync(fakeHome);
+    const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+
+    const otherSkill = path.join(tmpDir, 'other-skill');
+    fs.mkdirSync(otherSkill);
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '# skill\n');
+
+    const linkPath = path.join(fakeHome, '.claude', 'skills', 'switchbot');
+    fs.mkdirSync(path.dirname(linkPath), { recursive: true });
+    const linkType = process.platform === 'win32' ? 'junction' : 'dir';
+    fs.symlinkSync(path.resolve(otherSkill), linkPath, linkType);
+
+    const ctx = baseCtx({ agent: 'claude-code', skillPath: skillDir });
+    const step = stepSymlinkSkill({ force: true });
+    step.execute(ctx);
+    expect(ctx.skillLinkCreated).toBe(true);
     homeSpy.mockRestore();
   });
 

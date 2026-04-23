@@ -34,6 +34,7 @@ interface UninstallCliOptions {
   removePolicy?: boolean;
   removeCreds?: boolean;
   yes?: boolean;
+  purge?: boolean;
 }
 
 function parseAgent(value: string | undefined): AgentName {
@@ -74,6 +75,7 @@ export function registerUninstallCommand(program: Command): void {
     .option('--remove-creds', 'delete credentials from the OS keychain (default: prompt)')
     .option('--remove-policy', 'also delete policy.yaml (default: keep — user edits may live there)')
     .option('-y, --yes', 'assume yes to every confirmation prompt (non-interactive)')
+    .option('--purge', 'shorthand for --yes --remove-creds --remove-policy: remove everything without prompting')
     .addHelpText(
       'after',
       `
@@ -90,13 +92,17 @@ Examples:
 
   # Non-interactive, remove everything including the policy
   switchbot uninstall --yes --remove-policy
+
+  # One-shot: remove absolutely everything without prompting
+  switchbot uninstall --purge
 `,
     )
     .action(async (opts: UninstallCliOptions, command: Command) => {
       const agent = parseAgent(opts.agent);
       const profile = getActiveProfile() ?? 'default';
-      const yes = Boolean(opts.yes);
-      const removePolicy = Boolean(opts.removePolicy);
+      const purge = Boolean(opts.purge);
+      const yes = Boolean(opts.yes) || purge;
+      const removePolicy = Boolean(opts.removePolicy) || purge;
       const removeCreds = Boolean(opts.removeCreds) || yes;
       const globalOpts = command.parent?.opts() ?? {};
       const dryRun = Boolean(globalOpts.dryRun);

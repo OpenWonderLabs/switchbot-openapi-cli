@@ -20,6 +20,9 @@ import {
   type MqttTrigger,
   isDeviceState,
   isTimeBetween,
+  isAllCondition,
+  isAnyCondition,
+  isNotCondition,
 } from './types.js';
 import { isWithinTuple } from './quiet-hours.js';
 
@@ -95,7 +98,8 @@ export interface EvaluateConditionsContext {
 }
 
 /**
- * Evaluate all conditions; AND-joined. Unsupported conditions short-
+ * Evaluate all conditions; AND-joined at the top level. Composite nodes
+ * (all/any/not) are evaluated recursively. Unsupported conditions short-
  * circuit to "not matched" and surface in `unsupported` so the engine
  * can warn loudly rather than silently drop fires. device_state
  * conditions need `ctx.fetchStatus` — without it they count as
@@ -110,56 +114,89 @@ export async function evaluateConditions(
   if (!conditions || conditions.length === 0) return result;
 
   for (const c of conditions) {
-    if (isTimeBetween(c)) {
-      if (!isWithinTuple(c.time_between, now)) {
-        result.matched = false;
-        result.failures.push(
-          `time_between ${c.time_between[0]}-${c.time_between[1]} did not include ${now.toTimeString().slice(0, 5)}`,
-        );
-      }
-    } else if (isDeviceState(c)) {
-      if (!ctx.fetchStatus) {
-        result.matched = false;
-        result.unsupported.push({
-          keyword: 'device_state',
-          hint: 'device_state evaluation requires a live status fetcher; this call site did not provide one.',
-        });
-        continue;
-      }
-      const resolved = resolveDeviceRef(c.device, ctx.aliases);
-      if (!resolved) {
-        result.matched = false;
-        result.failures.push(
-          `device_state: could not resolve device "${c.device}" to an id (no matching alias).`,
-        );
-        continue;
-      }
-      try {
-        const status = await ctx.fetchStatus(resolved);
-        if (!compareField(status[c.field], c.op, c.value)) {
-          result.matched = false;
-          const actual = formatValue(status[c.field]);
-          const expected = formatValue(c.value);
-          result.failures.push(
-            `device_state ${c.device}.${c.field} ${c.op} ${expected} (actual: ${actual})`,
-          );
-        }
-      } catch (err) {
-        result.matched = false;
-        result.failures.push(
-          `device_state ${c.device}.${c.field}: fetch failed — ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-    } else {
+    const sub = await evaluateSingle(c, now, ctx);
+    if (!sub.matched) {
       result.matched = false;
-      result.unsupported.push({
-        keyword: 'unknown',
-        hint: `Unrecognised condition shape: ${JSON.stringify(c).slice(0, 120)}`,
-      });
+      result.failures.push(...sub.failures);
+    }
+    result.unsupported.push(...sub.unsupported);
+    if (!sub.matched && result.unsupported.length > 0) {
+      // Propagate unsupported from inner composite even if outer still matched
     }
   }
 
   return result;
+}
+
+async function evaluateSingle(
+  c: Condition,
+  now: Date,
+  ctx: EvaluateConditionsContext,
+): Promise<ConditionEvaluation> {
+  const ok: ConditionEvaluation = { matched: true, failures: [], unsupported: [] };
+  const fail = (msg: string): ConditionEvaluation => ({ matched: false, failures: [msg], unsupported: [] });
+
+  if (isAllCondition(c)) {
+    const result: ConditionEvaluation = { matched: true, failures: [], unsupported: [] };
+    for (const sub of c.all) {
+      const r = await evaluateSingle(sub, now, ctx);
+      if (!r.matched) { result.matched = false; result.failures.push(...r.failures); }
+      result.unsupported.push(...r.unsupported);
+    }
+    return result;
+  }
+
+  if (isAnyCondition(c)) {
+    const result: ConditionEvaluation = { matched: false, failures: [], unsupported: [] };
+    for (const sub of c.any) {
+      const r = await evaluateSingle(sub, now, ctx);
+      result.unsupported.push(...r.unsupported);
+      if (r.matched) { result.matched = true; result.failures = []; return result; }
+      result.failures.push(...r.failures);
+    }
+    return result;
+  }
+
+  if (isNotCondition(c)) {
+    const r = await evaluateSingle(c.not, now, ctx);
+    if (r.unsupported.length > 0) return { matched: false, failures: [], unsupported: r.unsupported };
+    return r.matched ? fail('not: inner condition matched (negated)') : ok;
+  }
+
+  if (isTimeBetween(c)) {
+    return isWithinTuple(c.time_between, now)
+      ? ok
+      : fail(`time_between ${c.time_between[0]}-${c.time_between[1]} did not include ${now.toTimeString().slice(0, 5)}`);
+  }
+
+  if (isDeviceState(c)) {
+    if (!ctx.fetchStatus) {
+      return {
+        matched: false,
+        failures: [],
+        unsupported: [{ keyword: 'device_state', hint: 'device_state evaluation requires a live status fetcher; this call site did not provide one.' }],
+      };
+    }
+    const resolved = resolveDeviceRef(c.device, ctx.aliases);
+    if (!resolved) return fail(`device_state: could not resolve device "${c.device}" to an id (no matching alias).`);
+    try {
+      const status = await ctx.fetchStatus(resolved);
+      if (!compareField(status[c.field], c.op, c.value)) {
+        const actual = formatValue(status[c.field]);
+        const expected = formatValue(c.value);
+        return fail(`device_state ${c.device}.${c.field} ${c.op} ${expected} (actual: ${actual})`);
+      }
+      return ok;
+    } catch (err) {
+      return fail(`device_state ${c.device}.${c.field}: fetch failed — ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  return {
+    matched: false,
+    failures: [],
+    unsupported: [{ keyword: 'unknown', hint: `Unrecognised condition shape: ${JSON.stringify(c).slice(0, 120)}` }],
+  };
 }
 
 function resolveDeviceRef(

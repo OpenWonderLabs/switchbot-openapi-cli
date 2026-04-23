@@ -177,6 +177,17 @@
         "schedule": {
           "type": "string",
           "description": "Standard 5-field cron (minute hour dom month dow). Interpreted in local system timezone."
+        },
+        "days": {
+          "type": "array",
+          "description": "Optional weekday filter applied after the cron expression fires. Values are full-name or 3-letter day abbreviations (case-insensitive): mon/monday … sun/sunday. When omitted, all days pass.",
+          "uniqueItems": true,
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "enum": ["mon", "tue", "wed", "thu", "fri", "sat", "sun",
+                     "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+          }
         }
       }
     },
@@ -196,8 +207,7 @@
     },
 
     "condition": {
-      "type": "object",
-      "description": "Predicate evaluated after the trigger matches. Supports two shapes: a time window, or a device-state comparison. `additionalProperties: false` lives on each `oneOf` branch below — putting it here would reject every key because this schema has no top-level `properties`.",
+      "description": "Predicate evaluated after the trigger matches. Leaf shapes: time_between, device_state. Composites: all (AND), any (OR), not (negation). `additionalProperties: false` lives on each `oneOf` branch so keys are validated per-shape.",
       "oneOf": [
         {
           "type": "object",
@@ -222,6 +232,43 @@
             "field":  { "type": "string", "description": "status field name, e.g. `online`, `power`, `brightness`" },
             "op":     { "enum": ["==", "!=", "<", ">", "<=", ">="] },
             "value":  { "description": "Literal to compare against. Booleans, strings, numbers." }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["all"],
+          "properties": {
+            "all": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/condition" },
+              "description": "All sub-conditions must be true (logical AND)."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["any"],
+          "properties": {
+            "any": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/condition" },
+              "description": "At least one sub-condition must be true (logical OR)."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["not"],
+          "properties": {
+            "not": {
+              "$ref": "#/$defs/condition",
+              "description": "Negates the sub-condition."
+            }
           }
         }
       ]

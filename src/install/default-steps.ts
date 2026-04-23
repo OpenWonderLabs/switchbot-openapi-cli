@@ -166,7 +166,12 @@ export function skillLinkPathFor(agent: AgentName, home: string = os.homedir()):
   return null;
 }
 
-export function stepSymlinkSkill(): InstallStep<InstallContext> {
+export interface SymlinkSkillOptions {
+  /** When true, replace an existing symlink even if it points elsewhere. */
+  force?: boolean;
+}
+
+export function stepSymlinkSkill(opts: SymlinkSkillOptions = {}): InstallStep<InstallContext> {
   return {
     name: 'symlink-skill',
     description: 'Link the skill into ~/.claude/skills/switchbot (Claude Code)',
@@ -196,18 +201,45 @@ export function stepSymlinkSkill(): InstallStep<InstallContext> {
         return;
       }
 
+      // A2: require a SKILL.md only when we are about to create a link.
+      // Non-automating agents (cursor/copilot) print a recipe and return
+      // above, so they are never blocked by this check.
+      if (!opts.force && !fs.existsSync(path.join(target, 'SKILL.md'))) {
+        throw new Error(
+          `${target} does not look like a skill (no SKILL.md at the root). ` +
+          'Pass --force if you really mean to link this directory.',
+        );
+      }
+
       if (fs.existsSync(linkPath)) {
         const st = fs.lstatSync(linkPath);
         if (st.isSymbolicLink()) {
-          // Already linked (possibly to a different path). We treat this
-          // as a no-op to keep install idempotent; uninstall will remove.
-          ctx.skillLinkPath = linkPath;
-          ctx.skillLinkCreated = false;
-          return;
+          // A3: tolerate an existing link only when it points at the same
+          // target; otherwise the user is likely trying to repoint and we
+          // should not silently pretend success. --force replaces it.
+          let existingTarget: string | null = null;
+          try {
+            existingTarget = path.resolve(path.dirname(linkPath), fs.readlinkSync(linkPath));
+          } catch {
+            existingTarget = null;
+          }
+          if (existingTarget === target) {
+            ctx.skillLinkPath = linkPath;
+            ctx.skillLinkCreated = false;
+            return;
+          }
+          if (!opts.force) {
+            throw new Error(
+              `${linkPath} already links to ${existingTarget ?? '(unreadable)'}; ` +
+              'pass --force to replace it, or run `switchbot uninstall` first.',
+            );
+          }
+          fs.unlinkSync(linkPath);
+        } else {
+          throw new Error(
+            `${linkPath} exists and is not a symlink; refusing to clobber (move it aside and re-run)`,
+          );
         }
-        throw new Error(
-          `${linkPath} exists and is not a symlink; refusing to clobber (move it aside and re-run)`,
-        );
       }
 
       fs.mkdirSync(path.dirname(linkPath), { recursive: true });

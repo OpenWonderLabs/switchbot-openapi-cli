@@ -19,6 +19,8 @@ describe('switchbot install (dry-run smoke)', () => {
     expect(stdout).toContain('--agent <name>');
     expect(stdout).toContain('--skill-path <dir>');
     expect(stdout).toContain('--token-file <path>');
+    expect(stdout).toContain('--force');
+    expect(stdout).toContain('--verify');
     expect(stdout).toContain('Exit codes:');
   });
 

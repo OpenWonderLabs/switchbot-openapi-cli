@@ -16,7 +16,22 @@
  */
 
 import { Cron } from 'croner';
-import type { EngineEvent, Rule } from './types.js';
+import type { EngineEvent, Rule, DayOfWeek } from './types.js';
+
+/** Maps JS getDay() (0=Sun) to 3-letter abbreviation. */
+const JS_DAY_TO_ABBR = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
+
+/** Expand a days[] entry to its canonical 3-letter abbr so comparisons are O(1). */
+function normaliseDay(d: DayOfWeek): string {
+  return d.toLowerCase().slice(0, 3);
+}
+
+/** Return true if `t` falls on one of the listed days (or days is absent/empty). */
+export function matchesDayFilter(days: DayOfWeek[] | undefined, t: Date): boolean {
+  if (!days || days.length === 0) return true;
+  const todayAbbr = JS_DAY_TO_ABBR[t.getDay()];
+  return days.some((d) => normaliseDay(d) === todayAbbr);
+}
 
 export interface CronDispatch {
   (rule: Rule, event: EngineEvent): Promise<void>;
@@ -178,6 +193,11 @@ export class CronScheduler {
 
   private async fire(entry: Scheduled): Promise<void> {
     const when = this.nowDate();
+    // Apply the optional day-of-week filter before dispatching.
+    const trigger = entry.rule.when;
+    if (trigger.source === 'cron' && !matchesDayFilter(trigger.days, when)) {
+      return;
+    }
     const event: EngineEvent = {
       source: 'cron',
       event: entry.schedule,

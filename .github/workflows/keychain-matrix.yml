@@ -1,0 +1,101 @@
+name: Keychain OS Matrix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/credentials/**'
+      - 'src/install/**'
+      - 'tests/credentials/**'
+      - 'tests/install/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/credentials/**'
+      - 'src/install/**'
+      - 'tests/credentials/**'
+      - 'tests/install/**'
+  workflow_dispatch:
+
+# Each job installs Node, builds, and runs the credential + install-step
+# test suites against the real OS keychain backend. The unit tests (which
+# mock spawn) pass on ubuntu-latest in the main CI; here we verify
+# that the live system commands are available and callable.
+
+jobs:
+  keychain-macos:
+    name: Keychain — macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+
+      # Create and unlock a temporary keychain so the macOS backend can
+      # write entries without prompting the System Keychain.
+      - name: Set up temporary keychain
+        run: |
+          security create-keychain -p "" switchbot-ci.keychain
+          security set-keychain-settings -lut 3600 switchbot-ci.keychain
+          security unlock-keychain -p "" switchbot-ci.keychain
+          security list-keychains -d user -s switchbot-ci.keychain $(security list-keychains -d user | sed s/\"//g)
+          echo "SWITCHBOT_CI_KEYCHAIN=switchbot-ci.keychain" >> "$GITHUB_ENV"
+
+      - name: Run credential + install-step tests
+        run: npm test -- tests/credentials tests/install
+
+      - name: Delete temporary keychain
+        if: always()
+        run: |
+          security delete-keychain switchbot-ci.keychain || true
+
+  keychain-linux:
+    name: Keychain — Linux (libsecret)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: npm
+
+      - name: Install libsecret + D-Bus session tooling
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends \
+            libsecret-tools \
+            gnome-keyring \
+            dbus-x11
+
+      - run: npm ci
+      - run: npm run build
+
+      # Start a D-Bus session and unlock gnome-keyring so secret-tool can
+      # store entries. The keyring is unlocked with an empty password.
+      - name: Run credential + install-step tests inside D-Bus session
+        run: |
+          eval "$(dbus-launch --sh-syntax)"
+          echo "" | gnome-keyring-daemon --daemonize --unlock --components=secrets
+          export DBUS_SESSION_BUS_ADDRESS
+          npm test -- tests/credentials tests/install
+
+  keychain-windows:
+    name: Keychain — Windows (Credential Manager)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+
+      # Windows Credential Manager is available to any logged-in user on
+      # GitHub-hosted Windows runners; no extra setup required.
+      - name: Run credential + install-step tests
+        run: npm test -- tests/credentials tests/install

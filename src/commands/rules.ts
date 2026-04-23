@@ -95,7 +95,10 @@ function loadAutomation(policyPathFlag: string | undefined): LoadedAutomation | 
 function describeTrigger(rule: Rule): string {
   const t = rule.when;
   if (t.source === 'mqtt') return t.device ? `mqtt:${t.event}@${t.device}` : `mqtt:${t.event}`;
-  if (t.source === 'cron') return `cron:${t.schedule}`;
+  if (t.source === 'cron') {
+    const base = `cron:${t.schedule}`;
+    return t.days && t.days.length > 0 ? `${base} [${t.days.join(',')}]` : base;
+  }
   return `webhook:${t.path}`;
 }
 

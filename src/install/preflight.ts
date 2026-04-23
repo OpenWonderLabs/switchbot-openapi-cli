@@ -48,6 +48,13 @@ export interface PreflightOptions {
    * Override process.platform for tests.
    */
   platform?: NodeJS.Platform;
+  /**
+   * Target agent. When set to `claude-code` the preflight probes that
+   * `~/.claude/` (or the skills directory underneath it) is writable, so
+   * the later symlink-skill step fails fast with a clear message.
+   * Unset (or `none`/`cursor`/`copilot`) skips the check.
+   */
+  agent?: 'claude-code' | 'cursor' | 'copilot' | 'none';
 }
 
 function parseMajor(version: string): number | null {
@@ -162,6 +169,26 @@ function checkHomeDirWritable(opts: PreflightOptions): PreflightCheck {
   }
 }
 
+function checkAgentSkillDirWritable(opts: PreflightOptions): PreflightCheck | null {
+  if (opts.agent !== 'claude-code') return null;
+  const home = os.homedir();
+  const target = path.join(home, '.claude', 'skills');
+  try {
+    fs.mkdirSync(target, { recursive: true });
+    const probe = path.join(target, `.preflight-${process.pid}-${Date.now()}`);
+    fs.writeFileSync(probe, 'ok');
+    fs.unlinkSync(probe);
+    return { name: 'agent-skills-dir', status: 'ok', message: `writable: ${target}` };
+  } catch (err) {
+    return {
+      name: 'agent-skills-dir',
+      status: 'fail',
+      message: `cannot prepare ${target}: ${err instanceof Error ? err.message : String(err)}`,
+      hint: 'open Claude Code once (it will create ~/.claude) or create the directory manually',
+    };
+  }
+}
+
 /**
  * Run every pre-flight check and return a combined result. Safe to
  * call multiple times; no state is cached.
@@ -172,6 +199,8 @@ export async function runPreflight(options: PreflightOptions = {}): Promise<Pref
   checks.push(checkPolicy());
   checks.push(await checkKeychain());
   checks.push(checkHomeDirWritable(options));
+  const agentCheck = checkAgentSkillDirWritable(options);
+  if (agentCheck) checks.push(agentCheck);
   const ok = checks.every((c) => c.status !== 'fail');
   return { checks, ok };
 }

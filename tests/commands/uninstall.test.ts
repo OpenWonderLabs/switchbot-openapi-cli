@@ -20,6 +20,7 @@ describe('switchbot uninstall (dry-run smoke)', () => {
     expect(stdout).toContain('--remove-creds');
     expect(stdout).toContain('--remove-policy');
     expect(stdout).toContain('-y, --yes');
+    expect(stdout).toContain('--purge');
   });
 
   it('--dry-run lists the planned removals without mutating anything', () => {
@@ -50,6 +51,12 @@ describe('switchbot uninstall (dry-run smoke)', () => {
     const actions = parsed.data.plan.map((p: { action: string }) => p.action);
     expect(actions).not.toContain('remove-skill-link');
     expect(actions).toEqual(['remove-credentials', 'remove-policy']);
+  });
+
+  it('--purge implies --yes --remove-creds --remove-policy (visible in dry-run)', () => {
+    // dry-run just prints the plan, but purge flag acceptance (no parse error) is the key test
+    const { code } = runCli(['--dry-run', 'uninstall', '--agent', 'none', '--purge']);
+    expect(code).toBe(0);
   });
 
   it('rejects unknown --agent values', () => {

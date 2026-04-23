@@ -23,10 +23,19 @@ export interface MqttTrigger {
   device?: string;
 }
 
+export type DayOfWeek = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
+  | 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
+
 export interface CronTrigger {
   source: 'cron';
   /** Standard 5-field cron (minute hour dom month dow), local tz. */
   schedule: string;
+  /**
+   * Optional weekday filter applied AFTER the cron expression fires.
+   * When omitted, every firing passes. Values are matched
+   * case-insensitively against the local weekday name.
+   */
+  days?: DayOfWeek[];
 }
 
 export interface WebhookTrigger {
@@ -48,7 +57,19 @@ export interface DeviceStateCondition {
   value: unknown;
 }
 
-export type Condition = TimeBetweenCondition | DeviceStateCondition;
+export interface AllCondition {
+  all: Condition[];
+}
+
+export interface AnyCondition {
+  any: Condition[];
+}
+
+export interface NotCondition {
+  not: Condition;
+}
+
+export type Condition = TimeBetweenCondition | DeviceStateCondition | AllCondition | AnyCondition | NotCondition;
 
 export interface Action {
   command: string;
@@ -107,6 +128,15 @@ export function isTimeBetween(c: Condition): c is TimeBetweenCondition {
 export function isDeviceState(c: Condition): c is DeviceStateCondition {
   const d = c as DeviceStateCondition;
   return typeof d.device === 'string' && typeof d.field === 'string' && typeof d.op === 'string';
+}
+export function isAllCondition(c: Condition): c is AllCondition {
+  return Array.isArray((c as AllCondition).all);
+}
+export function isAnyCondition(c: Condition): c is AnyCondition {
+  return Array.isArray((c as AnyCondition).any);
+}
+export function isNotCondition(c: Condition): c is NotCondition {
+  return (c as NotCondition).not !== undefined && !Array.isArray((c as NotCondition).not);
 }
 
 /** Re-export for consumers that want the single list without a second import. */

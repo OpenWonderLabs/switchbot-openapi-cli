@@ -195,3 +195,80 @@ describe('evaluateConditions', () => {
     expect(r3.matched).toBe(false);
   });
 });
+
+describe('evaluateConditions — composites', () => {
+  const now = new Date();
+  now.setHours(14, 0, 0, 0); // 14:00
+
+  it('all: true when all sub-conditions pass', async () => {
+    const r = await evaluateConditions(
+      [{ all: [{ time_between: ['13:00', '15:00'] }, { time_between: ['12:00', '16:00'] }] }],
+      now,
+    );
+    expect(r.matched).toBe(true);
+  });
+
+  it('all: false when any sub-condition fails', async () => {
+    const r = await evaluateConditions(
+      [{ all: [{ time_between: ['13:00', '15:00'] }, { time_between: ['00:00', '10:00'] }] }],
+      now,
+    );
+    expect(r.matched).toBe(false);
+  });
+
+  it('any: true when at least one sub-condition passes', async () => {
+    const r = await evaluateConditions(
+      [{ any: [{ time_between: ['00:00', '10:00'] }, { time_between: ['13:00', '15:00'] }] }],
+      now,
+    );
+    expect(r.matched).toBe(true);
+  });
+
+  it('any: false when all sub-conditions fail', async () => {
+    const r = await evaluateConditions(
+      [{ any: [{ time_between: ['00:00', '08:00'] }, { time_between: ['20:00', '23:59'] }] }],
+      now,
+    );
+    expect(r.matched).toBe(false);
+  });
+
+  it('not: inverts a passing condition to false', async () => {
+    const r = await evaluateConditions(
+      [{ not: { time_between: ['13:00', '15:00'] } }],
+      now,
+    );
+    expect(r.matched).toBe(false);
+  });
+
+  it('not: inverts a failing condition to true', async () => {
+    const r = await evaluateConditions(
+      [{ not: { time_between: ['00:00', '10:00'] } }],
+      now,
+    );
+    expect(r.matched).toBe(true);
+  });
+
+  it('nested composition: any(not(time_between), time_between)', async () => {
+    const r = await evaluateConditions(
+      [{
+        any: [
+          { not: { time_between: ['13:00', '15:00'] } }, // false (not passes, we are in window)
+          { time_between: ['13:00', '15:00'] },           // true
+        ],
+      }],
+      now,
+    );
+    expect(r.matched).toBe(true);
+  });
+
+  it('top-level array remains AND-joined across composites', async () => {
+    const r = await evaluateConditions(
+      [
+        { any: [{ time_between: ['13:00', '15:00'] }] }, // true
+        { not: { time_between: ['13:00', '15:00'] } },   // false
+      ],
+      now,
+    );
+    expect(r.matched).toBe(false);
+  });
+});

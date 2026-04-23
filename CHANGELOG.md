@@ -5,6 +5,79 @@ All notable changes to `@switchbot/openapi-cli` are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.11.0] - 2026-04-23
+
+Feature release — install/uninstall UX polish, cross-OS keychain CI,
+and two rules engine enhancements.
+
+### Changed — `switchbot install` polish
+
+- **`--force`** replaces an existing skill symlink pointing at a different
+  target, and bypasses the `SKILL.md` presence check (for in-development
+  skill repos).
+- **`--verify`** runs `switchbot doctor --json` as a warn-only post-check
+  after a successful install. The result is surfaced (text or `--json`)
+  but never changes the exit code — a doctor failure after a good install
+  does not trigger rollback.
+- **`stepSymlinkSkill`** now requires `SKILL.md` at the root of
+  `--skill-path` before creating a link, so linking a random directory is
+  caught at install time. Non-automating agents (cursor/copilot) are
+  unaffected — they print a recipe before the check runs.
+- Existing symlinks pointing at a **different** target are now a hard
+  error without `--force`; pointing at the same target remains idempotent.
+- **Preflight** gains an `agent-skills-dir` check for `--agent claude-code`
+  that probes `~/.claude/skills/` writable before the step can fail.
+
+### Changed — `switchbot uninstall` polish
+
+- **`--purge`** is shorthand for `--yes --remove-creds --remove-policy`:
+  removes everything in one flag without any prompts.
+
+### Added — CI
+
+- **`.github/workflows/keychain-matrix.yml`** — new workflow that runs the
+  credential + install-step test suites on macOS (temp keychain),
+  Linux (D-Bus + gnome-keyring), and Windows (Credential Manager). Triggers
+  on changes under `src/credentials/`, `src/install/`, and their test
+  counterparts.
+
+### Added — `rules trigger.days` (γ-lite)
+
+- Cron triggers now accept an optional **`days`** filter:
+  ```yaml
+  when:
+    source: cron
+    schedule: "0 9 * * *"
+    days: [mon, tue, wed, thu, fri]
+  ```
+  Values are matched case-insensitively; both 3-letter abbreviations
+  (`mon`) and full names (`monday`) are accepted. Firings on unlisted
+  weekdays are silently suppressed before dispatch — throttle counters and
+  audit log entries are not written for suppressed firings.
+
+### Added — `rules conditions` composition (γ)
+
+- Rule conditions can now be composed with **`all`** (AND), **`any`** (OR),
+  and **`not`** (negation):
+  ```yaml
+  conditions:
+    - any:
+        - time_between: ["22:00", "06:00"]
+        - device: lamp
+          field: power
+          op: "=="
+          value: "on"
+    - not:
+        time_between: ["08:00", "20:00"]
+  ```
+  Nesting is unlimited. The top-level `conditions[]` array remains
+  AND-joined so existing flat rules are unaffected.
+
+### Notes
+
+- 1676 tests pass (+22 vs 2.10.0: 6 polish + 9 day_of_week + 8
+  and/or/not + 1 purge).
+
 ## [2.10.0] - 2026-04-23
 
 Feature release — adds `switchbot install` / `switchbot uninstall`,

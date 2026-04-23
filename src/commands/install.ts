@@ -28,6 +28,7 @@ import {
   stepWriteKeychain,
   stepScaffoldPolicy,
   stepSymlinkSkill,
+  stepDoctorVerify,
   type AgentName,
   type InstallContext,
 } from '../install/default-steps.js';
@@ -42,6 +43,8 @@ interface InstallCliOptions {
   skillPath?: string;
   tokenFile?: string;
   skip?: string;
+  force?: boolean;
+  verify?: boolean;
 }
 
 function parseAgent(value: string | undefined): AgentName {
@@ -127,6 +130,8 @@ export function registerInstallCommand(program: Command): void {
     .option('--skill-path <dir>', 'local clone of openclaw-switchbot-skill (enables auto-link)')
     .option('--token-file <path>', 'two-line credential file (token, secret); read once and deleted on success')
     .option('--skip <names>', 'comma-separated list of step names to skip (e.g. "scaffold-policy,symlink-skill")')
+    .option('--force', 'replace an existing skill symlink pointing at a different path; allow link even without SKILL.md')
+    .option('--verify', 'after a successful install, run `switchbot doctor --json` as a warn-only post-check')
     .addHelpText(
       'after',
       `
@@ -157,11 +162,13 @@ Examples:
       const skip = parseSkipList(opts.skip);
       const skillPath = opts.skillPath ? path.resolve(opts.skillPath) : undefined;
       const tokenFile = opts.tokenFile ? path.resolve(opts.tokenFile) : undefined;
+      const force = Boolean(opts.force);
+      const verify = Boolean(opts.verify);
       const globalOpts = command.parent?.opts() ?? {};
       const dryRun = Boolean(globalOpts.dryRun);
 
       // Pre-flight: read-only checks, never mutate anything.
-      const pf = await runPreflight();
+      const pf = await runPreflight({ agent });
       if (!pf.ok) {
         if (isJsonMode()) {
           printJson({ ok: false, stage: 'preflight', preflight: pf });
@@ -189,7 +196,7 @@ Examples:
         stepPromptCredentials(),
         stepWriteKeychain(),
         stepScaffoldPolicy(),
-        stepSymlinkSkill(),
+        stepSymlinkSkill({ force }),
       ];
       const steps = allSteps.filter((s) => !skip.has(s.name));
 
@@ -209,6 +216,17 @@ Examples:
         }
       }
 
+      // A7: opt-in post-install verification. Doctor is NEVER part of the
+      // rollback chain — a failing doctor after a good install would
+      // destroy working state. So we run it AFTER runInstall resolves, as
+      // a warn-only check. The outcome is reported but never flips the
+      // command's exit code.
+      if (report.ok && verify) {
+        const cliPath = process.argv[1] ?? '';
+        const step = stepDoctorVerify({ cliPath });
+        await step.execute(ctx);
+      }
+
       if (isJsonMode()) {
         printJson({
           ok: report.ok,
@@ -220,12 +238,20 @@ Examples:
           policyScaffolded: ctx.policyScaffoldResult && !ctx.policyScaffoldResult.skipped,
           skillLinkPath: ctx.skillLinkPath,
           skillLinkCreated: Boolean(ctx.skillLinkCreated),
+          verify: verify ? { ok: ctx.doctorOk ?? null, report: ctx.doctorReport ?? null } : undefined,
         });
       } else if (report.ok) {
         console.log(chalk.green('✓ install complete'));
         if (ctx.skillLinkCreated) console.log(`  linked skill: ${ctx.skillLinkPath}`);
         if (ctx.policyScaffoldResult?.skipped === false) console.log(`  wrote policy: ${ctx.policyScaffoldResult.policyPath}`);
         printRecipe(ctx);
+        if (verify) {
+          if (ctx.doctorOk) {
+            console.log(chalk.green('✓ doctor --json: all green'));
+          } else {
+            console.log(chalk.yellow('! doctor --json reported issues — install is committed; run `switchbot doctor` to inspect'));
+          }
+        }
         console.log('');
         console.log(chalk.bold('Next:'));
         console.log('  switchbot doctor        # verify the setup');

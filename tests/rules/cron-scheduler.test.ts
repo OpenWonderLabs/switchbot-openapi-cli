@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
-import { CronScheduler } from '../../src/rules/cron-scheduler.js';
-import type { Rule, EngineEvent } from '../../src/rules/types.js';
+import { CronScheduler, matchesDayFilter } from '../../src/rules/cron-scheduler.js';
+import type { Rule, EngineEvent, DayOfWeek } from '../../src/rules/types.js';
 
-function cronRule(name: string, schedule: string): Rule {
+function cronRule(name: string, schedule: string, days?: DayOfWeek[]): Rule {
   return {
     name,
-    when: { source: 'cron', schedule },
+    when: { source: 'cron', schedule, ...(days ? { days } : {}) },
     then: [{ command: 'devices command <id> turnOn', device: 'lamp' }],
     dry_run: true,
   };
@@ -141,5 +141,62 @@ describe('CronScheduler', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(events.length).toBeGreaterThanOrEqual(1);
     scheduler.stop();
+  });
+});
+
+describe('matchesDayFilter', () => {
+  // 2026-04-27 is a Monday (getDay() === 1)
+  const monday = new Date('2026-04-27T09:00:00');
+  // 2026-04-26 is a Sunday (getDay() === 0)
+  const sunday = new Date('2026-04-26T09:00:00');
+
+  it('returns true when days is undefined', () => {
+    expect(matchesDayFilter(undefined, monday)).toBe(true);
+  });
+
+  it('returns true when days is an empty array', () => {
+    expect(matchesDayFilter([], monday)).toBe(true);
+  });
+
+  it('matches 3-letter abbreviation (mon)', () => {
+    expect(matchesDayFilter(['mon'], monday)).toBe(true);
+    expect(matchesDayFilter(['mon'], sunday)).toBe(false);
+  });
+
+  it('matches full name (monday)', () => {
+    expect(matchesDayFilter(['monday'], monday)).toBe(true);
+    expect(matchesDayFilter(['monday'], sunday)).toBe(false);
+  });
+
+  it('case-insensitive match (MON, Monday, mOnDaY)', () => {
+    expect(matchesDayFilter(['MON' as DayOfWeek], monday)).toBe(true);
+    expect(matchesDayFilter(['Monday' as DayOfWeek], monday)).toBe(true);
+  });
+
+  it('matches sun on a Sunday', () => {
+    expect(matchesDayFilter(['sun'], sunday)).toBe(true);
+    expect(matchesDayFilter(['sun'], monday)).toBe(false);
+  });
+
+  it('allows a multi-day list (weekdays)', () => {
+    const weekdays: DayOfWeek[] = ['mon', 'tue', 'wed', 'thu', 'fri'];
+    expect(matchesDayFilter(weekdays, monday)).toBe(true);
+    expect(matchesDayFilter(weekdays, sunday)).toBe(false);
+  });
+
+  it('fireNowForTest suppresses dispatch when days filter does not match', async () => {
+    // Lock fake clock to a Monday.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-27T09:00:00'));
+    const events: Array<unknown> = [];
+    const scheduler = new CronScheduler({
+      dispatch: async (rule) => { events.push(rule.name); },
+      now: () => new Date(),
+    });
+    // Only fires on weekends.
+    scheduler.register(cronRule('weekend-only', '0 9 * * *', ['sat', 'sun']));
+    await scheduler.fireNowForTest('weekend-only');
+    expect(events).toHaveLength(0); // Monday — suppressed
+    vi.useRealTimers();
   });
 });
