@@ -5,6 +5,75 @@ All notable changes to `@switchbot/openapi-cli` are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.10.0] - 2026-04-23
+
+Feature release — adds `switchbot install` / `switchbot uninstall`,
+collapsing the Phase 3 one-command bootstrap UX onto the Phase 3A
+orchestrator library that shipped in 2.9.0.
+
+### Added — `switchbot install` (Phase 3B, in-CLI)
+
+- **`switchbot install`** — one-command setup that composes four
+  steps with rollback on failure: prompt credentials → write keychain
+  → scaffold `policy.yaml` → symlink the Claude Code skill. The step
+  library (`src/install/default-steps.ts`) is a thin layer over the
+  generic `runInstall()` runner, so each factory is independently
+  unit-tested and individually skippable via `--skip`.
+- **`--agent <name>`** — `claude-code` (default: auto-links
+  `~/.claude/skills/switchbot` to `--skill-path`), `cursor` / `copilot`
+  (prints a skill-install recipe for docs users to follow), `none`
+  (skips the skill step entirely).
+- **`--skill-path <dir>`** — points at a local clone of
+  `openclaw-switchbot-skill`. No auto-clone — fork/offline/pin
+  semantics stay in the user's court. On Windows the link uses an
+  NTFS junction so it works without elevation.
+- **`--token-file <path>`** — two-line credential file for
+  non-interactive installs. Deleted on success; left alone on failure
+  so the user can retry.
+- **`--skip <names>`** — comma-separated step names to skip; useful
+  for partial re-runs after fixing one failing step.
+- **`--dry-run`** — prints the step list (text) or a structured
+  preview (`--json`) without mutation.
+- **Exit codes**: `0` ok · `2` preflight failed (nothing changed) ·
+  `3` step failed, rollback completed · `4` rollback had residue (the
+  printed output tells the user what to clean up).
+- **Deliberate non-decisions**: doctor verification is NOT a step
+  (treating its failure as rollback-worthy would destroy a
+  freshly-installed good state); `install` prints
+  `next: switchbot doctor` as a hint instead.
+
+### Added — `switchbot uninstall`
+
+- **`switchbot uninstall`** — reverse of install. Removes the skill
+  symlink (default yes, confirm), credentials (opt-in via
+  `--remove-creds`), and `policy.yaml` (opt-in via `--remove-policy`
+  since user edits may live there). `--yes` assumes yes to every
+  confirmation; `--dry-run` previews; `--json` emits structured
+  outcomes.
+- Unlike install, uninstall is **not** rollback-safe — it keeps going
+  on per-step failure and exits `3` if anything failed, so the user
+  can read the per-action report and clean up manually.
+- The CLI binary is never uninstalled. Users remove it via
+  `npm rm -g @switchbot/openapi-cli`.
+
+### Changed
+
+- **`src/commands/policy.ts`** exports `scaffoldPolicyFile()` so the
+  install step can reuse the exact scaffolding logic `policy new`
+  uses — no drift risk between the two code paths.
+- **`src/commands/config.ts`** exports `promptTokenAndSecret()` and
+  `readCredentialsFile()` for the install step to reuse the same
+  terminal-prompt behavior `config set-token` has.
+
+### Notes
+
+- No API/CLI surface breakage. Existing scripts continue to work.
+- Path for the skill symlink: `~/.claude/skills/switchbot` on
+  claude-code; other agents receive a recipe block instead of an
+  auto-link.
+- 1654 tests pass (+30 vs 2.9.0: 20 step factory unit tests + 5
+  install smoke + 5 uninstall smoke).
+
 ## [2.9.0] - 2026-04-23
 
 Feature release — Policy v0.2, the Phase 4 rules engine, Phase 3A

@@ -26,6 +26,8 @@ import { registerAgentBootstrapCommand } from './commands/agent-bootstrap.js';
 import { registerPolicyCommand } from './commands/policy.js';
 import { registerRulesCommand } from './commands/rules.js';
 import { registerAuthCommand } from './commands/auth.js';
+import { registerInstallCommand } from './commands/install.js';
+import { registerUninstallCommand } from './commands/uninstall.js';
 import { primeCredentials } from './credentials/prime.js';
 import { getActiveProfile } from './lib/request-context.js';
 
@@ -50,7 +52,7 @@ if (isJsonMode()) {
 const TOP_LEVEL_COMMANDS = [
   'config', 'devices', 'scenes', 'webhook', 'completion', 'mcp',
   'quota', 'catalog', 'cache', 'events', 'doctor', 'schema',
-  'history', 'plan', 'capabilities', 'agent-bootstrap',
+  'history', 'plan', 'capabilities', 'agent-bootstrap', 'install', 'uninstall',
 ] as const;
 
 const cacheModeArg = (value: string): string => {
@@ -111,6 +113,8 @@ registerAgentBootstrapCommand(program);
 registerPolicyCommand(program);
 registerRulesCommand(program);
 registerAuthCommand(program);
+registerInstallCommand(program);
+registerUninstallCommand(program);
 
 // Prime keychain-stored credentials before any command runs. This is a
 // best-effort probe: failures are silently swallowed inside primeCredentials,

@@ -124,6 +124,16 @@ switchbot --help
 
 ## Quick start
 
+The fast path (credentials + policy + skill link, with rollback on failure):
+
+```bash
+switchbot install --agent claude-code --skill-path ../openclaw-switchbot-skill
+# or preview first
+switchbot install --dry-run
+```
+
+Prefer the manual 4-step walk-through? Here it is:
+
 ```bash
 # 1. Save your credentials (one-time)
 switchbot config set-token <token> <secret>

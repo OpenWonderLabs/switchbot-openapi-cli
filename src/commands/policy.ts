@@ -30,6 +30,50 @@ function readEmbeddedTemplate(): string {
   return readFileSync(fileURLToPath(url), 'utf-8');
 }
 
+export class PolicyFileExistsError extends Error {
+  constructor(public readonly policyPath: string) {
+    super(`refusing to overwrite existing policy at ${policyPath}`);
+    this.name = 'PolicyFileExistsError';
+  }
+}
+
+export interface ScaffoldPolicyResult {
+  policyPath: string;
+  schemaVersion: string;
+  bytesWritten: number;
+  overwritten: boolean;
+  /** True when the file already existed and --force was not used (no mutation). */
+  skipped?: boolean;
+}
+
+/**
+ * Write the starter policy template to `policyPath`. Refuses to
+ * overwrite an existing file unless `opts.force === true` — the install
+ * orchestrator uses `skipExisting: true` instead, which returns
+ * `skipped: true` without touching the file.
+ */
+export function scaffoldPolicyFile(
+  policyPath: string,
+  opts: { force?: boolean; skipExisting?: boolean } = {},
+): ScaffoldPolicyResult {
+  const force = opts.force === true;
+  if (existsSync(policyPath)) {
+    if (opts.skipExisting) {
+      return { policyPath, schemaVersion: CURRENT_POLICY_SCHEMA_VERSION, bytesWritten: 0, overwritten: false, skipped: true };
+    }
+    if (!force) throw new PolicyFileExistsError(policyPath);
+  }
+  const template = readEmbeddedTemplate();
+  mkdirSync(dirname(policyPath), { recursive: true });
+  writeFileSync(policyPath, template, { encoding: 'utf-8' });
+  return {
+    policyPath,
+    schemaVersion: CURRENT_POLICY_SCHEMA_VERSION,
+    bytesWritten: Buffer.byteLength(template, 'utf-8'),
+    overwritten: force,
+  };
+}
+
 function exitPolicyError(kind: 'file-not-found' | 'yaml-parse' | 'internal', message: string, extra: Record<string, unknown> = {}): never {
   const code = kind === 'file-not-found' ? 2 : kind === 'yaml-parse' ? 3 : 4;
   if (isJsonMode()) {
@@ -135,34 +179,29 @@ Examples:
       const policyPath = resolvePolicyPath({ flag: pathArg });
       const force = opts.force === true;
 
-      if (existsSync(policyPath) && !force) {
-        const message = `refusing to overwrite existing policy at ${policyPath}`;
-        const hint = 'pass --force to overwrite, or choose a different path';
-        if (isJsonMode()) {
-          emitJsonError({ code: 5, kind: 'exists', message, hint, policyPath });
-        } else {
-          console.error(message);
-          console.error(`hint: ${hint}`);
+      let result: ScaffoldPolicyResult;
+      try {
+        result = scaffoldPolicyFile(policyPath, { force });
+      } catch (err) {
+        if (err instanceof PolicyFileExistsError) {
+          const message = err.message;
+          const hint = 'pass --force to overwrite, or choose a different path';
+          if (isJsonMode()) {
+            emitJsonError({ code: 5, kind: 'exists', message, hint, policyPath });
+          } else {
+            console.error(message);
+            console.error(`hint: ${hint}`);
+          }
+          process.exit(5);
         }
-        process.exit(5);
+        throw err;
       }
 
-      const template = readEmbeddedTemplate();
-      mkdirSync(dirname(policyPath), { recursive: true });
-      writeFileSync(policyPath, template, { encoding: 'utf-8' });
-
-      const payload = {
-        policyPath,
-        schemaVersion: CURRENT_POLICY_SCHEMA_VERSION,
-        bytesWritten: Buffer.byteLength(template, 'utf-8'),
-        overwritten: force,
-      };
-
       if (isJsonMode()) {
-        printJson(payload);
+        printJson(result);
       } else {
-        console.log(`✓ wrote starter policy to ${policyPath}`);
-        console.log(`  schema version: ${CURRENT_POLICY_SCHEMA_VERSION}`);
+        console.log(`✓ wrote starter policy to ${result.policyPath}`);
+        console.log(`  schema version: ${result.schemaVersion}`);
         console.log(`  next steps:`);
         console.log(`    1. open the file and fill in the aliases block`);
         console.log(`    2. run \`switchbot policy validate\``);

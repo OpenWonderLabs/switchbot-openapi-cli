@@ -89,6 +89,38 @@ async function promptSecret(question: string): Promise<string> {
   });
 }
 
+/**
+ * Interactive echo-off prompt for token + secret. Used by both
+ * `switchbot config set-token` and the install orchestrator. Throws if
+ * stdin is not a TTY.
+ */
+export async function promptTokenAndSecret(): Promise<{ token: string; secret: string }> {
+  if (!process.stdin.isTTY) {
+    throw new Error('interactive prompt requires a TTY');
+  }
+  const token = (await promptSecret('Token: ')).trim();
+  const secret = (await promptSecret('Secret: ')).trim();
+  if (!token || !secret) {
+    throw new Error('token and secret are both required');
+  }
+  return { token, secret };
+}
+
+/**
+ * Read a two-line credential file (line 1 = token, line 2 = secret)
+ * and unlink it on success. The installer's `--token-file` escape
+ * hatch uses this; keeps credentials off the command line and shell
+ * history for CI-style installs.
+ */
+export function readCredentialsFile(filePath: string): { token: string; secret: string } {
+  const raw = fs.readFileSync(filePath, 'utf-8');
+  const lines = raw.split(/\r?\n/).filter((l) => l.length > 0);
+  if (lines.length < 2) {
+    throw new Error(`credential file ${filePath} must contain two lines: token, then secret`);
+  }
+  return { token: lines[0].trim(), secret: lines[1].trim() };
+}
+
 export function registerConfigCommand(program: Command): void {
   const config = program
     .command('config')

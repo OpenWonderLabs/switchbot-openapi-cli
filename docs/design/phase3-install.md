@@ -1,12 +1,14 @@
 # Phase 3 — one-command install design
 
-> Status: **partially shipped (3A)**. Phase 3A landed in v2.8.x:
-> `src/credentials/keychain.ts` abstraction with four backends,
-> the `switchbot auth keychain` subcommand group, doctor +
+> Status: **in-CLI shipped (3B-lite) in v2.10.0**. Phase 3A landed
+> in v2.8.x: `src/credentials/keychain.ts` abstraction with four
+> backends, the `switchbot auth keychain` subcommand group, doctor +
 > agent-bootstrap integration, and an in-repo `src/install/` library
-> (preflight + rollback-aware step runner) that Phase 3B's external
-> `openclaw plugins install` command can call into. The external
-> installer itself and the ClawHub registry entry are Phase 3B and
+> (preflight + rollback-aware step runner). v2.10.0 wraps that
+> library as the built-in `switchbot install` / `switchbot uninstall`
+> commands — the 7-step Quickstart collapses to a single command
+> with rollback on failure. The external `openclaw plugins install`
+> wrapper and the ClawHub registry entry remain Phase 3B proper and
 > live outside this repo.
 
 ## Goal
