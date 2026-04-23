@@ -1,8 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   classifyMqttPayload,
   evaluateConditions,
   matchesMqttTrigger,
+  type DeviceStatusFetcher,
 } from '../../src/rules/matcher.js';
 import type { EngineEvent, MqttTrigger } from '../../src/rules/types.js';
 
@@ -80,25 +81,25 @@ describe('matchesMqttTrigger', () => {
 });
 
 describe('evaluateConditions', () => {
-  it('returns matched=true when conditions list is empty or absent', () => {
-    expect(evaluateConditions(undefined, at('12:00')).matched).toBe(true);
-    expect(evaluateConditions([], at('12:00')).matched).toBe(true);
+  it('returns matched=true when conditions list is empty or absent', async () => {
+    expect((await evaluateConditions(undefined, at('12:00'))).matched).toBe(true);
+    expect((await evaluateConditions([], at('12:00'))).matched).toBe(true);
   });
 
-  it('accepts time_between when `now` is inside the window', () => {
-    const r = evaluateConditions([{ time_between: ['22:00', '07:00'] }], at('23:30'));
+  it('accepts time_between when `now` is inside the window', async () => {
+    const r = await evaluateConditions([{ time_between: ['22:00', '07:00'] }], at('23:30'));
     expect(r.matched).toBe(true);
     expect(r.failures).toEqual([]);
   });
 
-  it('rejects time_between with a descriptive failure when outside', () => {
-    const r = evaluateConditions([{ time_between: ['22:00', '07:00'] }], at('14:00'));
+  it('rejects time_between with a descriptive failure when outside', async () => {
+    const r = await evaluateConditions([{ time_between: ['22:00', '07:00'] }], at('14:00'));
     expect(r.matched).toBe(false);
     expect(r.failures[0]).toMatch(/time_between/);
   });
 
-  it('flags device_state as unsupported without blocking downstream rules', () => {
-    const r = evaluateConditions(
+  it('flags device_state as unsupported when no fetcher is supplied (lint path)', async () => {
+    const r = await evaluateConditions(
       [{ device: 'lamp', field: 'power', op: '==', value: 'on' }],
       at('12:00'),
     );
@@ -106,8 +107,8 @@ describe('evaluateConditions', () => {
     expect(r.unsupported.map((u) => u.keyword)).toContain('device_state');
   });
 
-  it('AND-joins multiple conditions: one failure means not matched', () => {
-    const r = evaluateConditions(
+  it('AND-joins multiple conditions: one failure means not matched', async () => {
+    const r = await evaluateConditions(
       [
         { time_between: ['22:00', '07:00'] },
         { time_between: ['06:00', '10:00'] },
@@ -116,5 +117,81 @@ describe('evaluateConditions', () => {
     );
     expect(r.matched).toBe(false);
     expect(r.failures).toHaveLength(1);
+  });
+
+  it('resolves device_state aliases and passes when the value matches', async () => {
+    const fetchStatus: DeviceStatusFetcher = vi.fn(async () => ({ power: 'on', battery: 87 }));
+    const r = await evaluateConditions(
+      [{ device: 'hallway lamp', field: 'power', op: '==', value: 'on' }],
+      at('12:00'),
+      { aliases: { 'hallway lamp': 'LAMP-ID' }, fetchStatus },
+    );
+    expect(r.matched).toBe(true);
+    expect(fetchStatus).toHaveBeenCalledWith('LAMP-ID');
+  });
+
+  it('fails with a descriptive message when the value mismatches', async () => {
+    const fetchStatus: DeviceStatusFetcher = async () => ({ power: 'off' });
+    const r = await evaluateConditions(
+      [{ device: 'LAMP-ID', field: 'power', op: '==', value: 'on' }],
+      at('12:00'),
+      { fetchStatus },
+    );
+    expect(r.matched).toBe(false);
+    expect(r.failures[0]).toMatch(/device_state LAMP-ID\.power/);
+    expect(r.failures[0]).toContain('"off"');
+  });
+
+  it('supports numeric ordering operators with string coercion', async () => {
+    const fetchStatus: DeviceStatusFetcher = async () => ({ battery: '42' });
+    const pass = await evaluateConditions(
+      [{ device: 'd', field: 'battery', op: '>=', value: 20 }],
+      at('12:00'),
+      { fetchStatus },
+    );
+    expect(pass.matched).toBe(true);
+    const fail = await evaluateConditions(
+      [{ device: 'd', field: 'battery', op: '<', value: 20 }],
+      at('12:00'),
+      { fetchStatus },
+    );
+    expect(fail.matched).toBe(false);
+  });
+
+  it('reports fetch failure as a failure, not an unsupported', async () => {
+    const fetchStatus: DeviceStatusFetcher = async () => {
+      throw new Error('boom');
+    };
+    const r = await evaluateConditions(
+      [{ device: 'd', field: 'power', op: '==', value: 'on' }],
+      at('12:00'),
+      { fetchStatus },
+    );
+    expect(r.matched).toBe(false);
+    expect(r.unsupported).toEqual([]);
+    expect(r.failures[0]).toContain('fetch failed');
+    expect(r.failures[0]).toContain('boom');
+  });
+
+  it('!=, <=, > work with mixed numeric/string comparisons', async () => {
+    const fetchStatus: DeviceStatusFetcher = async () => ({ power: 'on', temp: 22.5 });
+    const r1 = await evaluateConditions(
+      [{ device: 'd', field: 'power', op: '!=', value: 'off' }],
+      at('12:00'),
+      { fetchStatus },
+    );
+    expect(r1.matched).toBe(true);
+    const r2 = await evaluateConditions(
+      [{ device: 'd', field: 'temp', op: '<=', value: 25 }],
+      at('12:00'),
+      { fetchStatus },
+    );
+    expect(r2.matched).toBe(true);
+    const r3 = await evaluateConditions(
+      [{ device: 'd', field: 'temp', op: '>', value: 30 }],
+      at('12:00'),
+      { fetchStatus },
+    );
+    expect(r3.matched).toBe(false);
   });
 });

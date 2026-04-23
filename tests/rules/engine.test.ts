@@ -440,4 +440,122 @@ describe('RulesEngine', () => {
     });
     await expect(engine.start()).rejects.toThrow(/webhookToken/);
   });
+
+  it('device_state condition fires when live status matches expected value', async () => {
+    const fires: EngineFireEntry[] = [];
+    const fetchStatus = vi.fn(async () => ({ power: 'on', battery: 87 }));
+    const engine = new RulesEngine({
+      automation: automation([
+        mqttRule({
+          conditions: [{ device: 'hallway lamp', field: 'power', op: '==', value: 'on' }],
+        }),
+      ]),
+      aliases: { 'hallway lamp': 'LAMP-ID' },
+      mqttClient: mqtt as unknown as SwitchBotMqttClient,
+      mqttCredential: fakeCredential,
+      skipApiCall: true,
+      statusFetcher: fetchStatus,
+      onFire: (e) => fires.push(e),
+    });
+    await engine.start();
+    mqtt.emitMessage({ context: { deviceMac: 'EVENT-DEV', detectionState: 'DETECTED' } });
+    await engine.drainForTest();
+
+    expect(fires.map((f) => f.status)).toEqual(['dry']);
+    expect(fetchStatus).toHaveBeenCalledWith('LAMP-ID');
+  });
+
+  it('device_state condition blocks the fire when live status mismatches', async () => {
+    const fires: EngineFireEntry[] = [];
+    const engine = new RulesEngine({
+      automation: automation([
+        mqttRule({
+          conditions: [{ device: 'LAMP-ID', field: 'power', op: '==', value: 'on' }],
+        }),
+      ]),
+      aliases: { 'hallway lamp': 'AA-BB-CC' },
+      mqttClient: mqtt as unknown as SwitchBotMqttClient,
+      mqttCredential: fakeCredential,
+      skipApiCall: true,
+      statusFetcher: async () => ({ power: 'off' }),
+      onFire: (e) => fires.push(e),
+    });
+    await engine.start();
+    mqtt.emitMessage({ context: { deviceMac: 'EVENT-DEV', detectionState: 'DETECTED' } });
+    await engine.drainForTest();
+
+    expect(fires.map((f) => f.status)).toEqual(['conditions-failed']);
+    expect(fires[0].reason).toMatch(/device_state LAMP-ID\.power/);
+  });
+
+  it('per-tick cache dedupes multiple device_state lookups on the same device', async () => {
+    const fetchStatus = vi.fn(async () => ({ power: 'on', battery: 87 }));
+    const engine = new RulesEngine({
+      automation: automation([
+        mqttRule({
+          conditions: [
+            { device: 'hallway lamp', field: 'power', op: '==', value: 'on' },
+            { device: 'hallway lamp', field: 'battery', op: '>=', value: 20 },
+          ],
+        }),
+      ]),
+      aliases: { 'hallway lamp': 'LAMP-ID' },
+      mqttClient: mqtt as unknown as SwitchBotMqttClient,
+      mqttCredential: fakeCredential,
+      skipApiCall: true,
+      statusFetcher: fetchStatus,
+    });
+    await engine.start();
+    mqtt.emitMessage({ context: { deviceMac: 'EVENT-DEV', detectionState: 'DETECTED' } });
+    await engine.drainForTest();
+
+    expect(fetchStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it('per-tick cache does not leak across separate pipeline runs', async () => {
+    const fetchStatus = vi.fn(async () => ({ power: 'on' }));
+    const engine = new RulesEngine({
+      automation: automation([
+        mqttRule({
+          conditions: [{ device: 'hallway lamp', field: 'power', op: '==', value: 'on' }],
+        }),
+      ]),
+      aliases: { 'hallway lamp': 'LAMP-ID' },
+      mqttClient: mqtt as unknown as SwitchBotMqttClient,
+      mqttCredential: fakeCredential,
+      skipApiCall: true,
+      statusFetcher: fetchStatus,
+    });
+    await engine.start();
+    mqtt.emitMessage({ context: { deviceMac: 'EVENT-DEV', detectionState: 'DETECTED' } });
+    mqtt.emitMessage({ context: { deviceMac: 'EVENT-DEV', detectionState: 'DETECTED' } });
+    await engine.drainForTest();
+
+    expect(fetchStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it('device_state fetch failure surfaces as conditions-failed with the error message', async () => {
+    const fires: EngineFireEntry[] = [];
+    const engine = new RulesEngine({
+      automation: automation([
+        mqttRule({
+          conditions: [{ device: 'LAMP-ID', field: 'power', op: '==', value: 'on' }],
+        }),
+      ]),
+      aliases: { 'hallway lamp': 'AA-BB-CC' },
+      mqttClient: mqtt as unknown as SwitchBotMqttClient,
+      mqttCredential: fakeCredential,
+      skipApiCall: true,
+      statusFetcher: async () => {
+        throw new Error('network down');
+      },
+      onFire: (e) => fires.push(e),
+    });
+    await engine.start();
+    mqtt.emitMessage({ context: { deviceMac: 'EVENT-DEV', detectionState: 'DETECTED' } });
+    await engine.drainForTest();
+
+    expect(fires.map((f) => f.status)).toEqual(['conditions-failed']);
+    expect(fires[0].reason).toContain('network down');
+  });
 });

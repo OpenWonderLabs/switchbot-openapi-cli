@@ -22,8 +22,14 @@ import { randomUUID } from 'node:crypto';
 import type { AxiosInstance } from 'axios';
 import type { SwitchBotMqttClient } from '../mqtt/client.js';
 import type { MqttCredential } from '../mqtt/credential.js';
+import { fetchDeviceStatus } from '../lib/devices.js';
 import { isDestructiveCommand } from './destructive.js';
-import { classifyMqttPayload, evaluateConditions, matchesMqttTrigger } from './matcher.js';
+import {
+  classifyMqttPayload,
+  evaluateConditions,
+  matchesMqttTrigger,
+  type DeviceStatusFetcher,
+} from './matcher.js';
 import { ThrottleGate, parseMaxPerMs } from './throttle.js';
 import { executeRuleAction } from './action.js';
 import { CronScheduler } from './cron-scheduler.js';
@@ -183,6 +189,13 @@ export interface RulesEngineOptions {
   webhookPort?: number;
   /** Webhook listener host (default 127.0.0.1). */
   webhookHost?: string;
+  /**
+   * Override how device_state conditions fetch live status. Primarily a
+   * test seam — production callers should leave it unset so the engine
+   * goes through the normal `fetchDeviceStatus` path with the shared
+   * axios client.
+   */
+  statusFetcher?: DeviceStatusFetcher;
 }
 
 export interface EngineFireEntry {
@@ -466,7 +479,24 @@ export class RulesEngine {
 
   private async dispatchRule(rule: Rule, event: EngineEvent): Promise<void> {
     const fireId = randomUUID();
-    const cond = evaluateConditions(rule.conditions, event.t);
+    // Per-tick status cache: one pipeline run through dispatchRule, one
+    // cache. Multiple device_state conditions on the same deviceId share
+    // a single round trip; subsequent pipeline runs see fresh status.
+    const statusCache = new Map<string, Promise<Record<string, unknown>>>();
+    const baseFetcher: DeviceStatusFetcher =
+      this.opts.statusFetcher ??
+      ((id) => fetchDeviceStatus(id, this.opts.httpClient));
+    const fetchStatus: DeviceStatusFetcher = (deviceId) => {
+      const existing = statusCache.get(deviceId);
+      if (existing) return existing;
+      const p = baseFetcher(deviceId);
+      statusCache.set(deviceId, p);
+      return p;
+    };
+    const cond = await evaluateConditions(rule.conditions, event.t, {
+      aliases: this.opts.aliases,
+      fetchStatus,
+    });
     if (!cond.matched) {
       if (cond.unsupported.length > 0) {
         writeAudit({
