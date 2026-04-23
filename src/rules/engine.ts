@@ -26,12 +26,15 @@ import { isDestructiveCommand } from './destructive.js';
 import { classifyMqttPayload, evaluateConditions, matchesMqttTrigger } from './matcher.js';
 import { ThrottleGate, parseMaxPerMs } from './throttle.js';
 import { executeRuleAction } from './action.js';
+import { CronScheduler } from './cron-scheduler.js';
 import {
   type AutomationBlock,
   type EngineEvent,
   type Rule,
+  isCronTrigger,
   isMqttTrigger,
 } from './types.js';
+import { Cron } from 'croner';
 import { writeAudit } from '../utils/audit.js';
 
 export interface LintIssue {
@@ -66,14 +69,29 @@ export function lintRules(automation: AutomationBlock | null | undefined): LintR
     seenNames.add(r.name);
 
     // Trigger support
-    if (r.when.source === 'cron' || r.when.source === 'webhook') {
+    if (r.when.source === 'webhook') {
       issues.push({
         rule: r.name,
         severity: 'warning',
         code: 'trigger-unsupported',
-        message: `Trigger source "${r.when.source}" is not active in this build (PoC is MQTT-only).`,
+        message: `Trigger source "${r.when.source}" is not active in this build (E2 pending).`,
       });
       unsupportedCount++;
+    }
+
+    // Cron expression validity (cron trigger is now active in E1).
+    if (r.when.source === 'cron') {
+      try {
+        // eslint-disable-next-line no-new
+        new Cron(r.when.schedule, { paused: true });
+      } catch (err) {
+        issues.push({
+          rule: r.name,
+          severity: 'error',
+          code: 'invalid-cron',
+          message: `cron schedule "${r.when.schedule}" is not parseable: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
     }
 
     // Destructive guard
@@ -167,6 +185,7 @@ export class RulesEngine {
   private readonly throttle = new ThrottleGate();
   private unsubscribeMessage: (() => void) | null = null;
   private unsubscribeState: (() => void) | null = null;
+  private cronScheduler: CronScheduler | null = null;
   private started = false;
   private stopped = false;
   /**
@@ -227,6 +246,18 @@ export class RulesEngine {
       });
     }
 
+    // Cron triggers. We start the scheduler only when at least one cron
+    // rule is active — no need to stand up timers otherwise.
+    const cronRules = this.rules.filter((r) => isCronTrigger(r.when));
+    if (cronRules.length > 0) {
+      this.cronScheduler = new CronScheduler({
+        dispatch: (rule, event) =>
+          this.enqueue(() => this.onCronFire(rule, event)),
+      });
+      for (const r of cronRules) this.cronScheduler.register(r);
+      this.cronScheduler.start();
+    }
+
     this.unsubscribeState = this.opts.mqttClient.onStateChange((state) => {
       if (state === 'failed' && !this.stopped) {
         // Propagate to caller via stats; the rules run command decides
@@ -247,6 +278,10 @@ export class RulesEngine {
     this.unsubscribeState?.();
     this.unsubscribeMessage = null;
     this.unsubscribeState = null;
+    if (this.cronScheduler) {
+      this.cronScheduler.stop();
+      this.cronScheduler = null;
+    }
   }
 
   /**
@@ -255,6 +290,29 @@ export class RulesEngine {
    */
   async ingestMqttForTest(payload: unknown): Promise<void> {
     await this.enqueue(() => this.onMqttMessage(payload, { preParsed: true }));
+  }
+
+  /**
+   * Fire a cron rule directly without needing the scheduler/timers.
+   * Used by tests that want to exercise the dispatch pipeline without
+   * depending on fake timers or croner's internals.
+   */
+  async ingestCronForTest(rule: Rule, when: Date = new Date()): Promise<void> {
+    if (!isCronTrigger(rule.when)) {
+      throw new Error(`ingestCronForTest: rule "${rule.name}" is not a cron trigger`);
+    }
+    const event: EngineEvent = {
+      source: 'cron',
+      event: rule.when.schedule,
+      t: when,
+      payload: { schedule: rule.when.schedule },
+    };
+    await this.enqueue(() => this.onCronFire(rule, event));
+  }
+
+  /** Read-only peek at cron schedule state — for `rules list` extras. */
+  getCronSchedule(ruleName: string): { schedule: string; nextAt: Date | null } | null {
+    return this.cronScheduler?.getScheduledFor(ruleName) ?? null;
   }
 
   /** Test helper — resolves after all queued dispatches complete. */
@@ -308,6 +366,15 @@ export class RulesEngine {
         await this.stop();
         return;
       }
+    }
+  }
+
+  private async onCronFire(rule: Rule, event: EngineEvent): Promise<void> {
+    if (this.stopped || !this.started) return;
+    this.stats.eventsProcessed++;
+    await this.dispatchRule(rule, event);
+    if (this.opts.maxFirings !== undefined && this.firesTotal() >= this.opts.maxFirings) {
+      await this.stop();
     }
   }
 

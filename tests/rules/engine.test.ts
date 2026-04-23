@@ -65,12 +65,33 @@ describe('lintRules', () => {
   it('warns (not errors) when a rule uses an unsupported trigger', () => {
     const r = lintRules(
       automation([
-        { ...mqttRule({ name: 'cron one' }), when: { source: 'cron', schedule: '*/5 * * * *' } },
+        { ...mqttRule({ name: 'webhook one' }), when: { source: 'webhook', path: '/motion' } },
       ]),
     );
     expect(r.valid).toBe(true);
     expect(r.rules[0].status).toBe('unsupported');
     expect(r.unsupportedCount).toBe(1);
+  });
+
+  it('accepts a valid cron rule as ok (cron is wired in E1)', () => {
+    const r = lintRules(
+      automation([
+        { ...mqttRule({ name: 'nightly lights' }), when: { source: 'cron', schedule: '0 22 * * *' } },
+      ]),
+    );
+    expect(r.valid).toBe(true);
+    expect(r.rules[0].status).toBe('ok');
+    expect(r.unsupportedCount).toBe(0);
+  });
+
+  it('rejects a cron rule with an unparseable schedule', () => {
+    const r = lintRules(
+      automation([
+        { ...mqttRule({ name: 'bad cron' }), when: { source: 'cron', schedule: 'not a cron' } },
+      ]),
+    );
+    expect(r.valid).toBe(false);
+    expect(r.rules[0].issues.find((i) => i.code === 'invalid-cron')).toBeDefined();
   });
 
   it('flags destructive actions as errors', () => {
@@ -272,5 +293,101 @@ describe('RulesEngine', () => {
     await engine.drainForTest();
     expect(fires).toEqual([]);
     expect(engine.getStats().eventsProcessed).toBe(0);
+  });
+
+  it('cron-triggered rule fires via ingestCronForTest and writes rule-fire-dry audit', async () => {
+    const fires: EngineFireEntry[] = [];
+    const rule: Rule = {
+      name: 'nightly lights off',
+      when: { source: 'cron', schedule: '0 22 * * *' },
+      then: [{ command: 'devices command <id> turnOff', device: 'hallway lamp' }],
+      dry_run: true,
+    };
+    const engine = new RulesEngine({
+      automation: automation([rule]),
+      aliases: { 'hallway lamp': 'AA-BB-CC' },
+      mqttClient: mqtt as unknown as SwitchBotMqttClient,
+      mqttCredential: fakeCredential,
+      skipApiCall: true,
+      onFire: (e) => fires.push(e),
+    });
+    await engine.start();
+    // Cron rules don't need MQTT subscription.
+    await engine.ingestCronForTest(rule, new Date(2026, 3, 22, 22, 0, 0));
+    await engine.drainForTest();
+    await engine.stop();
+
+    expect(fires).toHaveLength(1);
+    expect(fires[0].status).toBe('dry');
+    expect(engine.getStats().dryFires).toBe(1);
+    const audit = readAudit(auditFile);
+    expect(audit).toHaveLength(1);
+    expect(audit[0].kind).toBe('rule-fire-dry');
+    expect((audit[0] as { rule?: { triggerSource?: string } }).rule?.triggerSource).toBe('cron');
+  });
+
+  it('getCronSchedule exposes the next planned run for a cron rule', async () => {
+    const rule: Rule = {
+      name: 'hourly',
+      when: { source: 'cron', schedule: '0 * * * *' },
+      then: [{ command: 'devices command <id> turnOn', device: 'hallway lamp' }],
+      dry_run: true,
+    };
+    const engine = new RulesEngine({
+      automation: automation([rule]),
+      aliases: { 'hallway lamp': 'AA-BB-CC' },
+      mqttClient: mqtt as unknown as SwitchBotMqttClient,
+      mqttCredential: fakeCredential,
+      skipApiCall: true,
+    });
+    await engine.start();
+    const info = engine.getCronSchedule('hourly');
+    expect(info).not.toBeNull();
+    expect(info!.schedule).toBe('0 * * * *');
+    expect(info!.nextAt).toBeInstanceOf(Date);
+    await engine.stop();
+  });
+
+  it('cron throttle suppresses a rapid second fire', async () => {
+    const fires: EngineFireEntry[] = [];
+    const rule: Rule = {
+      name: 'rapid cron',
+      when: { source: 'cron', schedule: '* * * * *' },
+      then: [{ command: 'devices command <id> turnOn', device: 'hallway lamp' }],
+      dry_run: true,
+      throttle: { max_per: '1h' },
+    };
+    const engine = new RulesEngine({
+      automation: automation([rule]),
+      aliases: { 'hallway lamp': 'AA-BB-CC' },
+      mqttClient: mqtt as unknown as SwitchBotMqttClient,
+      mqttCredential: fakeCredential,
+      skipApiCall: true,
+      onFire: (e) => fires.push(e),
+    });
+    await engine.start();
+    const base = new Date(2026, 3, 22, 10, 0, 0);
+    await engine.ingestCronForTest(rule, base);
+    await engine.ingestCronForTest(rule, new Date(base.getTime() + 60_000)); // +1 minute
+    await engine.drainForTest();
+    await engine.stop();
+    expect(fires.map((f) => f.status)).toEqual(['dry', 'throttled']);
+  });
+
+  it('cron rule with invalid schedule causes engine.start() to throw', async () => {
+    const rule: Rule = {
+      name: 'broken',
+      when: { source: 'cron', schedule: 'not a cron' },
+      then: [{ command: 'devices command <id> turnOn', device: 'hallway lamp' }],
+      dry_run: true,
+    };
+    const engine = new RulesEngine({
+      automation: automation([rule]),
+      aliases: { 'hallway lamp': 'AA-BB-CC' },
+      mqttClient: mqtt as unknown as SwitchBotMqttClient,
+      mqttCredential: fakeCredential,
+      skipApiCall: true,
+    });
+    await expect(engine.start()).rejects.toThrow(/invalid-cron/);
   });
 });

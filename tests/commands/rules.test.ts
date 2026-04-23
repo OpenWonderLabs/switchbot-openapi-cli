@@ -139,6 +139,29 @@ describe('switchbot rules (commander surface)', () => {
     });
 
     it('flags unsupported trigger types with status=unsupported', async () => {
+      const webhook = [
+        'automation:',
+        '  enabled: true',
+        '  rules:',
+        '    - name: doorbell',
+        '      when:',
+        '        source: webhook',
+        '        path: "/doorbell"',
+        '      then:',
+        '        - command: "devices command <id> turnOn"',
+        '          device: hallway lamp',
+        'aliases:',
+        '  "hallway lamp": "AA-BB-CC-DD-EE-FF"',
+        '',
+      ].join('\n');
+      const p = path.join(tmpDir, 'policy.yaml');
+      fs.writeFileSync(p, v02Policy(webhook), 'utf-8');
+      const { stdout, exitCode } = await runCli(['rules', 'lint', p]);
+      expect(exitCode).toBe(0);
+      expect(stdout.join('\n')).toMatch(/\[unsupported\] doorbell/);
+    });
+
+    it('accepts a cron trigger as ok since E1 wired cron support', async () => {
       const cron = [
         'automation:',
         '  enabled: true',
@@ -158,7 +181,7 @@ describe('switchbot rules (commander surface)', () => {
       fs.writeFileSync(p, v02Policy(cron), 'utf-8');
       const { stdout, exitCode } = await runCli(['rules', 'lint', p]);
       expect(exitCode).toBe(0);
-      expect(stdout.join('\n')).toMatch(/\[unsupported\] nightly/);
+      expect(stdout.join('\n')).toMatch(/\[ok\] nightly/);
     });
 
     it('emits a structured --json envelope', async () => {
