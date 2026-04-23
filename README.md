@@ -15,11 +15,13 @@ Run scenes, stream real-time events over MQTT, and plug AI agents into your home
 - **Issues / feature requests:** [GitHub Issues](https://github.com/OpenWonderLabs/switchbot-openapi-cli/issues)
 
 > Looking for the **conversational skill** that drives this CLI from a chat
-> agent? The companion skill (Claude Desktop / OpenClaw / ClawHub) is
-> published separately — see [`docs/agent-guide.md`](./docs/agent-guide.md)
-> for the authoritative surfaces (MCP, `agent-bootstrap`, `schema export`,
-> `capabilities --json`) the skill consumes. The dedicated skill repo
-> distribution is tracked as Phase 3B (ClawHub registry).
+> agent? The companion skill (Claude Desktop / OpenClaw / ClawHub) lives in
+> the sibling repo
+> [`openclaw-switchbot-skill`](https://github.com/OpenWonderLabs/openclaw-switchbot-skill).
+> See [`docs/agent-guide.md`](./docs/agent-guide.md) for the authoritative
+> surfaces (MCP, `agent-bootstrap`, `schema export`, `capabilities --json`)
+> the skill consumes. Skill packaging + ClawHub registry entry is tracked
+> as Phase 3B — see [`docs/design/roadmap.md`](./docs/design/roadmap.md).
 
 ---
 
@@ -1021,21 +1023,45 @@ Bug reports, feature requests, and PRs are welcome.
 
 ## Roadmap
 
-Tracked for a future v3.x line (OpenClaw B-17 / B-18 / B-19 / B-21) — each is a
-standalone track rather than a bug fix:
+Phase 1 through Phase 4 are shipped as of v2.9.0. The authoritative
+phase table (including the skill-repo `autonomyLevel` L1/L2/L3
+dimension and reserved Tracks β / γ / δ / ε) lives in
+[`docs/design/roadmap.md`](./docs/design/roadmap.md).
 
-- **Policy v0.2 as the default schema** — `policy new` currently emits v0.1 so
-  fresh files stay compatible with older CLI builds; v3.0 flips the default to
-  v0.2 and ships a deprecation window for v0.1.
-- **Daemon mode** — long-running local process with a Unix/named-pipe socket so
-  repeated MCP or plan invocations don't pay fresh-process startup every call.
-- **`npx @switchbot/mcp-server`** — split the MCP server into its own tiny
-  published package so non-CLI users can `npx` it directly without installing
-  the full CLI.
-- **`switchbot self-test`** — scripted end-to-end harness that checks a live
-  token + a representative device and prints a go/no-go report.
-- **Record / replay** — capture raw request/response pairs into a fixture file
-  and replay them offline for deterministic testing and CI.
+Reserved tracks — not yet started, listed here so planning uses the
+same labels the roadmap doc uses:
+
+- **Track β — one-command install surface.** Top-level `switchbot
+  install` wrapper around the Phase 3A library, pending ClawHub
+  registry infra (Phase 3B).
+- **Track γ — rules v0.3.** `day_of_week`, `and`/`or` composition,
+  per-trigger debounce, profile-scoped rules, templating in
+  `then.command`.
+- **Track δ — semi-autonomous workflow (L2).** `plan suggest` paired
+  with `plan run --require-approval` so agents can draft and confirm
+  multi-step plans in one round-trip.
+- **Track ε — cross-OS CI matrix for keychain.** End-to-end matrix
+  (macOS + Windows + Linux libsecret) instead of unit-tested backends
+  only.
+
+Background tracks still on the standing backlog:
+
+- **Policy v0.2 as the default schema** — `policy new` currently
+  emits v0.1 so fresh files stay compatible with older CLI builds;
+  v3.0 flips the default to v0.2 and ships a deprecation window
+  for v0.1.
+- **Daemon mode** — long-running local process with a Unix/named-pipe
+  socket so repeated MCP or plan invocations don't pay fresh-process
+  startup every call.
+- **`npx @switchbot/mcp-server`** — split the MCP server into its own
+  tiny published package so non-CLI users can `npx` it directly
+  without installing the full CLI.
+- **`switchbot self-test`** — scripted end-to-end harness that checks
+  a live token + a representative device and prints a go/no-go
+  report.
+- **Record / replay** — capture raw request/response pairs into a
+  fixture file and replay them offline for deterministic testing
+  and CI.
 
 ## License
 
