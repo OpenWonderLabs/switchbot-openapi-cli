@@ -27,12 +27,14 @@ import { classifyMqttPayload, evaluateConditions, matchesMqttTrigger } from './m
 import { ThrottleGate, parseMaxPerMs } from './throttle.js';
 import { executeRuleAction } from './action.js';
 import { CronScheduler } from './cron-scheduler.js';
+import { WebhookListener, DEFAULT_WEBHOOK_PORT } from './webhook-listener.js';
 import {
   type AutomationBlock,
   type EngineEvent,
   type Rule,
   isCronTrigger,
   isMqttTrigger,
+  isWebhookTrigger,
 } from './types.js';
 import { Cron } from 'croner';
 import { writeAudit } from '../utils/audit.js';
@@ -68,13 +70,14 @@ export function lintRules(automation: AutomationBlock | null | undefined): LintR
     }
     seenNames.add(r.name);
 
-    // Trigger support
-    if (r.when.source === 'webhook') {
+    // Trigger support — cron + webhook are both wired in E1/E2. The
+    // only remaining unsupported source would be an unknown string.
+    if (r.when.source !== 'mqtt' && r.when.source !== 'cron' && r.when.source !== 'webhook') {
       issues.push({
         rule: r.name,
         severity: 'warning',
         code: 'trigger-unsupported',
-        message: `Trigger source "${r.when.source}" is not active in this build (E2 pending).`,
+        message: `Trigger source "${(r.when as { source: string }).source}" is not recognised by this build.`,
       });
       unsupportedCount++;
     }
@@ -90,6 +93,20 @@ export function lintRules(automation: AutomationBlock | null | undefined): LintR
           severity: 'error',
           code: 'invalid-cron',
           message: `cron schedule "${r.when.schedule}" is not parseable: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+    }
+
+    // Webhook path sanity — must start with "/" and carry at least one
+    // non-slash character. Keeps common typos out of production.
+    if (r.when.source === 'webhook') {
+      const p = r.when.path;
+      if (typeof p !== 'string' || !p.startsWith('/') || p.length < 2) {
+        issues.push({
+          rule: r.name,
+          severity: 'error',
+          code: 'invalid-webhook-path',
+          message: `webhook path "${String(p)}" must start with "/" and contain at least one character.`,
         });
       }
     }
@@ -157,6 +174,15 @@ export interface RulesEngineOptions {
   skipApiCall?: boolean;
   /** Side channel for unit tests — drop every processed event here. */
   onFire?: (entry: EngineFireEntry) => void;
+  /**
+   * Webhook bearer token. Required when any rule uses a webhook
+   * trigger; the listener will refuse to start otherwise.
+   */
+  webhookToken?: string;
+  /** Webhook listener port (default 18790). Set 0 to auto-allocate. */
+  webhookPort?: number;
+  /** Webhook listener host (default 127.0.0.1). */
+  webhookHost?: string;
 }
 
 export interface EngineFireEntry {
@@ -186,6 +212,7 @@ export class RulesEngine {
   private unsubscribeMessage: (() => void) | null = null;
   private unsubscribeState: (() => void) | null = null;
   private cronScheduler: CronScheduler | null = null;
+  private webhookListener: WebhookListener | null = null;
   private started = false;
   private stopped = false;
   /**
@@ -258,6 +285,27 @@ export class RulesEngine {
       this.cronScheduler.start();
     }
 
+    // Webhook triggers. Only bind the HTTP port when at least one rule
+    // needs it — standing up the listener unconditionally would force
+    // every user into an open port they didn't ask for.
+    const webhookRules = this.rules.filter((r) => isWebhookTrigger(r.when));
+    if (webhookRules.length > 0) {
+      if (!this.opts.webhookToken) {
+        throw new Error(
+          'webhook rules require a bearer token — pass RulesEngineOptions.webhookToken.',
+        );
+      }
+      this.webhookListener = new WebhookListener({
+        rules: webhookRules,
+        bearerToken: this.opts.webhookToken,
+        host: this.opts.webhookHost,
+        port: this.opts.webhookPort ?? DEFAULT_WEBHOOK_PORT,
+        dispatch: (rule, event) =>
+          this.enqueue(() => this.onWebhookFire(rule, event)),
+      });
+      await this.webhookListener.start();
+    }
+
     this.unsubscribeState = this.opts.mqttClient.onStateChange((state) => {
       if (state === 'failed' && !this.stopped) {
         // Propagate to caller via stats; the rules run command decides
@@ -281,6 +329,10 @@ export class RulesEngine {
     if (this.cronScheduler) {
       this.cronScheduler.stop();
       this.cronScheduler = null;
+    }
+    if (this.webhookListener) {
+      await this.webhookListener.stop();
+      this.webhookListener = null;
     }
   }
 
@@ -308,6 +360,27 @@ export class RulesEngine {
       payload: { schedule: rule.when.schedule },
     };
     await this.enqueue(() => this.onCronFire(rule, event));
+  }
+
+  /**
+   * Fire a webhook rule directly without standing up the HTTP listener.
+   */
+  async ingestWebhookForTest(rule: Rule, body = '', when: Date = new Date()): Promise<void> {
+    if (!isWebhookTrigger(rule.when)) {
+      throw new Error(`ingestWebhookForTest: rule "${rule.name}" is not a webhook trigger`);
+    }
+    const event: EngineEvent = {
+      source: 'webhook',
+      event: rule.when.path,
+      t: when,
+      payload: { path: rule.when.path, body },
+    };
+    await this.enqueue(() => this.onWebhookFire(rule, event));
+  }
+
+  /** Returns the bound webhook port when the listener is active. */
+  getWebhookPort(): number | null {
+    return this.webhookListener?.getPort() ?? null;
   }
 
   /** Read-only peek at cron schedule state — for `rules list` extras. */
@@ -370,6 +443,15 @@ export class RulesEngine {
   }
 
   private async onCronFire(rule: Rule, event: EngineEvent): Promise<void> {
+    if (this.stopped || !this.started) return;
+    this.stats.eventsProcessed++;
+    await this.dispatchRule(rule, event);
+    if (this.opts.maxFirings !== undefined && this.firesTotal() >= this.opts.maxFirings) {
+      await this.stop();
+    }
+  }
+
+  private async onWebhookFire(rule: Rule, event: EngineEvent): Promise<void> {
     if (this.stopped || !this.started) return;
     this.stats.eventsProcessed++;
     await this.dispatchRule(rule, event);

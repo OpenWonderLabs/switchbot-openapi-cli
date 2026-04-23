@@ -9,10 +9,12 @@ import {
 } from '../policy/load.js';
 import { validateLoadedPolicy } from '../policy/validate.js';
 import type { AutomationBlock, Rule } from '../rules/types.js';
+import { isWebhookTrigger } from '../rules/types.js';
 import { lintRules, RulesEngine, type LintResult } from '../rules/engine.js';
 import { tryLoadConfig } from '../config.js';
 import { fetchMqttCredential } from '../mqtt/credential.js';
 import { SwitchBotMqttClient } from '../mqtt/client.js';
+import { WebhookTokenStore } from '../rules/webhook-token.js';
 
 interface LoadedAutomation {
   path: string;
@@ -154,7 +156,9 @@ function registerRun(rules: Command): void {
     .option('--token <token>', 'SwitchBot API token (falls back to env / config).')
     .option('--secret <secret>', 'SwitchBot API secret (falls back to env / config).')
     .option('--max-firings <n>', 'Stop after this many successful fires (test / demo use).', (v) => Number.parseInt(v, 10))
-    .action(async (pathArg: string | undefined, opts: { dryRun?: boolean; token?: string; secret?: string; maxFirings?: number }) => {
+    .option('--webhook-port <n>', 'Webhook listener port (default 18790). Pass 0 for an auto-allocated port.', (v) => Number.parseInt(v, 10))
+    .option('--webhook-host <host>', 'Webhook listener bind address (default 127.0.0.1; set 0.0.0.0 to expose beyond loopback).')
+    .action(async (pathArg: string | undefined, opts: { dryRun?: boolean; token?: string; secret?: string; maxFirings?: number; webhookPort?: number; webhookHost?: string }) => {
       const loaded = loadAutomation(pathArg);
       if (!loaded) return;
 
@@ -201,6 +205,10 @@ function registerRun(rules: Command): void {
         });
       }
 
+      const needsWebhook = (loaded.automation?.rules ?? []).some((r) => isWebhookTrigger(r.when) && r.enabled !== false);
+      const webhookTokenStore = new WebhookTokenStore();
+      const webhookToken = needsWebhook ? webhookTokenStore.getOrCreate() : undefined;
+
       if (!isJsonMode()) console.error('Fetching MQTT credentials…');
       const credential = await fetchMqttCredential(token, secret);
       const client = new SwitchBotMqttClient(credential, () => fetchMqttCredential(token!, secret!));
@@ -212,6 +220,9 @@ function registerRun(rules: Command): void {
         mqttCredential: credential,
         globalDryRun: opts.dryRun === true,
         maxFirings: opts.maxFirings,
+        webhookToken,
+        webhookPort: opts.webhookPort,
+        webhookHost: opts.webhookHost,
       });
 
       let stopping = false;
@@ -234,6 +245,12 @@ function registerRun(rules: Command): void {
         console.error(
           `Rules engine started — ${engine.getStats().rulesActive} active rule(s), ${opts.dryRun ? 'global dry-run' : 'live'}.`,
         );
+        if (needsWebhook) {
+          const boundPort = engine.getWebhookPort();
+          console.error(
+            `Webhook listener on ${opts.webhookHost ?? '127.0.0.1'}:${boundPort ?? '?'} (bearer file: ${webhookTokenStore.getFilePath()}).`,
+          );
+        }
       } else {
         printJson({
           kind: 'control',
@@ -241,6 +258,7 @@ function registerRun(rules: Command): void {
           t: new Date().toISOString(),
           rulesActive: engine.getStats().rulesActive,
           globalDryRun: opts.dryRun === true,
+          webhookPort: needsWebhook ? engine.getWebhookPort() : null,
         });
       }
 
@@ -257,6 +275,38 @@ function registerRun(rules: Command): void {
         }, 1000);
       });
       await stop(0);
+    });
+}
+
+function registerWebhookRotateToken(rules: Command): void {
+  rules
+    .command('webhook-rotate-token')
+    .description('Generate and persist a fresh webhook bearer token.')
+    .action(() => {
+      const store = new WebhookTokenStore();
+      const fresh = store.rotate();
+      if (isJsonMode()) {
+        printJson({ status: 'rotated', filePath: store.getFilePath(), tokenLength: fresh.length });
+      } else {
+        console.log(`Webhook bearer rotated. Token written to ${store.getFilePath()}.`);
+        console.log('New token (copy now — it is not shown again):');
+        console.log(fresh);
+      }
+    });
+}
+
+function registerWebhookShowToken(rules: Command): void {
+  rules
+    .command('webhook-show-token')
+    .description('Print the current webhook bearer token (creating one if absent).')
+    .action(() => {
+      const store = new WebhookTokenStore();
+      const token = store.getOrCreate();
+      if (isJsonMode()) {
+        printJson({ filePath: store.getFilePath(), tokenLength: token.length });
+      } else {
+        console.log(token);
+      }
     });
 }
 
@@ -290,4 +340,6 @@ Exit codes (lint):
   registerLint(rules);
   registerList(rules);
   registerRun(rules);
+  registerWebhookRotateToken(rules);
+  registerWebhookShowToken(rules);
 }

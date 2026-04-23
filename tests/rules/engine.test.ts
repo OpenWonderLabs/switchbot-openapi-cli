@@ -62,10 +62,12 @@ describe('lintRules', () => {
     expect(r.rules[0].status).toBe('ok');
   });
 
-  it('warns (not errors) when a rule uses an unsupported trigger', () => {
+  it('warns (not errors) when a rule uses an unsupported trigger source', () => {
     const r = lintRules(
       automation([
-        { ...mqttRule({ name: 'webhook one' }), when: { source: 'webhook', path: '/motion' } },
+        // Cast through unknown to construct an unrecognised trigger source
+        // shape without TS whining; lint should still warn cleanly.
+        { ...mqttRule({ name: 'alien' }), when: { source: 'martian' as unknown as 'mqtt', event: 'landing' } } as Rule,
       ]),
     );
     expect(r.valid).toBe(true);
@@ -389,5 +391,53 @@ describe('RulesEngine', () => {
       skipApiCall: true,
     });
     await expect(engine.start()).rejects.toThrow(/invalid-cron/);
+  });
+
+  it('webhook trigger rule dry-fires via ingestWebhookForTest', async () => {
+    const fires: EngineFireEntry[] = [];
+    const rule: Rule = {
+      name: 'doorbell',
+      when: { source: 'webhook', path: '/doorbell' },
+      then: [{ command: 'devices command <id> turnOn', device: 'hallway lamp' }],
+      dry_run: true,
+    };
+    const engine = new RulesEngine({
+      automation: automation([rule]),
+      aliases: { 'hallway lamp': 'AA-BB-CC' },
+      mqttClient: mqtt as unknown as SwitchBotMqttClient,
+      mqttCredential: fakeCredential,
+      skipApiCall: true,
+      webhookToken: 'unit-test-token',
+      webhookPort: 0, // avoid port clash in test runs
+      onFire: (e) => fires.push(e),
+    });
+    await engine.start();
+    expect(engine.getWebhookPort()).toBeGreaterThan(0);
+    await engine.ingestWebhookForTest(rule, '{"hi":true}');
+    await engine.drainForTest();
+    await engine.stop();
+
+    expect(fires).toHaveLength(1);
+    expect(fires[0].status).toBe('dry');
+    const audit = readAudit(auditFile);
+    expect(audit[0].kind).toBe('rule-fire-dry');
+    expect((audit[0] as { rule?: { triggerSource?: string } }).rule?.triggerSource).toBe('webhook');
+  });
+
+  it('webhook rule without a bearer token refuses to start', async () => {
+    const rule: Rule = {
+      name: 'doorbell',
+      when: { source: 'webhook', path: '/doorbell' },
+      then: [{ command: 'devices command <id> turnOn', device: 'hallway lamp' }],
+      dry_run: true,
+    };
+    const engine = new RulesEngine({
+      automation: automation([rule]),
+      aliases: { 'hallway lamp': 'AA-BB-CC' },
+      mqttClient: mqtt as unknown as SwitchBotMqttClient,
+      mqttCredential: fakeCredential,
+      skipApiCall: true,
+    });
+    await expect(engine.start()).rejects.toThrow(/webhookToken/);
   });
 });
