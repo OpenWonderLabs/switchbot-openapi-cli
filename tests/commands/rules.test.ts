@@ -272,4 +272,190 @@ describe('switchbot rules (commander surface)', () => {
       expect(parsed.error?.code).toBe(2);
     });
   });
+
+  describe('rules tail', () => {
+    function writeAudit(file: string, rows: unknown[]): void {
+      fs.writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+    }
+
+    it('prints rule-* entries as a human-readable stream', async () => {
+      const auditFile = path.join(tmpDir, 'audit.log');
+      writeAudit(auditFile, [
+        {
+          t: '2026-04-23T10:00:00.000Z',
+          kind: 'rule-fire-dry',
+          deviceId: 'LAMP-ID',
+          command: 'turnOn',
+          parameter: null,
+          commandType: 'command',
+          dryRun: true,
+          rule: { name: 'night-light', triggerSource: 'mqtt', matchedDevice: 'LAMP-ID', fireId: 'f-1' },
+        },
+        {
+          t: '2026-04-23T10:05:00.000Z',
+          kind: 'command',
+          deviceId: 'OTHER',
+          command: 'turnOff',
+          parameter: null,
+          commandType: 'command',
+          dryRun: false,
+        },
+      ]);
+      const { stdout, exitCode } = await runCli(['rules', 'tail', '--file', auditFile]);
+      expect(exitCode).toBe(0);
+      const joined = stdout.join('\n');
+      expect(joined).toContain('night-light');
+      expect(joined).toContain('dry');
+      // The raw command entry must be filtered out.
+      expect(joined).not.toContain('OTHER');
+    });
+
+    it('--rule filter narrows the stream to one rule name', async () => {
+      const auditFile = path.join(tmpDir, 'audit.log');
+      writeAudit(auditFile, [
+        {
+          t: '2026-04-23T10:00:00.000Z',
+          kind: 'rule-fire-dry',
+          deviceId: 'A',
+          command: 'turnOn',
+          parameter: null,
+          commandType: 'command',
+          dryRun: true,
+          rule: { name: 'alpha', triggerSource: 'mqtt', fireId: 'f-1' },
+        },
+        {
+          t: '2026-04-23T10:10:00.000Z',
+          kind: 'rule-throttled',
+          deviceId: 'B',
+          command: 'turnOn',
+          parameter: null,
+          commandType: 'command',
+          dryRun: true,
+          rule: { name: 'beta', triggerSource: 'mqtt', fireId: 'f-2' },
+        },
+      ]);
+      const { stdout, exitCode } = await runCli([
+        'rules', 'tail', '--file', auditFile, '--rule', 'beta',
+      ]);
+      expect(exitCode).toBe(0);
+      const joined = stdout.join('\n');
+      expect(joined).toContain('beta');
+      expect(joined).not.toContain('alpha');
+    });
+
+    it('prints a "(no entries)" hint when no rule entries match', async () => {
+      const auditFile = path.join(tmpDir, 'audit.log');
+      writeAudit(auditFile, []);
+      const { stdout, exitCode } = await runCli(['rules', 'tail', '--file', auditFile]);
+      expect(exitCode).toBe(0);
+      expect(stdout.join('\n')).toMatch(/no rule-\* entries/);
+    });
+
+    it('--json emits one JSON line per rule-* entry', async () => {
+      const auditFile = path.join(tmpDir, 'audit.log');
+      writeAudit(auditFile, [
+        {
+          t: '2026-04-23T10:00:00.000Z',
+          kind: 'rule-fire',
+          deviceId: 'A',
+          command: 'turnOn',
+          parameter: null,
+          commandType: 'command',
+          dryRun: false,
+          result: 'ok',
+          rule: { name: 'gamma', triggerSource: 'mqtt', fireId: 'f-3' },
+        },
+      ]);
+      const { stdout, exitCode } = await runCli(['--json', 'rules', 'tail', '--file', auditFile]);
+      expect(exitCode).toBe(0);
+      const lines = stdout.filter((l) => l.trim().startsWith('{'));
+      expect(lines).toHaveLength(1);
+      const parsed = JSON.parse(lines[0]);
+      expect(parsed.kind).toBe('rule-fire');
+      expect(parsed.rule.name).toBe('gamma');
+    });
+  });
+
+  describe('rules replay', () => {
+    function writeAudit(file: string, rows: unknown[]): void {
+      fs.writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+    }
+
+    it('aggregates fires / dries / throttled / errors by rule and sorts by activity', async () => {
+      const auditFile = path.join(tmpDir, 'audit.log');
+      writeAudit(auditFile, [
+        {
+          t: '2026-04-23T10:00:00.000Z',
+          kind: 'rule-fire-dry',
+          deviceId: 'A',
+          command: 'turnOn',
+          parameter: null,
+          commandType: 'command',
+          dryRun: true,
+          rule: { name: 'loud', triggerSource: 'mqtt', fireId: 'f-1' },
+        },
+        {
+          t: '2026-04-23T10:05:00.000Z',
+          kind: 'rule-fire-dry',
+          deviceId: 'A',
+          command: 'turnOn',
+          parameter: null,
+          commandType: 'command',
+          dryRun: true,
+          rule: { name: 'loud', triggerSource: 'mqtt', fireId: 'f-2' },
+        },
+        {
+          t: '2026-04-23T10:10:00.000Z',
+          kind: 'rule-throttled',
+          deviceId: 'A',
+          command: 'turnOn',
+          parameter: null,
+          commandType: 'command',
+          dryRun: true,
+          rule: { name: 'loud', triggerSource: 'mqtt', fireId: 'f-3' },
+        },
+        {
+          t: '2026-04-23T10:20:00.000Z',
+          kind: 'rule-fire-dry',
+          deviceId: 'B',
+          command: 'turnOff',
+          parameter: null,
+          commandType: 'command',
+          dryRun: true,
+          rule: { name: 'quiet', triggerSource: 'cron', fireId: 'f-4' },
+        },
+      ]);
+      const { stdout, exitCode } = await runCli([
+        '--json', 'rules', 'replay', '--file', auditFile,
+      ]);
+      expect(exitCode).toBe(0);
+      const body = stdout.join('\n');
+      const parsed = JSON.parse(body);
+      const payload = parsed.data ?? parsed;
+      expect(payload.total).toBe(4);
+      expect(payload.summaries.map((s: { rule: string }) => s.rule)).toEqual(['loud', 'quiet']);
+      const loud = payload.summaries[0];
+      expect(loud.driesFires).toBe(2);
+      expect(loud.throttled).toBe(1);
+      expect(loud.fires).toBe(0);
+      expect(loud.triggerSource).toBe('mqtt');
+    });
+
+    it('rejects --since with an invalid duration (usage error)', async () => {
+      const { stdout, stderr, exitCode } = await runCli([
+        'rules', 'replay', '--since', 'forever', '--file', path.join(tmpDir, 'nope.log'),
+      ]);
+      expect(exitCode).toBe(2);
+      const combined = [...stdout, ...stderr].join('\n');
+      expect(combined).toMatch(/Invalid --since/);
+    });
+
+    it('handles an empty / missing audit log gracefully', async () => {
+      const { stdout, exitCode } = await runCli([
+        'rules', 'replay', '--file', path.join(tmpDir, 'nope.log'),
+      ]);
+      expect(exitCode).toBe(0);
+      expect(stdout.join('\n')).toMatch(/no rules recorded/);
+    });
+  });
 });

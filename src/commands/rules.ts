@@ -1,4 +1,7 @@
 import { Command } from 'commander';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { isJsonMode, printJson, exitWithError } from '../utils/output.js';
 import {
   loadPolicyFile,
@@ -25,6 +28,15 @@ import {
   sighupSupported,
   isPidAlive,
 } from '../rules/pid-file.js';
+import { readAudit, type AuditEntry } from '../utils/audit.js';
+import {
+  aggregateRuleAudits,
+  filterRuleAudits,
+  RULE_AUDIT_KINDS,
+} from '../rules/audit-query.js';
+import { parseDurationToMs } from '../devices/history-query.js';
+
+const DEFAULT_AUDIT_PATH = path.join(os.homedir(), '.switchbot', 'audit.log');
 
 interface LoadedAutomation {
   path: string;
@@ -344,6 +356,171 @@ function registerRun(rules: Command): void {
     });
 }
 
+function resolveSinceMs(since: string | undefined): number | undefined {
+  if (since === undefined) return undefined;
+  const durMs = parseDurationToMs(since);
+  if (durMs === null) {
+    exitWithError({
+      code: 2,
+      kind: 'usage',
+      message: `Invalid --since value "${since}". Expected e.g. "30s", "15m", "1h", "7d".`,
+      extra: { subKind: 'invalid-since' },
+    });
+  }
+  return Date.now() - (durMs as number);
+}
+
+function formatAuditLine(e: AuditEntry): string {
+  const rule = e.rule?.name ?? '(no-rule)';
+  const trigger = e.rule?.triggerSource ?? '?';
+  const device = e.rule?.matchedDevice ?? e.deviceId ?? '-';
+  const status =
+    e.kind === 'rule-fire'
+      ? e.result === 'error'
+        ? 'error'
+        : 'fire'
+      : e.kind === 'rule-fire-dry'
+        ? 'dry'
+        : e.kind === 'rule-throttled'
+          ? 'throttled'
+          : 'rejected';
+  const reason = e.rule?.reason ?? e.error ?? '';
+  const reasonSuffix = reason ? `  ${reason}` : '';
+  return `${e.t}  ${status.padEnd(9)} ${rule}  [${trigger}:${device}]${reasonSuffix}`;
+}
+
+function registerTail(rules: Command): void {
+  rules
+    .command('tail')
+    .description('Stream rule-* entries from the audit log.')
+    .option('--file <path>', `Audit log path (default ${DEFAULT_AUDIT_PATH})`)
+    .option('--since <duration>', 'Only entries newer than this window (e.g. 1h, 30m, 7d).')
+    .option('--rule <name>', 'Filter to a single rule name.')
+    .option('-f, --follow', 'Keep the process open and stream new lines as they arrive.')
+    .action(async (opts: { file?: string; since?: string; rule?: string; follow?: boolean }) => {
+      const file = opts.file ?? DEFAULT_AUDIT_PATH;
+      const sinceMs = resolveSinceMs(opts.since);
+
+      const existing = fs.existsSync(file) ? readAudit(file) : [];
+      const filtered = filterRuleAudits(existing, { sinceMs, ruleName: opts.rule });
+
+      if (isJsonMode()) {
+        for (const e of filtered) console.log(JSON.stringify(e));
+      } else if (filtered.length === 0 && !opts.follow) {
+        console.log(
+          `(no rule-* entries in ${file}${opts.rule ? ` for rule "${opts.rule}"` : ''})`,
+        );
+      } else {
+        for (const e of filtered) console.log(formatAuditLine(e));
+      }
+
+      if (!opts.follow) return;
+
+      // Follow: poll the file size and parse only newly appended bytes.
+      // Audit writes are append-only and infrequent, so 500 ms is plenty.
+      let offset = fs.existsSync(file) ? fs.statSync(file).size : 0;
+      let buffer = '';
+      const emit = (line: string) => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        let entry: AuditEntry;
+        try {
+          entry = JSON.parse(trimmed) as AuditEntry;
+        } catch {
+          return;
+        }
+        const kept = filterRuleAudits([entry], { sinceMs, ruleName: opts.rule });
+        if (kept.length === 0) return;
+        if (isJsonMode()) console.log(JSON.stringify(entry));
+        else console.log(formatAuditLine(entry));
+      };
+
+      const poll = setInterval(() => {
+        if (!fs.existsSync(file)) return;
+        const size = fs.statSync(file).size;
+        if (size < offset) {
+          // Log was truncated / rotated — restart from the top.
+          offset = 0;
+          buffer = '';
+        }
+        if (size === offset) return;
+        const fd = fs.openSync(file, 'r');
+        try {
+          const chunk = Buffer.alloc(size - offset);
+          fs.readSync(fd, chunk, 0, chunk.length, offset);
+          offset = size;
+          buffer += chunk.toString('utf-8');
+        } finally {
+          fs.closeSync(fd);
+        }
+        let newline = buffer.indexOf('\n');
+        while (newline !== -1) {
+          emit(buffer.slice(0, newline));
+          buffer = buffer.slice(newline + 1);
+          newline = buffer.indexOf('\n');
+        }
+      }, 500);
+
+      await new Promise<void>((resolve) => {
+        const onStop = () => {
+          clearInterval(poll);
+          resolve();
+        };
+        process.once('SIGINT', onStop);
+        process.once('SIGTERM', onStop);
+      });
+    });
+}
+
+function formatReplayTable(report: ReturnType<typeof aggregateRuleAudits>): string {
+  const lines: string[] = [];
+  lines.push(`total rule-entries: ${report.total}`);
+  if (report.webhookRejectedCount > 0) {
+    lines.push(`webhook-rejected (no rule): ${report.webhookRejectedCount}`);
+  }
+  if (report.summaries.length === 0) {
+    lines.push('(no rules recorded in the audit window)');
+    return lines.join('\n');
+  }
+  lines.push('rule | trigger | fires | dries | throttled | errors | error% | first | last');
+  for (const s of report.summaries) {
+    lines.push(
+      `${s.rule} | ${s.triggerSource ?? '-'} | ${s.fires} | ${s.driesFires} | ${s.throttled} | ${s.errors} | ${(s.errorRate * 100).toFixed(1)}% | ${s.firstAt ?? '-'} | ${s.lastAt ?? '-'}`,
+    );
+  }
+  return lines.join('\n');
+}
+
+function registerReplay(rules: Command): void {
+  rules
+    .command('replay')
+    .description('Aggregate rule-* audit entries per rule (fire/throttle/error counts).')
+    .option('--file <path>', `Audit log path (default ${DEFAULT_AUDIT_PATH})`)
+    .option('--since <duration>', 'Only entries newer than this window (e.g. 1h, 7d).')
+    .option('--rule <name>', 'Filter to a single rule name.')
+    .action((opts: { file?: string; since?: string; rule?: string }) => {
+      const file = opts.file ?? DEFAULT_AUDIT_PATH;
+      const entries = fs.existsSync(file) ? readAudit(file) : [];
+      const sinceMs = resolveSinceMs(opts.since);
+      const filtered = filterRuleAudits(entries, {
+        sinceMs,
+        ruleName: opts.rule,
+        kinds: RULE_AUDIT_KINDS,
+      });
+      const report = aggregateRuleAudits(filtered);
+      if (isJsonMode()) {
+        printJson({
+          file,
+          sinceMs: sinceMs ?? null,
+          ruleFilter: opts.rule ?? null,
+          ...report,
+        });
+      } else {
+        console.log(formatReplayTable(report));
+      }
+    });
+}
+
 function registerReload(rules: Command): void {
   rules
     .command('reload')
@@ -441,6 +618,8 @@ Subcommands:
   run  [path]               Subscribe to MQTT (+ cron/webhook) and execute matching rules.
   reload                    Hot-reload the running engine's policy (SIGHUP on Unix,
                             pid-file sentinel on Windows).
+  tail                      Stream rule-* entries from the audit log (--follow tails).
+  replay                    Per-rule aggregate: fires/dries/throttled/errors + window.
   webhook-rotate-token      Rotate the bearer token used for webhook triggers.
   webhook-show-token        Print the current bearer token (creating one if absent).
 
@@ -459,6 +638,8 @@ Exit codes (lint):
   registerList(rules);
   registerRun(rules);
   registerReload(rules);
+  registerTail(rules);
+  registerReplay(rules);
   registerWebhookRotateToken(rules);
   registerWebhookShowToken(rules);
 }
