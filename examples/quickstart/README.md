@@ -78,13 +78,13 @@ aliases, quiet hours, destructive-command confirmations, audit log
 location, and (v0.2 only) automation rules.
 
 ```bash
-mkdir -p ~/.config/openclaw/switchbot
+mkdir -p ~/.config/switchbot
 cp examples/quickstart/policy.yaml.example \
-   ~/.config/openclaw/switchbot/policy.yaml
+   ~/.config/switchbot/policy.yaml
 
 # Replace the sample deviceId under `aliases` with a real one:
 switchbot devices list --json | jq '.data[] | {id: .deviceId, name: .deviceName}'
-$EDITOR ~/.config/openclaw/switchbot/policy.yaml
+$EDITOR ~/.config/switchbot/policy.yaml
 
 switchbot policy validate
 ```

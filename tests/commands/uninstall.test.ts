@@ -61,7 +61,7 @@ describe('switchbot uninstall (dry-run smoke)', () => {
 
   it('rejects unknown --agent values', () => {
     const { code, stderr } = runCli(['--dry-run', 'uninstall', '--agent', 'bogus']);
-    expect(code).not.toBe(0);
-    expect(stderr).toMatch(/--agent must be one of/);
+    expect(code).toBe(2);
+    expect(stderr).not.toMatch(/at parseAgent/);
   });
 });

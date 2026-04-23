@@ -1,12 +1,12 @@
 # Agent Guide
 
-This guide covers everything an LLM agent (Claude, GPT, Cursor, Zed, OpenClaw, a homegrown orchestrator…) needs to drive SwitchBot devices through the `switchbot` CLI **safely** and **reliably**, without the agent needing to guess at device-specific JSON payloads.
+This guide covers everything an LLM agent (Claude, GPT, Cursor, Zed, a homegrown orchestrator…) needs to drive SwitchBot devices through the `switchbot` CLI **safely** and **reliably**, without the agent needing to guess at device-specific JSON payloads.
 
 If you're a human looking for a tour, start with the [top-level README](../README.md). This file assumes you're writing code that *calls* the CLI or embeds the MCP server.
 
 > **Skill packaging.** This CLI is the authoritative machine-readable surface.
-> The conversational skill that wraps it (Claude Desktop / OpenClaw / ClawHub
-> entry point) is tracked as Phase 3B and published out of a separate repo
+> The conversational skill that wraps it (Claude Desktop / third-party agent
+> entry points) is tracked as Phase 3B and published out of a separate repo
 > — the skill has no private contract with the CLI, only the documented
 > surfaces below (`mcp serve`, `agent-bootstrap`, `schema export`,
 > `capabilities --json`). To detect CLI ↔ agent-bootstrap schema drift before
@@ -26,6 +26,7 @@ If you're a human looking for a tour, start with the [top-level README](../READM
 - [Catalog: the shared contract](#catalog-the-shared-contract)
 - [Safety rails](#safety-rails)
 - [Policy awareness](#policy-awareness)
+- [Autonomous rule authoring (L3)](#autonomous-rule-authoring-l3)
 - [Observability](#observability)
 - [Performance and token budget](#performance-and-token-budget)
 
@@ -279,7 +280,7 @@ Use `switchbot doctor` to confirm the CLI is healthy before orchestrating anythi
 ## Policy awareness
 
 Users can declare per-account preferences in a `policy.yaml` file
-(`~/.config/openclaw/switchbot/policy.yaml` by default). Agents should
+(at the CLI's default policy path). Agents should
 read it at session start — it holds the aliases, quiet-hours window,
 and confirmation overrides the user wants honoured.
 
@@ -309,6 +310,54 @@ Full field-level reference: [`docs/policy-reference.md`](./policy-reference.md).
 
 ---
 
+## Autonomous rule authoring (L3)
+
+Agents operating at autonomy level L3 can **author** automation rules
+programmatically — no manual policy.yaml editing required.
+
+### Workflow
+
+```bash
+# Step 1: Generate candidate rule YAML (no side effects)
+switchbot rules suggest \
+  --intent "turn on hallway light when motion detected" \
+  --trigger mqtt \
+  --device "hallway-sensor" --device "hallway-lamp"
+
+# Step 2: Dry-run into policy.yaml (shows diff, no write)
+switchbot rules suggest --intent "..." | switchbot policy add-rule --dry-run
+
+# Step 3: Show diff to user, wait for approval, then inject
+switchbot rules suggest --intent "..." | switchbot policy add-rule --enable
+
+# Step 4: Lint and reload
+switchbot rules lint && switchbot rules reload
+```
+
+MCP agents use `rules_suggest` + `policy_add_rule` tools for the same
+pipeline without shell access.
+
+### Hard limits
+
+- **Never** set `automation.enabled: true` without explicitly informing the user.
+- **Always** start a new rule with `dry_run: true` (the generator does this automatically).
+- **Never** arm a rule (`dry_run: false`) on first author — require the user to confirm firings look correct via `switchbot rules tail --follow`.
+- **Never** use destructive commands (`unlock`, `deleteScene`, etc.) in rule `then[]`.
+
+### Dry-run → arm transition
+
+After the user confirms the rule fires correctly:
+
+```bash
+# Edit policy.yaml: remove dry_run: true (or set dry_run: false)
+# Then reload:
+switchbot rules lint && switchbot rules reload
+```
+
+Use `switchbot rules replay --since 24h --json` regularly to surface misfires.
+
+---
+
 ## Observability
 
 ```bash
@@ -328,24 +377,6 @@ The audit format is JSONL with this shape:
 ```
 
 Pair with `switchbot devices watch --interval=30s` for continuous state diffs (add `--include-unchanged` to emit every tick even when nothing changed), `switchbot events tail` to receive webhook pushes locally, or `switchbot events mqtt-tail` for real-time MQTT shadow updates.
-
-#### Routing MQTT events to an OpenClaw agent
-
-Run `mqtt-tail` once with `--sink openclaw` to replace the SwitchBot channel plugin entirely — no separate plugin installation required:
-
-```bash
-switchbot events mqtt-tail \
-  --sink openclaw \
-  --openclaw-token <token> \
-  --openclaw-model my-home-agent
-
-# Persist history at the same time:
-switchbot events mqtt-tail \
-  --sink file --sink-file ~/.switchbot/events.jsonl \
-  --sink openclaw --openclaw-token <token> --openclaw-model home
-```
-
-OpenClaw exposes an OpenAI-compatible HTTP API at `http://localhost:18789/v1/chat/completions`. The sink formats each event as a short text message (e.g. `📱 Climate Panel: 27.5°C / 51%`) and POSTs it to the agent directly.
 
 ---
 

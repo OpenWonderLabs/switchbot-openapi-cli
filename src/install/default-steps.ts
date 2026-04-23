@@ -45,6 +45,7 @@ export interface InstallContext {
   credentials?: CredentialBundle;
   credentialStore?: CredentialStore;
   credentialsWereStored?: boolean;
+  previousCredentials?: CredentialBundle | null;
   policyScaffoldResult?: ScaffoldPolicyResult;
   skillLinkPath?: string;
   skillLinkCreated?: boolean;
@@ -100,6 +101,8 @@ export function stepWriteKeychain(): InstallStep<InstallContext> {
         throw new Error('internal: credentials missing at write-keychain; prompt step must run first');
       }
       const store = await selectCredentialStore();
+      const previous = await store.get(ctx.profile);
+      ctx.previousCredentials = previous;
       await store.set(ctx.profile, ctx.credentials);
       ctx.credentialStore = store;
       ctx.credentialsWereStored = true;
@@ -107,9 +110,14 @@ export function stepWriteKeychain(): InstallStep<InstallContext> {
     async undo(ctx) {
       if (!ctx.credentialsWereStored || !ctx.credentialStore) return;
       try {
-        await ctx.credentialStore.delete(ctx.profile);
+        if (ctx.previousCredentials) {
+          await ctx.credentialStore.set(ctx.profile, ctx.previousCredentials);
+        } else {
+          await ctx.credentialStore.delete(ctx.profile);
+        }
       } finally {
         ctx.credentialsWereStored = false;
+        ctx.previousCredentials = undefined;
       }
     },
   };

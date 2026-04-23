@@ -113,4 +113,31 @@ describe('runPreflight', () => {
     const res = await runPreflight();
     expect(res.ok).toBe(true);
   });
+
+  it('is read-only: does not create ~/.switchbot or ~/.claude during checks', async () => {
+    const switchbotDir = path.join(tmp, '.switchbot');
+    const claudeDir = path.join(tmp, '.claude');
+    expect(fs.existsSync(switchbotDir)).toBe(false);
+    expect(fs.existsSync(claudeDir)).toBe(false);
+
+    const res = await runPreflight({ agent: 'claude-code', expectSkillLink: true });
+    expect(res.ok).toBe(true);
+
+    expect(fs.existsSync(switchbotDir)).toBe(false);
+    expect(fs.existsSync(claudeDir)).toBe(false);
+  });
+
+  it('skips agent-skills-dir check when expectSkillLink=false', async () => {
+    const res = await runPreflight({ agent: 'claude-code', expectSkillLink: false });
+    const agent = res.checks.find((c) => c.name === 'agent-skills-dir');
+    expect(agent).toBeUndefined();
+  });
+
+  it('fails agent-skills-dir when a path component is a file', async () => {
+    fs.writeFileSync(path.join(tmp, '.claude'), 'blocked', 'utf-8');
+    const res = await runPreflight({ agent: 'claude-code', expectSkillLink: true });
+    const agent = res.checks.find((c) => c.name === 'agent-skills-dir');
+    expect(agent?.status).toBe('fail');
+    expect(res.ok).toBe(false);
+  });
 });

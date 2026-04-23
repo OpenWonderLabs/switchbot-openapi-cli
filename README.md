@@ -15,12 +15,11 @@ Run scenes, stream real-time events over MQTT, and plug AI agents into your home
 - **Issues / feature requests:** [GitHub Issues](https://github.com/OpenWonderLabs/switchbot-openapi-cli/issues)
 
 > Looking for the **conversational skill** that drives this CLI from a chat
-> agent? The companion skill (Claude Desktop / OpenClaw / ClawHub) lives in
-> the sibling repo
-> [`openclaw-switchbot-skill`](https://github.com/OpenWonderLabs/openclaw-switchbot-skill).
+> agent? A companion skill for third-party agent hosts is maintained in a
+> separate repository.
 > See [`docs/agent-guide.md`](./docs/agent-guide.md) for the authoritative
 > surfaces (MCP, `agent-bootstrap`, `schema export`, `capabilities --json`)
-> the skill consumes. Skill packaging + ClawHub registry entry is tracked
+> the skill consumes. Skill packaging + registry entry is tracked
 > as Phase 3B — see [`docs/design/roadmap.md`](./docs/design/roadmap.md).
 
 ---
@@ -127,7 +126,7 @@ switchbot --help
 The fast path (credentials + policy + skill link, with rollback on failure):
 
 ```bash
-switchbot install --agent claude-code --skill-path ../openclaw-switchbot-skill
+switchbot install --agent claude-code --skill-path ../switchbot-skill
 # or preview first
 switchbot install --dry-run
 ```
@@ -225,15 +224,15 @@ the CLI (and any connected AI agent) should honour: device aliases,
 quiet-hours, confirmation overrides, audit-log location, and CLI
 profile. The file lives at:
 
-- Linux / macOS: `~/.config/openclaw/switchbot/policy.yaml`
-- Windows: `%USERPROFILE%\.config\openclaw\switchbot\policy.yaml`
+- Linux / macOS: default policy path resolved by the CLI
+- Windows: default policy path resolved by the CLI
 
 Everything in it is optional — if the file is missing, safe defaults
 apply. Scaffold, edit, and validate:
 
 ```bash
 switchbot policy new        # write a commented starter template
-$EDITOR ~/.config/openclaw/switchbot/policy.yaml
+$EDITOR <policy-path>
 switchbot policy validate   # exit 0 if OK, otherwise line-accurate error
 ```
 
@@ -390,7 +389,7 @@ switchbot devices list --filter 'name~living'
 switchbot devices list --filter 'type=/Hub.*/'
 switchbot devices list --filter 'name~office,type=/Bulb|Strip/'
 
-# Filter by family / room (family & room info requires the 'src: OpenClaw'
+# Filter by family / room (family & room info requires the platform source
 # header, which this CLI sends on every request)
 switchbot devices list --json | jq '.deviceList[] | select(.familyName == "Home")'
 switchbot devices list --json | jq '[.deviceList[], .infraredRemoteList[]] | group_by(.familyName)'
@@ -650,22 +649,10 @@ By default `mqtt-tail` prints JSONL to stdout. Use `--sink` (repeatable) to rout
 | `stdout` | (default when no `--sink` given) |
 | `file` | `--sink-file <path>` — append JSONL |
 | `webhook` | `--webhook-url <url>` — HTTP POST each event |
-| `openclaw` | `--openclaw-url`, `--openclaw-token` (or `$OPENCLAW_TOKEN`), `--openclaw-model` |
 | `telegram` | `--telegram-token` (or `$TELEGRAM_TOKEN`), `--telegram-chat <chatId>` |
 | `homeassistant` | `--ha-url <url>` + `--ha-webhook-id` (no auth) or `--ha-token` (REST event API) |
 
 ```bash
-# Push events to an OpenClaw agent (replaces the SwitchBot channel plugin)
-switchbot events mqtt-tail \
-  --sink openclaw \
-  --openclaw-token <token> \
-  --openclaw-model my-home-agent
-
-# Write to file + push to OpenClaw simultaneously
-switchbot events mqtt-tail \
-  --sink file --sink-file ~/.switchbot/events.jsonl \
-  --sink openclaw --openclaw-token <token> --openclaw-model home
-
 # Generic webhook (n8n, Make, etc.)
 switchbot events mqtt-tail --sink webhook --webhook-url https://n8n.local/hook/abc
 
@@ -821,11 +808,11 @@ switchbot cache clear --key status
 
 ### `policy` — validate, scaffold, and migrate policy.yaml
 
-Companion to the [OpenClaw SwitchBot skill](https://github.com/OpenWonderLabs/openclaw-switchbot-skill). The skill reads behaviour (aliases, confirmations, quiet hours, audit path) from `~/.config/openclaw/switchbot/policy.yaml`. This command group checks that file before the skill ever sees it, turning what used to be silent failures into line-accurate errors.
+Companion to the separate SwitchBot skill repository for third-party agent hosts. The skill reads behaviour (aliases, confirmations, quiet hours, audit path) from `policy.yaml`. This command group checks that file before the skill ever sees it, turning what used to be silent failures into line-accurate errors.
 
 ```bash
 # Write a starter policy at the default location
-switchbot policy new                              # → ~/.config/openclaw/switchbot/policy.yaml
+switchbot policy new                              # writes to the resolved default policy path
 switchbot policy new ./custom/policy.yaml --force
 
 # Validate (compiler-style errors with line:col + caret + hints)
@@ -838,7 +825,7 @@ switchbot policy validate --no-snippet             # plain error list, no source
 switchbot policy migrate
 ```
 
-Path resolution order: positional `[path]` > `SWITCHBOT_POLICY_PATH` env var > default `~/.config/openclaw/switchbot/policy.yaml`.
+Path resolution order: positional `[path]` > `SWITCHBOT_POLICY_PATH` env var > default policy path.
 
 **Exit codes:** `0` valid / `1` invalid / `2` file-not-found / `3` yaml-parse / `4` internal / `5` file already exists (on `new`, overridden with `--force`) / `6` unsupported schema version (on `migrate`).
 
@@ -846,16 +833,16 @@ Example — editing an alias without quoting the deviceId:
 
 ```console
 $ switchbot policy validate
-~/.config/openclaw/switchbot/policy.yaml:14:11
+<policy-path>:14:11
   14 |   bedroom light: 01-abc-12345
                  ^^^^^^^^^^^^^
 error: /aliases/bedroom light does not match pattern ^[A-Z0-9]{2,}-[A-Z0-9-]+$
 hint:  paste the deviceId from `switchbot devices list --format=tsv`, e.g. 01-202407090924-26354212
 
-✗ 1 error in ~/.config/openclaw/switchbot/policy.yaml (schema v0.1)
+✗ 1 error in <policy-path> (schema v0.1)
 ```
 
-The schema shipped with the CLI (`src/policy/schema/v0.1.json`) is mirrored as `examples/policy.schema.json` in the skill repo; a CI job on every push diffs the two to prevent drift.
+The schema shipped with the CLI (`src/policy/schema/v0.1.json`) is mirrored as `examples/policy.schema.json` in the companion skill repo; a CI job on every push diffs the two to prevent drift.
 
 
 
@@ -1048,7 +1035,7 @@ Reserved tracks — not yet started, listed here so planning uses the
 same labels the roadmap doc uses:
 
 - **Track β — one-command install surface.** Top-level `switchbot
-  install` wrapper around the Phase 3A library, pending ClawHub
+  install` wrapper around the Phase 3A library, pending external
   registry infra (Phase 3B).
 - **Track γ — rules v0.3.** `day_of_week`, `and`/`or` composition,
   per-trigger debounce, profile-scoped rules, templating in
@@ -1056,6 +1043,10 @@ same labels the roadmap doc uses:
 - **Track δ — semi-autonomous workflow (L2).** ✅ `plan suggest` paired
   with `plan run --require-approval` so agents can draft and confirm
   multi-step plans in one round-trip. MCP tool `plan_suggest` available.
+- **Track ζ — fully autonomous rule authoring (L3).** ✅ `rules suggest`
+  + `policy add-rule` let agents generate a rule YAML and inject it into
+  policy.yaml without manual editing. MCP tools `rules_suggest` +
+  `policy_add_rule` available (v2.13.0).
 - **Track ε — cross-OS CI matrix for keychain.** End-to-end matrix
   (macOS + Windows + Linux libsecret) instead of unit-tested backends
   only.

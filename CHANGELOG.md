@@ -5,6 +5,52 @@ All notable changes to `@switchbot/openapi-cli` are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.13.0] - 2026-04-24
+
+Feature release — L3 fully autonomous rule authoring for agents.
+
+### Added — `rules suggest`
+
+- New subcommand `switchbot rules suggest --intent <text>` scaffolds a
+  candidate automation rule YAML from natural language intent + optional
+  device list. No LLM involved — uses keyword heuristics for trigger
+  inference (mqtt/cron/webhook), schedule inference (am/pm/night/morning),
+  and command inference (8 patterns). Always emits `dry_run: true` and
+  `throttle: { max_per: "10m" }` for MQTT triggers.
+- Options: `--trigger`, `--device` (repeatable), `--event`, `--schedule`,
+  `--days`, `--webhook-path`, `--out`.
+- Output: raw rule YAML on stdout; `--json` for structured output.
+- Exported `suggestRule(opts)` pure function in `src/rules/suggest.ts`.
+
+### Added — `policy add-rule`
+
+- New subcommand `switchbot policy add-rule` reads rule YAML from **stdin**
+  and appends it to `automation.rules[]` in policy.yaml, preserving all
+  existing comments and formatting.
+- `--dry-run`: print the unified diff without writing to disk.
+- `--enable`: set `automation.enabled: true` after inserting the rule.
+- `--force`: overwrite an existing rule with the same name.
+- Pipeline-friendly: `switchbot rules suggest ... | switchbot policy add-rule`.
+- Exported `addRuleToPolicySource()` / `addRuleToPolicyFile()` in
+  `src/policy/add-rule.ts`.
+
+### Added — MCP tools `rules_suggest` + `policy_add_rule`
+
+- `rules_suggest` (tier `read`): MCP equivalent of `rules suggest`; agents
+  call it without shell access to draft a rule YAML.
+- `policy_add_rule` (tier `action`): MCP equivalent of `policy add-rule`;
+  agents inject a rule into policy.yaml and receive the diff for user
+  confirmation. Always run with `dry_run: true` first.
+- MCP tool count: 15 → 17.
+
+### Changed
+
+- `src/lib/command-keywords.ts`: `COMMAND_KEYWORDS` array extracted from
+  `plan.ts` into a shared module; imported by both `plan.ts` and
+  `rules/suggest.ts`.
+- `docs/agent-guide.md`: new section "Autonomous rule authoring (L3)"
+  covering the suggest → add-rule → lint → reload → dry-run → arm workflow.
+
 ## [2.12.0] - 2026-04-23
 
 Feature release — semi-autonomous L2 workflow for agents.
@@ -128,7 +174,7 @@ orchestrator library that shipped in 2.9.0.
   (prints a skill-install recipe for docs users to follow), `none`
   (skips the skill step entirely).
 - **`--skill-path <dir>`** — points at a local clone of
-  `openclaw-switchbot-skill`. No auto-clone — fork/offline/pin
+  the companion skill repo. No auto-clone — fork/offline/pin
   semantics stay in the user's court. On Windows the link uses an
   NTFS junction so it works without elevation.
 - **`--token-file <path>`** — two-line credential file for
@@ -249,7 +295,7 @@ instead of a collection of commands that happen to share a binary.
 - **`doctor`** and **`agent-bootstrap --compact`** report the active
   credential source in a field named `credentialSource`.
 - **`src/install/`** — in-repo preflight + rollback-aware step runner
-  library that the external `openclaw plugins install` command
+  library that the external plugin-manager install command
   (Phase 3B) can call into. Library only; no top-level install
   subcommand ships in this release (that is Track β).
 
@@ -271,14 +317,13 @@ instead of a collection of commands that happen to share a binary.
   `docs/design/roadmap.md` and lists reserved tracks β / γ / δ / ε
   alongside the existing long-term backlog.
 - **README header** — the skill-pointer blockquote now links directly
-  to the sibling
-  [`openclaw-switchbot-skill`](https://github.com/OpenWonderLabs/openclaw-switchbot-skill)
-  repo instead of saying "published separately".
+  to the sibling companion skill repo instead of saying
+  "published separately".
 
 ### Skill-side impact
 
 - The companion skill is bumped to **0.3.0** in
-  `openclaw-switchbot-skill` with `authority.cli: ">=2.9.0 <3.0.0"`,
+  the companion skill repo with `authority.cli: ">=2.9.0 <3.0.0"`,
   `policy.version: "0.2"`, and `autonomyLevel: "L1"`. The skill's
   Authoritative command table adds the `switchbot rules *` and
   `switchbot auth keychain *` groups shipped in this release.
@@ -287,14 +332,14 @@ instead of a collection of commands that happen to share a binary.
 
 Feature release — `switchbot policy` command group.
 
-The OpenClaw SwitchBot skill reads its behaviour from `~/.config/openclaw/switchbot/policy.yaml` (aliases, confirmations, quiet hours, audit path). Until this release, a typo in that file failed silently — the skill would load whatever YAML parsed and use defaults for anything it didn't understand, leaving the user to wonder why "bedroom light" didn't work. This release ships a dedicated command group that turns those silent failures into compiler-style errors with line numbers, carets, and fix hints, and eliminates the hand-crafted starter template step from the skill's Quickstart.
+The companion SwitchBot skill reads its behaviour from `~/.config/switchbot/policy.yaml` (aliases, confirmations, quiet hours, audit path). Until this release, a typo in that file failed silently — the skill would load whatever YAML parsed and use defaults for anything it didn't understand, leaving the user to wonder why "bedroom light" didn't work. This release ships a dedicated command group that turns those silent failures into compiler-style errors with line numbers, carets, and fix hints, and eliminates the hand-crafted starter template step from the skill's Quickstart.
 
 ### Added
 
 - **`switchbot policy validate [path]`** — validates the policy file against the embedded schema v0.1 (JSON Schema 2020-12). Reports each error with its path, YAML line:col, a source-line snippet + caret, and an action-specific hint (e.g. "paste the deviceId from `switchbot devices list --format=tsv`" on alias pattern mismatches; "destructive actions (lock/unlock/delete*/factoryReset) cannot be pre-approved in policy.yaml" on a forbidden `never_confirm` entry). Supports `--json` for programmatic consumers, `--no-snippet` to drop source preview, `--no-color` for piped output.
-- **`switchbot policy new [path]`** — writes a 99-line annotated starter template to the given path (or the default `~/.config/openclaw/switchbot/policy.yaml`). Refuses to overwrite an existing file unless `--force` is passed. Creates the parent directory if needed.
+- **`switchbot policy new [path]`** — writes a 99-line annotated starter template to the given path (or the default `~/.config/switchbot/policy.yaml`). Refuses to overwrite an existing file unless `--force` is passed. Creates the parent directory if needed.
 - **`switchbot policy migrate [path]`** — reports the policy file's schema version against what this CLI supports. No-op today (only v0.1 exists); wired so future releases can run structural upgrades without breaking existing policies.
-- **Path resolution precedence**: `[path]` argument > `SWITCHBOT_POLICY_PATH` env var > default `~/.config/openclaw/switchbot/policy.yaml`. The same resolver is exported for the Phase 3 `agent-bootstrap` install flow to reuse.
+- **Path resolution precedence**: `[path]` argument > `SWITCHBOT_POLICY_PATH` env var > default `~/.config/switchbot/policy.yaml`. The same resolver is exported for the Phase 3 `agent-bootstrap` install flow to reuse.
 - **Exit-code taxonomy** (scriptable): `0` valid / `1` invalid / `2` file-not-found / `3` yaml-parse / `4` internal / `5` exists (on `new` without `--force`) / `6` unsupported-version (on `migrate`). `--json` mode emits the usual `{schemaVersion, error}` or `{schemaVersion, data}` envelope.
 - **Embedded schema asset** — `src/policy/schema/v0.1.json` ships in the npm package via a post-build `copy-assets.mjs` step. The skill repository's `examples/policy.schema.json` is the mirror copy; a CI job diffs the two on every push to prevent drift.
 
@@ -304,7 +349,7 @@ The OpenClaw SwitchBot skill reads its behaviour from `~/.config/openclaw/switch
 
 ### Skill-side impact
 
-- OpenClaw SwitchBot skill v0.2.0 declares `authority.cli: "@switchbot/openapi-cli@>=2.8.0 <3.0.0"` and replaces the manual "edit this file by hand" Quickstart step with `switchbot policy new` + `switchbot policy validate`. See the skill repo's `CHANGELOG.md` for the matching entry.
+- Companion SwitchBot skill v0.2.0 declares `authority.cli: "@switchbot/openapi-cli@>=2.8.0 <3.0.0"` and replaces the manual "edit this file by hand" Quickstart step with `switchbot policy new` + `switchbot policy validate`. See the skill repo's `CHANGELOG.md` for the matching entry.
 
 ## [2.7.2] - 2026-04-21
 
@@ -407,7 +452,7 @@ metadata, and agent-discoverable resource surfaces (scenes, webhooks, keys).
 
 ## [2.6.1] - 2026-04-21
 
-Follow-up to v2.6.0 from the OpenClaw re-audit. Three real findings
+Follow-up to v2.6.0 from the external re-audit. Three real findings
 (R-2, R-3, R-4) plus a repo-wide English-only chore; R-1 rejected with
 reason.
 
@@ -460,7 +505,7 @@ reason.
 
 ## [2.6.0] - 2026-04-21
 
-Addresses 14 findings from the OpenClaw v2.5.1 audit (B-1 … B-16, minus
+Addresses 14 findings from the external v2.5.1 audit (B-1 … B-16, minus
 the two declined-as-misread items and four P3 items parked for v3.x).
 All in a single minor bump — no staged releases.
 
@@ -529,7 +574,7 @@ All in a single minor bump — no staged releases.
 
 - Roadmap section at the bottom of README for the v3.x track
   (daemon mode, standalone `npx` MCP package, `self-test` harness,
-  record/replay) — OpenClaw B-17 / B-18 / B-19 / B-21 are parked there
+  record/replay) — audit items B-17 / B-18 / B-19 / B-21 are parked there
   rather than folded into this minor.
 - Clarified that `devices expand` is intentionally limited to
   multi-parameter commands (`setAll`, `setPosition`, `setMode`);
@@ -816,7 +861,7 @@ used to require exact matches are now substrings. See
   `notes[]` entry. `count / min / max / avg / sum` remain exact.
 - All bug-fix items bundled into 2.5.0 rather than shipping a separate
   2.4.1. Source of bug numbers: the v2.4.0 smoke-test report at
-  `D:/servicdata/openclaw/workspace/switchbot-cli-v2.4.0-report.md`.
+  `D:/servicdata/workspace/switchbot-cli-v2.4.0-report.md`.
 
 ### Not included (deferred)
 
@@ -833,7 +878,7 @@ used to require exact matches are now substrings. See
 
 ## [2.4.0] - 2026-04-20
 
-Large agent-experience overhaul driven by the OpenClaw + Claude integration
+Large agent-experience overhaul driven by third-party agent + Claude integration
 feedback (19 items across P0/P1/P2/P3) plus a new **device history
 aggregation** subsystem. All schema changes are **additive-only** — existing
 agent integrations keep working without code changes and pick up the new

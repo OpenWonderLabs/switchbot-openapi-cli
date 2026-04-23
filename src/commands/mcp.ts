@@ -56,6 +56,8 @@ import {
 } from '../policy/schema.js';
 import { planMigration } from '../policy/migrate.js';
 import { suggestPlan } from './plan.js';
+import { suggestRule } from '../rules/suggest.js';
+import { addRuleToPolicyFile, AddRuleError } from '../policy/add-rule.js';
 import { writeFileSync } from 'node:fs';
 
 const LATEST_SUPPORTED_VERSION: PolicySchemaVersion =
@@ -1304,6 +1306,106 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
     },
   );
 
+  // ---- rules_suggest --------------------------------------------------------
+  server.registerTool(
+    'rules_suggest',
+    {
+      title: 'Draft a SwitchBot automation rule from intent',
+      description:
+        'Generate a candidate automation rule YAML from a natural language intent. ' +
+        'Uses keyword heuristics (no LLM) to infer trigger, schedule, and command. ' +
+        'Always emits dry_run: true — the rule must be reviewed before arming. ' +
+        'Pass the returned rule_yaml to policy_add_rule to inject it into policy.yaml.',
+      _meta: { agentSafetyTier: 'read' },
+      inputSchema: z.object({
+        intent: z.string().min(1).describe('Natural language description (e.g. "turn off lights at 10pm").'),
+        trigger: z.enum(['mqtt', 'cron', 'webhook']).optional().describe('Trigger type (inferred from intent if omitted).'),
+        device_ids: z.array(z.string().min(1)).optional().describe('Device IDs; first is sensor for mqtt triggers, rest are action targets.'),
+        event: z.string().optional().describe('MQTT event name override (e.g. motion.detected).'),
+        schedule: z.string().optional().describe('5-field cron expression override (e.g. "0 22 * * *").'),
+        days: z.array(z.string()).optional().describe('Weekday filter (e.g. ["mon","tue","wed","thu","fri"]).'),
+        webhook_path: z.string().optional().describe('Webhook path override (default /action).'),
+      }).strict(),
+      outputSchema: {
+        rule: z.unknown().describe('Rule object matching the v0.2 policy schema.'),
+        rule_yaml: z.string().describe('YAML string ready to pipe to policy_add_rule.'),
+        warnings: z.array(z.string()).describe('Informational warnings (e.g. unrecognized intent defaulted).'),
+      },
+    },
+    ({ intent, trigger, device_ids, event, schedule, days, webhook_path }) => {
+      const devices = (device_ids ?? []).map((id) => {
+        const cached = getCachedDevice(id);
+        return { id, name: cached?.name, type: cached?.type };
+      });
+      try {
+        const { rule, ruleYaml, warnings } = suggestRule({
+          intent,
+          trigger,
+          devices,
+          event,
+          schedule,
+          days,
+          webhookPath: webhook_path,
+        });
+        return {
+          content: [{ type: 'text' as const, text: ruleYaml }],
+          structuredContent: { rule, rule_yaml: ruleYaml, warnings },
+        };
+      } catch (err) {
+        return apiErrorToMcpError(err);
+      }
+    },
+  );
+
+  // ---- policy_add_rule ------------------------------------------------------
+  server.registerTool(
+    'policy_add_rule',
+    {
+      title: 'Append a rule to automation.rules[] in policy.yaml',
+      description:
+        'Inject a rule YAML snippet (as produced by rules_suggest) into the automation.rules[] ' +
+        'array in policy.yaml. Preserves existing comments and formatting. ' +
+        'Always run with dry_run: true first so the agent can show the diff for user approval. ' +
+        'Never set enable_automation: true without explicitly informing the user.',
+      _meta: { agentSafetyTier: 'action' },
+      inputSchema: z.object({
+        rule_yaml: z.string().min(1).describe('YAML string of a single rule object (e.g. from rules_suggest).'),
+        policy_path: z.string().optional().describe('Path to policy.yaml (defaults to $SWITCHBOT_POLICY_PATH or ~/.switchbot/policy.yaml).'),
+        enable_automation: z.boolean().default(false).describe('If true, sets automation.enabled: true after inserting the rule.'),
+        dry_run: z.boolean().default(false).describe('If true, compute and return the diff without writing to disk.'),
+        force: z.boolean().default(false).describe('If true, overwrite an existing rule with the same name.'),
+      }).strict(),
+      outputSchema: {
+        policyPath: z.string().describe('Resolved path to the policy file.'),
+        ruleName: z.string().describe('Name of the rule that was (or would be) inserted.'),
+        written: z.boolean().describe('True when the file was actually written.'),
+        diff: z.string().describe('Unified-style diff showing lines added/removed.'),
+      },
+    },
+    ({ rule_yaml, policy_path, enable_automation, dry_run, force }) => {
+      const policyPath = resolvePolicyPath({ flag: policy_path });
+      try {
+        const result = addRuleToPolicyFile({
+          ruleYaml: rule_yaml,
+          policyPath,
+          enableAutomation: enable_automation,
+          dryRun: dry_run,
+          force,
+        });
+        const out = { policyPath, ruleName: result.ruleName, written: result.written, diff: result.diff };
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(out, null, 2) }],
+          structuredContent: out,
+        };
+      } catch (err) {
+        if (err instanceof AddRuleError) {
+          return apiErrorToMcpError(new Error(`${err.code}: ${err.message}`));
+        }
+        return apiErrorToMcpError(err);
+      }
+    },
+  );
+
   return server;
 }
 
@@ -1324,7 +1426,7 @@ export function registerMcpCommand(program: Command): void {
     .command('mcp')
     .description('Run as a Model Context Protocol server so AI agents can call SwitchBot tools')
     .addHelpText('after', `
-The MCP server exposes fourteen tools:
+The MCP server exposes sixteen tools:
   - list_devices            fetch all physical + IR devices
   - get_device_status       live status for a physical device
   - send_command            control a device (destructive commands need confirm:true)
@@ -1339,6 +1441,9 @@ The MCP server exposes fourteen tools:
   - policy_validate         check policy.yaml against the embedded schema (v0.1 / v0.2)
   - policy_new              scaffold a starter policy.yaml (action — confirm first)
   - policy_migrate          upgrade policy.yaml to the latest schema (action — preserves comments)
+  - plan_suggest            draft a Plan JSON from intent + device IDs (heuristic, no LLM)
+  - rules_suggest           draft an automation rule YAML from intent (heuristic, no LLM)
+  - policy_add_rule         append a rule into automation.rules[] in policy.yaml
 
 Resource (read-only):
   - switchbot://events    snapshot of recent MQTT shadow events from the ring buffer

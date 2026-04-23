@@ -17,8 +17,8 @@ The JSON Schema that backs this document lives at
 
 | OS | Default path |
 |---|---|
-| Linux / macOS | `~/.config/openclaw/switchbot/policy.yaml` |
-| Windows | `%USERPROFILE%\.config\openclaw\switchbot\policy.yaml` |
+| Linux / macOS | `~/.config/switchbot/policy.yaml` |
+| Windows | `%USERPROFILE%\.config\switchbot\policy.yaml` |
 
 Override order (first hit wins):
 
@@ -260,7 +260,7 @@ cli:
 `switchbot config set-token --profile <name>`.
 
 > **Note:** the policy file path is **not** profile-aware today —
-> every profile shares the same `~/.config/openclaw/switchbot/policy.yaml`.
+> every profile shares the same `~/.config/switchbot/policy.yaml`.
 > If you need separate policies per profile, point each to its own
 > file via the `$SWITCHBOT_POLICY_PATH` environment variable when you
 > run the CLI. Tracking profile-scoped paths as a future enhancement.
@@ -302,7 +302,7 @@ For machine consumption, pass `--json`. The envelope is the standard
     "kind": "usage",
     "message": "lowercase deviceId at policy.yaml:12:14",
     "hint": "SwitchBot deviceIds are uppercase.",
-    "file": "/home/you/.config/openclaw/switchbot/policy.yaml",
+    "file": "/home/you/.config/switchbot/policy.yaml",
     "line": 12,
     "column": 14,
     "rule": "aliases-deviceId-pattern"

@@ -6,6 +6,7 @@ import { executeCommand, isDestructiveCommand } from '../lib/devices.js';
 import { executeScene } from '../lib/scenes.js';
 import { getCachedDevice } from '../devices/cache.js';
 import { resolveDeviceId } from '../utils/name-resolver.js';
+import { COMMAND_KEYWORDS } from '../lib/command-keywords.js';
 
 export interface PlanCommandStep {
   type: 'command';
@@ -190,17 +191,6 @@ export interface SuggestResult {
   plan: Plan;
   warnings: string[];
 }
-
-const COMMAND_KEYWORDS: Array<{ pattern: RegExp; command: string }> = [
-  { pattern: /\boff\b|\bturn.?off\b|\bstop\b/i, command: 'turnOff' },
-  { pattern: /\bon\b|\bturn.?on\b|\bstart\b/i, command: 'turnOn' },
-  { pattern: /\bpress\b|\bclick\b|\btap\b/i, command: 'press' },
-  { pattern: /\block\b/i, command: 'lock' },
-  { pattern: /\bunlock\b/i, command: 'unlock' },
-  { pattern: /\bopen\b|\braise\b|\bup\b/i, command: 'open' },
-  { pattern: /\bclose\b|\blower\b|\bdown\b/i, command: 'close' },
-  { pattern: /\bpause\b/i, command: 'pause' },
-];
 
 export function suggestPlan(opts: SuggestOptions): SuggestResult {
   const warnings: string[] = [];

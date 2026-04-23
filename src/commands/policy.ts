@@ -18,6 +18,7 @@ import {
   type PolicySchemaVersion,
 } from '../policy/schema.js';
 import { planMigration, PolicyMigrationError } from '../policy/migrate.js';
+import { addRuleToPolicyFile, AddRuleError } from '../policy/add-rule.js';
 
 // Latest version the CLI knows how to migrate *to*. Distinct from
 // CURRENT_POLICY_SCHEMA_VERSION (the version `policy new` emits), which stays
@@ -103,6 +104,7 @@ Subcommands:
   new [path]        Write a starter policy to the default location (or a given path)
   migrate [path]    Upgrade a policy file to the latest supported schema
                     (v${CURRENT_POLICY_SCHEMA_VERSION} → v${LATEST_SUPPORTED_VERSION} today; no-op if already current)
+  add-rule          Append a rule YAML (from stdin) into automation.rules[]
 
 Exit codes (validate):
   0  valid
@@ -344,4 +346,71 @@ Examples:
         console.log(`  bytes written: ${bytesWritten}`);
       }
     });
+
+  policy
+    .command('add-rule')
+    .description('Append a rule (read from stdin) into automation.rules[] in policy.yaml')
+    .option('--policy <path>', 'Path to policy.yaml (or set $SWITCHBOT_POLICY_PATH)')
+    .option('--enable', 'Set automation.enabled: true after inserting the rule')
+    .option('--force', 'Overwrite an existing rule with the same name')
+    .option('--dry-run', 'Print the diff without writing to disk')
+    .addHelpText('after', `
+Reads rule YAML from stdin. Combine with 'rules suggest' for a full pipeline:
+
+  $ switchbot rules suggest --intent "turn off lights at 10pm" --trigger cron \\
+      --device <id> | switchbot policy add-rule --dry-run
+  $ switchbot rules suggest --intent "turn off lights at 10pm" --trigger cron \\
+      --device <id> | switchbot policy add-rule --enable
+`)
+    .action(async (opts: { policy?: string; enable?: boolean; force?: boolean; dryRun?: boolean }) => {
+      const policyPath = resolvePolicyPath({ flag: opts.policy });
+      let ruleYaml: string;
+      try {
+        ruleYaml = await readStdinText();
+      } catch (err) {
+        exitPolicyError('internal', `failed to read stdin: ${(err as Error).message}`);
+      }
+      if (!ruleYaml!.trim()) {
+        exitPolicyError('internal', 'no rule YAML received on stdin');
+      }
+      try {
+        const result = addRuleToPolicyFile({
+          ruleYaml: ruleYaml!,
+          policyPath,
+          enableAutomation: opts.enable,
+          force: opts.force,
+          dryRun: opts.dryRun,
+        });
+        if (isJsonMode()) {
+          printJson({
+            policyPath,
+            ruleName: result.ruleName,
+            written: result.written,
+            diff: result.diff,
+          });
+        } else {
+          console.log(result.diff);
+          if (result.written) {
+            console.log(`✓ rule "${result.ruleName}" added to ${policyPath}`);
+          } else {
+            console.log(`• dry-run: rule "${result.ruleName}" not written`);
+          }
+        }
+      } catch (err) {
+        if (err instanceof AddRuleError) {
+          exitPolicyError('internal', err.message, { kind: err.code });
+        }
+        throw err;
+      }
+    });
+}
+
+function readStdinText(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let buf = '';
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', (chunk) => (buf += chunk));
+    process.stdin.on('end', () => resolve(buf));
+    process.stdin.on('error', reject);
+  });
 }

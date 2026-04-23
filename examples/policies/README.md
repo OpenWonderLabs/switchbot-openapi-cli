@@ -22,7 +22,7 @@ Start with the closest match, then edit in your own `aliases` from
 `switchbot devices list --format=tsv`. Validate before you rely on it:
 
 ```bash
-cp examples/policies/cautious.yaml ~/.config/openclaw/switchbot/policy.yaml
+cp examples/policies/cautious.yaml ~/.config/switchbot/policy.yaml
 # open in your editor, fill in aliases
 switchbot policy validate
 ```

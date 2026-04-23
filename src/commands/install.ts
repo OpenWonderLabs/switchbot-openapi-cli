@@ -17,7 +17,7 @@
  *   `switchbot doctor`" hint after success.
  */
 
-import { Command } from 'commander';
+import { Command, InvalidArgumentError } from 'commander';
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolvePolicyPath } from '../policy/load.js';
@@ -50,7 +50,7 @@ interface InstallCliOptions {
 function parseAgent(value: string | undefined): AgentName {
   if (!value) return 'claude-code';
   if (!(AGENT_VALUES as readonly string[]).includes(value)) {
-    throw new Error(`--agent must be one of ${AGENT_VALUES.join(', ')} (got "${value}")`);
+    throw new InvalidArgumentError(`--agent must be one of ${AGENT_VALUES.join(', ')} (got "${value}")`);
   }
   return value as AgentName;
 }
@@ -168,7 +168,10 @@ Examples:
       const dryRun = Boolean(globalOpts.dryRun);
 
       // Pre-flight: read-only checks, never mutate anything.
-      const pf = await runPreflight({ agent });
+      const pf = await runPreflight({
+        agent,
+        expectSkillLink: agent === 'claude-code' && Boolean(skillPath),
+      });
       if (!pf.ok) {
         if (isJsonMode()) {
           printJson({ ok: false, stage: 'preflight', preflight: pf });

@@ -7,12 +7,8 @@
 > per-rule `throttle` + `dry_run` fire end-to-end. v2.11.0 added
 > `days` weekday filter on cron triggers and `all`/`any`/`not`
 > condition composition. Companion to
-> `docs/design/phase4-rules-schema.md`.
-> three triggers (MQTT / cron / webhook) + `time_between` and
-> `device_state` conditions + per-rule `throttle` + `dry_run` fire
-> end-to-end. Hot-reload via SIGHUP (Unix) or a pid-file sentinel
-> (Windows). Companion to `docs/design/phase4-rules-schema.md`,
-> which specifies the `automation.rules[]` shape in `policy.yaml`.
+> `docs/design/phase4-rules-schema.md`, which specifies the
+> `automation.rules[]` shape in `policy.yaml`.
 
 ## Goal
 
@@ -118,7 +114,7 @@ suppressed firings.
 ### `source: webhook`
 
 The engine binds an HTTP listener on localhost (port from CLI config,
-default 18790 to avoid conflict with the OpenClaw gateway on 18789).
+default 18790 to avoid conflict with a local agent gateway on 18789).
 Authentication is a static bearer token generated at first run and
 stored alongside credentials. External callers (IFTTT, HA, whatever)
 POST JSON to the configured `path`; the body becomes the trigger

@@ -113,6 +113,23 @@ describe('stepWriteKeychain', () => {
     await step.undo(ctx); // must not throw
     expect(store._entries.size).toBe(0);
   });
+
+  it('undo restores previously existing credentials after an overwrite', async () => {
+    const store = makeMockStore();
+    store._entries.set('default', { token: 'old-token', secret: 'old-secret' });
+    const ctx = baseCtx({ credentials: { token: 'new-token', secret: 'new-secret' } });
+    const spy = vi.spyOn(await import('../../src/credentials/keychain.js'), 'selectCredentialStore')
+      .mockResolvedValue(store);
+    const step = stepWriteKeychain();
+
+    await step.execute(ctx);
+    expect(store._entries.get('default')).toEqual({ token: 'new-token', secret: 'new-secret' });
+
+    await step.undo(ctx);
+    expect(store._entries.get('default')).toEqual({ token: 'old-token', secret: 'old-secret' });
+
+    spy.mockRestore();
+  });
 });
 
 describe('stepScaffoldPolicy', () => {

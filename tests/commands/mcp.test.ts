@@ -92,7 +92,7 @@ describe('mcp server', () => {
     cacheMock.updateCacheFromDeviceList.mockClear();
   });
 
-  it('exposes the fifteen tools with titles and input schemas', async () => {
+  it('exposes the seventeen tools with titles and input schemas', async () => {
     const { client } = await pair();
     const { tools } = await client.listTools();
 
@@ -107,10 +107,12 @@ describe('mcp server', () => {
         'list_devices',
         'list_scenes',
         'plan_suggest',
+        'policy_add_rule',
         'policy_migrate',
         'policy_new',
         'policy_validate',
         'query_device_history',
+        'rules_suggest',
         'run_scene',
         'search_catalog',
         'send_command',

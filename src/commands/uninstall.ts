@@ -17,7 +17,7 @@
  * gone run `npm rm -g @switchbot/openapi-cli`.
  */
 
-import { Command } from 'commander';
+import { Command, InvalidArgumentError } from 'commander';
 import fs from 'node:fs';
 import readline from 'node:readline';
 import { resolvePolicyPath } from '../policy/load.js';
@@ -40,7 +40,7 @@ interface UninstallCliOptions {
 function parseAgent(value: string | undefined): AgentName {
   if (!value) return 'claude-code';
   if (!(AGENT_VALUES as readonly string[]).includes(value)) {
-    throw new Error(`--agent must be one of ${AGENT_VALUES.join(', ')} (got "${value}")`);
+    throw new InvalidArgumentError(`--agent must be one of ${AGENT_VALUES.join(', ')} (got "${value}")`);
   }
   return value as AgentName;
 }

@@ -18,6 +18,8 @@ import { tryLoadConfig } from '../config.js';
 import { fetchMqttCredential } from '../mqtt/credential.js';
 import { SwitchBotMqttClient } from '../mqtt/client.js';
 import { WebhookTokenStore } from '../rules/webhook-token.js';
+import { suggestRule } from '../rules/suggest.js';
+import { getCachedDevice } from '../devices/cache.js';
 import {
   getDefaultPidFilePaths,
   writePidFile,
@@ -605,6 +607,62 @@ function registerWebhookShowToken(rules: Command): void {
     });
 }
 
+function registerSuggest(rules: Command): void {
+  rules
+    .command('suggest')
+    .description('Generate a candidate rule YAML from intent + devices (heuristic, no LLM)')
+    .requiredOption('--intent <text>', 'Natural language description of the automation')
+    .option('--trigger <type>', 'mqtt | cron | webhook (inferred from intent if omitted)')
+    .option(
+      '--device <id>',
+      'Device ID or alias to include (repeatable)',
+      (v: string, prev: string[]) => [...prev, v],
+      [] as string[],
+    )
+    .option('--event <type>', 'MQTT event name override (e.g. motion.detected)')
+    .option('--schedule <cron>', '5-field cron expression override')
+    .option('--days <days>', 'Weekday filter, comma-separated (e.g. mon,tue,wed,thu,fri)')
+    .option('--webhook-path <path>', 'Webhook path override (default: /action)')
+    .option('--out <file>', 'Write YAML to file instead of stdout')
+    .action(
+      (opts: {
+        intent: string;
+        trigger?: string;
+        device: string[];
+        event?: string;
+        schedule?: string;
+        days?: string;
+        webhookPath?: string;
+        out?: string;
+      }) => {
+        const trigger = opts.trigger as 'mqtt' | 'cron' | 'webhook' | undefined;
+        const days = opts.days ? opts.days.split(',').map((d) => d.trim()) : undefined;
+        const devices = opts.device.map((ref) => {
+          const cached = getCachedDevice(ref);
+          return { id: ref, name: cached?.name, type: cached?.type };
+        });
+        const { rule, ruleYaml, warnings } = suggestRule({
+          intent: opts.intent,
+          trigger,
+          devices,
+          event: opts.event,
+          schedule: opts.schedule,
+          days,
+          webhookPath: opts.webhookPath,
+        });
+        for (const w of warnings) process.stderr.write(`warning: ${w}\n`);
+        if (opts.out) {
+          fs.writeFileSync(opts.out, ruleYaml, 'utf8');
+          if (!isJsonMode()) console.log(`✓ rule YAML written to ${opts.out}`);
+        } else if (isJsonMode()) {
+          printJson({ rule, rule_yaml: ruleYaml, warnings });
+        } else {
+          process.stdout.write(ruleYaml);
+        }
+      },
+    );
+}
+
 export function registerRulesCommand(program: Command): void {
   const rules = program
     .command('rules')
@@ -616,6 +674,7 @@ Reads the same policy file as \`switchbot policy\` (${DEFAULT_POLICY_PATH} by
 default; override with --policy or $SWITCHBOT_POLICY_PATH).
 
 Subcommands:
+  suggest                   Generate a candidate rule YAML from intent (heuristic, no LLM).
   lint [path]               Static-check rule definitions; no MQTT, no API calls.
   list [path]               Print a human/JSON summary of each rule's trigger + actions.
   run  [path]               Subscribe to MQTT (+ cron/webhook) and execute matching rules.
@@ -637,6 +696,7 @@ Exit codes (lint):
   4  internal / schema validation failed
 `,
     );
+  registerSuggest(rules);
   registerLint(rules);
   registerList(rules);
   registerRun(rules);

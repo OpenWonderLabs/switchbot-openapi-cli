@@ -7,22 +7,22 @@
 > (preflight + rollback-aware step runner). v2.10.0 wraps that
 > library as the built-in `switchbot install` / `switchbot uninstall`
 > commands — the 7-step Quickstart collapses to a single command
-> with rollback on failure. The external `openclaw plugins install`
-> wrapper and the ClawHub registry entry remain Phase 3B proper and
+> with rollback on failure. The external plugin-manager install wrapper
+> and the external registry entry remain Phase 3B proper and
 > live outside this repo.
 
 ## Implementation delta (what changed from this design)
 
 This document was written before `switchbot install` shipped. The body
-below describes the original design intent (`openclaw plugins install`
+below describes the original design intent (external plugin-manager
 surface). What actually landed in v2.10.0 differs in three ways:
 
 | Design doc says | What shipped |
 |---|---|
-| Entry point: `openclaw plugins install clawhub:switchbot` | Built-in: `switchbot install` (no ClawHub dependency) |
+| Entry point: `plugins install switchbot` | Built-in: `switchbot install` (no external registry dependency) |
 | Step 2: `npm i -g @switchbot/openapi-cli` | Skipped — CLI already in PATH is the precondition |
 | Step 8: `switchbot doctor` failure → full rollback | `--verify` flag makes doctor a warn-only post-step; failure never triggers rollback |
-| Uninstall: `openclaw plugins uninstall` | Built-in: `switchbot uninstall [--purge]` |
+| Uninstall: `plugins uninstall switchbot` | Built-in: `switchbot uninstall [--purge]` |
 
 Additional flags not in this design: `--force` (replace existing
 symlink), `--verify` (opt-in post-install doctor check), `--purge`
@@ -35,7 +35,7 @@ flow: install npm package, set token, create policy, install skill,
 restart agent. Phase 3 collapses that to:
 
 ```bash
-openclaw plugins install clawhub:switchbot
+plugins install switchbot
 ```
 
 On success, every check passes: `switchbot doctor` → all green, the
@@ -55,7 +55,7 @@ live in the OS keychain (not a `0600` JSON on disk).
 ## High-level flow
 
 ```
-openclaw plugins install clawhub:switchbot
+plugins install switchbot
   │
   ▼
 1. Pre-flight checks      (Node >= 18, npm on PATH, agent installed, conflict scan)
@@ -129,7 +129,7 @@ keyring daemon (SSH sessions, headless) would otherwise fail the
 install. The `file` backend keeps today's `0600` behavior. `doctor`
 surfaces which backend is active so users aren't surprised.
 
-Key naming convention (service = `com.openclaw.switchbot`; account =
+Key naming convention (service = `com.switchbot.skill`; account =
 `<profile>:token` and `<profile>:secret`). Two entries per profile,
 not one, so `security(1)` scripting doesn't require JSON parsing.
 
@@ -149,7 +149,7 @@ Checks:
 | `node --version` >= 18 | Continue | Abort, print Node install URL |
 | `npm` on PATH | Continue | Abort, print PATH fix hint |
 | No existing `switchbot` binary at a different version | Continue | Warn if <2.8.0, offer `--upgrade` |
-| No `~/.config/openclaw/switchbot/policy.yaml` OR the existing one validates | Continue | Warn; skip policy scaffold step |
+| No `~/.config/switchbot/policy.yaml` OR the existing one validates | Continue | Warn; skip policy scaffold step |
 | Target agent installed (Claude Code / Cursor / Copilot / ...) | Continue | Warn; install anyway, skip step 6 |
 | Network to `npmjs.org` + `api.switch-bot.com` | Continue | Abort with diagnostics |
 
@@ -165,14 +165,14 @@ Paste your SwitchBot SECRET:
 
 Input is captured with echo disabled on platforms that support it. On
 a TTY-less install (CI-driven?), fail fast with exit code 3 and a hint
-pointing at the `openclaw plugins install --token-file <path>` escape
+pointing at the `plugins install --token-file <path>` escape
 hatch (which reads a two-line file and deletes it on success).
 
 ## Skill install (step 6)
 
 The installer handles Claude Code natively (`~/.claude/skills/` symlink)
 and delegates others to the recipes under
-`openclaw-switchbot-skill/docs/agents/*.md` — printing the relevant
+`companion-skill/docs/agents/*.md` — printing the relevant
 one-liner rather than automating it. Rationale: Cursor / Copilot /
 Gemini / Codex all have different edge cases around where
 instructions files live, and automating all of them exceeds the
@@ -187,7 +187,7 @@ records an undo. Otherwise the step is informational.
 Parity with install:
 
 ```bash
-openclaw plugins uninstall clawhub:switchbot
+plugins uninstall switchbot
 ```
 
 Walks the exact reverse of the install flow. Prompts before each
@@ -196,7 +196,7 @@ and defaults the dangerous ones to "no":
 
 ```
 Remove SwitchBot credentials from keychain? [y/N]
-Remove policy.yaml at ~/.config/openclaw/switchbot/policy.yaml? [y/N]
+Remove policy.yaml at ~/.config/switchbot/policy.yaml? [y/N]
 Uninstall @switchbot/openapi-cli globally? [y/N]
 Remove skill link ~/.claude/skills/switchbot? [Y/n]
 ```
@@ -224,18 +224,17 @@ recreate and is almost never what the user wants to preserve.
   distribution), or shell (zero deps, painful Windows story). Leaning
   **Node** — reuses the CLI's HTTP client, npm install step becomes
   trivial, and we can distribute as another npm package.
-- `@openclaw/plugin-switchbot` vs `clawhub:switchbot` naming. ClawHub
-  is the brand; npm name should reflect it. Defer until the ClawHub
-  registry is live.
+- `@switchbot/plugin-skill` vs `registry:switchbot` naming. Defer
+  until the external registry is live.
 - How does the installer know which skill commit to link? Pin to the
   version in the plugin's own `package.json` (dep on
-  `openclaw-switchbot-skill@^0.2`)? Git-clone main? Deferred — the
+  `companion-skill@^0.2`)? Git-clone main? Deferred — the
   choice affects reproducibility and update UX.
 
 ## Dependencies on other Phase 3 tracks
 
-- `openclaw plugins` command itself (the generic install framework)
-- A ClawHub registry entry for `clawhub:switchbot`
+- The external plugin-manager install command (generic framework)
+- An external registry entry for `switchbot`
 - Node bindings for each keychain backend (evaluate `keytar`,
   `@napi-rs/keyring`, or a new wrapper — `keytar` is unmaintained)
 

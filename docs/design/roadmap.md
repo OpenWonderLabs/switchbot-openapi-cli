@@ -2,11 +2,12 @@
 
 > **Status as of 2026-04-23:** Phase 1 complete, Phase 2 complete,
 > Phase 3A complete (keychain + install library + built-in CLI install
-> command), Phase 3B tracked in the separate
-> [`openclaw-switchbot-skill`](https://github.com/OpenWonderLabs/openclaw-switchbot-skill)
-> repo, Phase 4 shipped at v0.2 (rules engine with MQTT + cron +
+> command), Phase 3B tracked in the separate companion skill repo,
+> Phase 4 shipped at v0.2 (rules engine with MQTT + cron +
 > webhook triggers, condition composition, weekday filter).
 > Tracks β / γ / δ / ε all shipped between v2.10.0 and v2.12.0.
+> Note: Track γ is a runtime capability increment on the v0.2 rule
+> model, not a separate policy schema version.
 
 This file is the **single source of truth** for phase numbering across
 the two repos in this project:
@@ -14,12 +15,23 @@ the two repos in this project:
 | Repo                                   | What it delivers                          | Uses phases?                              |
 |----------------------------------------|-------------------------------------------|-------------------------------------------|
 | `switchbot-openapi-cli` (this repo)    | CLI binary, MCP server, rules engine      | **Yes** — Phase 1/2/3/4 are defined here  |
-| `openclaw-switchbot-skill` (sibling)   | Conversational skill packaging of the CLI | **No** — uses orthogonal `autonomyLevel`  |
+| companion skill repo (sibling)         | Conversational skill packaging of the CLI | **No** — uses orthogonal `autonomyLevel`  |
 
 The skill repo does **not** re-number phases. It declares
 `tracksCliPhase: ">=4"` and an autonomy dimension
 (`autonomyLevel: L1 | L2 | L3`). The phase table below is what it
 points back to.
+
+## Completion matrix (scope clarity)
+
+| Capability | This repo (`switchbot-openapi-cli`) | Cross-repo (`+ companion skill repo`) | Notes |
+|---|---|---|---|
+| Phase 1 (manual orchestration) | Shipped | Shipped | Stable in v2.7.x |
+| Phase 2 (policy tooling) | Shipped | Shipped | v0.1 + v0.2 policy schema support |
+| Phase 3A (keychain + install CLI) | Shipped | Shipped | `switchbot install` / `switchbot uninstall` |
+| Phase 3B (skill packaging + external registry) | External tracking only | In progress outside this repo | Owned by companion skill repo |
+| Phase 4 (rules engine, v0.2 model) | Shipped | Shipped | MQTT/cron/webhook + `days` + `all`/`any`/`not` |
+| Track β / γ / δ / ε | Shipped | Shipped (β partially external for registry publish) | γ is a v0.2 capability increment |
 
 ---
 
@@ -65,7 +77,7 @@ reads it, the MCP server reads it, and `doctor` reports on it.
 Surfaces:
 
 - `policy new | validate | migrate` (v0.1 and v0.2 schemas)
-- `~/.config/openclaw/switchbot/policy.yaml` discovery rules
+- Default `policy.yaml` discovery rules
 - Aliases (human-readable device names)
 - Quiet hours (local-time windows, midnight-crossing supported)
 - Confirmation tiers (destructive / mutation / read)
@@ -91,13 +103,11 @@ published as a separate skill repo.
   any step failure. `--agent claude-code` auto-symlinks the skill;
   other agents print a recipe. `--purge` for one-flag full teardown.
 
-**Phase 3B — Skill packaging + ClawHub registry:**
+**Phase 3B — Skill packaging + external registry:**
 
-- Tracked in the sibling
-  [`openclaw-switchbot-skill`](https://github.com/OpenWonderLabs/openclaw-switchbot-skill)
-  repo
+- Tracked in the sibling companion skill repo
 - `SKILL.md` + `manifest.json` + skill-side examples
-- Publishing to ClawHub / Claude Desktop / other agent surfaces
+- Publishing to Claude Desktop / other agent surfaces + external registries
 
 ### Phase 4 — Rules engine v0.2 *(shipped, v2.8.x → v2.11.0)*
 
@@ -143,9 +153,9 @@ the skill's `manifest.json` `roadmap` block, which points back here.
 - **Track β — one-command install surface *(shipped, v2.10.0)*.**
   Top-level `switchbot install` / `switchbot uninstall` wrapping the
   Phase 3A library. CLI assumed already in PATH; doctor runs as
-  warn-only post-step. Phase 3B (ClawHub registry entry) still external.
-- **Track γ — rules v0.3 *(shipped, v2.11.0)*.**
-  `day_of_week` filter on cron triggers; `all` / `any` / `not`
+  warn-only post-step. Phase 3B (registry entry) still external.
+- **Track γ — rules v0.2 capability increment *(shipped, v2.11.0)*.**
+  `days` weekday filter on cron triggers; `all` / `any` / `not`
   condition composition. Per-trigger debounce and profile-scoped rules
   remain deferred.
 - **Track δ — semi-autonomous workflow L2 *(shipped, v2.12.0)*.**
@@ -165,6 +175,9 @@ the skill's `manifest.json` `roadmap` block, which points back here.
   bump forces a major bump on its own.
 - **Policy schema:** `0.1 → 0.2` is a minor. A major schema bump
   happens only if the top-level shape breaks (no planned v1.x yet).
+- **Rules track labels vs schema versions:** Track names (for example
+  γ) describe runtime increments and do not imply a policy schema bump;
+  current schema line remains `0.1 | 0.2`.
 - **Skill manifest:** the skill repo owns its own semver track,
   independent of CLI version. `authority.cli` in
   `manifest.json` narrows the compatible CLI range per skill release.

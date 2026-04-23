@@ -55,6 +55,14 @@ export interface PreflightOptions {
    * Unset (or `none`/`cursor`/`copilot`) skips the check.
    */
   agent?: 'claude-code' | 'cursor' | 'copilot' | 'none';
+  /**
+   * Whether this install run will actually attempt to create the Claude
+   * skill link. When false, the agent-skills-dir check is skipped even if
+   * agent is `claude-code` (e.g. recipe-only installs without --skill-path).
+   *
+   * Defaults to true for backward compatibility when `agent=claude-code`.
+   */
+  expectSkillLink?: boolean;
 }
 
 function parseMajor(version: string): number | null {
@@ -149,15 +157,35 @@ async function checkKeychain(): Promise<PreflightCheck> {
   }
 }
 
-function checkHomeDirWritable(opts: PreflightOptions): PreflightCheck {
+function checkHomeDirWritable(): PreflightCheck {
   const home = os.homedir();
+  const switchbotDir = path.join(home, '.switchbot');
   try {
-    // Attempt a write probe under ~/.switchbot without creating clutter.
-    const probe = path.join(home, '.switchbot', `.preflight-${process.pid}-${Date.now()}`);
-    fs.mkdirSync(path.dirname(probe), { recursive: true });
-    fs.writeFileSync(probe, 'ok', { mode: 0o600 });
-    fs.unlinkSync(probe);
-    void opts;
+    const homeStat = fs.statSync(home);
+    if (!homeStat.isDirectory()) {
+      return {
+        name: 'home',
+        status: 'fail',
+        message: `home path is not a directory: ${home}`,
+        hint: 'check your HOME/USERPROFILE environment configuration',
+      };
+    }
+
+    if (fs.existsSync(switchbotDir)) {
+      const sbStat = fs.statSync(switchbotDir);
+      if (!sbStat.isDirectory()) {
+        return {
+          name: 'home',
+          status: 'fail',
+          message: `${switchbotDir} exists but is not a directory`,
+          hint: 'move the file aside and re-run install',
+        };
+      }
+      fs.accessSync(switchbotDir, fs.constants.W_OK);
+      return { name: 'home', status: 'ok', message: `writable: ${switchbotDir}` };
+    }
+
+    fs.accessSync(home, fs.constants.W_OK);
     return { name: 'home', status: 'ok', message: `writable: ${home}` };
   } catch (err) {
     return {
@@ -169,21 +197,47 @@ function checkHomeDirWritable(opts: PreflightOptions): PreflightCheck {
   }
 }
 
+function nearestExistingPath(target: string): string | null {
+  let cur = target;
+  while (true) {
+    if (fs.existsSync(cur)) return cur;
+    const parent = path.dirname(cur);
+    if (parent === cur) return null;
+    cur = parent;
+  }
+}
+
 function checkAgentSkillDirWritable(opts: PreflightOptions): PreflightCheck | null {
-  if (opts.agent !== 'claude-code') return null;
+  const shouldCheck = opts.agent === 'claude-code' && (opts.expectSkillLink ?? true);
+  if (!shouldCheck) return null;
   const home = os.homedir();
   const target = path.join(home, '.claude', 'skills');
   try {
-    fs.mkdirSync(target, { recursive: true });
-    const probe = path.join(target, `.preflight-${process.pid}-${Date.now()}`);
-    fs.writeFileSync(probe, 'ok');
-    fs.unlinkSync(probe);
+    const existing = nearestExistingPath(target);
+    if (!existing) {
+      return {
+        name: 'agent-skills-dir',
+        status: 'fail',
+        message: `cannot resolve an existing parent for ${target}`,
+        hint: 'check your home directory path and permissions',
+      };
+    }
+    const stat = fs.statSync(existing);
+    if (!stat.isDirectory()) {
+      return {
+        name: 'agent-skills-dir',
+        status: 'fail',
+        message: `path component is not a directory: ${existing}`,
+        hint: 'move the blocking file aside and re-run install',
+      };
+    }
+    fs.accessSync(existing, fs.constants.W_OK);
     return { name: 'agent-skills-dir', status: 'ok', message: `writable: ${target}` };
   } catch (err) {
     return {
       name: 'agent-skills-dir',
       status: 'fail',
-      message: `cannot prepare ${target}: ${err instanceof Error ? err.message : String(err)}`,
+      message: `cannot write to ${target}: ${err instanceof Error ? err.message : String(err)}`,
       hint: 'open Claude Code once (it will create ~/.claude) or create the directory manually',
     };
   }
@@ -198,7 +252,7 @@ export async function runPreflight(options: PreflightOptions = {}): Promise<Pref
   checks.push(checkNodeVersion(options));
   checks.push(checkPolicy());
   checks.push(await checkKeychain());
-  checks.push(checkHomeDirWritable(options));
+  checks.push(checkHomeDirWritable());
   const agentCheck = checkAgentSkillDirWritable(options);
   if (agentCheck) checks.push(agentCheck);
   const ok = checks.every((c) => c.status !== 'fail');
