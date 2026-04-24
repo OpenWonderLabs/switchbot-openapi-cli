@@ -29,6 +29,7 @@ import { registerAuthCommand } from './commands/auth.js';
 import { registerInstallCommand } from './commands/install.js';
 import { registerUninstallCommand } from './commands/uninstall.js';
 import { registerStatusSyncCommand } from './commands/status-sync.js';
+import { registerHealthCommand } from './commands/health.js';
 import { primeCredentials } from './credentials/prime.js';
 import { getActiveProfile } from './lib/request-context.js';
 
@@ -117,6 +118,7 @@ registerAuthCommand(program);
 registerInstallCommand(program);
 registerUninstallCommand(program);
 registerStatusSyncCommand(program);
+registerHealthCommand(program);
 
 // Prime keychain-stored credentials before any command runs. This is a
 // best-effort probe: failures are silently swallowed inside primeCredentials,

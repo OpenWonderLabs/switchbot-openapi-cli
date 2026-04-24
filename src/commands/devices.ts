@@ -384,6 +384,7 @@ Examples:
     .option('--name-room <room>', 'Narrow --name by room name (substring match)', stringArg('--name-room'))
     .option('--type <commandType>', 'Command type: "command" for built-in commands (default), "customize" for user-defined IR buttons', enumArg('--type', COMMAND_TYPES), 'command')
     .option('--yes', 'Confirm a destructive command (Smart Lock unlock, Garage open, …). --dry-run is always allowed without --yes.')
+    .option('--explain', 'Print a human-readable summary of what this command would do (risk level, device type, idempotency) then exit without executing.')
     .option('--allow-unknown-device', 'Allow targeting a deviceId that is not in the local cache. By default unknown IDs exit 2 so --dry-run is a reliable pre-flight gate; use this flag for scripted pass-through.')
     .option('--skip-param-validation', 'Skip client-side parameter validation (escape hatch — prefer fixing the argument over using this).')
     .option('--idempotency-key <key>', 'Client-supplied key to dedupe retries. process-local 60s window; cache is per Node process (MCP session, batch run, plan run). Independent CLI invocations do not share cache.', stringArg('--idempotency-key'))
@@ -432,7 +433,7 @@ Examples:
   $ switchbot devices command ABC123 "MyButton" --type customize
   $ switchbot devices command <lockId> unlock --yes
 `)
-    .action(async (deviceIdArg: string | undefined, cmdArg: string | undefined, parameter: string | undefined, options: { name?: string; nameStrategy?: string; nameType?: string; nameCategory?: 'physical' | 'ir'; nameRoom?: string; type: string; yes?: boolean; allowUnknownDevice?: boolean; skipParamValidation?: boolean; idempotencyKey?: string }) => {
+    .action(async (deviceIdArg: string | undefined, cmdArg: string | undefined, parameter: string | undefined, options: { name?: string; nameStrategy?: string; nameType?: string; nameCategory?: 'physical' | 'ir'; nameRoom?: string; type: string; yes?: boolean; explain?: boolean; allowUnknownDevice?: boolean; skipParamValidation?: boolean; idempotencyKey?: string }) => {
       // Declared outside try so the DryRunSignal catch branch can reference them.
       let _deviceId: string | undefined;
       let _cmd: string | undefined;
@@ -543,6 +544,41 @@ Examples:
         }
 
         const cachedForGuard = getCachedDevice(deviceId);
+
+        // --explain: print intent + risk metadata without executing
+        if (options.explain) {
+          const isDestructive = isDestructiveCommand(cachedForGuard?.type, cmd, options.type);
+          const reason = getDestructiveReason(cachedForGuard?.type, cmd, options.type);
+          const riskLevel = isDestructive ? 'high' : options.type === 'command' ? 'medium' : 'low';
+          const recommendedMode = isDestructive ? 'review-before-execute' : 'direct';
+          if (isJsonMode()) {
+            printJson({
+              intent: `Send command "${cmd}" to device ${deviceId}`,
+              deviceType: cachedForGuard?.type ?? 'unknown',
+              deviceName: cachedForGuard?.name ?? null,
+              command: cmd,
+              parameter: parameter ?? null,
+              commandType: options.type,
+              riskLevel,
+              requiresConfirmation: isDestructive,
+              safetyReason: reason ?? null,
+              recommendedMode,
+              note: 'This is a dry explanation only — command was NOT executed.',
+            });
+          } else {
+            console.log(`Command: ${cmd} on device ${deviceId}`);
+            console.log(`Device type: ${cachedForGuard?.type ?? 'unknown'}${cachedForGuard?.name ? ` (${cachedForGuard.name})` : ''}`);
+            console.log(`Parameter: ${parameter ?? '(none)'}`);
+            console.log(`Risk level: ${riskLevel}`);
+            if (reason) console.log(`Safety reason: ${reason}`);
+            if (isDestructive) {
+              console.log('Requires --yes or plan approval to execute.');
+            }
+            console.log('(not executed — remove --explain to run)');
+          }
+          process.exit(0);
+        }
+
         if (
           !options.yes &&
           !isDryRun() &&

@@ -506,6 +506,46 @@ function checkPolicy(): Check {
   }
 }
 
+async function checkKeychain(): Promise<Check> {
+  try {
+    const { selectCredentialStore } = await import('../credentials/keychain.js');
+    const store = await selectCredentialStore();
+    const desc = store.describe();
+    const isNative = desc.backend !== 'file';
+    if (!isNative) {
+      // Native keychain not available or not detected
+      return {
+        name: 'keychain',
+        status: 'warn',
+        detail: {
+          backend: desc.backend,
+          message: 'OS native keychain not detected — credentials stored in plain file (~/.switchbot/config.json). Consider installing a keychain backend for better security.',
+          hint: process.platform === 'linux'
+            ? 'Install libsecret (secret-tool) for GNOME Keyring support.'
+            : process.platform === 'darwin'
+            ? 'macOS Keychain is available — re-run `switchbot config set-token` to store credentials there.'
+            : 'Windows Credential Manager is available — re-run `switchbot config set-token` to use it.',
+        },
+      };
+    }
+    return {
+      name: 'keychain',
+      status: 'ok',
+      detail: {
+        backend: desc.backend,
+        writable: desc.writable,
+        message: `Credentials stored in OS keychain (${desc.backend}).`,
+      },
+    };
+  } catch (err) {
+    return {
+      name: 'keychain',
+      status: 'warn',
+      detail: { message: `Keychain probe failed: ${err instanceof Error ? err.message : String(err)}` },
+    };
+  }
+}
+
 function checkNodeVersion(): Check {
   const major = Number(process.versions.node.split('.')[0]);
   if (Number.isFinite(major) && major < 18) {
@@ -713,6 +753,7 @@ const CHECK_REGISTRY: CheckDef[] = [
   { name: 'node', description: 'Node.js version compatibility', run: () => checkNodeVersion() },
   { name: 'path', description: 'switchbot binary reachable on PATH', run: () => checkPathDiscoverability() },
   { name: 'credentials', description: 'credentials file present and parseable', run: () => checkCredentials() },
+  { name: 'keychain', description: 'OS keychain backend availability and usage', run: () => checkKeychain() },
   { name: 'profiles', description: 'profile definitions valid', run: () => checkProfiles() },
   { name: 'catalog', description: 'catalog loads', run: () => checkCatalog() },
   { name: 'catalog-schema', description: 'catalog vs agent-bootstrap version aligned', run: () => checkCatalogSchema() },

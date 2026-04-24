@@ -8,6 +8,13 @@
  *
  * If the server returns a `Retry-After` header we always prefer it over our
  * own backoff — the API explicitly told us when to come back.
+ *
+ * Circuit breaker:
+ *   Prevents hammering a consistently-failing endpoint. Tracks consecutive
+ *   failures; when `failureThreshold` is exceeded the circuit opens and
+ *   subsequent calls fail immediately (with CircuitOpenError). After
+ *   `resetTimeoutMs` the circuit enters half-open state: the next call is
+ *   allowed as a probe — success closes it, failure re-opens it.
  */
 
 export type BackoffStrategy = 'linear' | 'exponential';
@@ -64,4 +71,103 @@ export function nextRetryDelayMs(
 
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// ---------------------------------------------------------------------------
+// Circuit breaker
+// ---------------------------------------------------------------------------
+
+export type CircuitState = 'closed' | 'open' | 'half-open';
+
+export interface CircuitBreakerOptions {
+  /** Number of consecutive failures before the circuit opens. Default: 5. */
+  failureThreshold?: number;
+  /** Milliseconds to keep the circuit open before entering half-open. Default: 60_000. */
+  resetTimeoutMs?: number;
+}
+
+/**
+ * Thrown when a call is blocked because the circuit is open.
+ */
+export class CircuitOpenError extends Error {
+  constructor(
+    public readonly circuitName: string,
+    public readonly nextAttemptMs: number,
+  ) {
+    super(`Circuit "${circuitName}" is open — too many recent failures. Next probe allowed in ${Math.ceil((nextAttemptMs - Date.now()) / 1000)}s.`);
+    this.name = 'CircuitOpenError';
+  }
+}
+
+export class CircuitBreaker {
+  private state: CircuitState = 'closed';
+  private failures = 0;
+  private lastOpenedAt = 0;
+  private readonly failureThreshold: number;
+  private readonly resetTimeoutMs: number;
+
+  constructor(
+    public readonly name: string,
+    opts: CircuitBreakerOptions = {},
+  ) {
+    this.failureThreshold = opts.failureThreshold ?? 5;
+    this.resetTimeoutMs = opts.resetTimeoutMs ?? 60_000;
+  }
+
+  getState(): CircuitState {
+    this._maybeHalfOpen();
+    return this.state;
+  }
+
+  getStats(): { state: CircuitState; failures: number; lastOpenedAt: number; nextProbeMs: number } {
+    this._maybeHalfOpen();
+    return {
+      state: this.state,
+      failures: this.failures,
+      lastOpenedAt: this.lastOpenedAt,
+      nextProbeMs: this.state === 'open' ? this.lastOpenedAt + this.resetTimeoutMs : 0,
+    };
+  }
+
+  /**
+   * Check if a call is allowed. Throws `CircuitOpenError` when the circuit
+   * is open and the reset timeout hasn't elapsed. Call `recordSuccess()` or
+   * `recordFailure()` after the operation completes.
+   */
+  checkAndAllow(): void {
+    this._maybeHalfOpen();
+    if (this.state === 'open') {
+      throw new CircuitOpenError(this.name, this.lastOpenedAt + this.resetTimeoutMs);
+    }
+    // closed or half-open: allow the call
+  }
+
+  recordSuccess(): void {
+    this.failures = 0;
+    this.state = 'closed';
+  }
+
+  recordFailure(): void {
+    this.failures++;
+    if (this.state === 'half-open' || this.failures >= this.failureThreshold) {
+      this.state = 'open';
+      this.lastOpenedAt = Date.now();
+    }
+  }
+
+  /** Reset to closed — useful for testing or manual recovery. */
+  reset(): void {
+    this.state = 'closed';
+    this.failures = 0;
+    this.lastOpenedAt = 0;
+  }
+
+  private _maybeHalfOpen(): void {
+    if (
+      this.state === 'open' &&
+      Date.now() >= this.lastOpenedAt + this.resetTimeoutMs
+    ) {
+      this.state = 'half-open';
+    }
+  }
 }

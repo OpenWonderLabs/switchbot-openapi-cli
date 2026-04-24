@@ -269,6 +269,26 @@ Files are written with mode 0600. Profiles live under ~/.switchbot/profiles/<nam
         printJson({ ok: true, message: 'credentials saved' });
       } else {
         console.log(chalk.green('✓ Credentials saved'));
+        // Keychain-first hint: proactively suggest storing in OS keychain when
+        // the user is on a supported platform and saved to file (default path).
+        try {
+          const { selectCredentialStore } = await import('../credentials/keychain.js');
+          const store = await selectCredentialStore();
+          if (store.describe().backend === 'file') {
+            const platform = process.platform;
+            if (platform === 'darwin' || platform === 'win32') {
+              console.error(chalk.grey(
+                'Tip: Your OS supports a native keychain. Run `switchbot auth keychain store` to move credentials off the plain config file for better security.'
+              ));
+            } else if (platform === 'linux') {
+              console.error(chalk.grey(
+                'Tip: If you have GNOME Keyring (secret-tool) installed, run `switchbot auth keychain store` to store credentials more securely.'
+              ));
+            }
+          }
+        } catch {
+          // Keychain probe failed — silently skip the tip
+        }
       }
     });
 
