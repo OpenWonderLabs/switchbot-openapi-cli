@@ -14,6 +14,7 @@ import { validateLoadedPolicy } from '../policy/validate.js';
 import type { AutomationBlock, Rule } from '../rules/types.js';
 import { isWebhookTrigger } from '../rules/types.js';
 import { lintRules, RulesEngine, type LintResult } from '../rules/engine.js';
+import { analyzeConflicts, type ConflictReport } from '../rules/conflict-analyzer.js';
 import { tryLoadConfig } from '../config.js';
 import { fetchMqttCredential } from '../mqtt/credential.js';
 import { SwitchBotMqttClient } from '../mqtt/client.js';
@@ -663,6 +664,75 @@ function registerSuggest(rules: Command): void {
     );
 }
 
+function formatConflictReport(report: ConflictReport): string {
+  const lines: string[] = [];
+  lines.push(`findings: ${report.findings.length}  errors: ${report.counts.error}  warnings: ${report.counts.warning}  info: ${report.counts.info}`);
+  if (report.findings.length === 0) {
+    lines.push('No conflicts detected.');
+    return lines.join('\n');
+  }
+  for (const f of report.findings) {
+    lines.push(`  [${f.severity}] ${f.code}: ${f.message}`);
+    if (f.hint) lines.push(`      hint: ${f.hint}`);
+  }
+  return lines.join('\n');
+}
+
+function registerConflicts(rules: Command): void {
+  rules
+    .command('conflicts [path]')
+    .description('Detect conflicting or risky rule patterns (opposing actions, high-frequency catch-all, destructive commands).')
+    .action((pathArg: string | undefined) => {
+      const loaded = loadAutomation(pathArg);
+      if (!loaded) return;
+      const allRules = loaded.automation?.rules ?? [];
+      const report = analyzeConflicts(allRules);
+      if (isJsonMode()) {
+        printJson({
+          policyPath: loaded.path,
+          ruleCount: allRules.length,
+          ...report,
+        });
+      } else {
+        console.log(formatConflictReport(report));
+      }
+      process.exit(report.clean ? 0 : 1);
+    });
+}
+
+function registerDoctor(rules: Command): void {
+  rules
+    .command('doctor [path]')
+    .description('Combined health check: lint + conflict analysis + operational guidance.')
+    .action((pathArg: string | undefined) => {
+      const loaded = loadAutomation(pathArg);
+      if (!loaded) return;
+      const allRules = loaded.automation?.rules ?? [];
+      const lintResult = lintRules(loaded.automation);
+      const conflictReport = analyzeConflicts(allRules);
+
+      const overall = lintResult.valid && conflictReport.clean;
+
+      if (isJsonMode()) {
+        printJson({
+          policyPath: loaded.path,
+          policySchemaVersion: loaded.schemaVersion,
+          automationEnabled: loaded.automation?.enabled === true,
+          overall,
+          lint: lintResult,
+          conflicts: conflictReport,
+        });
+      } else {
+        console.log('=== Lint ===');
+        console.log(formatLintHuman(lintResult, loaded.schemaVersion));
+        console.log('\n=== Conflicts ===');
+        console.log(formatConflictReport(conflictReport));
+        console.log(`\noverall: ${overall ? 'ok' : 'issues found'}`);
+      }
+      process.exit(overall ? 0 : 1);
+    });
+}
+
 export function registerRulesCommand(program: Command): void {
   const rules = program
     .command('rules')
@@ -682,6 +752,8 @@ Subcommands:
                             pid-file sentinel on Windows).
   tail                      Stream rule-* entries from the audit log (--follow tails).
   replay                    Per-rule aggregate: fires/dries/throttled/errors + window.
+  conflicts [path]          Detect conflicting or risky rule patterns.
+  doctor [path]             Combined health check: lint + conflict analysis + summary.
   webhook-rotate-token      Rotate the bearer token used for webhook triggers.
   webhook-show-token        Print the current bearer token (creating one if absent).
 
@@ -703,6 +775,8 @@ Exit codes (lint):
   registerReload(rules);
   registerTail(rules);
   registerReplay(rules);
+  registerConflicts(rules);
+  registerDoctor(rules);
   registerWebhookRotateToken(rules);
   registerWebhookShowToken(rules);
 }

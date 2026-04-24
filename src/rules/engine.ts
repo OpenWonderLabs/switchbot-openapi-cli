@@ -141,6 +141,54 @@ export function lintRules(automation: AutomationBlock | null | undefined): LintR
           message: `throttle.max_per "${r.throttle.max_per}" is not a valid duration.`,
         });
       }
+      if (r.throttle.dedupe_window) {
+        try {
+          parseMaxPerMs(r.throttle.dedupe_window);
+        } catch {
+          issues.push({
+            rule: r.name,
+            severity: 'error',
+            code: 'invalid-dedupe-window',
+            message: `throttle.dedupe_window "${r.throttle.dedupe_window}" is not a valid duration.`,
+          });
+        }
+      }
+    }
+
+    // cooldown field validation
+    if (r.cooldown) {
+      try {
+        parseMaxPerMs(r.cooldown);
+      } catch {
+        issues.push({
+          rule: r.name,
+          severity: 'error',
+          code: 'invalid-cooldown',
+          message: `cooldown "${r.cooldown}" is not a valid duration (expected e.g. "10m", "1h").`,
+        });
+      }
+      if (r.throttle?.max_per) {
+        issues.push({
+          rule: r.name,
+          severity: 'warning',
+          code: 'cooldown-throttle-overlap',
+          message: `Both "cooldown" and "throttle.max_per" are set. "cooldown" takes precedence.`,
+        });
+      }
+    }
+
+    // requires_stable_for field validation
+    if (r.requires_stable_for) {
+      try {
+        parseMaxPerMs(r.requires_stable_for);
+      } catch {
+        issues.push({
+          rule: r.name,
+          severity: 'error',
+          code: 'invalid-requires-stable-for',
+          message: `requires_stable_for "${r.requires_stable_for}" is not a valid duration.`,
+        });
+      }
     }
 
     const enabled = r.enabled !== false;
@@ -628,9 +676,13 @@ export class RulesEngine {
       return;
     }
 
-    const windowMs = rule.throttle ? parseMaxPerMs(rule.throttle.max_per) : null;
+    // cooldown takes precedence over throttle.max_per when both are set.
+    const effectiveMaxPerMs = rule.cooldown
+      ? parseMaxPerMs(rule.cooldown)
+      : rule.throttle ? parseMaxPerMs(rule.throttle.max_per) : null;
+    const dedupeWindowMs = rule.throttle?.dedupe_window ? parseMaxPerMs(rule.throttle.dedupe_window) : null;
     const throttleKey = event.deviceId;
-    const check = this.throttle.check(rule.name, windowMs, event.t.getTime(), throttleKey);
+    const check = this.throttle.check(rule.name, effectiveMaxPerMs, event.t.getTime(), throttleKey, dedupeWindowMs);
     if (!check.allowed) {
       this.stats.throttled++;
       writeAudit({
@@ -648,8 +700,8 @@ export class RulesEngine {
           matchedDevice: event.deviceId,
           fireId,
           reason: check.nextAllowedAt
-            ? `throttled — next allowed at ${new Date(check.nextAllowedAt).toISOString()}`
-            : 'throttled',
+            ? `${check.dedupedBy ?? 'throttled'} — next allowed at ${new Date(check.nextAllowedAt).toISOString()}`
+            : check.dedupedBy ?? 'throttled',
         },
       });
       this.opts.onFire?.({ ruleName: rule.name, fireId, status: 'throttled', deviceId: event.deviceId });

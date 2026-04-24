@@ -80,6 +80,8 @@ export interface Action {
 
 export interface Throttle {
   max_per: string;
+  /** Deduplicate identical events arriving within this window after the last fire. */
+  dedupe_window?: string;
 }
 
 export interface Rule {
@@ -90,6 +92,10 @@ export interface Rule {
   then: Action[];
   throttle?: Throttle | null;
   dry_run?: boolean;
+  /** Shorthand cooldown — equivalent to throttle.max_per. Takes precedence when both are set. */
+  cooldown?: string;
+  /** Hysteresis guard — device state must remain stable for this duration before the rule fires. */
+  requires_stable_for?: string;
 }
 
 export interface AutomationBlock {

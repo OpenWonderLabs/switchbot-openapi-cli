@@ -4,6 +4,8 @@
  * Semantics:
  *   - `max_per: "10m"` → a rule may fire at most once every 10 minutes
  *     per (rule, deviceId) pair.
+ *   - `dedupe_window: "5s"` → suppress fires whose key already fired
+ *     within the window (collapses rapid sensor bursts into one action).
  *   - Fires that would violate the window are **suppressed** (not
  *     queued) and surface as `{ allowed: false, reason: 'throttled' }`.
  *   - When a rule has no `throttle` block, `ThrottleGate.check` returns
@@ -32,6 +34,8 @@ export interface ThrottleCheckResult {
   lastFiredAt?: number;
   /** When the window will reopen. */
   nextAllowedAt?: number;
+  /** Whether this was blocked by the dedupe_window (vs max_per). */
+  dedupedBy?: 'dedupe_window' | 'max_per' | 'cooldown';
 }
 
 export class ThrottleGate {
@@ -51,14 +55,27 @@ export class ThrottleGate {
     windowMs: number | null,
     now: number,
     deviceId?: string,
+    dedupeWindowMs?: number | null,
   ): ThrottleCheckResult {
-    if (windowMs === null || windowMs <= 0) return { allowed: true };
     const key = this.keyOf(ruleName, deviceId);
     const last = this.lastFireAt.get(key);
+
+    // dedupe_window check: suppress if last fire was within this (typically smaller) window
+    if (dedupeWindowMs !== null && dedupeWindowMs !== undefined && dedupeWindowMs > 0) {
+      if (last !== undefined) {
+        const dedupeEnd = last + dedupeWindowMs;
+        if (now < dedupeEnd) {
+          return { allowed: false, lastFiredAt: last, nextAllowedAt: dedupeEnd, dedupedBy: 'dedupe_window' };
+        }
+      }
+    }
+
+    // max_per / cooldown check
+    if (windowMs === null || windowMs <= 0) return { allowed: true, lastFiredAt: last };
     if (last === undefined) return { allowed: true };
     const earliest = last + windowMs;
     if (now >= earliest) return { allowed: true, lastFiredAt: last };
-    return { allowed: false, lastFiredAt: last, nextAllowedAt: earliest };
+    return { allowed: false, lastFiredAt: last, nextAllowedAt: earliest, dedupedBy: windowMs > 0 ? 'max_per' : undefined };
   }
 
   record(ruleName: string, now: number, deviceId?: string): void {

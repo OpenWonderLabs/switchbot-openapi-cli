@@ -130,9 +130,24 @@
               "type": "string",
               "pattern": "^\\d+[smh]$",
               "description": "Minimum spacing between fires, e.g. \"10m\". Later triggers inside the window are suppressed and audited."
+            },
+            "dedupe_window": {
+              "type": "string",
+              "pattern": "^\\d+[smh]$",
+              "description": "Deduplicate identical events arriving within this window after the last fire. Complements max_per: use when rapid sensor bursts should collapse into one action."
             }
           },
           "required": ["max_per"]
+        },
+        "cooldown": {
+          "type": "string",
+          "pattern": "^\\d+[smh]$",
+          "description": "Shorthand cooldown — minimum pause after a rule fires before it can fire again. Equivalent to throttle.max_per but at rule level. Takes precedence over throttle.max_per when both are set."
+        },
+        "requires_stable_for": {
+          "type": "string",
+          "pattern": "^\\d+[smh]$",
+          "description": "Hysteresis guard — the triggering device state must remain stable (unchanged) for this duration before the rule fires. Prevents action storms from transient sensor flicker. Validated at lint; enforcement is best-effort in the engine."
         },
         "dry_run": {
           "type": "boolean",
