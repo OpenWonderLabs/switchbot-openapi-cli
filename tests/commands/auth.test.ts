@@ -238,7 +238,7 @@ describe('auth keychain migrate', () => {
     expect(fs.existsSync(file)).toBe(true);
   });
 
-  it('deletes the source file when --delete-file is passed', async () => {
+  it('deletes the source file when --delete-file is passed and no metadata remains', async () => {
     const store = makeStore({ writable: true });
     selectMock.mockResolvedValue(store);
 
@@ -249,6 +249,26 @@ describe('auth keychain migrate', () => {
     const res = await runCli(['auth', 'keychain', 'migrate', '--delete-file']);
     expect(res.exitCode).toBe(0);
     expect(fs.existsSync(file)).toBe(false);
+  });
+
+  it('scrubs token/secret but preserves metadata when --delete-file is passed', async () => {
+    const store = makeStore({ writable: true });
+    selectMock.mockResolvedValue(store);
+
+    const file = path.join(tmpHome, '.switchbot', 'config.json');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(
+      file,
+      JSON.stringify({ token: 't-src', secret: 's-src', label: 'keep-me', limits: { dailyCap: 12 } }),
+    );
+
+    const res = await runCli(['auth', 'keychain', 'migrate', '--delete-file']);
+    expect(res.exitCode).toBe(0);
+    expect(fs.existsSync(file)).toBe(true);
+    expect(JSON.parse(fs.readFileSync(file, 'utf-8'))).toEqual({
+      label: 'keep-me',
+      limits: { dailyCap: 12 },
+    });
   });
 
   it('exits 2 with usage error when the source file is missing', async () => {

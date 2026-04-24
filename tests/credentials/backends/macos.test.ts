@@ -104,13 +104,15 @@ describe('macOS backend — get', () => {
 describe('macOS backend — set + delete', () => {
   it('set calls add-generic-password with -U for token then secret', async () => {
     spawnMock
+      .mockImplementationOnce(() => makeFakeProc({ stdout: '', code: 44 }))
+      .mockImplementationOnce(() => makeFakeProc({ stdout: '', code: 44 }))
       .mockImplementationOnce(() => makeFakeProc({ code: 0 }))
       .mockImplementationOnce(() => makeFakeProc({ code: 0 }));
 
     const { createMacOsBackend } = await import('../../../src/credentials/backends/macos.js');
     await createMacOsBackend().set('prod', { token: 'T', secret: 'S' });
-    expect(spawnMock).toHaveBeenCalledTimes(2);
-    const setArgs = spawnMock.mock.calls[0][1] as string[];
+    expect(spawnMock).toHaveBeenCalledTimes(4);
+    const setArgs = spawnMock.mock.calls[2][1] as string[];
     expect(setArgs).toContain('add-generic-password');
     expect(setArgs).toContain('-U');
     expect(setArgs).toContain('prod:token');
@@ -118,12 +120,38 @@ describe('macOS backend — set + delete', () => {
   });
 
   it('set throws KeychainError when security exits non-zero', async () => {
-    spawnMock.mockImplementationOnce(() => makeFakeProc({ code: 45, stderr: 'could not be added' }));
+    spawnMock
+      .mockImplementationOnce(() => makeFakeProc({ stdout: '', code: 44 }))
+      .mockImplementationOnce(() => makeFakeProc({ stdout: '', code: 44 }))
+      .mockImplementationOnce(() => makeFakeProc({ code: 45, stderr: 'could not be added' }))
+      .mockImplementationOnce(() => makeFakeProc({ code: 44 }))
+      .mockImplementationOnce(() => makeFakeProc({ code: 44 }));
 
     const { createMacOsBackend } = await import('../../../src/credentials/backends/macos.js');
     await expect(createMacOsBackend().set('default', { token: 't', secret: 's' })).rejects.toThrow(
       /security\(1\) exit 45/,
     );
+  });
+
+  it('restores previous fields when the second write fails', async () => {
+    spawnMock
+      .mockImplementationOnce(() => makeFakeProc({ stdout: 'old-token\n', code: 0 }))
+      .mockImplementationOnce(() => makeFakeProc({ stdout: 'old-secret\n', code: 0 }))
+      .mockImplementationOnce(() => makeFakeProc({ code: 0 }))
+      .mockImplementationOnce(() => makeFakeProc({ code: 45, stderr: 'could not be added' }))
+      .mockImplementationOnce(() => makeFakeProc({ code: 0 }))
+      .mockImplementationOnce(() => makeFakeProc({ code: 0 }));
+
+    const { createMacOsBackend } = await import('../../../src/credentials/backends/macos.js');
+    await expect(createMacOsBackend().set('prod', { token: 'new-token', secret: 'new-secret' })).rejects.toThrow(
+      /security\(1\) exit 45/,
+    );
+
+    expect(spawnMock).toHaveBeenCalledTimes(6);
+    const restoreTokenArgs = spawnMock.mock.calls[4][1] as string[];
+    const restoreSecretArgs = spawnMock.mock.calls[5][1] as string[];
+    expect(restoreTokenArgs).toContain('prod:token');
+    expect(restoreSecretArgs).toContain('prod:secret');
   });
 
   it('delete tolerates exit 44 ("not found") as idempotent success', async () => {

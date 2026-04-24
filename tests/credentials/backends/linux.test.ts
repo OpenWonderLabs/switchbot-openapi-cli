@@ -101,25 +101,55 @@ describe('Linux backend — get', () => {
 describe('Linux backend — set', () => {
   it('writes token and secret via secret-tool store reading stdin', async () => {
     spawnMock
+      .mockImplementationOnce(() => makeFakeProc({ stdout: '', code: 1 }))
+      .mockImplementationOnce(() => makeFakeProc({ stdout: '', code: 1 }))
       .mockImplementationOnce(() => makeFakeProc({ code: 0 }))
       .mockImplementationOnce(() => makeFakeProc({ code: 0 }));
 
     const { createLinuxBackend } = await import('../../../src/credentials/backends/linux.js');
     await createLinuxBackend().set('work', { token: 'tok', secret: 'sec' });
 
-    expect(spawnMock).toHaveBeenCalledTimes(2);
-    const firstArgs = spawnMock.mock.calls[0][1] as string[];
+    expect(spawnMock).toHaveBeenCalledTimes(4);
+    const firstArgs = spawnMock.mock.calls[2][1] as string[];
     expect(firstArgs[0]).toBe('store');
     expect(firstArgs).toContain('--label');
     expect(firstArgs).toContain('work:token');
   });
 
   it('throws KeychainError on store failure', async () => {
-    spawnMock.mockImplementationOnce(() => makeFakeProc({ code: 5, stderr: 'no keyring' }));
+    spawnMock
+      .mockImplementationOnce(() => makeFakeProc({ stdout: '', code: 1 }))
+      .mockImplementationOnce(() => makeFakeProc({ stdout: '', code: 1 }))
+      .mockImplementationOnce(() => makeFakeProc({ code: 5, stderr: 'no keyring' }))
+      .mockImplementationOnce(() => makeFakeProc({ code: 0 }))
+      .mockImplementationOnce(() => makeFakeProc({ code: 0 }));
     const { createLinuxBackend } = await import('../../../src/credentials/backends/linux.js');
     await expect(createLinuxBackend().set('x', { token: 't', secret: 's' })).rejects.toThrow(
       /secret-tool exit 5/,
     );
+  });
+
+  it('restores previous fields when the second write fails', async () => {
+    spawnMock
+      .mockImplementationOnce(() => makeFakeProc({ stdout: 'old-token\n', code: 0 }))
+      .mockImplementationOnce(() => makeFakeProc({ stdout: 'old-secret\n', code: 0 }))
+      .mockImplementationOnce(() => makeFakeProc({ code: 0 }))
+      .mockImplementationOnce(() => makeFakeProc({ code: 5, stderr: 'no keyring' }))
+      .mockImplementationOnce(() => makeFakeProc({ code: 0 }))
+      .mockImplementationOnce(() => makeFakeProc({ code: 0 }));
+
+    const { createLinuxBackend } = await import('../../../src/credentials/backends/linux.js');
+    await expect(createLinuxBackend().set('work', { token: 'new-token', secret: 'new-secret' })).rejects.toThrow(
+      /secret-tool exit 5/,
+    );
+
+    expect(spawnMock).toHaveBeenCalledTimes(6);
+    const restoreTokenArgs = spawnMock.mock.calls[4][1] as string[];
+    const restoreSecretArgs = spawnMock.mock.calls[5][1] as string[];
+    expect(restoreTokenArgs).toContain('work:token');
+    expect(restoreSecretArgs).toContain('work:secret');
+    expect(spawnMock.mock.calls[4][0]).toBe('secret-tool');
+    expect(spawnMock.mock.calls[5][0]).toBe('secret-tool');
   });
 });
 

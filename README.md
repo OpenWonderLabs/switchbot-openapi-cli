@@ -196,7 +196,7 @@ export SWITCHBOT_SECRET=...
 switchbot config show
 ```
 
-### OS keychain (preview)
+### OS keychain
 
 Prefer native OS storage over the `0600` JSON on disk:
 
@@ -204,8 +204,10 @@ Prefer native OS storage over the `0600` JSON on disk:
 # See which backend is active on this machine
 switchbot auth keychain describe
 
-# Move existing ~/.switchbot/config.json into the keychain
-#   (pass --delete-file to remove the source after a successful migration)
+# Move existing ~/.switchbot/config.json into the keychain.
+#   With --delete-file, the CLI deletes the source only when it contains
+#   nothing except token/secret; otherwise it scrubs those fields and keeps
+#   profile metadata such as labels and limits.
 switchbot auth keychain migrate
 
 # Or write credentials directly (TTY prompt or --stdin-file <path>)

@@ -78,9 +78,10 @@ trims the file; retention is the operator's responsibility.
 
 Order of precedence: environment variables → OS keychain →
 `0600`-permissioned JSON file. The keychain backend is automatic per
-platform (macOS `security`, Windows `cmdkey`, Linux `secret-tool`).
-No command echoes the token or secret to stdout. `doctor` reports
-which backend is active but never prints the value.
+platform (macOS `security`, Windows PowerShell + Win32
+`CredReadW`/`CredWriteW`, Linux `secret-tool`). No command echoes the
+token or secret to stdout. `doctor` reports which backend is active
+but never prints the value.
 
 ## 10. Cold-start is one command, bounded in time
 

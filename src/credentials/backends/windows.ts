@@ -190,6 +190,18 @@ async function deleteField(profile: string, field: 'token' | 'secret'): Promise<
   }
 }
 
+async function restoreField(profile: string, field: 'token' | 'secret', value: string | null): Promise<void> {
+  try {
+    if (value === null) {
+      await deleteField(profile, field);
+      return;
+    }
+    await writeField(profile, field, value);
+  } catch {
+    // Best effort only. Preserve the original write failure.
+  }
+}
+
 export function createWindowsBackend(): CredentialStore {
   return {
     name: 'credman',
@@ -200,8 +212,16 @@ export function createWindowsBackend(): CredentialStore {
       return { token, secret };
     },
     async set(profile: string, creds: CredentialBundle): Promise<void> {
-      await writeField(profile, 'token', creds.token);
-      await writeField(profile, 'secret', creds.secret);
+      const previousToken = await readField(profile, 'token');
+      const previousSecret = await readField(profile, 'secret');
+      try {
+        await writeField(profile, 'token', creds.token);
+        await writeField(profile, 'secret', creds.secret);
+      } catch (err) {
+        await restoreField(profile, 'token', previousToken);
+        await restoreField(profile, 'secret', previousSecret);
+        throw err;
+      }
     },
     async delete(profile: string): Promise<void> {
       await deleteField(profile, 'token');

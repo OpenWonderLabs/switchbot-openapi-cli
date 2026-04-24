@@ -18,7 +18,7 @@ below describes the original design intent (`openclaw plugins install`
 surface). What actually landed in v2.10.0 differs in three ways:
 
 | Design doc says | What shipped |
-|---|---|
+| --- | --- |
 | Entry point: `openclaw plugins install clawhub:switchbot` | Built-in: `switchbot install` (no ClawHub dependency) |
 | Step 2: `npm i -g @switchbot/openapi-cli` | Skipped — CLI already in PATH is the precondition |
 | Step 8: `switchbot doctor` failure → full rollback | `--verify` flag makes doctor a warn-only post-step; failure never triggers rollback |
@@ -54,7 +54,7 @@ live in the OS keychain (not a `0600` JSON on disk).
 
 ## High-level flow
 
-```
+```text
 plugins install switchbot
   │
   ▼
@@ -70,8 +70,8 @@ plugins install switchbot
 4. Keychain write          (via Keychain abstraction — see below)
   │                          → rollback step: delete the entry
   ▼
-5. Bridge CLI → keychain   (CLI reads via `keytar`/native bindings; no
-  │                         disk fallback if keychain available)
+5. Bridge CLI → keychain   (CLI reads via the credential-store
+  │                         abstraction; disk fallback remains available)
   ▼
 6. Skill install           (symlink skill repo into agent's skills dir)
   │                          → rollback step: remove the symlink
@@ -94,13 +94,12 @@ about.
 
 ## Keychain abstraction
 
-Credentials today live in `~/.switchbot/config.json` with `0600`
-permissions. That's fine for developers but leaves tokens on disk,
-readable by any process running as the user. Phase 3 moves them to
-the native keychain.
+Credentials today can still live in `~/.switchbot/config.json` with
+`0600` permissions, but the shipped runtime now prefers the native OS
+keychain and falls back to the file backend only when no writable
+native store is available.
 
-Interface (in pseudo-TypeScript; lives in `src/credentials/keychain.ts`
-when implemented — not in this repo yet):
+Interface (implemented in `src/credentials/keychain.ts`):
 
 ```typescript
 interface CredentialStore {
@@ -119,19 +118,20 @@ interface CredentialStore {
 Backend selection at runtime:
 
 | OS | First choice | Fallback chain |
-|---|---|---|
-| macOS | `Keychain` via `security(1)` or `keytar` native | `file` (same 0600 json today) |
-| Windows | `Credential Manager` via `CredRead/CredWrite` | `file` |
-| Linux | `libsecret` via D-Bus | `file`, with a `doctor` warning |
+| --- | --- | --- |
+| macOS | `Keychain` via `security(1)` | `file` (same 0600 json today) |
+| Windows | `Credential Manager` via PowerShell + Win32 `CredReadW` / `CredWriteW` | `file` |
+| Linux | `libsecret` via `secret-tool` | `file`, with a `doctor` warning |
 
 The fallback exists because Linux desktops without a running
 keyring daemon (SSH sessions, headless) would otherwise fail the
 install. The `file` backend keeps today's `0600` behavior. `doctor`
 surfaces which backend is active so users aren't surprised.
 
-Key naming convention (service = `com.switchbot.skill`; account =
+Key naming convention (service = `com.openclaw.switchbot`; account =
 `<profile>:token` and `<profile>:secret`). Two entries per profile,
-not one, so `security(1)` scripting doesn't require JSON parsing.
+not one, so `security(1)` / `secret-tool` scripting doesn't require
+JSON parsing.
 
 ## Pre-flight checks (step 1)
 
@@ -145,11 +145,11 @@ Failures must print:
 Checks:
 
 | Check | Pass | Fail action |
-|---|---|---|
+| --- | --- | --- |
 | `node --version` >= 18 | Continue | Abort, print Node install URL |
 | `npm` on PATH | Continue | Abort, print PATH fix hint |
 | No existing `switchbot` binary at a different version | Continue | Warn if <2.8.0, offer `--upgrade` |
-| No `~/.config/switchbot/policy.yaml` OR the existing one validates | Continue | Warn; skip policy scaffold step |
+| No existing `~/.config/switchbot/policy.yaml` OR the existing one validates | Continue | Warn; skip policy scaffold step |
 | Target agent installed (Claude Code / Cursor / Copilot / ...) | Continue | Warn; install anyway, skip step 6 |
 | Network to `npmjs.org` + `api.switch-bot.com` | Continue | Abort with diagnostics |
 
@@ -158,7 +158,7 @@ Checks:
 Interactive only. **Tokens MUST NOT** be passed as CLI args (shell
 history, process listing). The prompt:
 
-```
+```text
 Paste your SwitchBot TOKEN  (Profile → App Version x10 → Developer Options):
 Paste your SwitchBot SECRET:
 ```
@@ -194,7 +194,7 @@ Walks the exact reverse of the install flow. Prompts before each
 destructive step (delete keychain entry, remove policy, uninstall CLI)
 and defaults the dangerous ones to "no":
 
-```
+```text
 Remove SwitchBot credentials from keychain? [y/N]
 Remove policy.yaml at ~/.config/switchbot/policy.yaml? [y/N]
 Uninstall @switchbot/openapi-cli globally? [y/N]
@@ -235,8 +235,8 @@ recreate and is almost never what the user wants to preserve.
 
 - The external plugin-manager install command (generic framework)
 - An external registry entry for `switchbot`
-- Node bindings for each keychain backend (evaluate `keytar`,
-  `@napi-rs/keyring`, or a new wrapper — `keytar` is unmaintained)
+- Native bindings for each keychain backend are explicitly out of
+  scope; the shipped implementation shells out to OS tooling instead
 
 None of these are in scope for this document; it only covers what the
 SwitchBot side of the install needs to look like.

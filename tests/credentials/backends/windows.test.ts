@@ -110,30 +110,60 @@ describe('Windows backend — get', () => {
 describe('Windows backend — set', () => {
   it('passes value through SWITCHBOT_CRED_VALUE env var, not argv', async () => {
     spawnMock
+      .mockImplementationOnce(() => makeFakeProc({ code: 2 }))
+      .mockImplementationOnce(() => makeFakeProc({ code: 2 }))
       .mockImplementationOnce(() => makeFakeProc({ code: 0 }))
       .mockImplementationOnce(() => makeFakeProc({ code: 0 }));
 
     const { createWindowsBackend } = await import('../../../src/credentials/backends/windows.js');
     await createWindowsBackend().set('prod', { token: 'tok123', secret: 'sec456' });
 
-    expect(spawnMock).toHaveBeenCalledTimes(2);
-    const [, tokenArgs, tokenOpts] = spawnMock.mock.calls[0] as [string, string[], { env: NodeJS.ProcessEnv }];
+    expect(spawnMock).toHaveBeenCalledTimes(4);
+    const [, tokenArgs, tokenOpts] = spawnMock.mock.calls[2] as [string, string[], { env: NodeJS.ProcessEnv }];
     expect(tokenOpts.env.SWITCHBOT_CRED_VALUE).toBe('tok123');
     expect(tokenOpts.env.SWITCHBOT_CRED_TARGET).toBe('com.openclaw.switchbot:prod:token');
     expect(tokenOpts.env.SWITCHBOT_CRED_USER).toBe('prod:token');
     // ensure no credential value was leaked to argv
     expect(tokenArgs.some((a) => a.includes('tok123'))).toBe(false);
 
-    const [, , secretOpts] = spawnMock.mock.calls[1] as [string, string[], { env: NodeJS.ProcessEnv }];
+    const [, , secretOpts] = spawnMock.mock.calls[3] as [string, string[], { env: NodeJS.ProcessEnv }];
     expect(secretOpts.env.SWITCHBOT_CRED_VALUE).toBe('sec456');
   });
 
   it('throws KeychainError when CredWrite exits non-zero', async () => {
-    spawnMock.mockImplementationOnce(() => makeFakeProc({ code: 3 }));
+    spawnMock
+      .mockImplementationOnce(() => makeFakeProc({ code: 2 }))
+      .mockImplementationOnce(() => makeFakeProc({ code: 2 }))
+      .mockImplementationOnce(() => makeFakeProc({ code: 3 }))
+      .mockImplementationOnce(() => makeFakeProc({ code: 0 }))
+      .mockImplementationOnce(() => makeFakeProc({ code: 0 }));
     const { createWindowsBackend } = await import('../../../src/credentials/backends/windows.js');
     await expect(createWindowsBackend().set('p', { token: 't', secret: 's' })).rejects.toThrow(
       /CredWrite exit 3/,
     );
+  });
+
+  it('restores previous fields when the second write fails', async () => {
+    const oldTokenB64 = Buffer.from('old-token', 'utf-8').toString('base64');
+    const oldSecretB64 = Buffer.from('old-secret', 'utf-8').toString('base64');
+    spawnMock
+      .mockImplementationOnce(() => makeFakeProc({ stdout: oldTokenB64, code: 0 }))
+      .mockImplementationOnce(() => makeFakeProc({ stdout: oldSecretB64, code: 0 }))
+      .mockImplementationOnce(() => makeFakeProc({ code: 0 }))
+      .mockImplementationOnce(() => makeFakeProc({ code: 3 }))
+      .mockImplementationOnce(() => makeFakeProc({ code: 0 }))
+      .mockImplementationOnce(() => makeFakeProc({ code: 0 }));
+
+    const { createWindowsBackend } = await import('../../../src/credentials/backends/windows.js');
+    await expect(createWindowsBackend().set('prod', { token: 'new-token', secret: 'new-secret' })).rejects.toThrow(
+      /CredWrite exit 3/,
+    );
+
+    expect(spawnMock).toHaveBeenCalledTimes(6);
+    const [, , restoreTokenOpts] = spawnMock.mock.calls[4] as [string, string[], { env: NodeJS.ProcessEnv }];
+    const [, , restoreSecretOpts] = spawnMock.mock.calls[5] as [string, string[], { env: NodeJS.ProcessEnv }];
+    expect(restoreTokenOpts.env.SWITCHBOT_CRED_VALUE).toBe('old-token');
+    expect(restoreSecretOpts.env.SWITCHBOT_CRED_VALUE).toBe('old-secret');
   });
 });
 

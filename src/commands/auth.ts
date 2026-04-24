@@ -115,6 +115,22 @@ function readStdinFile(filePath: string): CredentialBundle {
   return { token, secret };
 }
 
+type MigrationSourceCleanup = 'kept' | 'deleted' | 'scrubbed';
+
+function cleanupMigratedSourceFile(sourceFile: string, parsed: Record<string, unknown>): MigrationSourceCleanup {
+  const next = { ...parsed };
+  delete next.token;
+  delete next.secret;
+
+  if (Object.keys(next).length === 0) {
+    fs.unlinkSync(sourceFile);
+    return 'deleted';
+  }
+
+  fs.writeFileSync(sourceFile, JSON.stringify(next, null, 2), { mode: 0o600 });
+  return 'scrubbed';
+}
+
 export function registerAuthCommand(program: Command): void {
   const auth = program
     .command('auth')
@@ -267,7 +283,7 @@ export function registerAuthCommand(program: Command): void {
   keychain
     .command('migrate')
     .description('Copy credentials from ~/.switchbot/config.json (or --profile) into the keychain')
-    .option('--delete-file', 'Remove the source file after a successful migration (default: keep)')
+    .option('--delete-file', 'Remove the source credential file when possible; otherwise scrub token/secret and keep metadata')
     .action(async (options: { deleteFile?: boolean }) => {
       const profile = activeProfile();
       const store = await selectCredentialStore();
@@ -293,9 +309,13 @@ export function registerAuthCommand(program: Command): void {
         });
       }
 
-      let parsed: { token?: unknown; secret?: unknown };
+      let parsed: Record<string, unknown>;
       try {
-        parsed = JSON.parse(fs.readFileSync(sourceFile, 'utf-8'));
+        const raw = JSON.parse(fs.readFileSync(sourceFile, 'utf-8'));
+        if (!raw || typeof raw !== 'object') {
+          throw new Error('expected a JSON object');
+        }
+        parsed = raw as Record<string, unknown>;
       } catch (err) {
         exitWithError({
           code: 1,
@@ -323,11 +343,10 @@ export function registerAuthCommand(program: Command): void {
         });
       }
 
-      let deleted = false;
+      let cleanup: MigrationSourceCleanup = 'kept';
       if (options.deleteFile) {
         try {
-          fs.unlinkSync(sourceFile);
-          deleted = true;
+          cleanup = cleanupMigratedSourceFile(sourceFile, parsed);
         } catch (err) {
           // Non-fatal: migration succeeded, we just couldn't clean up.
           console.error(`warning: could not remove ${sourceFile}: ${err instanceof Error ? err.message : String(err)}`);
@@ -340,12 +359,18 @@ export function registerAuthCommand(program: Command): void {
           backend: store.name,
           migrated: true,
           sourceFile,
-          sourceDeleted: deleted,
+          sourceDeleted: cleanup === 'deleted',
+          sourceScrubbed: cleanup === 'scrubbed',
         });
         return;
       }
       console.log(`Migrated profile "${profile}" to backend "${store.name}".`);
-      console.log(`source: ${sourceFile}${deleted ? ' (deleted)' : ''}`);
+      const cleanupNote = cleanup === 'deleted'
+        ? ' (deleted)'
+        : cleanup === 'scrubbed'
+        ? ' (credentials removed; metadata kept)'
+        : '';
+      console.log(`source: ${sourceFile}${cleanupNote}`);
       if (!options.deleteFile) {
         console.log('Source file kept — pass --delete-file on the next run to remove it.');
       }
