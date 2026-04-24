@@ -15,9 +15,13 @@ describe('doctor command', () => {
     homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(tmp);
     delete process.env.SWITCHBOT_TOKEN;
     delete process.env.SWITCHBOT_SECRET;
+    // DEFAULT_POLICY_PATH is evaluated at module load time using the real homedir,
+    // so mock the env var to keep tests isolated from the developer's real policy file.
+    process.env.SWITCHBOT_POLICY_PATH = path.join(tmp, '.config', 'openclaw', 'switchbot', 'policy.yaml');
   });
   afterEach(() => {
     homedirSpy.mockRestore();
+    delete process.env.SWITCHBOT_POLICY_PATH;
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
@@ -419,7 +423,7 @@ describe('doctor command', () => {
     }
   });
 
-  it('policy check is ok when the file is valid against the v0.1 schema', async () => {
+  it('policy check is fail when the file contains v0.1 (unsupported in v3.0)', async () => {
     const policyDir = path.join(tmp, '.config', 'openclaw', 'switchbot');
     const policyPath = path.join(policyDir, 'policy.yaml');
     fs.mkdirSync(policyDir, { recursive: true });
@@ -429,12 +433,13 @@ describe('doctor command', () => {
     process.env.SWITCHBOT_SECRET = 's';
     try {
       const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--section', 'policy']);
+      // v0.1 is unsupported in v3.0 — validation returns unsupported-version error.
       const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
       const policy = payload.data.checks.find((c: { name: string }) => c.name === 'policy');
-      expect(policy.status).toBe('ok');
+      expect(policy.status).toBe('fail');
       expect(policy.detail.present).toBe(true);
-      expect(policy.detail.valid).toBe(true);
-      expect(policy.detail.schemaVersion).toBe('0.1');
+      expect(policy.detail.valid).toBe(false);
+      expect(policy.detail.errorCount).toBeGreaterThan(0);
     } finally {
       delete process.env.SWITCHBOT_POLICY_PATH;
     }

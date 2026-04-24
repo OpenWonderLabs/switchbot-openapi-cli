@@ -61,17 +61,18 @@ describe('runPreflight', () => {
     }
   });
 
-  it('policy check is ok when a valid policy file exists', async () => {
+  it('policy check warns when policy file contains v0.1 (unsupported in v3.0)', async () => {
     const policyDir = path.join(tmp, '.config', 'openclaw', 'switchbot');
     fs.mkdirSync(policyDir, { recursive: true });
+    // v0.1 is no longer supported — validator returns unsupported-version error.
     fs.writeFileSync(path.join(policyDir, 'policy.yaml'), 'version: "0.1"\n');
     const prev = process.env.SWITCHBOT_POLICY_PATH;
     process.env.SWITCHBOT_POLICY_PATH = path.join(policyDir, 'policy.yaml');
     try {
       const res = await runPreflight();
       const policy = res.checks.find((c) => c.name === 'policy');
-      expect(policy?.status).toBe('ok');
-      expect(policy?.message).toMatch(/validates/);
+      expect(policy?.status).toBe('warn');
+      expect(policy?.hint).toMatch(/policy validate/);
     } finally {
       if (prev === undefined) delete process.env.SWITCHBOT_POLICY_PATH;
       else process.env.SWITCHBOT_POLICY_PATH = prev;

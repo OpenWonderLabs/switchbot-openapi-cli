@@ -734,9 +734,9 @@ export function deriveSafetyTier(
   return 'mutation';
 }
 
-/** Read the safety reason for a command, with fallback to the legacy field. */
+/** Read the safety reason for a command. */
 export function getCommandSafetyReason(spec: CommandSpec): string | null {
-  return spec.safetyReason ?? spec.destructiveReason ?? null;
+  return spec.safetyReason ?? null;
 }
 
 /**

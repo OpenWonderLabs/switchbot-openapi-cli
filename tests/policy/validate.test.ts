@@ -1,5 +1,5 @@
 /**
- * Policy v0.1 schema validation — unit tests.
+ * Policy schema validation — unit tests.
  *
  * Drives `validateLoadedPolicy` against a matrix of real-looking YAML
  * documents and asserts:
@@ -13,6 +13,9 @@
  * We load through `loadPolicyFile` because the validator consumes the
  * full `LoadedPolicy` envelope (data + doc + source), and we want the
  * tests to exercise the same path production uses.
+ *
+ * NOTE (v3.0): v0.1 policy support was removed. All v0.1 fixtures now
+ * return { valid: false, errors: [{ keyword: 'unsupported-version' }] }.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
@@ -28,7 +31,7 @@ function writeAndLoad(tmpDir: string, yaml: string) {
   return loadPolicyFile(p);
 }
 
-describe('policy validator (v0.1)', () => {
+describe('policy validator (v0.1 — unsupported in v3.0)', () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -39,21 +42,19 @@ describe('policy validator (v0.1)', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('accepts the shipped starter template verbatim', () => {
-    const templatePath = path.resolve(__dirname, '../../src/policy/examples/policy.example.yaml');
-    const loaded = loadPolicyFile(templatePath);
-    const result = validateLoadedPolicy(loaded);
-    expect(result.valid).toBe(true);
-    expect(result.errors).toEqual([]);
-  });
+  // All v0.1 documents are now rejected with a single unsupported-version error.
 
-  it('accepts a minimal policy with only the version field', () => {
+  it('rejects a minimal v0.1 policy with unsupported-version', () => {
     const loaded = writeAndLoad(tmpDir, 'version: "0.1"\n');
     const result = validateLoadedPolicy(loaded);
-    expect(result.valid).toBe(true);
+    expect(result.valid).toBe(false);
+    const vErr = result.errors.find((e) => e.keyword === 'unsupported-version');
+    expect(vErr).toBeDefined();
+    expect(vErr!.path).toBe('/version');
+    expect(vErr!.hint).toMatch(/v3\.0|supported version/i);
   });
 
-  it('accepts nulls on every optional block (commented-out YAML parses as null)', () => {
+  it('rejects nulls-on-every-block v0.1 policy with unsupported-version', () => {
     const loaded = writeAndLoad(
       tmpDir,
       [
@@ -68,14 +69,10 @@ describe('policy validator (v0.1)', () => {
       ].join('\n'),
     );
     const result = validateLoadedPolicy(loaded);
-    expect(result.valid).toBe(true);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.keyword === 'unsupported-version')).toBe(true);
   });
 
-  // Per-block null regression. The combined test above would pass even if
-  // only one of the six blocks nulled out correctly (one error is still
-  // `valid === false`). These tests pin each block independently so a
-  // future `"type": ["object"]` (without `"null"`) regression on any
-  // single block surfaces with a clear failing name.
   it.each([
     ['aliases'],
     ['confirmations'],
@@ -83,14 +80,14 @@ describe('policy validator (v0.1)', () => {
     ['audit'],
     ['automation'],
     ['cli'],
-  ])('accepts null on only the %s block', (block) => {
+  ])('rejects v0.1 with null %s block (unsupported-version)', (block) => {
     const loaded = writeAndLoad(tmpDir, `version: "0.1"\n${block}:\n`);
     const result = validateLoadedPolicy(loaded);
-    expect(result.valid, `${block}: null should be accepted`).toBe(true);
-    expect(result.errors).toEqual([]);
+    expect(result.valid, `v0.1 ${block}:null should be unsupported`).toBe(false);
+    expect(result.errors.some((e) => e.keyword === 'unsupported-version')).toBe(true);
   });
 
-  it('flags a missing version field with a clear hint', () => {
+  it('flags a missing version field with a clear hint (falls back to current schema)', () => {
     const loaded = writeAndLoad(tmpDir, 'aliases:\n  "lamp": "01-ABC-12345"\n');
     const result = validateLoadedPolicy(loaded);
     expect(result.valid).toBe(false);
@@ -100,7 +97,7 @@ describe('policy validator (v0.1)', () => {
     expect(missing!.hint).toContain('0.2');
   });
 
-  it('rejects an unsupported schema version with a helpful hint', () => {
+  it('rejects an unsupported schema version "0.9" with a helpful hint', () => {
     // "0.9" is not in SUPPORTED_POLICY_SCHEMA_VERSIONS — the validator short-
     // circuits before dispatching to a schema and returns a single
     // unsupported-version error.
@@ -113,17 +110,15 @@ describe('policy validator (v0.1)', () => {
     expect(versionErr!.hint).toMatch(/supported versions/i);
   });
 
-  it('rejects an unknown top-level key and points to it', () => {
+  it('rejects v0.1 with an unknown top-level key (unsupported-version short-circuits)', () => {
     const loaded = writeAndLoad(tmpDir, 'version: "0.1"\nbogus: 1\n');
     const result = validateLoadedPolicy(loaded);
     expect(result.valid).toBe(false);
-    const extra = result.errors.find((e) => e.keyword === 'additionalProperties');
-    expect(extra).toBeDefined();
-    expect(extra!.message).toContain('bogus');
-    expect(extra!.line).toBe(2);
+    // unsupported-version fires before additionalProperties check
+    expect(result.errors.some((e) => e.keyword === 'unsupported-version')).toBe(true);
   });
 
-  it('accepts an aliases map with canonical deviceId format', () => {
+  it('rejects v0.1 aliases with canonical deviceId format (unsupported-version)', () => {
     const loaded = writeAndLoad(
       tmpDir,
       [
@@ -135,24 +130,23 @@ describe('policy validator (v0.1)', () => {
       ].join('\n'),
     );
     const result = validateLoadedPolicy(loaded);
-    expect(result.valid).toBe(true);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.keyword === 'unsupported-version')).toBe(true);
   });
 
-  it('rejects lowercased deviceIds with a deviceId-format hint', () => {
+  it('rejects v0.1 with lowercased deviceIds (unsupported-version short-circuits)', () => {
     const loaded = writeAndLoad(
       tmpDir,
       ['version: "0.1"', 'aliases:', '  "lamp": "not-a-device-id"', ''].join('\n'),
     );
     const result = validateLoadedPolicy(loaded);
     expect(result.valid).toBe(false);
-    const patternErr = result.errors.find((e) => e.keyword === 'pattern');
-    expect(patternErr).toBeDefined();
-    expect(patternErr!.path).toBe('/aliases/lamp');
-    expect(patternErr!.hint).toContain('devices list');
+    // unsupported-version fires first; no pattern error expected
+    expect(result.errors.some((e) => e.keyword === 'unsupported-version')).toBe(true);
   });
 
   for (const destructive of ['lock', 'unlock', 'deleteWebhook', 'deleteScene', 'factoryReset']) {
-    it(`rejects "${destructive}" inside confirmations.never_confirm`, () => {
+    it(`rejects v0.1 with "${destructive}" in never_confirm (unsupported-version)`, () => {
       const loaded = writeAndLoad(
         tmpDir,
         [
@@ -165,15 +159,11 @@ describe('policy validator (v0.1)', () => {
       );
       const result = validateLoadedPolicy(loaded);
       expect(result.valid).toBe(false);
-      const notErr = result.errors.find(
-        (e) => e.keyword === 'not' && e.path.startsWith('/confirmations/never_confirm/'),
-      );
-      expect(notErr).toBeDefined();
-      expect(notErr!.hint).toMatch(/destructive/);
+      expect(result.errors.some((e) => e.keyword === 'unsupported-version')).toBe(true);
     });
   }
 
-  it('accepts non-destructive actions in never_confirm (e.g. turnOn/turnOff)', () => {
+  it('rejects v0.1 non-destructive never_confirm (unsupported-version)', () => {
     const loaded = writeAndLoad(
       tmpDir,
       [
@@ -186,96 +176,92 @@ describe('policy validator (v0.1)', () => {
       ].join('\n'),
     );
     const result = validateLoadedPolicy(loaded);
-    expect(result.valid).toBe(true);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.keyword === 'unsupported-version')).toBe(true);
   });
 
-  it('accepts well-formed quiet_hours', () => {
+  it('rejects v0.1 well-formed quiet_hours (unsupported-version)', () => {
     const loaded = writeAndLoad(
       tmpDir,
       ['version: "0.1"', 'quiet_hours:', '  start: "22:00"', '  end:   "08:00"', ''].join('\n'),
     );
     const result = validateLoadedPolicy(loaded);
-    expect(result.valid).toBe(true);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.keyword === 'unsupported-version')).toBe(true);
   });
 
-  it('rejects out-of-range hours (25:00) with a pattern error', () => {
+  it('rejects v0.1 out-of-range hours (unsupported-version short-circuits)', () => {
     const loaded = writeAndLoad(
       tmpDir,
       ['version: "0.1"', 'quiet_hours:', '  start: "25:00"', '  end:   "08:00"', ''].join('\n'),
     );
     const result = validateLoadedPolicy(loaded);
     expect(result.valid).toBe(false);
-    const patternErr = result.errors.find((e) => e.keyword === 'pattern' && e.path.includes('quiet_hours'));
-    expect(patternErr).toBeDefined();
+    expect(result.errors.some((e) => e.keyword === 'unsupported-version')).toBe(true);
   });
 
-  it('rejects quiet_hours with only `start` (dependentRequired)', () => {
+  it('rejects v0.1 quiet_hours with only `start` (unsupported-version)', () => {
     const loaded = writeAndLoad(
       tmpDir,
       ['version: "0.1"', 'quiet_hours:', '  start: "22:00"', ''].join('\n'),
     );
     const result = validateLoadedPolicy(loaded);
     expect(result.valid).toBe(false);
-    const depErr = result.errors.find((e) => e.keyword === 'dependentRequired');
-    expect(depErr).toBeDefined();
-    expect(depErr!.message).toContain('end');
+    expect(result.errors.some((e) => e.keyword === 'unsupported-version')).toBe(true);
   });
 
-  it('rejects quiet_hours with only `end` (dependentRequired)', () => {
+  it('rejects v0.1 quiet_hours with only `end` (unsupported-version)', () => {
     const loaded = writeAndLoad(
       tmpDir,
       ['version: "0.1"', 'quiet_hours:', '  end: "08:00"', ''].join('\n'),
     );
     const result = validateLoadedPolicy(loaded);
     expect(result.valid).toBe(false);
-    const depErr = result.errors.find((e) => e.keyword === 'dependentRequired');
-    expect(depErr).toBeDefined();
-    expect(depErr!.message).toContain('start');
+    expect(result.errors.some((e) => e.keyword === 'unsupported-version')).toBe(true);
   });
 
-  it('accepts audit.retention as "never" or "<n>d|w|m"', () => {
+  it('rejects v0.1 audit.retention values (unsupported-version)', () => {
     for (const retention of ['never', '90d', '4w', '6m']) {
       const loaded = writeAndLoad(
         tmpDir,
         ['version: "0.1"', 'audit:', `  retention: "${retention}"`, ''].join('\n'),
       );
       const result = validateLoadedPolicy(loaded);
-      expect(result.valid, `retention=${retention}`).toBe(true);
+      expect(result.valid, `v0.1 retention=${retention} should be unsupported`).toBe(false);
+      expect(result.errors.some((e) => e.keyword === 'unsupported-version')).toBe(true);
     }
   });
 
-  it('rejects audit.retention without a unit suffix', () => {
+  it('rejects v0.1 audit.retention without unit suffix (unsupported-version)', () => {
     const loaded = writeAndLoad(
       tmpDir,
       ['version: "0.1"', 'audit:', '  retention: "10"', ''].join('\n'),
     );
     const result = validateLoadedPolicy(loaded);
     expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.keyword === 'pattern')).toBe(true);
+    expect(result.errors.some((e) => e.keyword === 'unsupported-version')).toBe(true);
   });
 
-  it('accepts cli.cache_ttl in "<n>s|m|h" format', () => {
+  it('rejects v0.1 cli.cache_ttl values (unsupported-version)', () => {
     for (const ttl of ['30s', '5m', '2h']) {
       const loaded = writeAndLoad(
         tmpDir,
         ['version: "0.1"', 'cli:', `  cache_ttl: "${ttl}"`, ''].join('\n'),
       );
       const result = validateLoadedPolicy(loaded);
-      expect(result.valid, `cache_ttl=${ttl}`).toBe(true);
+      expect(result.valid, `v0.1 cache_ttl=${ttl} should be unsupported`).toBe(false);
+      expect(result.errors.some((e) => e.keyword === 'unsupported-version')).toBe(true);
     }
   });
 
-  it('reports line and column for the offending value', () => {
+  it('rejects v0.1 with bad alias value (unsupported-version, no line info expected)', () => {
     const loaded = writeAndLoad(
       tmpDir,
       ['version: "0.1"', 'aliases:', '  "lamp": "lowercase-bad"', ''].join('\n'),
     );
     const result = validateLoadedPolicy(loaded);
     expect(result.valid).toBe(false);
-    const patternErr = result.errors.find((e) => e.keyword === 'pattern');
-    expect(patternErr).toBeDefined();
-    expect(patternErr!.line).toBe(3);
-    expect(typeof patternErr!.col).toBe('number');
+    expect(result.errors.some((e) => e.keyword === 'unsupported-version')).toBe(true);
   });
 });
 

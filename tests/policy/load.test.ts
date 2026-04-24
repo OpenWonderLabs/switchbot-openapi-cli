@@ -58,24 +58,29 @@ describe('policy loader', () => {
     }
   });
 
-  it('strips utf-8 BOM transparently', () => {
+  it('strips utf-8 BOM transparently (v0.1 file loads but fails unsupported-version)', () => {
     const p = path.join(tmpDir, 'policy.yaml');
     const bom = '\uFEFF';
     fs.writeFileSync(p, `${bom}version: "0.1"\n`, 'utf-8');
     const loaded = loadPolicyFile(p);
+    // Loader must succeed (no throw); v0.1 is rejected at the validation layer.
+    expect(loaded).toBeDefined();
     const result = validateLoadedPolicy(loaded);
-    expect(result.valid).toBe(true);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.keyword === 'unsupported-version')).toBe(true);
   });
 
-  it('handles CRLF line endings', () => {
+  it('handles CRLF line endings (v0.1 file loads but fails unsupported-version)', () => {
     const p = path.join(tmpDir, 'policy.yaml');
     fs.writeFileSync(p, 'version: "0.1"\r\naliases:\r\n  "lamp": "01-ABC-12345"\r\n', 'utf-8');
     const loaded = loadPolicyFile(p);
+    expect(loaded).toBeDefined();
     const result = validateLoadedPolicy(loaded);
-    expect(result.valid).toBe(true);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.keyword === 'unsupported-version')).toBe(true);
   });
 
-  it('preserves non-ASCII alias keys (utf-8, e.g. Chinese)', () => {
+  it('preserves non-ASCII alias keys (utf-8, e.g. Chinese) — loader succeeds, validator rejects v0.1', () => {
     const p = path.join(tmpDir, 'policy.yaml');
     fs.writeFileSync(
       p,
@@ -83,10 +88,13 @@ describe('policy loader', () => {
       'utf-8',
     );
     const loaded = loadPolicyFile(p);
-    const result = validateLoadedPolicy(loaded);
-    expect(result.valid).toBe(true);
+    // The loader must preserve the non-ASCII key regardless of schema version.
     const aliases = (loaded.data as { aliases: Record<string, string> }).aliases;
     expect(aliases['客厅灯']).toBe('01-202407090924-26354212');
+    // Validation now rejects v0.1.
+    const result = validateLoadedPolicy(loaded);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.keyword === 'unsupported-version')).toBe(true);
   });
 
   it('exposes the raw source string for snippet rendering', () => {

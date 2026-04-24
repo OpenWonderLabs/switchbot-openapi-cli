@@ -174,7 +174,7 @@ describe('agent-bootstrap', () => {
     }
   });
 
-  it('policyStatus reports present:true + valid:true for a minimal v0.1 file', async () => {
+  it('policyStatus reports present:true + valid:false for a v0.1 file (unsupported in v3.0)', async () => {
     const policyDir = path.join(tmpDir, '.config', 'openclaw', 'switchbot');
     const policyPath = path.join(policyDir, 'policy.yaml');
     fs.mkdirSync(policyDir, { recursive: true });
@@ -191,9 +191,8 @@ describe('agent-bootstrap', () => {
       const data = payload.data as Record<string, unknown>;
       const status = data.policyStatus as Record<string, unknown>;
       expect(status.present).toBe(true);
-      expect(status.valid).toBe(true);
-      expect(status.schemaVersion).toBe('0.1');
-      expect(status.errorCount).toBe(0);
+      expect(status.valid).toBe(false);
+      expect(status.errorCount).toBeGreaterThan(0);
     } finally {
       delete process.env.SWITCHBOT_POLICY_PATH;
     }

@@ -16,11 +16,11 @@ describe('schema export', () => {
     expect(parsed.generatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(Array.isArray(parsed.types)).toBe(true);
     expect(parsed.types.length).toBeGreaterThan(10);
-    // Every entry should have normalized idempotent/destructive booleans.
+    // Every entry should have normalized idempotent booleans and safetyTier strings.
     for (const t of parsed.types) {
       for (const c of t.commands) {
         expect(typeof c.idempotent).toBe('boolean');
-        expect(typeof c.destructive).toBe('boolean');
+        expect(typeof c.safetyTier).toBe('string');
       }
     }
   });
@@ -38,7 +38,7 @@ describe('schema export', () => {
     expect(parsed.types).toEqual([]);
   });
 
-  it('tags a known destructive command', async () => {
+  it('tags a known destructive command with safetyTier', async () => {
     const res = await runCli(registerSchemaCommand, ['schema', 'export']);
     const parsed = JSON.parse(res.stdout.join('')).data;
     const lock = parsed.types.find(
@@ -46,7 +46,7 @@ describe('schema export', () => {
     );
     if (!lock) return; // catalog may omit on some builds — soft assert
     const unlock = lock.commands.find((c: { command: string }) => c.command === 'unlock');
-    if (unlock) expect(unlock.destructive).toBe(true);
+    if (unlock) expect(unlock.safetyTier).toBe('destructive');
   });
 
   it('--role filters to the matching functional group', async () => {

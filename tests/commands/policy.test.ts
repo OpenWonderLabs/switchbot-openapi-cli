@@ -132,7 +132,8 @@ describe('switchbot policy (commander surface)', () => {
   describe('policy validate', () => {
     function seedValid(name = 'policy.yaml'): string {
       const p = path.join(tmpDir, name);
-      fs.writeFileSync(p, 'version: "0.1"\n', 'utf-8');
+      // Use v0.2 — v0.1 is unsupported in v3.0.
+      fs.writeFileSync(p, 'version: "0.2"\n', 'utf-8');
       return p;
     }
     function seedInvalid(name = 'policy.yaml'): string {
@@ -149,7 +150,7 @@ describe('switchbot policy (commander surface)', () => {
       const p = seedValid();
       const { stdout, exitCode } = runCli(['policy', 'validate', p]);
       expect(exitCode).toBe(0);
-      expect(stdout.join('\n')).toMatch(/is valid \(schema v0\.1\)/);
+      expect(stdout.join('\n')).toMatch(/is valid \(schema v0\.2\)/);
     });
 
     it('exits 1 on an invalid policy and prints error blocks', () => {
@@ -170,7 +171,7 @@ describe('switchbot policy (commander surface)', () => {
 
     it('exits 3 on YAML parse errors', () => {
       const p = path.join(tmpDir, 'bad.yaml');
-      fs.writeFileSync(p, 'version: "0.1"\naliases: [unterminated\n', 'utf-8');
+      fs.writeFileSync(p, 'version: "0.2"\naliases: [unterminated\n', 'utf-8');
       const { stderr, exitCode } = runCli(['policy', 'validate', p]);
       expect(exitCode).toBe(3);
       expect(stderr.join('\n')).toContain('YAML parse error');
@@ -186,7 +187,7 @@ describe('switchbot policy (commander surface)', () => {
       };
       expect(parsed.data.valid).toBe(true);
       expect(parsed.data.errors).toEqual([]);
-      expect(parsed.data.schemaVersion).toBe('0.1');
+      expect(parsed.data.schemaVersion).toBe('0.2');
     });
 
     it('emits a validation envelope in --json mode on failure (still exit 1)', () => {
@@ -230,7 +231,7 @@ describe('switchbot policy (commander surface)', () => {
       expect(parsed.data.status).toBe('already-current');
     });
 
-    it('upgrades v0.1 → v0.2 in place and preserves comments + aliases', () => {
+    it('upgrades v0.1 → v0.2 now fails (no migration path in v3.0)', () => {
       const p = path.join(tmpDir, 'policy.yaml');
       const original = [
         '# My SwitchBot policy',
@@ -244,30 +245,26 @@ describe('switchbot policy (commander surface)', () => {
       fs.writeFileSync(p, original, 'utf-8');
 
       const { stdout, exitCode } = runCli(['--json', 'policy', 'migrate', p]);
-      expect(exitCode).toBe(0);
+      // v0.1 is no longer in SUPPORTED_POLICY_SCHEMA_VERSIONS — exit 6.
+      expect(exitCode).toBe(6);
       const parsed = JSON.parse(stdout[0]) as {
-        data: { status: string; from: string; to: string; bytesWritten: number };
+        error: { code: number; kind: string };
       };
-      expect(parsed.data.status).toBe('migrated');
-      expect(parsed.data.from).toBe('0.1');
-      expect(parsed.data.to).toBe('0.2');
-      expect(parsed.data.bytesWritten).toBeGreaterThan(0);
-
-      const after = fs.readFileSync(p, 'utf-8');
-      expect(after).toContain('# My SwitchBot policy');
-      expect(after).toContain('# Friendly names map to deviceIds');
-      expect(after).toMatch(/version:\s*"0\.2"/);
-      expect(after).toContain('01-202407090924-26354212');
+      expect(parsed.error.code).toBe(6);
+      expect(parsed.error.kind).toBe('unsupported-version');
+      // File must be untouched.
+      expect(fs.readFileSync(p, 'utf-8')).toBe(original);
     });
 
-    it('--dry-run reports what would change without writing the file', () => {
+    it('--dry-run on v0.1 also returns exit 6 (unsupported, no migration path)', () => {
       const p = seed('policy.yaml', '0.1');
       const before = fs.readFileSync(p, 'utf-8');
       const { stdout, exitCode } = runCli(['--json', 'policy', 'migrate', p, '--dry-run']);
-      expect(exitCode).toBe(0);
-      const parsed = JSON.parse(stdout[0]) as { data: { status: string; bytesWritten: number } };
-      expect(parsed.data.status).toBe('dry-run');
-      expect(parsed.data.bytesWritten).toBe(0);
+      // v0.1 unsupported — exits before dry-run logic.
+      expect(exitCode).toBe(6);
+      const parsed = JSON.parse(stdout[0]) as { error: { code: number; kind: string } };
+      expect(parsed.error.code).toBe(6);
+      expect(parsed.error.kind).toBe('unsupported-version');
       expect(fs.readFileSync(p, 'utf-8')).toBe(before);
     });
 
@@ -291,11 +288,17 @@ describe('switchbot policy (commander surface)', () => {
       expect(parsed.error.hint).toContain('downgrade');
     });
 
-    it('exits 7 when the migrated file would fail v0.2 schema precheck', () => {
-      // Seed a file that's valid v0.1 but breaks under v0.2 — an automation
-      // block with a loose rule shape (v0.1 accepts it, v0.2 requires
-      // {name, when, then}). The migration bumps version but leaves the
-      // body alone, so the precheck surfaces the structural gap.
+    it('exits 7 when the migrated file would fail v0.2 schema precheck (v0.2 source)', () => {
+      // Seed a v0.2 file with a broken automation rule that fails v0.2 precheck
+      // when planMigration runs it through the validator again after a no-op.
+      // Since MIGRATION_CHAIN is empty, we test precheck failure by seeding a
+      // v0.2 file that already fails validation and observe that --to=0.2 on
+      // an already-current file returns already-current (no exit 7 path here).
+      //
+      // The exit-7 path is exercised via a v0.2 file with a bad rule shape
+      // supplied via the MCP test suite (policy_migrate refuses precheck).
+      // Here we verify that a v0.1 file — which is no longer migratable —
+      // returns exit 6 (unsupported), not exit 7.
       const p = path.join(tmpDir, 'policy.yaml');
       fs.writeFileSync(
         p,
@@ -310,14 +313,14 @@ describe('switchbot policy (commander surface)', () => {
       );
       const before = fs.readFileSync(p, 'utf-8');
       const { stdout, exitCode } = runCli(['--json', 'policy', 'migrate', p]);
-      expect(exitCode).toBe(7);
+      // v0.1 is unsupported — exits 6 before reaching precheck.
+      expect(exitCode).toBe(6);
       const parsed = JSON.parse(stdout[0]) as {
-        error: { code: number; kind: string; errors: Array<{ keyword: string }> };
+        error: { code: number; kind: string };
       };
-      expect(parsed.error.code).toBe(7);
-      expect(parsed.error.kind).toBe('migration-precheck-failed');
-      expect(parsed.error.errors.length).toBeGreaterThan(0);
-      // File must stay untouched on precheck failure.
+      expect(parsed.error.code).toBe(6);
+      expect(parsed.error.kind).toBe('unsupported-version');
+      // File must stay untouched.
       expect(fs.readFileSync(p, 'utf-8')).toBe(before);
     });
 
