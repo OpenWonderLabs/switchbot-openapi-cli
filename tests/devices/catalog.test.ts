@@ -174,8 +174,8 @@ describe('devices/catalog', () => {
       }
     });
 
-    it('deriveSafetyTier infers destructive from legacy destructive: true', () => {
-      expect(deriveSafetyTier({ command: 'x', parameter: '-', description: '', destructive: true }))
+    it('deriveSafetyTier uses safetyTier field directly', () => {
+      expect(deriveSafetyTier({ command: 'x', parameter: '-', description: '', safetyTier: 'destructive' }))
         .toBe('destructive');
     });
 
@@ -189,14 +189,11 @@ describe('devices/catalog', () => {
         .toBe('mutation');
     });
 
-    it('getCommandSafetyReason falls back to legacy destructiveReason', () => {
-      expect(getCommandSafetyReason({ command: 'x', parameter: '-', description: '', destructiveReason: 'legacy' }))
-        .toBe('legacy');
+    it('getCommandSafetyReason returns safetyReason', () => {
       expect(getCommandSafetyReason({ command: 'x', parameter: '-', description: '', safetyReason: 'new' }))
         .toBe('new');
-      // safetyReason wins over destructiveReason when both are set.
-      expect(getCommandSafetyReason({ command: 'x', parameter: '-', description: '', safetyReason: 'new', destructiveReason: 'legacy' }))
-        .toBe('new');
+      expect(getCommandSafetyReason({ command: 'x', parameter: '-', description: '' }))
+        .toBeNull();
     });
   });
 

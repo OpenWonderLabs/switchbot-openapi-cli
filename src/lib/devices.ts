@@ -391,7 +391,6 @@ export async function describeDevice(
           return {
             ...c,
             safetyTier: tier,
-            destructive: tier === 'destructive',
             ...(reason ? { safetyReason: reason } : {}),
           };
         }),

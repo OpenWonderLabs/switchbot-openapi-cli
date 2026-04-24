@@ -19,7 +19,19 @@ const osMock = vi.hoisted(() => ({
 vi.mock('node:fs', () => ({ default: fsMock, ...fsMock }));
 vi.mock('node:os', () => ({ default: osMock, ...osMock }));
 
-import { loadConfig, saveConfig, showConfig, listProfiles } from '../src/config.js';
+import { loadConfig, saveConfig, showConfig, listProfiles, tryLoadConfig } from '../src/config.js';
+import { __resetPrimedCredentials, primeCredentials } from '../src/credentials/prime.js';
+
+const selectMock = vi.fn();
+vi.mock('../src/credentials/keychain.js', async () => {
+  const actual = await vi.importActual<typeof import('../src/credentials/keychain.js')>(
+    '../src/credentials/keychain.js',
+  );
+  return {
+    ...actual,
+    selectCredentialStore: (...args: unknown[]) => selectMock(...args),
+  };
+});
 
 describe('config', () => {
   beforeEach(() => {
@@ -31,6 +43,8 @@ describe('config', () => {
     fsMock.mkdirSync.mockReset();
     fsMock.readdirSync.mockReset();
     fsMock.readdirSync.mockReturnValue([]);
+    selectMock.mockReset();
+    __resetPrimedCredentials();
   });
 
   describe('loadConfig', () => {
@@ -314,6 +328,66 @@ describe('config', () => {
       fsMock.existsSync.mockReturnValue(true);
       fsMock.readdirSync.mockReturnValue(['work.json', 'home.json', 'README', 'lab.json']);
       expect(listProfiles()).toEqual(['home', 'lab', 'work']);
+    });
+  });
+
+  describe('keychain bridge', () => {
+    async function primeWith(profile: string, creds: { token: string; secret: string } | null) {
+      const get = vi.fn().mockResolvedValue(creds);
+      selectMock.mockResolvedValue({ name: 'keychain', get } as unknown);
+      await primeCredentials(profile);
+    }
+
+    it('loadConfig prefers keychain-primed creds over a present config file', async () => {
+      await primeWith('default', { token: 'kc-token', secret: 'kc-secret' });
+      fsMock.existsSync.mockReturnValue(true);
+      fsMock.readFileSync.mockReturnValue(JSON.stringify({ token: 'file-t', secret: 'file-s' }));
+
+      expect(loadConfig()).toEqual({ token: 'kc-token', secret: 'kc-secret' });
+      expect(fsMock.readFileSync).not.toHaveBeenCalled();
+    });
+
+    it('tryLoadConfig prefers keychain-primed creds over a present config file', async () => {
+      await primeWith('default', { token: 'kc-token', secret: 'kc-secret' });
+      fsMock.existsSync.mockReturnValue(true);
+      fsMock.readFileSync.mockReturnValue(JSON.stringify({ token: 'file-t', secret: 'file-s' }));
+
+      expect(tryLoadConfig()).toEqual({ token: 'kc-token', secret: 'kc-secret' });
+    });
+
+    it('loadConfig falls back to file when keychain-primed result is null', async () => {
+      await primeWith('default', null);
+      fsMock.existsSync.mockReturnValue(true);
+      fsMock.readFileSync.mockReturnValue(JSON.stringify({ token: 'file-t', secret: 'file-s' }));
+
+      expect(loadConfig()).toEqual({ token: 'file-t', secret: 'file-s' });
+    });
+
+    it('env vars still beat keychain-primed creds', async () => {
+      process.env.SWITCHBOT_TOKEN = 'env-t';
+      process.env.SWITCHBOT_SECRET = 'env-s';
+      await primeWith('default', { token: 'kc-t', secret: 'kc-s' });
+
+      expect(loadConfig()).toEqual({ token: 'env-t', secret: 'env-s' });
+    });
+
+    it('--config <path> override disables the keychain bridge so the file is authoritative', async () => {
+      const originalArgv = process.argv;
+      try {
+        process.argv = ['node', 'cli', '--config', '/override.json'];
+        await primeWith('default', { token: 'kc-t', secret: 'kc-s' });
+        fsMock.existsSync.mockReturnValue(true);
+        fsMock.readFileSync.mockReturnValue(JSON.stringify({ token: 'ov-t', secret: 'ov-s' }));
+
+        expect(loadConfig()).toEqual({ token: 'ov-t', secret: 'ov-s' });
+      } finally {
+        process.argv = originalArgv;
+      }
+    });
+
+    it('tryLoadConfig returns null when neither env, keychain, nor file have creds', () => {
+      fsMock.existsSync.mockReturnValue(false);
+      expect(tryLoadConfig()).toBeNull();
     });
   });
 });

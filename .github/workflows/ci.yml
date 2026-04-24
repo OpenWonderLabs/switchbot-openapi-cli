@@ -7,8 +7,21 @@ on:
     branches: [main]
 
 jobs:
+  docs-lint:
+    name: Markdown lint (changelog)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: npm
+      - run: npm ci
+      - run: npm run lint:md:changelog
+
   test:
     runs-on: ubuntu-latest
+    needs: docs-lint
     strategy:
       matrix:
         node-version: [18.x, 20.x, 22.x]
@@ -75,3 +88,34 @@ jobs:
             echo "FAIL: budget is 15000, got $BYTES"
             exit 1
           fi
+
+  policy-schema-sync:
+    name: Policy schema sync with skill repo
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch skill repo's mirrored schema
+        run: |
+          HTTP=$(curl -o /tmp/skill-policy.schema.json -w "%{http_code}" -fsSL --retry 3 \
+            https://raw.githubusercontent.com/OpenWonderLabs/openclaw-switchbot-skill/main/examples/policy.schema.json \
+            2>/dev/null || echo "000")
+          if [ "$HTTP" = "404" ] || [ "$HTTP" = "000" ]; then
+            echo "SKIP: skill repo schema not yet published (HTTP $HTTP). Skipping drift check."
+            exit 0
+          fi
+          if [ "$HTTP" != "200" ]; then
+            echo "WARN: unexpected HTTP $HTTP fetching skill schema. Skipping drift check."
+            exit 0
+          fi
+          echo "Fetched skill schema (HTTP $HTTP). Diffing against CLI v0.2 source of truth..."
+          if ! diff -u /tmp/skill-policy.schema.json src/policy/schema/v0.2.json; then
+            echo ""
+            echo "FAIL: policy schema drift detected."
+            echo "  CLI source: src/policy/schema/v0.2.json"
+            echo "  Skill copy: https://github.com/OpenWonderLabs/openclaw-switchbot-skill/blob/main/examples/policy.schema.json"
+            echo ""
+            echo "Sync the skill's examples/policy.schema.json from the CLI file and cut a matching skill release."
+            exit 1
+          fi
+          echo "OK: policy schema matches skill repo."

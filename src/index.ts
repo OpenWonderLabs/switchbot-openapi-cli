@@ -23,6 +23,14 @@ import { registerHistoryCommand } from './commands/history.js';
 import { registerPlanCommand } from './commands/plan.js';
 import { registerCapabilitiesCommand } from './commands/capabilities.js';
 import { registerAgentBootstrapCommand } from './commands/agent-bootstrap.js';
+import { registerPolicyCommand } from './commands/policy.js';
+import { registerRulesCommand } from './commands/rules.js';
+import { registerAuthCommand } from './commands/auth.js';
+import { registerInstallCommand } from './commands/install.js';
+import { registerUninstallCommand } from './commands/uninstall.js';
+import { registerStatusSyncCommand } from './commands/status-sync.js';
+import { primeCredentials } from './credentials/prime.js';
+import { getActiveProfile } from './lib/request-context.js';
 
 const require = createRequire(import.meta.url);
 const { version: pkgVersion } = require('../package.json') as { version: string };
@@ -45,7 +53,7 @@ if (isJsonMode()) {
 const TOP_LEVEL_COMMANDS = [
   'config', 'devices', 'scenes', 'webhook', 'completion', 'mcp',
   'quota', 'catalog', 'cache', 'events', 'doctor', 'schema',
-  'history', 'plan', 'capabilities', 'agent-bootstrap',
+  'history', 'plan', 'capabilities', 'agent-bootstrap', 'install', 'uninstall', 'status-sync',
 ] as const;
 
 const cacheModeArg = (value: string): string => {
@@ -103,6 +111,20 @@ registerHistoryCommand(program);
 registerPlanCommand(program);
 registerCapabilitiesCommand(program);
 registerAgentBootstrapCommand(program);
+registerPolicyCommand(program);
+registerRulesCommand(program);
+registerAuthCommand(program);
+registerInstallCommand(program);
+registerUninstallCommand(program);
+registerStatusSyncCommand(program);
+
+// Prime keychain-stored credentials before any command runs. This is a
+// best-effort probe: failures are silently swallowed inside primeCredentials,
+// so the existing file-based path remains the safety net. We probe once per
+// invocation (even for --help and --version, which is harmless).
+program.hook('preAction', async () => {
+  await primeCredentials(getActiveProfile() ?? 'default');
+});
 
 program.addHelpText('after', `
 Credentials:
@@ -132,6 +154,7 @@ Examples:
   $ switchbot devices command <deviceId> turnOn --dry-run
   $ switchbot scenes execute <sceneId> --verbose
   $ switchbot webhook setup https://your.host/hook
+  $ switchbot status-sync start --openclaw-model home-agent
 
 Discovery:
   Don't know a device ID / what it supports?

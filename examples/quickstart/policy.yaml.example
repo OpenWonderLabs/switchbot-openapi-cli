@@ -1,0 +1,78 @@
+# ============================================================================
+#  policy.yaml.example — starter policy for first-day orchestration
+# ============================================================================
+#
+#  Why this shape:
+#    The minimum viable end-to-end sample: one read-friendly alias, one
+#    quiet-hours guard, one mutation-tier confirmation override, and a
+#    single dry-run rule that proves the engine fires without touching
+#    the device. Enough to let an agent demonstrate "I can read, I
+#    confirm mutations, I respect bedtime, I can author automations"
+#    within the first session, without risking a real actuator.
+#
+#  Schema version:
+#    v0.2 — enables the `automation.rules[]` block. If you don't need
+#    the rules engine yet, change the top line back to "0.1" and delete
+#    the `automation:` section; the rest of the file is valid for both
+#    versions.
+#
+#  Copy to install:
+#    mkdir -p ~/.config/openclaw/switchbot
+#    cp examples/quickstart/policy.yaml.example \
+#       ~/.config/openclaw/switchbot/policy.yaml
+#    switchbot policy validate
+#
+#  Where it lives on disk:
+#    Linux / macOS: ~/.config/openclaw/switchbot/policy.yaml
+#    Windows:       %USERPROFILE%\.config\openclaw\switchbot\policy.yaml
+#
+# ============================================================================
+
+version: "0.2"
+
+# Human-readable names → deviceIds. Aliases remove ambiguity when two
+# devices share a substring of their display name. Replace the sample
+# ID with one from `switchbot devices list --json | jq '.data[].deviceId'`.
+aliases:
+  "hallway lamp": "AA-BB-CC-DD-EE-FF"
+
+# Destructive commands (Smart Lock unlock, Garage Door open, …) always
+# prompt unless explicitly overridden. Mutation-tier is commented out
+# by default — uncomment only if you trust the agent to turn devices
+# on/off without a confirmation step.
+confirmations:
+  destructive: always
+  # mutation: never
+
+# Silence noisy automations between 23:00 and 07:00 local time. Crossing
+# midnight is supported natively.
+quiet_hours:
+  enabled: true
+  start: "23:00"
+  end: "07:00"
+
+# Append every mutating command to a JSONL audit log. Retention is a
+# soft hint — the CLI never trims the file itself; plug in `logrotate`
+# or similar if you want bounded disk usage.
+audit:
+  enabled: true
+  path: "~/.switchbot/audit.log"
+  retention_days: 90
+
+# One dry-run rule: prove the engine fires end-to-end without touching
+# the bulb. Once you're confident, set `dry_run: false` to arm it.
+automation:
+  enabled: true
+  rules:
+    - name: "hallway motion at night (dry-run demo)"
+      when:
+        source: mqtt
+        event: motion.detected
+      conditions:
+        - time_between: ["22:00", "07:00"]
+      then:
+        - command: "devices command <id> turnOn"
+          device: "hallway lamp"
+      throttle:
+        max_per: "10m"
+      dry_run: true

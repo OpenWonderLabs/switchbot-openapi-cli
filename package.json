@@ -1,6 +1,6 @@
 {
   "name": "@switchbot/openapi-cli",
-  "version": "2.7.2",
+  "version": "3.0.0",
   "description": "SwitchBot smart home CLI — control devices, run scenes, stream real-time events, and integrate AI agents via MCP. Full API v1.1 coverage.",
   "keywords": [
     "switchbot",
@@ -36,10 +36,12 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc",
-    "build:prod": "tsc -p tsconfig.build.json",
+    "build": "tsc && node scripts/copy-assets.mjs",
+    "build:prod": "tsc -p tsconfig.build.json && node scripts/copy-assets.mjs",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "dev": "tsx src/index.ts",
+    "lint:md": "markdownlint \"**/*.md\"",
+    "lint:md:changelog": "markdownlint CHANGELOG.md",
     "start": "node dist/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -48,20 +50,26 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "ajv": "^8.18.0",
+    "ajv-formats": "^3.0.1",
     "axios": "^1.7.9",
     "chalk": "^5.4.1",
     "cli-table3": "^0.6.5",
     "commander": "^12.1.0",
+    "croner": "^10.0.1",
     "js-yaml": "^4.1.1",
     "mqtt": "^5.3.0",
     "pino": "^9.0.0",
-    "uuid": "^11.0.5"
+    "uuid": "^11.0.5",
+    "yaml": "^2.8.3",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.10.7",
     "@types/uuid": "^10.0.0",
     "@vitest/coverage-v8": "^2.1.9",
+    "markdownlint-cli": "^0.48.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
     "vitest": "^2.1.9"

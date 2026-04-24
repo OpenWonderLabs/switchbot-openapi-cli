@@ -42,6 +42,35 @@ import { todayUsage } from '../utils/quota.js';
 import { describeCache } from '../devices/cache.js';
 import { withRequestContext } from '../lib/request-context.js';
 import { profileFilePath, tryLoadConfig } from '../config.js';
+import {
+  loadPolicyFile,
+  resolvePolicyPath,
+  PolicyFileNotFoundError,
+  PolicyYamlParseError,
+} from '../policy/load.js';
+import { validateLoadedPolicy } from '../policy/validate.js';
+import {
+  CURRENT_POLICY_SCHEMA_VERSION,
+  SUPPORTED_POLICY_SCHEMA_VERSIONS,
+  type PolicySchemaVersion,
+} from '../policy/schema.js';
+import { planMigration } from '../policy/migrate.js';
+import { suggestPlan } from './plan.js';
+import { suggestRule } from '../rules/suggest.js';
+import { addRuleToPolicyFile, AddRuleError } from '../policy/add-rule.js';
+import { writeFileSync } from 'node:fs';
+import { readAudit, type AuditEntry } from '../utils/audit.js';
+import { parseDurationToMs } from '../utils/flags.js';
+import { resolveDeviceId } from '../utils/name-resolver.js';
+import { validatePlan } from './plan.js';
+import { parse as yamlParse } from 'yaml';
+import { diffPolicyValues } from '../policy/diff.js';
+
+const LATEST_SUPPORTED_VERSION: PolicySchemaVersion =
+  SUPPORTED_POLICY_SCHEMA_VERSIONS[SUPPORTED_POLICY_SCHEMA_VERSIONS.length - 1];
+import { fileURLToPath } from 'node:url';
+import { dirname as pathDirname, join as pathJoin } from 'node:path';
+import os from 'node:os';
 import fs from 'node:fs';
 
 /**
@@ -95,6 +124,78 @@ function apiErrorToMcpError(err: unknown) {
     transient: payload.transient,
     retryAfterMs: payload.retryAfterMs,
   });
+}
+
+const DEFAULT_AUDIT_LOG_FILE = pathJoin(os.homedir(), '.switchbot', 'audit.log');
+
+interface AuditFilterOptions {
+  since?: string;
+  from?: string;
+  to?: string;
+  kinds?: AuditEntry['kind'][];
+  deviceId?: string;
+  ruleName?: string;
+  results?: Array<'ok' | 'error'>;
+}
+
+function resolveAuditRange(opts: Pick<AuditFilterOptions, 'since' | 'from' | 'to'>): {
+  fromMs: number;
+  toMs: number;
+} {
+  if (opts.since && (opts.from || opts.to)) {
+    throw new Error('--since is mutually exclusive with --from/--to.');
+  }
+  if (opts.since) {
+    const dur = parseDurationToMs(opts.since);
+    if (dur === null) {
+      throw new Error(`Invalid --since value "${opts.since}". Expected e.g. "30s", "15m", "1h", "7d".`);
+    }
+    return { fromMs: Date.now() - dur, toMs: Number.POSITIVE_INFINITY };
+  }
+
+  let fromMs = Number.NEGATIVE_INFINITY;
+  let toMs = Number.POSITIVE_INFINITY;
+  if (opts.from) {
+    const parsed = Date.parse(opts.from);
+    if (!Number.isFinite(parsed)) {
+      throw new Error(`Invalid --from value "${opts.from}". Expected ISO-8601 timestamp.`);
+    }
+    fromMs = parsed;
+  }
+  if (opts.to) {
+    const parsed = Date.parse(opts.to);
+    if (!Number.isFinite(parsed)) {
+      throw new Error(`Invalid --to value "${opts.to}". Expected ISO-8601 timestamp.`);
+    }
+    toMs = parsed;
+  }
+  if (fromMs > toMs) {
+    throw new Error('--from must be <= --to.');
+  }
+  return { fromMs, toMs };
+}
+
+function filterAuditEntries(entries: AuditEntry[], opts: AuditFilterOptions): AuditEntry[] {
+  const { fromMs, toMs } = resolveAuditRange(opts);
+  return entries.filter((entry) => {
+    const tMs = Date.parse(entry.t);
+    if (!Number.isFinite(tMs)) return false;
+    if (tMs < fromMs || tMs > toMs) return false;
+    if (opts.kinds && opts.kinds.length > 0 && !opts.kinds.includes(entry.kind)) return false;
+    if (opts.deviceId && entry.deviceId !== opts.deviceId) return false;
+    if (opts.ruleName && entry.rule?.name !== opts.ruleName) return false;
+    if (opts.results && opts.results.length > 0) {
+      if (!entry.result || !opts.results.includes(entry.result)) return false;
+    }
+    return true;
+  });
+}
+
+function topNFromMap(counts: Map<string, number>, n: number): Array<{ key: string; count: number }> {
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, n)
+    .map(([key, count]) => ({ key, count }));
 }
 
 export function createSwitchBotMcpServer(options?: { eventManager?: EventSubscriptionManager }): McpServer {
@@ -638,7 +739,6 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
             idempotent: z.boolean().optional(),
             safetyTier: z.enum(['read', 'mutation', 'ir-fire-forget', 'destructive', 'maintenance']).optional(),
             safetyReason: z.string().optional(),
-            destructive: z.boolean().optional(),
           }).passthrough()),
           aliases: z.array(z.string()).optional(),
           statusFields: z.array(z.string()).optional(),
@@ -668,7 +768,6 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
           return {
             ...c,
             safetyTier: tier,
-            destructive: tier === 'destructive',
             ...(reason ? { safetyReason: reason } : {}),
           };
         }),
@@ -932,6 +1031,376 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
     }
   );
 
+  // ---- policy_validate -----------------------------------------------------
+  server.registerTool(
+    'policy_validate',
+    {
+      title: 'Validate a policy.yaml file',
+      description:
+        'Check a policy file against the embedded JSON Schema (supports v0.1 and v0.2). ' +
+        'Returns the validation result with per-error line/col and a hint. ' +
+        'When no path is given, reads the resolved default (${SWITCHBOT_POLICY_PATH} or ~/.config/openclaw/switchbot/policy.yaml). ' +
+        'Use before relying on aliases/quiet_hours/confirmations so the agent never acts on a broken policy.',
+      _meta: { agentSafetyTier: 'read' },
+      inputSchema: z.object({
+        path: z.string().optional().describe('Optional policy file path; defaults to the resolved default path'),
+      }).strict(),
+      outputSchema: {
+        policyPath: z.string(),
+        schemaVersion: z.string(),
+        present: z.boolean().describe('false when the file does not exist'),
+        valid: z.boolean().nullable().describe('null when present=false'),
+        errors: z.array(z.object({
+          path: z.string(),
+          line: z.number().optional(),
+          col: z.number().optional(),
+          keyword: z.string(),
+          message: z.string(),
+          hint: z.string().optional(),
+          schemaPath: z.string(),
+        })).describe('Empty when valid or when the file is missing'),
+      },
+    },
+    async ({ path: pathArg }) => {
+      const policyPath = resolvePolicyPath({ flag: pathArg });
+      try {
+        const loaded = loadPolicyFile(policyPath);
+        const result = validateLoadedPolicy(loaded);
+        const structured = {
+          policyPath: result.policyPath,
+          schemaVersion: result.schemaVersion,
+          present: true,
+          valid: result.valid,
+          errors: result.errors,
+        };
+        return {
+          content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+          structuredContent: structured,
+        };
+      } catch (err) {
+        if (err instanceof PolicyFileNotFoundError) {
+          const structured = {
+            policyPath,
+            schemaVersion: CURRENT_POLICY_SCHEMA_VERSION,
+            present: false,
+            valid: null,
+            errors: [],
+          };
+          return {
+            content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+            structuredContent: structured,
+          };
+        }
+        if (err instanceof PolicyYamlParseError) {
+          const structured = {
+            policyPath,
+            schemaVersion: CURRENT_POLICY_SCHEMA_VERSION,
+            present: true,
+            valid: false,
+            errors: err.yamlErrors.map((e) => ({
+              path: '',
+              line: e.line,
+              col: e.col,
+              keyword: 'yaml-parse',
+              message: e.message,
+              schemaPath: '',
+            })),
+          };
+          return {
+            content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+            structuredContent: structured,
+          };
+        }
+        throw err;
+      }
+    }
+  );
+
+  // ---- policy_new ----------------------------------------------------------
+  server.registerTool(
+    'policy_new',
+    {
+      title: 'Scaffold a starter policy.yaml',
+      description:
+        'Write a starter policy file to the resolved default path (or a given path). Refuses to overwrite unless force=true. ' +
+        'This is a write action: the agent should only call it after confirming with the user.',
+      _meta: { agentSafetyTier: 'action' },
+      inputSchema: z.object({
+        path: z.string().optional().describe('Optional target path; defaults to the resolved default'),
+        force: z.boolean().optional().describe('When true, overwrite an existing file'),
+      }).strict(),
+      outputSchema: {
+        policyPath: z.string(),
+        schemaVersion: z.string(),
+        bytesWritten: z.number(),
+        overwritten: z.boolean(),
+      },
+    },
+    async ({ path: pathArg, force }) => {
+      const policyPath = resolvePolicyPath({ flag: pathArg });
+      const doForce = force === true;
+      if (fs.existsSync(policyPath) && !doForce) {
+        return mcpError('guard', 5, `refusing to overwrite existing policy at ${policyPath}`, {
+          hint: 'pass force=true to overwrite, or choose a different path',
+          context: { policyPath },
+        });
+      }
+      const templateUrl = new URL('../policy/examples/policy.example.yaml', import.meta.url);
+      const template = fs.readFileSync(fileURLToPath(templateUrl), 'utf-8');
+      fs.mkdirSync(pathDirname(policyPath), { recursive: true });
+      fs.writeFileSync(policyPath, template, { encoding: 'utf-8' });
+      const structured = {
+        policyPath,
+        schemaVersion: CURRENT_POLICY_SCHEMA_VERSION,
+        bytesWritten: Buffer.byteLength(template, 'utf-8'),
+        overwritten: doForce,
+      };
+      return {
+        content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+        structuredContent: structured,
+      };
+    }
+  );
+
+  // ---- policy_migrate ------------------------------------------------------
+  server.registerTool(
+    'policy_migrate',
+    {
+      title: 'Migrate a policy file to the latest supported schema',
+      description:
+        'Upgrades the policy file\'s schema version in place while preserving comments. ' +
+        'Safe by default: if the migrated document would fail schema validation, the file is NOT rewritten ' +
+        'and the tool returns status="precheck-failed" with the list of errors. ' +
+        'Pass dryRun=true to preview without touching the file. ' +
+        'Currently the only supported upgrade path is v0.1 → v0.2.',
+      _meta: { agentSafetyTier: 'action' },
+      inputSchema: z.object({
+        path: z.string().optional().describe('Optional policy file path; defaults to the resolved default path'),
+        dryRun: z.boolean().optional().describe('When true, report what would change without writing'),
+        to: z.string().optional().describe(`Target schema version (default: latest supported, "${LATEST_SUPPORTED_VERSION}")`),
+      }).strict(),
+      outputSchema: {
+        policyPath: z.string(),
+        fileVersion: z.string().optional(),
+        targetVersion: z.string(),
+        supportedVersions: z.array(z.string()),
+        status: z.enum([
+          'already-current',
+          'migrated',
+          'dry-run',
+          'no-version-field',
+          'unsupported',
+          'precheck-failed',
+          'file-not-found',
+        ]),
+        from: z.string().optional(),
+        to: z.string().optional(),
+        bytesWritten: z.number().optional(),
+        message: z.string(),
+        errors: z
+          .array(z.object({ path: z.string(), keyword: z.string(), message: z.string() }))
+          .optional(),
+      },
+    },
+    async ({ path: pathArg, dryRun, to }) => {
+      const policyPath = resolvePolicyPath({ flag: pathArg });
+      const target = (to ?? LATEST_SUPPORTED_VERSION) as PolicySchemaVersion;
+
+      let loaded;
+      try {
+        loaded = loadPolicyFile(policyPath);
+      } catch (err) {
+        if (err instanceof PolicyFileNotFoundError) {
+          const structured = {
+            policyPath,
+            targetVersion: target,
+            supportedVersions: [...SUPPORTED_POLICY_SCHEMA_VERSIONS],
+            status: 'file-not-found' as const,
+            message: `policy file not found: ${policyPath}`,
+          };
+          return {
+            content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+            structuredContent: structured,
+          };
+        }
+        throw err;
+      }
+
+      const data = loaded.data as { version?: unknown } | null;
+      const fileVersion = typeof data?.version === 'string' ? data.version : undefined;
+      const base = {
+        policyPath,
+        fileVersion,
+        targetVersion: target,
+        supportedVersions: [...SUPPORTED_POLICY_SCHEMA_VERSIONS],
+      };
+
+      if (!fileVersion) {
+        const structured = {
+          ...base,
+          status: 'no-version-field' as const,
+          message: `policy has no \`version\` field — add \`version: "${CURRENT_POLICY_SCHEMA_VERSION}"\``,
+        };
+        return {
+          content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+          structuredContent: structured,
+        };
+      }
+
+      if (!SUPPORTED_POLICY_SCHEMA_VERSIONS.includes(fileVersion as PolicySchemaVersion)) {
+        const structured = {
+          ...base,
+          status: 'unsupported' as const,
+          message: `policy schema v${fileVersion} is not supported (supports: ${SUPPORTED_POLICY_SCHEMA_VERSIONS.join(', ')})`,
+        };
+        return {
+          content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+          structuredContent: structured,
+        };
+      }
+
+      if (fileVersion === target) {
+        const structured = {
+          ...base,
+          status: 'already-current' as const,
+          message: `already on schema v${target}; no migration needed`,
+          bytesWritten: 0,
+        };
+        return {
+          content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+          structuredContent: structured,
+        };
+      }
+
+      const plan = planMigration(loaded, fileVersion as PolicySchemaVersion, target);
+      if (!plan.precheck.valid) {
+        const structured = {
+          ...base,
+          status: 'precheck-failed' as const,
+          message: `migrated policy fails schema v${target} precheck; file not written`,
+          errors: plan.precheck.errors.map((e) => ({ path: e.path, keyword: e.keyword, message: e.message })),
+        };
+        return {
+          content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+          structuredContent: structured,
+        };
+      }
+
+      const bytes = Buffer.byteLength(plan.nextSource, 'utf-8');
+      if (dryRun) {
+        const structured = {
+          ...base,
+          status: 'dry-run' as const,
+          from: plan.fromVersion,
+          to: plan.toVersion,
+          bytesWritten: 0,
+          message: `dry-run: would upgrade v${plan.fromVersion} → v${plan.toVersion} (${bytes} bytes)`,
+        };
+        return {
+          content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+          structuredContent: structured,
+        };
+      }
+
+      writeFileSync(policyPath, plan.nextSource, { encoding: 'utf-8' });
+      const structured = {
+        ...base,
+        status: 'migrated' as const,
+        from: plan.fromVersion,
+        to: plan.toVersion,
+        bytesWritten: bytes,
+        message: `migrated ${policyPath} to schema v${plan.toVersion} (from v${plan.fromVersion})`,
+      };
+      return {
+        content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+        structuredContent: structured,
+      };
+    }
+  );
+
+  // ---- policy_diff ---------------------------------------------------------
+  server.registerTool(
+    'policy_diff',
+    {
+      title: 'Compare two policy files',
+      description:
+        'Compare two policy YAML files and return the same contract as `switchbot --json policy diff`: ' +
+        '{ leftPath, rightPath, equal, changeCount, truncated, stats, changes, diff }.',
+      _meta: { agentSafetyTier: 'read' },
+      inputSchema: z.object({
+        left_path: z.string().min(1).describe('Path to the baseline policy file.'),
+        right_path: z.string().min(1).describe('Path to the candidate policy file.'),
+      }).strict(),
+      outputSchema: {
+        leftPath: z.string(),
+        rightPath: z.string(),
+        equal: z.boolean(),
+        changeCount: z.number().int(),
+        truncated: z.boolean(),
+        stats: z.object({
+          added: z.number().int(),
+          removed: z.number().int(),
+          changed: z.number().int(),
+        }),
+        changes: z.array(z.object({
+          path: z.string(),
+          kind: z.enum(['added', 'removed', 'changed']),
+          before: z.unknown().optional(),
+          after: z.unknown().optional(),
+        })),
+        diff: z.string(),
+      },
+    },
+    ({ left_path, right_path }) => {
+      let leftSource = '';
+      let rightSource = '';
+      try {
+        leftSource = fs.readFileSync(left_path, 'utf-8');
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') {
+          return mcpError('usage', 2, `policy file not found: ${left_path}`, {
+            context: { policyPath: left_path },
+          });
+        }
+        return mcpError('runtime', 1, `failed to read ${left_path}: ${String(err)}`);
+      }
+      try {
+        rightSource = fs.readFileSync(right_path, 'utf-8');
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') {
+          return mcpError('usage', 2, `policy file not found: ${right_path}`, {
+            context: { policyPath: right_path },
+          });
+        }
+        return mcpError('runtime', 1, `failed to read ${right_path}: ${String(err)}`);
+      }
+
+      let leftDoc: unknown;
+      let rightDoc: unknown;
+      try {
+        leftDoc = yamlParse(leftSource);
+      } catch (err) {
+        return mcpError('usage', 2, `YAML parse error in ${left_path}: ${(err as Error).message}`);
+      }
+      try {
+        rightDoc = yamlParse(rightSource);
+      } catch (err) {
+        return mcpError('usage', 2, `YAML parse error in ${right_path}: ${(err as Error).message}`);
+      }
+
+      const result = {
+        leftPath: left_path,
+        rightPath: right_path,
+        ...diffPolicyValues(leftDoc, rightDoc, leftSource, rightSource),
+      };
+
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+        structuredContent: result,
+      };
+    },
+  );
+
   // switchbot://events resource — snapshot of recent shadow events from the ring buffer.
   // Returns up to 100 recent events. When MQTT is disabled, returns an empty list with a state note.
   // URI: switchbot://events  (optional query: ?filter=<expression>  ?limit=<n>)
@@ -960,6 +1429,416 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
     );
   }
 
+  // ---- plan_suggest ---------------------------------------------------------
+  server.registerTool(
+    'plan_suggest',
+    {
+      title: 'Draft a SwitchBot execution plan from intent',
+      description:
+        'Generate a candidate Plan JSON from a natural language intent and a list of device IDs. ' +
+        'Uses keyword heuristics (no LLM) to pick the command. The returned plan is ready to pass to ' +
+        '`plan run` — review and edit before executing. Recognised commands: turnOn, turnOff, press, ' +
+        'lock, unlock, open, close, pause. Falls back to turnOn with a warning when intent is unclear.',
+      _meta: { agentSafetyTier: 'read' },
+      inputSchema: z.object({
+        intent: z.string().min(1).describe('Natural language description of what to do (e.g. "turn off all lights").'),
+        device_ids: z.array(z.string().min(1)).min(1).describe('Device IDs to act on.'),
+      }).strict(),
+      outputSchema: {
+        plan: z.unknown().describe('Candidate Plan JSON (version 1.0) ready to pass to plan run.'),
+        warnings: z.array(z.string()).describe('Informational warnings (e.g. unrecognized intent defaulted to turnOn).'),
+      },
+    },
+    ({ intent, device_ids }) => {
+      const devices = device_ids.map((id) => {
+        const cached = getCachedDevice(id);
+        return { id, name: cached?.name, type: cached?.type };
+      });
+      try {
+        const { plan, warnings } = suggestPlan({ intent, devices });
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ plan, warnings }, null, 2) }],
+          structuredContent: { plan, warnings },
+        };
+      } catch (err) {
+        return apiErrorToMcpError(err);
+      }
+    },
+  );
+
+  // ---- plan_run -------------------------------------------------------------
+  server.registerTool(
+    'plan_run',
+    {
+      title: 'Validate and execute a SwitchBot plan',
+      description:
+        'Execute a Plan JSON object (version 1.0). Destructive command steps are skipped unless yes=true. ' +
+        'Scene and wait steps run in order. Returns per-step results and a summary.',
+      _meta: { agentSafetyTier: 'action' },
+      inputSchema: z.object({
+        plan: z.unknown().describe('Plan JSON object (same schema as `switchbot plan run`).'),
+        yes: z.boolean().optional().describe('Authorize destructive command steps.'),
+        continue_on_error: z.boolean().optional().describe('Keep executing later steps after a failed step.'),
+      }).strict(),
+      outputSchema: {
+        ran: z.boolean(),
+        plan: z.unknown(),
+        results: z.array(z.unknown()),
+        summary: z.object({
+          total: z.number().int(),
+          ok: z.number().int(),
+          error: z.number().int(),
+          skipped: z.number().int(),
+        }),
+      },
+    },
+    async ({ plan, yes, continue_on_error }) => {
+      const validated = validatePlan(plan);
+      if (!validated.ok) {
+        return mcpError('usage', 2, 'plan invalid', {
+          context: { issues: validated.issues },
+          hint: 'Fix the reported issues and retry plan_run.',
+        });
+      }
+
+      const out: {
+        ran: true;
+        plan: typeof validated.plan;
+        results: Array<
+          | { step: number; type: 'command'; deviceId: string; command: string; status: 'ok' | 'error' | 'skipped'; error?: string }
+          | { step: number; type: 'scene'; sceneId: string; status: 'ok' | 'error'; error?: string }
+          | { step: number; type: 'wait'; ms: number; status: 'ok' }
+        >;
+        summary: { total: number; ok: number; error: number; skipped: number };
+      } = {
+        ran: true,
+        plan: validated.plan,
+        results: [],
+        summary: { total: validated.plan.steps.length, ok: 0, error: 0, skipped: 0 },
+      };
+
+      const continueOnError = continue_on_error === true;
+      const allowDestructive = yes === true;
+
+      for (let i = 0; i < validated.plan.steps.length; i++) {
+        const step = validated.plan.steps[i];
+        const idx = i + 1;
+
+        if (step.type === 'wait') {
+          await new Promise((resolve) => setTimeout(resolve, step.ms));
+          out.results.push({ step: idx, type: 'wait', ms: step.ms, status: 'ok' });
+          out.summary.ok++;
+          continue;
+        }
+
+        if (step.type === 'scene') {
+          try {
+            await executeScene(step.sceneId);
+            out.results.push({ step: idx, type: 'scene', sceneId: step.sceneId, status: 'ok' });
+            out.summary.ok++;
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            out.results.push({ step: idx, type: 'scene', sceneId: step.sceneId, status: 'error', error: msg });
+            out.summary.error++;
+            if (!continueOnError) break;
+          }
+          continue;
+        }
+
+        let resolvedDeviceId = '';
+        try {
+          resolvedDeviceId = resolveDeviceId(step.deviceId, step.deviceName);
+          const commandType = step.commandType ?? 'command';
+          const deviceType = getCachedDevice(resolvedDeviceId)?.type;
+          const destructive = isDestructiveCommand(deviceType, step.command, commandType);
+          if (destructive && !allowDestructive) {
+            out.results.push({
+              step: idx,
+              type: 'command',
+              deviceId: resolvedDeviceId,
+              command: step.command,
+              status: 'skipped',
+              error: 'destructive — rerun with yes=true',
+            });
+            out.summary.skipped++;
+            if (!continueOnError) break;
+            continue;
+          }
+
+          await executeCommand(resolvedDeviceId, step.command, step.parameter, commandType);
+          out.results.push({
+            step: idx,
+            type: 'command',
+            deviceId: resolvedDeviceId,
+            command: step.command,
+            status: 'ok',
+          });
+          out.summary.ok++;
+        } catch (err) {
+          if (err instanceof Error && err.name === 'DryRunSignal') {
+            out.results.push({
+              step: idx,
+              type: 'command',
+              deviceId: resolvedDeviceId || step.deviceId || 'unknown',
+              command: step.command,
+              status: 'ok',
+            });
+            out.summary.ok++;
+            continue;
+          }
+          const msg = err instanceof Error ? err.message : String(err);
+          out.results.push({
+            step: idx,
+            type: 'command',
+            deviceId: resolvedDeviceId || step.deviceId || 'unknown',
+            command: step.command,
+            status: 'error',
+            error: msg,
+          });
+          out.summary.error++;
+          if (!continueOnError) break;
+        }
+      }
+
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(out, null, 2) }],
+        structuredContent: out,
+      };
+    },
+  );
+
+  // ---- audit_query ----------------------------------------------------------
+  server.registerTool(
+    'audit_query',
+    {
+      title: 'Query command/rule audit log entries',
+      description:
+        'Filter entries from the local audit log (default ~/.switchbot/audit.log) by time range, kind, device, rule, and result. ' +
+        'Useful for review flows and rule-fire inspection without leaving MCP.',
+      _meta: { agentSafetyTier: 'read' },
+      inputSchema: z.object({
+        file: z.string().optional().describe('Optional audit log path; defaults to ~/.switchbot/audit.log.'),
+        since: z.string().optional().describe('Relative window ending now (e.g. "30m", "24h"). Mutually exclusive with from/to.'),
+        from: z.string().optional().describe('Range start (ISO-8601).'),
+        to: z.string().optional().describe('Range end (ISO-8601).'),
+        kinds: z.array(z.enum(['command', 'rule-fire', 'rule-fire-dry', 'rule-throttled', 'rule-webhook-rejected'])).optional().describe('Filter by entry kind.'),
+        device_id: z.string().optional().describe('Filter by deviceId.'),
+        rule_name: z.string().optional().describe('Filter by rule.name (rule-engine entries).'),
+        results: z.array(z.enum(['ok', 'error'])).optional().describe('Filter by execution result.'),
+        limit: z.number().int().min(1).max(5000).optional().describe('Max entries returned from the tail of the filtered set (default 200).'),
+      }).strict(),
+      outputSchema: {
+        file: z.string(),
+        totalMatched: z.number().int(),
+        returned: z.number().int(),
+        entries: z.array(z.unknown()),
+      },
+    },
+    ({ file, since, from, to, kinds, device_id, rule_name, results, limit }) => {
+      const filePath = file ?? DEFAULT_AUDIT_LOG_FILE;
+      const entries = readAudit(filePath);
+      try {
+        const filtered = filterAuditEntries(entries, {
+          since,
+          from,
+          to,
+          kinds,
+          deviceId: device_id,
+          ruleName: rule_name,
+          results,
+        });
+        const bounded = filtered.slice(-Math.max(1, limit ?? 200));
+        const out = {
+          file: filePath,
+          totalMatched: filtered.length,
+          returned: bounded.length,
+          entries: bounded,
+        };
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(out, null, 2) }],
+          structuredContent: out,
+        };
+      } catch (err) {
+        return mcpError('usage', 2, err instanceof Error ? err.message : 'invalid audit query options');
+      }
+    },
+  );
+
+  // ---- audit_stats ----------------------------------------------------------
+  server.registerTool(
+    'audit_stats',
+    {
+      title: 'Aggregate audit log counts for review dashboards',
+      description:
+        'Compute summary counters over the local audit log: by kind, by result, top devices, and top rules. ' +
+        'Supports the same filters as audit_query.',
+      _meta: { agentSafetyTier: 'read' },
+      inputSchema: z.object({
+        file: z.string().optional().describe('Optional audit log path; defaults to ~/.switchbot/audit.log.'),
+        since: z.string().optional().describe('Relative window ending now (e.g. "6h"). Mutually exclusive with from/to.'),
+        from: z.string().optional().describe('Range start (ISO-8601).'),
+        to: z.string().optional().describe('Range end (ISO-8601).'),
+        kinds: z.array(z.enum(['command', 'rule-fire', 'rule-fire-dry', 'rule-throttled', 'rule-webhook-rejected'])).optional().describe('Filter by entry kind.'),
+        device_id: z.string().optional().describe('Filter by deviceId.'),
+        rule_name: z.string().optional().describe('Filter by rule.name (rule-engine entries).'),
+        results: z.array(z.enum(['ok', 'error'])).optional().describe('Filter by execution result.'),
+        top_n: z.number().int().min(1).max(100).optional().describe('Number of top device/rule rows to return (default 10).'),
+      }).strict(),
+      outputSchema: {
+        file: z.string(),
+        totalMatched: z.number().int(),
+        byKind: z.record(z.string(), z.number().int()),
+        byResult: z.record(z.string(), z.number().int()),
+        topDevices: z.array(z.object({ deviceId: z.string(), count: z.number().int() })),
+        topRules: z.array(z.object({ ruleName: z.string(), count: z.number().int() })),
+      },
+    },
+    ({ file, since, from, to, kinds, device_id, rule_name, results, top_n }) => {
+      const filePath = file ?? DEFAULT_AUDIT_LOG_FILE;
+      const entries = readAudit(filePath);
+      try {
+        const filtered = filterAuditEntries(entries, {
+          since,
+          from,
+          to,
+          kinds,
+          deviceId: device_id,
+          ruleName: rule_name,
+          results,
+        });
+
+        const byKind = new Map<string, number>();
+        const byResult = new Map<string, number>();
+        const byDevice = new Map<string, number>();
+        const byRule = new Map<string, number>();
+
+        for (const entry of filtered) {
+          byKind.set(entry.kind, (byKind.get(entry.kind) ?? 0) + 1);
+          if (entry.result) byResult.set(entry.result, (byResult.get(entry.result) ?? 0) + 1);
+          if (entry.deviceId) byDevice.set(entry.deviceId, (byDevice.get(entry.deviceId) ?? 0) + 1);
+          if (entry.rule?.name) byRule.set(entry.rule.name, (byRule.get(entry.rule.name) ?? 0) + 1);
+        }
+
+        const topN = top_n ?? 10;
+        const out = {
+          file: filePath,
+          totalMatched: filtered.length,
+          byKind: Object.fromEntries([...byKind.entries()].sort((a, b) => a[0].localeCompare(b[0]))),
+          byResult: Object.fromEntries([...byResult.entries()].sort((a, b) => a[0].localeCompare(b[0]))),
+          topDevices: topNFromMap(byDevice, topN).map((item) => ({ deviceId: item.key, count: item.count })),
+          topRules: topNFromMap(byRule, topN).map((item) => ({ ruleName: item.key, count: item.count })),
+        };
+
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(out, null, 2) }],
+          structuredContent: out,
+        };
+      } catch (err) {
+        return mcpError('usage', 2, err instanceof Error ? err.message : 'invalid audit stats options');
+      }
+    },
+  );
+
+  // ---- rules_suggest --------------------------------------------------------
+  server.registerTool(
+    'rules_suggest',
+    {
+      title: 'Draft a SwitchBot automation rule from intent',
+      description:
+        'Generate a candidate automation rule YAML from a natural language intent. ' +
+        'Uses keyword heuristics (no LLM) to infer trigger, schedule, and command. ' +
+        'Always emits dry_run: true — the rule must be reviewed before arming. ' +
+        'Pass the returned rule_yaml to policy_add_rule to inject it into policy.yaml.',
+      _meta: { agentSafetyTier: 'read' },
+      inputSchema: z.object({
+        intent: z.string().min(1).describe('Natural language description (e.g. "turn off lights at 10pm").'),
+        trigger: z.enum(['mqtt', 'cron', 'webhook']).optional().describe('Trigger type (inferred from intent if omitted).'),
+        device_ids: z.array(z.string().min(1)).optional().describe('Device IDs; first is sensor for mqtt triggers, rest are action targets.'),
+        event: z.string().optional().describe('MQTT event name override (e.g. motion.detected).'),
+        schedule: z.string().optional().describe('5-field cron expression override (e.g. "0 22 * * *").'),
+        days: z.array(z.string()).optional().describe('Weekday filter (e.g. ["mon","tue","wed","thu","fri"]).'),
+        webhook_path: z.string().optional().describe('Webhook path override (default /action).'),
+      }).strict(),
+      outputSchema: {
+        rule: z.unknown().describe('Rule object matching the v0.2 policy schema.'),
+        rule_yaml: z.string().describe('YAML string ready to pipe to policy_add_rule.'),
+        warnings: z.array(z.string()).describe('Informational warnings (e.g. unrecognized intent defaulted).'),
+      },
+    },
+    ({ intent, trigger, device_ids, event, schedule, days, webhook_path }) => {
+      const devices = (device_ids ?? []).map((id) => {
+        const cached = getCachedDevice(id);
+        return { id, name: cached?.name, type: cached?.type };
+      });
+      try {
+        const { rule, ruleYaml, warnings } = suggestRule({
+          intent,
+          trigger,
+          devices,
+          event,
+          schedule,
+          days,
+          webhookPath: webhook_path,
+        });
+        return {
+          content: [{ type: 'text' as const, text: ruleYaml }],
+          structuredContent: { rule, rule_yaml: ruleYaml, warnings },
+        };
+      } catch (err) {
+        return apiErrorToMcpError(err);
+      }
+    },
+  );
+
+  // ---- policy_add_rule ------------------------------------------------------
+  server.registerTool(
+    'policy_add_rule',
+    {
+      title: 'Append a rule to automation.rules[] in policy.yaml',
+      description:
+        'Inject a rule YAML snippet (as produced by rules_suggest) into the automation.rules[] ' +
+        'array in policy.yaml. Preserves existing comments and formatting. ' +
+        'Always run with dry_run: true first so the agent can show the diff for user approval. ' +
+        'Never set enable_automation: true without explicitly informing the user.',
+      _meta: { agentSafetyTier: 'action' },
+      inputSchema: z.object({
+        rule_yaml: z.string().min(1).describe('YAML string of a single rule object (e.g. from rules_suggest).'),
+        policy_path: z.string().optional().describe('Path to policy.yaml (defaults to $SWITCHBOT_POLICY_PATH or ~/.switchbot/policy.yaml).'),
+        enable_automation: z.boolean().default(false).describe('If true, sets automation.enabled: true after inserting the rule.'),
+        dry_run: z.boolean().default(false).describe('If true, compute and return the diff without writing to disk.'),
+        force: z.boolean().default(false).describe('If true, overwrite an existing rule with the same name.'),
+      }).strict(),
+      outputSchema: {
+        policyPath: z.string().describe('Resolved path to the policy file.'),
+        ruleName: z.string().describe('Name of the rule that was (or would be) inserted.'),
+        written: z.boolean().describe('True when the file was actually written.'),
+        diff: z.string().describe('Unified-style diff showing lines added/removed.'),
+      },
+    },
+    ({ rule_yaml, policy_path, enable_automation, dry_run, force }) => {
+      const policyPath = resolvePolicyPath({ flag: policy_path });
+      try {
+        const result = addRuleToPolicyFile({
+          ruleYaml: rule_yaml,
+          policyPath,
+          enableAutomation: enable_automation,
+          dryRun: dry_run,
+          force,
+        });
+        const out = { policyPath, ruleName: result.ruleName, written: result.written, diff: result.diff };
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(out, null, 2) }],
+          structuredContent: out,
+        };
+      } catch (err) {
+        if (err instanceof AddRuleError) {
+          return apiErrorToMcpError(new Error(`${err.code}: ${err.message}`));
+        }
+        return apiErrorToMcpError(err);
+      }
+    },
+  );
+
   return server;
 }
 
@@ -980,7 +1859,7 @@ export function registerMcpCommand(program: Command): void {
     .command('mcp')
     .description('Run as a Model Context Protocol server so AI agents can call SwitchBot tools')
     .addHelpText('after', `
-The MCP server exposes eleven tools:
+  The MCP server exposes twenty-one tools:
   - list_devices            fetch all physical + IR devices
   - get_device_status       live status for a physical device
   - send_command            control a device (destructive commands need confirm:true)
@@ -992,6 +1871,16 @@ The MCP server exposes eleven tools:
   - get_device_history      fetch raw JSONL history records for a device
   - query_device_history    filter + page history records with field/time predicates
   - aggregate_device_history compute count/min/max/avg/sum/p50/p95 over history records
+  - policy_validate         check policy.yaml against the embedded schema (v0.1 / v0.2)
+  - policy_new              scaffold a starter policy.yaml (action — confirm first)
+  - policy_migrate          upgrade policy.yaml to the latest schema (action — preserves comments)
+  - policy_diff             compare two policy files with structural + line diff output
+  - plan_suggest            draft a Plan JSON from intent + device IDs (heuristic, no LLM)
+  - plan_run                validate + execute a Plan JSON document
+  - audit_query             filter audit log entries by time/device/rule/result
+  - audit_stats             aggregate audit counts by kind/result/device/rule
+  - rules_suggest           draft an automation rule YAML from intent (heuristic, no LLM)
+  - policy_add_rule         append a rule into automation.rules[] in policy.yaml
 
 Resource (read-only):
   - switchbot://events    snapshot of recent MQTT shadow events from the ring buffer

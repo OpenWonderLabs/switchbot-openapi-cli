@@ -1,9 +1,449 @@
 # Changelog
 
+<!-- markdownlint-configure-file {"MD024": false} -->
+
 All notable changes to `@switchbot/openapi-cli` are documented in this file.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [3.0.0] - 2026-04-24
+
+Major release — breaking changes, full feature parity across all branches.
+
+Includes all features shipped in v2.10.0 through v2.15.0: one-command install/uninstall,
+L3 autonomous rule authoring, plan suggest + `--require-approval`, MCP policy_diff and
+audit tools, and rules engine enhancements (all/any/not conditions, cron day_of_week filter).
+
+### BREAKING — removed `destructive: boolean` output field
+
+The `destructive` boolean field has been removed from all CLI and MCP JSON output surfaces:
+
+- `switchbot schema export` / `schema export --compact`
+- `switchbot devices describe <id>` command list
+- `switchbot agent-bootstrap --compact`
+- MCP `catalog_search` tool response
+- `switchbot explain <deviceId>`
+
+**Migration**: replace `entry.commands[].destructive` checks with
+`entry.commands[].safetyTier === 'destructive'`. The `safetyTier` field has been
+present since v2.7.0 and carries the same information.
+
+### BREAKING — removed policy schema v0.1 support
+
+`policy.yaml` files with `version: "0.1"` are no longer accepted. The validator now
+returns a clear error with migration instructions.
+
+**Migration**: if you have a v0.1 policy file, run `switchbot policy migrate` with
+CLI ≤2.15 first, then upgrade to v3.0.
+
+### Changed — `deriveSafetyTier` no longer reads `spec.destructive`
+
+The `CommandSpec.destructive` boolean and `CommandSpec.destructiveReason` fields have
+been removed from the catalog interface. Custom `~/.switchbot/catalog.json` overlays
+that used `destructive: true` must switch to `safetyTier: "destructive"`.
+
+Quality release — v0.2 policy default + contract hardening + docs baseline cleanup.
+
+### Changed — policy schema defaults
+
+- `CURRENT_POLICY_SCHEMA_VERSION` now points to `0.2`, so `switchbot policy new`
+  scaffolds v0.2 files by default.
+- Embedded starter template updated to v0.2 and refreshed wording for
+  third-party agent hosts.
+- Migration guidance updated to recommend explicit scalar `version` values
+  using the current default (`0.2`) while keeping `0.1` compatibility.
+
+### Added — policy diff parity guardrail
+
+- Added a cross-surface contract test asserting MCP `policy_diff`
+  `structuredContent` matches CLI `switchbot --json policy diff` output
+  exactly for the same inputs.
+
+### Changed — docs quality baseline
+
+- Normalized markdown table/fence styles in roadmap, agent guide, and README
+  to reduce lint noise and improve publish consistency.
+- Restored README `Output modes` anchor and fixed broken table-of-contents links.
+- Updated roadmap/README backlog text with an ordered execution queue and
+  explicit acceptance-oriented wording.
+
+## [2.14.0] - 2026-04-24
+
+Feature release — policy review parity for MCP + dry-run default alignment.
+
+### Added — MCP `policy_diff`
+
+- New read-only MCP tool `policy_diff({ left_path, right_path })` returns
+  the same contract as `switchbot --json policy diff`:
+  `{ leftPath, rightPath, equal, changeCount, truncated, stats, changes, diff }`.
+- Enables side-by-side policy review flows in MCP-only agent hosts.
+
+### Added — MCP review/execute parity for L2 workflows
+
+- `plan_run` executes Plan JSON directly in MCP (same destructive-step
+  gating semantics as CLI: skipped unless approved).
+- `audit_query` filters audit log entries by time/device/rule/result.
+- `audit_stats` aggregates audit entries by kind/result/device/rule.
+- MCP tool count: 17 → 21.
+
+### Changed — `dry_run` defaults and docs consistency
+
+- Policy schema v0.2 now defaults rule `dry_run` to `true`.
+- Design/spec docs and quickstart examples now document explicit arming
+  as `dry_run: false` (instead of “remove dry_run: true”).
+- Roadmap / agent guide / README capability statements updated to match
+  implemented CLI + MCP surfaces.
+
+## [2.13.0] - 2026-04-24
+
+Feature release — L3 fully autonomous rule authoring for agents.
+
+### Added — `rules suggest`
+
+- New subcommand `switchbot rules suggest --intent <text>` scaffolds a
+  candidate automation rule YAML from natural language intent + optional
+  device list. No LLM involved — uses keyword heuristics for trigger
+  inference (mqtt/cron/webhook), schedule inference (am/pm/night/morning),
+  and command inference (8 patterns). Always emits `dry_run: true` and
+  `throttle: { max_per: "10m" }` for MQTT triggers.
+- Options: `--trigger`, `--device` (repeatable), `--event`, `--schedule`,
+  `--days`, `--webhook-path`, `--out`.
+- Output: raw rule YAML on stdout; `--json` for structured output.
+- Exported `suggestRule(opts)` pure function in `src/rules/suggest.ts`.
+
+### Added — `policy add-rule`
+
+- New subcommand `switchbot policy add-rule` reads rule YAML from **stdin**
+  and appends it to `automation.rules[]` in policy.yaml, preserving all
+  existing comments and formatting.
+- `--dry-run`: print the unified diff without writing to disk.
+- `--enable`: set `automation.enabled: true` after inserting the rule.
+- `--force`: overwrite an existing rule with the same name.
+- Pipeline-friendly: `switchbot rules suggest ... | switchbot policy add-rule`.
+- Exported `addRuleToPolicySource()` / `addRuleToPolicyFile()` in
+  `src/policy/add-rule.ts`.
+
+### Added — MCP tools `rules_suggest` + `policy_add_rule`
+
+- `rules_suggest` (tier `read`): MCP equivalent of `rules suggest`; agents
+  call it without shell access to draft a rule YAML.
+- `policy_add_rule` (tier `action`): MCP equivalent of `policy add-rule`;
+  agents inject a rule into policy.yaml and receive the diff for user
+  confirmation. Always run with `dry_run: true` first.
+- MCP tool count: 15 → 17.
+
+### Changed
+
+- `src/lib/command-keywords.ts`: `COMMAND_KEYWORDS` array extracted from
+  `plan.ts` into a shared module; imported by both `plan.ts` and
+  `rules/suggest.ts`.
+- `docs/agent-guide.md`: new section "Autonomous rule authoring (L3)"
+  covering the suggest → add-rule → lint → reload → dry-run → arm workflow.
+
+## [2.12.0] - 2026-04-23
+
+Feature release — semi-autonomous L2 workflow for agents.
+
+### Added — `plan suggest`
+
+- New subcommand `switchbot plan suggest --intent <text> --device <id>...`
+  scaffolds a candidate Plan JSON from natural language intent + device list.
+  No LLM involved — uses keyword heuristics to match the intent against 8
+  command patterns (`turnOn`, `turnOff`, `press`, `lock`, `unlock`, `open`,
+  `close`, `pause`). Defaults to `turnOn` with a warning when unrecognised.
+  Output goes to stdout (or `--out <file>`); warnings go to stderr.
+- Exported `suggestPlan(opts)` pure function for programmatic use.
+
+### Added — `plan run --require-approval`
+
+- New flag `--require-approval` on `plan run` enables per-step TTY
+  confirmation for destructive steps: the CLI prints the step details and
+  prompts `[y/N]` before executing. Rejecting a step marks it `skipped`
+  with `decision: "rejected"` in the JSON output.
+- Non-TTY environments (CI, pipes) auto-reject destructive steps.
+- `--require-approval` is mutually exclusive with `--json` (exits with an
+  error if both are passed).
+- `--yes` takes precedence over `--require-approval` as blanket approval.
+
+### Added — MCP `plan_suggest` tool
+
+- New read-only MCP tool `plan_suggest({ intent, device_ids })` wraps
+  `suggestPlan()` for agents that prefer to stay in the MCP session.
+  Returns `{ plan, warnings }` structured content.
+
+## [2.11.0] - 2026-04-23
+
+Feature release — install/uninstall UX polish, cross-OS keychain CI,
+and two rules engine enhancements.
+
+### Changed — `switchbot install` polish
+
+- **`--force`** replaces an existing skill symlink pointing at a different
+  target, and bypasses the `SKILL.md` presence check (for in-development
+  skill repos).
+- **`--verify`** runs `switchbot doctor --json` as a warn-only post-check
+  after a successful install. The result is surfaced (text or `--json`)
+  but never changes the exit code — a doctor failure after a good install
+  does not trigger rollback.
+- **`stepSymlinkSkill`** now requires `SKILL.md` at the root of
+  `--skill-path` before creating a link, so linking a random directory is
+  caught at install time. Non-automating agents (cursor/copilot) are
+  unaffected — they print a recipe before the check runs.
+- Existing symlinks pointing at a **different** target are now a hard
+  error without `--force`; pointing at the same target remains idempotent.
+- **Preflight** gains an `agent-skills-dir` check for `--agent claude-code`
+  that probes `~/.claude/skills/` writable before the step can fail.
+
+### Changed — `switchbot uninstall` polish
+
+- **`--purge`** is shorthand for `--yes --remove-creds --remove-policy`:
+  removes everything in one flag without any prompts.
+
+### Added — CI
+
+- **`.github/workflows/keychain-matrix.yml`** — new workflow that runs the
+  credential + install-step test suites on macOS (temp keychain),
+  Linux (D-Bus + gnome-keyring), and Windows (Credential Manager). Triggers
+  on changes under `src/credentials/`, `src/install/`, and their test
+  counterparts.
+
+### Added — `rules trigger.days` (γ-lite)
+
+- Cron triggers now accept an optional **`days`** filter:
+
+  ```yaml
+  when:
+    source: cron
+    schedule: "0 9 * * *"
+    days: [mon, tue, wed, thu, fri]
+  ```
+
+  Values are matched case-insensitively; both 3-letter abbreviations
+  (`mon`) and full names (`monday`) are accepted. Firings on unlisted
+  weekdays are silently suppressed before dispatch — throttle counters and
+  audit log entries are not written for suppressed firings.
+
+### Added — `rules conditions` composition (γ)
+
+- Rule conditions can now be composed with **`all`** (AND), **`any`** (OR),
+  and **`not`** (negation):
+
+  ```yaml
+  conditions:
+    - any:
+        - time_between: ["22:00", "06:00"]
+        - device: lamp
+          field: power
+          op: "=="
+          value: "on"
+    - not:
+        time_between: ["08:00", "20:00"]
+  ```
+
+  Nesting is unlimited. The top-level `conditions[]` array remains
+  AND-joined so existing flat rules are unaffected.
+
+### Notes
+
+- 1676 tests pass (+22 vs 2.10.0: 6 polish + 9 day_of_week + 8
+  and/or/not + 1 purge).
+
+## [2.10.0] - 2026-04-23
+
+Feature release — adds `switchbot install` / `switchbot uninstall`,
+collapsing the Phase 3 one-command bootstrap UX onto the Phase 3A
+orchestrator library that shipped in 2.9.0.
+
+### Added — `switchbot install` (Phase 3B, in-CLI)
+
+- **`switchbot install`** — one-command setup that composes four
+  steps with rollback on failure: prompt credentials → write keychain
+  → scaffold `policy.yaml` → symlink the Claude Code skill. The step
+  library (`src/install/default-steps.ts`) is a thin layer over the
+  generic `runInstall()` runner, so each factory is independently
+  unit-tested and individually skippable via `--skip`.
+- **`--agent <name>`** — `claude-code` (default: auto-links
+  `~/.claude/skills/switchbot` to `--skill-path`), `cursor` / `copilot`
+  (prints a skill-install recipe for docs users to follow), `none`
+  (skips the skill step entirely).
+- **`--skill-path <dir>`** — points at a local clone of
+  the companion skill repo. No auto-clone — fork/offline/pin
+  semantics stay in the user's court. On Windows the link uses an
+  NTFS junction so it works without elevation.
+- **`--token-file <path>`** — two-line credential file for
+  non-interactive installs. Deleted on success; left alone on failure
+  so the user can retry.
+- **`--skip <names>`** — comma-separated step names to skip; useful
+  for partial re-runs after fixing one failing step.
+- **`--dry-run`** — prints the step list (text) or a structured
+  preview (`--json`) without mutation.
+- **Exit codes**: `0` ok · `2` preflight failed (nothing changed) ·
+  `3` step failed, rollback completed · `4` rollback had residue (the
+  printed output tells the user what to clean up).
+- **Deliberate non-decisions**: doctor verification is NOT a step
+  (treating its failure as rollback-worthy would destroy a
+  freshly-installed good state); `install` prints
+  `next: switchbot doctor` as a hint instead.
+
+### Added — `switchbot uninstall`
+
+- **`switchbot uninstall`** — reverse of install. Removes the skill
+  symlink (default yes, confirm), credentials (opt-in via
+  `--remove-creds`), and `policy.yaml` (opt-in via `--remove-policy`
+  since user edits may live there). `--yes` assumes yes to every
+  confirmation; `--dry-run` previews; `--json` emits structured
+  outcomes.
+- Unlike install, uninstall is **not** rollback-safe — it keeps going
+  on per-step failure and exits `3` if anything failed, so the user
+  can read the per-action report and clean up manually.
+- The CLI binary is never uninstalled. Users remove it via
+  `npm rm -g @switchbot/openapi-cli`.
+
+### Changed
+
+- **`src/commands/policy.ts`** exports `scaffoldPolicyFile()` so the
+  install step can reuse the exact scaffolding logic `policy new`
+  uses — no drift risk between the two code paths.
+- **`src/commands/config.ts`** exports `promptTokenAndSecret()` and
+  `readCredentialsFile()` for the install step to reuse the same
+  terminal-prompt behavior `config set-token` has.
+
+### Notes
+
+- No API/CLI surface breakage. Existing scripts continue to work.
+- Path for the skill symlink: `~/.claude/skills/switchbot` on
+  claude-code; other agents receive a recipe block instead of an
+  auto-link.
+- 1654 tests pass (+30 vs 2.9.0: 20 step factory unit tests + 5
+  install smoke + 5 uninstall smoke).
+
+## [2.9.0] - 2026-04-23
+
+Feature release — Policy v0.2, the Phase 4 rules engine, Phase 3A
+keychain support, and the install orchestrator library. This is the
+release that makes the CLI feel like a single integrated product
+instead of a collection of commands that happen to share a binary.
+
+### Added — Policy v0.2 schema (Phase 2 continuation)
+
+- **`policy new --version 0.2`** emits a v0.2 starter file carrying
+  the new `automation.rules[]` block. `policy new` still defaults to
+  v0.1 so existing CLI builds keep parsing the output — the default
+  flip is tracked on the Roadmap for v3.0.
+- **`policy validate`** dispatches the validator by schema version
+  (`0.1` or `0.2`), so a mixed install can hold two policy files at
+  different versions without false-positive errors.
+- **`policy migrate 0.1 → 0.2`** walks the YAML with `yaml@2`'s CST,
+  rewrites the `version:` scalar, and appends an `automation:` block
+  stub. Comments and key order are preserved byte-for-byte.
+- **Destructive-command validator hook** — the v0.2 schema rejects
+  rules whose `then.command` would fire `unlock`, `garage-door open`,
+  `keypad createKey`, or other destructive actions. The rejection is
+  a schema error, not a runtime surprise.
+- **`doctor`, `agent-bootstrap --compact`, MCP `policy_validate`**
+  now surface the detected policy schema version.
+
+### Added — Rules engine v0.2 (Phase 4)
+
+- **`switchbot rules lint`** — static checks against `policy.yaml`:
+  schema, alias resolution, cron expression validity, duplicate rule
+  names, destructive-command guard. Exit code 0/1/2/3.
+- **`switchbot rules list [--json]`** — prints every rule's name,
+  trigger summary, `dry_run` state, and throttle window.
+- **`switchbot rules run [--dry-run] [--max-firings N]`** — the
+  engine proper. Composes three triggers (`mqtt` / `cron` / `webhook`),
+  two conditions (`time_between` / `device_state`), and the
+  per-rule `throttle` and `dry_run` blocks.
+- **`switchbot rules reload`** — sends SIGHUP on Unix, writes a
+  pid-file sentinel on Windows. The engine reloads the policy without
+  restarting the process; in-flight firings complete on the old
+  policy.
+- **`switchbot rules tail [--follow]`** — tails the audit log
+  filtered to `rule-*` entries.
+- **`switchbot rules replay --since <duration> --dry-run`** — reads
+  past MQTT shadow events from the cache and replays them against
+  the current rule set without firing commands, for verifying rule
+  changes before enabling them.
+- **Audit log v2** — `rule-fire`, `rule-fire-dry`, `rule-throttled`,
+  and `rule-webhook-rejected` record types. Format is documented in
+  `docs/audit-log.md`.
+- **MQTT trigger** — subscribes to the cloud-issued broker, uses the
+  same `extractShadowEvent` helper as `events mqtt-tail`.
+- **Cron trigger** — runs on local time, quiet-hours aware.
+- **Webhook trigger** — bearer-token HTTP ingest on a configurable
+  port; tokens stored in the keychain, never in `policy.yaml`.
+- **`device_state` condition** — per-tick cached lookups so a single
+  firing doesn't hit the API N times for N conditions.
+
+### Added — Phase 3A: keychain + install orchestrator
+
+- **`src/credentials/keychain.ts`** abstraction with four backends:
+  macOS `security`, Windows `cmdkey`, Linux `secret-tool` (libsecret),
+  and a `0600`-permissioned JSON file fallback. The CLI picks the
+  first backend that works on the running platform.
+- **`switchbot auth keychain describe | get | set | delete | migrate`**
+  — explicit management of credentials in the chosen backend.
+  `migrate` moves a value from the file fallback to the OS keychain
+  and removes the file entry on success.
+- **`doctor`** and **`agent-bootstrap --compact`** report the active
+  credential source in a field named `credentialSource`.
+- **`src/install/`** — in-repo preflight + rollback-aware step runner
+  library that the external plugin-manager install command
+  (Phase 3B) can call into. Library only; no top-level install
+  subcommand ships in this release (that is Track β).
+
+### Added — Docs
+
+- **`docs/design/roadmap.md`** — authoritative Phase 1-4 table with
+  the skill repo's orthogonal `autonomyLevel` L1/L2/L3 mapping.
+- **`docs/ux-principles.md`** — 10 principles the CLI, MCP server,
+  rules engine, and skill all obey.
+- **`docs/phase-1-manual-orchestration.md`** — frames Phase 1 as the
+  complete manual-orchestration contract, not a transitional state.
+- **`examples/quickstart/`** — 7-step walkthrough + `policy.yaml.example`,
+  `config.env.example`, and a systemd unit template for running
+  `events mqtt-tail` as a long-lived service.
+
+### Changed
+
+- **README Roadmap section** now points at
+  `docs/design/roadmap.md` and lists reserved tracks β / γ / δ / ε
+  alongside the existing long-term backlog.
+- **README header** — the skill-pointer blockquote now links directly
+  to the sibling companion skill repo instead of saying
+  "published separately".
+
+### Skill-side impact
+
+- The companion skill is bumped to **0.3.0** in
+  the companion skill repo with `authority.cli: ">=2.9.0 <3.0.0"`,
+  `policy.version: "0.2"`, and `autonomyLevel: "L1"`. The skill's
+  Authoritative command table adds the `switchbot rules *` and
+  `switchbot auth keychain *` groups shipped in this release.
+
+## [2.8.0] - 2026-04-22
+
+Feature release — `switchbot policy` command group.
+
+The companion SwitchBot skill reads its behaviour from `~/.config/switchbot/policy.yaml` (aliases, confirmations, quiet hours, audit path). Until this release, a typo in that file failed silently — the skill would load whatever YAML parsed and use defaults for anything it didn't understand, leaving the user to wonder why "bedroom light" didn't work. This release ships a dedicated command group that turns those silent failures into compiler-style errors with line numbers, carets, and fix hints, and eliminates the hand-crafted starter template step from the skill's Quickstart.
+
+### Added
+
+- **`switchbot policy validate [path]`** — validates the policy file against the embedded schema v0.1 (JSON Schema 2020-12). Reports each error with its path, YAML line:col, a source-line snippet + caret, and an action-specific hint (e.g. "paste the deviceId from `switchbot devices list --format=tsv`" on alias pattern mismatches; "destructive actions (lock/unlock/delete*/factoryReset) cannot be pre-approved in policy.yaml" on a forbidden `never_confirm` entry). Supports `--json` for programmatic consumers, `--no-snippet` to drop source preview, `--no-color` for piped output.
+- **`switchbot policy new [path]`** — writes a 99-line annotated starter template to the given path (or the default `~/.config/switchbot/policy.yaml`). Refuses to overwrite an existing file unless `--force` is passed. Creates the parent directory if needed.
+- **`switchbot policy migrate [path]`** — reports the policy file's schema version against what this CLI supports. No-op today (only v0.1 exists); wired so future releases can run structural upgrades without breaking existing policies.
+- **Path resolution precedence**: `[path]` argument > `SWITCHBOT_POLICY_PATH` env var > default `~/.config/switchbot/policy.yaml`. The same resolver is exported for the Phase 3 `agent-bootstrap` install flow to reuse.
+- **Exit-code taxonomy** (scriptable): `0` valid / `1` invalid / `2` file-not-found / `3` yaml-parse / `4` internal / `5` exists (on `new` without `--force`) / `6` unsupported-version (on `migrate`). `--json` mode emits the usual `{schemaVersion, error}` or `{schemaVersion, data}` envelope.
+- **Embedded schema asset** — `src/policy/schema/v0.1.json` ships in the npm package via a post-build `copy-assets.mjs` step. The skill repository's `examples/policy.schema.json` is the mirror copy; a CI job diffs the two on every push to prevent drift.
+
+### Dependencies
+
+- Added `yaml@^2` (source-map-preserving parser), `ajv@^8` + `ajv-formats@^3` (JSON Schema 2020-12 validator via `ajv/dist/2020`).
+
+### Skill-side impact
+
+- Companion SwitchBot skill v0.2.0 declares `authority.cli: "@switchbot/openapi-cli@>=2.8.0 <3.0.0"` and replaces the manual "edit this file by hand" Quickstart step with `switchbot policy new` + `switchbot policy validate`. See the skill repo's `CHANGELOG.md` for the matching entry.
 
 ## [2.7.2] - 2026-04-21
 
@@ -106,7 +546,7 @@ metadata, and agent-discoverable resource surfaces (scenes, webhooks, keys).
 
 ## [2.6.1] - 2026-04-21
 
-Follow-up to v2.6.0 from the OpenClaw re-audit. Three real findings
+Follow-up to v2.6.0 from the external re-audit. Three real findings
 (R-2, R-3, R-4) plus a repo-wide English-only chore; R-1 rejected with
 reason.
 
@@ -159,7 +599,7 @@ reason.
 
 ## [2.6.0] - 2026-04-21
 
-Addresses 14 findings from the OpenClaw v2.5.1 audit (B-1 … B-16, minus
+Addresses 14 findings from the external v2.5.1 audit (B-1 … B-16, minus
 the two declined-as-misread items and four P3 items parked for v3.x).
 All in a single minor bump — no staged releases.
 
@@ -228,7 +668,7 @@ All in a single minor bump — no staged releases.
 
 - Roadmap section at the bottom of README for the v3.x track
   (daemon mode, standalone `npx` MCP package, `self-test` harness,
-  record/replay) — OpenClaw B-17 / B-18 / B-19 / B-21 are parked there
+  record/replay) — audit items B-17 / B-18 / B-19 / B-21 are parked there
   rather than folded into this minor.
 - Clarified that `devices expand` is intentionally limited to
   multi-parameter commands (`setAll`, `setPosition`, `setMode`);
@@ -453,7 +893,7 @@ used to require exact matches are now substrings. See
   steps. Unknown sceneId returns structured `scene_not_found` with a
   candidate list. (bug #17)
 - **`--no-color` flag + `NO_COLOR` env var** — honors the standard
-  https://no-color.org/ contract; disables chalk colors globally before
+  [no-color](https://no-color.org/) contract; disables chalk colors globally before
   any subcommand runs. (bug #12)
 - **`--format markdown`** — accepted as an alias for `--format table`
   with `--table-style markdown` forced at render time, independent of
@@ -515,7 +955,7 @@ used to require exact matches are now substrings. See
   `notes[]` entry. `count / min / max / avg / sum` remain exact.
 - All bug-fix items bundled into 2.5.0 rather than shipping a separate
   2.4.1. Source of bug numbers: the v2.4.0 smoke-test report at
-  `D:/servicdata/openclaw/workspace/switchbot-cli-v2.4.0-report.md`.
+  `D:/servicdata/workspace/switchbot-cli-v2.4.0-report.md`.
 
 ### Not included (deferred)
 
@@ -532,7 +972,7 @@ used to require exact matches are now substrings. See
 
 ## [2.4.0] - 2026-04-20
 
-Large agent-experience overhaul driven by the OpenClaw + Claude integration
+Large agent-experience overhaul driven by third-party agent + Claude integration
 feedback (19 items across P0/P1/P2/P3) plus a new **device history
 aggregation** subsystem. All schema changes are **additive-only** — existing
 agent integrations keep working without code changes and pick up the new
@@ -607,7 +1047,7 @@ fields when they upgrade.
   The cache is **process-local, in-memory**: keys live as SHA-256
   fingerprints on the heap (never raw, so heap dumps / log captures don't
   leak the user-supplied key) and vanish when the process exits. Replay
-  + conflict therefore apply within a single long-lived process — MCP
+  and conflict therefore apply within a single long-lived process — MCP
   server session, `devices batch` run, `plan run`, `history replay` — and
   do **not** carry across independent CLI invocations.
 - **Profile label / description / daily cap / default flags** — `config

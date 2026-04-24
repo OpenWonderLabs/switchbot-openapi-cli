@@ -1,8 +1,19 @@
 # Agent Guide
 
-This guide covers everything an LLM agent (Claude, GPT, Cursor, Zed, OpenClaw, a homegrown orchestrator…) needs to drive SwitchBot devices through the `switchbot` CLI **safely** and **reliably**, without the agent needing to guess at device-specific JSON payloads.
+This guide covers everything an LLM agent (Claude, GPT, Cursor, Zed, a homegrown orchestrator…) needs to drive SwitchBot devices through the `switchbot` CLI **safely** and **reliably**, without the agent needing to guess at device-specific JSON payloads.
 
 If you're a human looking for a tour, start with the [top-level README](../README.md). This file assumes you're writing code that *calls* the CLI or embeds the MCP server.
+
+> **Skill packaging.** This CLI is the authoritative machine-readable surface.
+> The conversational skill that wraps it (Claude Desktop / third-party agent
+> entry points) is tracked as Phase 3B and published out of a separate repo
+> — the skill has no private contract with the CLI, only the documented
+> surfaces below (`mcp serve`, `agent-bootstrap`, `schema export`,
+> `capabilities --json`). To detect CLI ↔ agent-bootstrap schema drift before
+> a session starts, run
+> `switchbot doctor --json | jq '.checks[] | select(.name=="catalog-schema")'`
+> — any status other than `ok` means the skill and CLI have diverged and
+> should be upgraded in lockstep.
 
 ---
 
@@ -14,6 +25,8 @@ If you're a human looking for a tour, start with the [top-level README](../READM
 - [Surface 3: Direct JSON invocation](#surface-3-direct-json-invocation)
 - [Catalog: the shared contract](#catalog-the-shared-contract)
 - [Safety rails](#safety-rails)
+- [Policy awareness](#policy-awareness)
+- [Autonomous rule authoring (L3)](#autonomous-rule-authoring-l3)
 - [Observability](#observability)
 - [Performance and token budget](#performance-and-token-budget)
 
@@ -23,11 +36,17 @@ If you're a human looking for a tour, start with the [top-level README](../READM
 
 All three share the same catalog, HMAC client, retry/backoff, destructive-command guard, cache, and audit-log. Choose based on how your agent is hosted:
 
-| Surface     | Use when…                                                                  | Entry point                                     |
-|-------------|----------------------------------------------------------------------------|-------------------------------------------------|
-| MCP server  | Your agent host speaks [MCP](https://modelcontextprotocol.io) (Claude Desktop, Cursor, Zed, Anthropic Agent SDK) | `switchbot mcp serve` (stdio) or `--port <n>`   |
-| Plan runner | Your agent is already producing structured JSON and you want the CLI to validate + execute it | `switchbot plan run <file>` / stdin               |
-| Direct CLI  | Your agent wraps subprocesses and parses their output                      | Any subcommand with `--json`                    |
+- **MCP server**
+  Use when your agent host speaks [MCP](https://modelcontextprotocol.io)
+  (Claude Desktop, Cursor, Zed, Anthropic Agent SDK).
+  Entry point: `switchbot mcp serve` (stdio) or `--port <n>`.
+- **Plan runner**
+  Use when your agent already produces structured JSON and you want the CLI
+  to validate and execute it.
+  Entry point: `switchbot plan run <file>` or stdin.
+- **Direct CLI**
+  Use when your agent wraps subprocesses and parses output directly.
+  Entry point: any subcommand with `--json`.
 
 ---
 
@@ -57,19 +76,31 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 }
 ```
 
-### Available tools (9)
+### Available tools (21)
 
-| Tool                   | Purpose                                                           | Destructive-guard?       |
-|------------------------|-------------------------------------------------------------------|--------------------------|
-| `list_devices`         | Enumerate physical devices + IR remotes                           | —                        |
-| `get_device_status`    | Live status for one device                                        | —                        |
-| `send_command`         | Dispatch a built-in or customize command                          | yes (`confirm: true` required) |
-| `list_scenes`          | Enumerate saved manual scenes                                     | —                        |
-| `run_scene`            | Execute a saved manual scene                                      | —                        |
-| `search_catalog`       | Look up device type by name/alias                                  | —                        |
-| `describe_device`      | Live status **plus** catalog-derived commands + suggested actions | —                        |
-| `account_overview`     | Single cold-start snapshot — devices, scenes, quota, cache, MQTT state. Call this first in a new agent session to avoid multiple round-trips. | — |
-| `get_device_history`   | Latest state + rolling history from disk — zero quota cost        | —                        |
+| Tool | Purpose | Safety tier |
+| --- | --- | --- |
+| `list_devices` | Enumerate physical devices + IR remotes | read |
+| `get_device_status` | Live status for one device | read |
+| `send_command` | Dispatch a built-in or customize command | action (destructive needs `confirm: true`) |
+| `list_scenes` | Enumerate saved manual scenes | read |
+| `run_scene` | Execute a saved manual scene | action |
+| `search_catalog` | Look up device type by name/alias | read |
+| `describe_device` | Catalog-derived capabilities + optional live status | read |
+| `account_overview` | Cold-start snapshot (devices/scenes/quota/cache/MQTT) | read |
+| `get_device_history` | Latest state + ring history from disk | read |
+| `query_device_history` | Time-range query over JSONL history | read |
+| `aggregate_device_history` | Bucketed statistics over history | read |
+| `policy_validate` | Validate policy.yaml | read |
+| `policy_new` | Scaffold a starter policy file | action |
+| `policy_migrate` | Upgrade policy schema in-place | action |
+| `policy_diff` | Compare two policy files (`leftPath/rightPath/equal/.../diff`) | read |
+| `plan_suggest` | Draft plan JSON from intent + devices | read |
+| `plan_run` | Validate and execute a plan JSON object | action |
+| `audit_query` | Filter audit log entries | read |
+| `audit_stats` | Aggregate audit stats by kind/result/device/rule | read |
+| `rules_suggest` | Draft automation rule YAML from intent | read |
+| `policy_add_rule` | Inject rule YAML into `automation.rules[]` with diff | action |
 
 The MCP server refuses destructive commands (Smart Lock `unlock`, Garage Door `open`, etc.) unless the tool call includes `confirm: true`. The allowed list is the `destructive: true` commands in the catalog — `switchbot schema export | jq '[.data.types[].commands[] | select(.destructive)]'` shows every one.
 
@@ -93,11 +124,14 @@ Reads `~/.switchbot/device-history/<deviceId>.json` written by `events mqtt-tail
 
 After `events mqtt-tail` runs on a device, `~/.switchbot/device-history/` contains up to three companion files per device:
 
-| File | Description |
-|------|-------------|
-| `<deviceId>.jsonl` | Append-only, authoritative event log. Source of truth for `history range` and `history aggregate`. Rotated at ~50 MB (up to 3 segments). |
-| `<deviceId>.json` | Latest 100-entry ring buffer. Written on every MQTT event. Read by MCP `get_device_history` for fast, zero-quota retrieval. |
-| `__control.jsonl` | MQTT connection lifecycle events (heartbeat, connect, disconnect). Not a device log; used for diagnostics. |
+- `<deviceId>.jsonl`: append-only, authoritative event log.
+  Source of truth for `history range` and `history aggregate`.
+  Rotated at ~50 MB (up to 3 segments).
+- `<deviceId>.json`: latest 100-entry ring buffer.
+  Written on every MQTT event. Read by MCP `get_device_history`
+  for fast, zero-quota retrieval.
+- `__control.jsonl`: MQTT connection lifecycle events
+  (heartbeat, connect, disconnect). Not a device log; used for diagnostics.
 
 The `.json` file is **not** the source of truth for historical queries — use `.jsonl` (via `history range` or `history aggregate`) when you need a complete, time-bounded record. The `.json` file is optimised for "what is the latest state?" lookups.
 
@@ -134,6 +168,20 @@ Give that file to your agent framework (OpenAI tool schema, Anthropic JSON mode,
 }
 ```
 
+### Draft a plan from intent (heuristic scaffold)
+
+```bash
+# CLI — produces a candidate plan JSON on stdout
+switchbot plan suggest --intent "turn off all lights" --device D1 --device D2
+
+# MCP — agents can call plan_suggest({intent, device_ids}) without leaving the session
+```
+
+`plan suggest` uses keyword heuristics (no LLM) to pick a command from the intent text and generate
+one step per device. Recognised verbs: `turnOn`, `turnOff`, `press`, `lock`, `unlock`, `open`, `close`,
+`pause`. Defaults to `turnOn` with a warning when the intent is unclear. Always review and edit the
+output before running.
+
 ### Validate first, run later
 
 ```bash
@@ -148,6 +196,7 @@ cat plan.json | switchbot --json plan run -         # machine-readable outcome
 - Steps execute sequentially. A failed step stops the run (exit 1) unless you pass `--continue-on-error`.
 - `wait` uses `setTimeout`; `ms` is capped at 600 000 so a malformed plan can't hang the agent.
 - Destructive commands are **skipped** (not failed) without `--yes`, so an agent that omits the flag gets a clean "needs confirmation" summary.
+- `--require-approval` enables per-step TTY confirmation for destructive steps — approve with `y`, reject with any other key. Non-TTY environments (CI, pipes) auto-reject. Mutually exclusive with `--json`. `--yes` takes precedence.
 - Every successful/failed step lands in `--audit-log` (see [Observability](#observability)).
 
 ---
@@ -156,10 +205,12 @@ cat plan.json | switchbot --json plan run -         # machine-readable outcome
 
 ### `--json` vs `--format=json` — pick the right one
 
-| Flag | Output | When to use |
-|------|--------|-------------|
-| `--json` | **Raw API payload** — exact JSON the SwitchBot API returned | `jq` pipelines, scripts that need the full response body |
-| `--format=json` | **Projected row view** — CLI column model, `--fields` applies | When you only need specific fields; consistent shape across all commands |
+- `--json`
+  Output: **Raw API payload** — exact JSON the SwitchBot API returned.
+  Use when: building `jq` pipelines or scripts that need the full response body.
+- `--format=json`
+  Output: **Projected row view** — CLI column model, `--fields` applies.
+  Use when: you only need specific fields with a consistent row shape.
 
 `--json` and `--format=json` differ only in output shape — they share the same HTTP client and auth.
 
@@ -249,6 +300,87 @@ Use `switchbot doctor` to confirm the CLI is healthy before orchestrating anythi
 
 ---
 
+## Policy awareness
+
+Users can declare per-account preferences in a `policy.yaml` file
+(at the CLI's default policy path). Agents should
+read it at session start — it holds the aliases, quiet-hours window,
+and confirmation overrides the user wants honoured.
+
+```bash
+switchbot policy validate            # exit 0 if the file is healthy
+switchbot policy validate --json     # machine-readable error envelope
+```
+
+Do **not** attempt to parse the YAML directly; let `policy validate`
+parse it and surface the result. If validation fails, relay the
+compiler-style error (file:line:col + hint) to the user — the CLI
+already produces agent-friendly output.
+
+Concepts an agent should honour:
+
+- `aliases.<name>` → deviceId mapping. Prefer this over the CLI's
+  match-by-name fallback, which can pick the wrong device when two
+  names collide.
+- `confirmations.always_confirm[]` / `confirmations.never_confirm[]` —
+  per-action overrides of the tier-based confirmation default. The
+  schema refuses to pre-approve destructive actions, so you can
+  trust `never_confirm` not to contain `unlock` etc.
+- `quiet_hours.start / end` — during this window, even `mutation`-tier
+  actions require explicit user confirmation.
+
+Full field-level reference: [`docs/policy-reference.md`](./policy-reference.md).
+
+---
+
+## Autonomous rule authoring (L3)
+
+Agents operating at autonomy level L3 can **author** automation rules
+programmatically — no manual policy.yaml editing required.
+
+### Workflow
+
+```bash
+# Step 1: Generate candidate rule YAML (no side effects)
+switchbot rules suggest \
+  --intent "turn on hallway light when motion detected" \
+  --trigger mqtt \
+  --device "hallway-sensor" --device "hallway-lamp"
+
+# Step 2: Dry-run into policy.yaml (shows diff, no write)
+switchbot rules suggest --intent "..." | switchbot policy add-rule --dry-run
+
+# Step 3: Show diff to user, wait for approval, then inject
+switchbot rules suggest --intent "..." | switchbot policy add-rule --enable
+
+# Step 4: Lint and reload
+switchbot rules lint && switchbot rules reload
+```
+
+MCP agents use `rules_suggest` + `policy_add_rule` tools for the same
+pipeline without shell access.
+
+### Hard limits
+
+- **Never** set `automation.enabled: true` without explicitly informing the user.
+- **Always** start a new rule with `dry_run: true` (the generator does this automatically).
+- **Never** arm a rule (`dry_run: false`) on first author — require the user to confirm firings look correct via `switchbot rules tail --follow`.
+- **Never** use destructive commands (`unlock`, `deleteScene`, etc.) in rule `then[]`.
+
+### Dry-run → arm transition
+
+After the user confirms the rule fires correctly:
+
+```bash
+# Edit policy.yaml: set dry_run: false
+# Then reload:
+switchbot rules lint && switchbot rules reload
+```
+
+Use `switchbot rules replay --since 24h --json` regularly to surface misfires.
+
+---
+
 ## Observability
 
 ```bash
@@ -268,24 +400,6 @@ The audit format is JSONL with this shape:
 ```
 
 Pair with `switchbot devices watch --interval=30s` for continuous state diffs (add `--include-unchanged` to emit every tick even when nothing changed), `switchbot events tail` to receive webhook pushes locally, or `switchbot events mqtt-tail` for real-time MQTT shadow updates.
-
-#### Routing MQTT events to an OpenClaw agent
-
-Run `mqtt-tail` once with `--sink openclaw` to replace the SwitchBot channel plugin entirely — no separate plugin installation required:
-
-```bash
-switchbot events mqtt-tail \
-  --sink openclaw \
-  --openclaw-token <token> \
-  --openclaw-model my-home-agent
-
-# Persist history at the same time:
-switchbot events mqtt-tail \
-  --sink file --sink-file ~/.switchbot/events.jsonl \
-  --sink openclaw --openclaw-token <token> --openclaw-model home
-```
-
-OpenClaw exposes an OpenAI-compatible HTTP API at `http://localhost:18789/v1/chat/completions`. The sink formats each event as a short text message (e.g. `📱 Climate Panel: 27.5°C / 51%`) and POSTs it to the agent directly.
 
 ---
 

@@ -10,6 +10,15 @@ import { DAILY_QUOTA, todayUsage } from '../utils/quota.js';
 import { AGENT_BOOTSTRAP_SCHEMA_VERSION } from './agent-bootstrap.js';
 import { CATALOG_SCHEMA_VERSION } from '../devices/catalog.js';
 import { createSwitchBotMcpServer, listRegisteredTools } from './mcp.js';
+import {
+  resolvePolicyPath,
+  loadPolicyFile,
+  PolicyFileNotFoundError,
+  PolicyYamlParseError,
+} from '../policy/load.js';
+import { validateLoadedPolicy } from '../policy/validate.js';
+import { selectCredentialStore } from '../credentials/keychain.js';
+import { getActiveProfile } from '../lib/request-context.js';
 
 interface Check {
   name: string;
@@ -21,27 +30,120 @@ export const DOCTOR_SCHEMA_VERSION = 1;
 
 async function checkCredentials(): Promise<Check> {
   const envOk = Boolean(process.env.SWITCHBOT_TOKEN && process.env.SWITCHBOT_SECRET);
-  if (envOk) return { name: 'credentials', status: 'ok', detail: 'env: SWITCHBOT_TOKEN + SWITCHBOT_SECRET' };
+  const profile = getActiveProfile() ?? 'default';
+
+  let backendName: string = 'file';
+  let backendLabel: string = 'file';
+  let writable = true;
+  let keychainHasProfile = false;
+  try {
+    const store = await selectCredentialStore();
+    const desc = store.describe();
+    backendName = store.name;
+    backendLabel = desc.backend;
+    writable = desc.writable;
+    try {
+      const creds = await store.get(profile);
+      keychainHasProfile = Boolean(creds && creds.token && creds.secret);
+    } catch {
+      keychainHasProfile = false;
+    }
+  } catch {
+    // selectCredentialStore falls back to file; a throw here is unexpected but
+    // non-fatal — downstream callers degrade to the file path.
+  }
+
+  if (envOk) {
+    return {
+      name: 'credentials',
+      status: 'ok',
+      detail: {
+        source: 'env',
+        backend: backendName,
+        backendLabel,
+        writable,
+        profile,
+        message: 'env: SWITCHBOT_TOKEN + SWITCHBOT_SECRET',
+      },
+    };
+  }
+
+  if (keychainHasProfile && backendName !== 'file') {
+    return {
+      name: 'credentials',
+      status: 'ok',
+      detail: {
+        source: 'keychain',
+        backend: backendName,
+        backendLabel,
+        writable,
+        profile,
+        message: `keychain (${backendLabel}) has credentials for profile "${profile}"`,
+      },
+    };
+  }
+
   const file = configFilePath();
   if (!fs.existsSync(file)) {
     return {
       name: 'credentials',
       status: 'fail',
-      detail: `No env vars and no config at ${file}. Run 'switchbot config set-token'.`,
+      detail: {
+        source: 'none',
+        backend: backendName,
+        backendLabel,
+        writable,
+        profile,
+        message: `No env vars, no keychain entry for profile "${profile}", and no config at ${file}. Run 'switchbot config set-token' or 'switchbot auth keychain set'.`,
+      },
     };
   }
   try {
     const raw = fs.readFileSync(file, 'utf-8');
     const cfg = JSON.parse(raw);
     if (!cfg.token || !cfg.secret) {
-      return { name: 'credentials', status: 'fail', detail: `Config ${file} missing token/secret.` };
+      return {
+        name: 'credentials',
+        status: 'fail',
+        detail: {
+          source: 'file',
+          backend: backendName,
+          backendLabel,
+          writable,
+          profile,
+          message: `Config ${file} missing token/secret.`,
+        },
+      };
     }
-    return { name: 'credentials', status: 'ok', detail: `file: ${file}` };
+    const status = writable && backendName !== 'file' ? 'warn' : 'ok';
+    const hint = status === 'warn'
+      ? `Consider running 'switchbot auth keychain migrate' to move credentials into ${backendLabel}.`
+      : undefined;
+    return {
+      name: 'credentials',
+      status,
+      detail: {
+        source: 'file',
+        backend: backendName,
+        backendLabel,
+        writable,
+        profile,
+        message: `file: ${file}`,
+        ...(hint ? { hint } : {}),
+      },
+    };
   } catch (err) {
     return {
       name: 'credentials',
       status: 'fail',
-      detail: `Unreadable config ${file}: ${err instanceof Error ? err.message : String(err)}`,
+      detail: {
+        source: 'file',
+        backend: backendName,
+        backendLabel,
+        writable,
+        profile,
+        message: `Unreadable config ${file}: ${err instanceof Error ? err.message : String(err)}`,
+      },
     };
   }
 }
@@ -325,6 +427,84 @@ function checkAudit(): Check {
   }
 }
 
+function checkPolicy(): Check {
+  // A policy file is optional — many users run the CLI without one. Report
+  // `ok` with `present: false` so agents can tell the difference between
+  // "no policy configured" (fine) and "policy broken" (needs attention).
+  const policyPath = resolvePolicyPath();
+  try {
+    const loaded = loadPolicyFile(policyPath);
+    const result = validateLoadedPolicy(loaded);
+    if (result.valid) {
+      return {
+        name: 'policy',
+        status: 'ok',
+        detail: {
+          path: policyPath,
+          present: true,
+          valid: true,
+          schemaVersion: result.schemaVersion,
+        },
+      };
+    }
+    return {
+      name: 'policy',
+      status: 'fail',
+      detail: {
+        path: policyPath,
+        present: true,
+        valid: false,
+        schemaVersion: result.schemaVersion,
+        errorCount: result.errors.length,
+        firstError: result.errors[0]
+          ? {
+              path: result.errors[0].path,
+              line: result.errors[0].line,
+              message: result.errors[0].message,
+            }
+          : undefined,
+        message: "run 'switchbot policy validate' for full diagnostics",
+      },
+    };
+  } catch (err) {
+    if (err instanceof PolicyFileNotFoundError) {
+      return {
+        name: 'policy',
+        status: 'ok',
+        detail: {
+          path: policyPath,
+          present: false,
+          message: "no policy file (optional — run 'switchbot policy new' to scaffold one)",
+        },
+      };
+    }
+    if (err instanceof PolicyYamlParseError) {
+      const first = err.yamlErrors[0];
+      return {
+        name: 'policy',
+        status: 'fail',
+        detail: {
+          path: policyPath,
+          present: true,
+          valid: false,
+          parseError: true,
+          line: first?.line,
+          col: first?.col,
+          message: first?.message ?? err.message,
+        },
+      };
+    }
+    return {
+      name: 'policy',
+      status: 'warn',
+      detail: {
+        path: policyPath,
+        message: `could not read policy file: ${err instanceof Error ? err.message : String(err)}`,
+      },
+    };
+  }
+}
+
 function checkNodeVersion(): Check {
   const major = Number(process.versions.node.split('.')[0]);
   if (Number.isFinite(major) && major < 18) {
@@ -474,6 +654,7 @@ const CHECK_REGISTRY: CheckDef[] = [
     run: ({ probe }) => (probe ? checkMqttProbe() : checkMqtt()),
   },
   { name: 'mcp', description: 'MCP server instantiable + tool count', run: () => checkMcp() },
+  { name: 'policy', description: 'policy.yaml present + schema-valid (if configured)', run: () => checkPolicy() },
   { name: 'audit', description: 'recent command errors (last 24h)', run: () => checkAudit() },
 ];
 
@@ -631,7 +812,12 @@ Examples:
       } else {
         for (const c of checks) {
           const icon = c.status === 'ok' ? '✓' : c.status === 'warn' ? '!' : '✗';
-          const detailStr = typeof c.detail === 'string' ? c.detail : JSON.stringify(c.detail);
+          const detailStr =
+            typeof c.detail === 'string'
+              ? c.detail
+              : (typeof (c.detail as { message?: unknown }).message === 'string'
+                  ? ((c.detail as { message: string }).message)
+                  : JSON.stringify(c.detail));
           console.log(`${icon} ${c.name.padEnd(12)} ${detailStr}`);
         }
         console.log('');

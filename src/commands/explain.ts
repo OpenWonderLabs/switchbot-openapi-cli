@@ -23,8 +23,6 @@ interface ExplainResult {
     parameter: string;
     idempotent?: boolean;
     safetyTier?: SafetyTier;
-    /** @deprecated Derived from safetyTier === 'destructive'. Will be removed in v3.0. */
-    destructive?: boolean;
   }>;
   statusFields: string[];
   children: Array<{ deviceId: string; name: string; type: string }>;
@@ -86,7 +84,6 @@ Examples:
                 parameter: c.parameter,
                 idempotent: c.idempotent,
                 ...(tier ? { safetyTier: tier } : {}),
-                destructive: c.destructive,
               };
             })
           : [];
@@ -151,7 +148,7 @@ function printHuman(r: ExplainResult): void {
   if (r.commands.length) {
     console.log('commands:');
     for (const c of r.commands) {
-      const flags = [c.idempotent && 'idempotent', c.destructive && 'destructive']
+      const flags = [c.idempotent && 'idempotent', c.safetyTier === 'destructive' && 'destructive']
         .filter(Boolean)
         .join(', ');
       const suffix = flags ? `  [${flags}]` : '';

@@ -2,14 +2,45 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { getAuditLog } from './flags.js';
 
-/** Bump when breaking changes to the audit line shape land. */
-export const AUDIT_VERSION = 1;
+/**
+ * Bump when breaking changes to the audit line shape land.
+ *
+ * History:
+ *   1 — initial command audit (kind: 'command' only).
+ *   2 — adds rule-engine kinds ('rule-fire', 'rule-fire-dry',
+ *       'rule-throttled', 'rule-webhook-rejected') and a sibling `rule`
+ *       block describing which rule fired and why. Reader stays backwards
+ *       compatible: v1 lines parse as command entries with `rule`
+ *       undefined.
+ */
+export const AUDIT_VERSION = 2;
+
+export type AuditEntryKind =
+  | 'command'
+  | 'rule-fire'
+  | 'rule-fire-dry'
+  | 'rule-throttled'
+  | 'rule-webhook-rejected';
+
+export interface AuditRuleContext {
+  /** Rule.name from policy.yaml. */
+  name: string;
+  /** Where the trigger came from. */
+  triggerSource: 'mqtt' | 'cron' | 'webhook';
+  /** Resolved deviceId the rule fired against, if any. */
+  matchedDevice?: string;
+  /** UUID correlating multi-action fires + throttle entries. */
+  fireId: string;
+  /** Optional free-text reason the engine recorded alongside the fire
+   * (e.g. "throttled: 8s since last fire", "destructive command blocked"). */
+  reason?: string;
+}
 
 export interface AuditEntry {
   /** Schema version — lets old log lines coexist with new ones after format changes. */
   auditVersion?: number;
   t: string;
-  kind: 'command';
+  kind: AuditEntryKind;
   deviceId: string;
   command: string;
   parameter: unknown;
@@ -17,6 +48,8 @@ export interface AuditEntry {
   dryRun: boolean;
   result?: 'ok' | 'error';
   error?: string;
+  /** Present for rule-engine kinds; absent for direct CLI command entries. */
+  rule?: AuditRuleContext;
 }
 
 function resolveAuditPath(): string | null {

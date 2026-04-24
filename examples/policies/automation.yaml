@@ -1,0 +1,129 @@
+# ============================================================================
+#  automation.yaml — policy v0.2, rule engine preview
+# ============================================================================
+#
+#  Why this shape:
+#    Demonstrates the v0.2 `automation.rules[]` block driving the
+#    `switchbot rules run` engine. Three rules, one per trigger source:
+#
+#      1. mqtt    — hallway motion at night flips a light on; active.
+#      2. mqtt    — window/door opened emits an audit-only dry-run; active.
+#      3. cron    — 22:00 turn off a forgotten kitchen plug; preview-only,
+#                   `rules lint` flags it as `trigger-unsupported` until
+#                   E1 lands.
+#
+#    The file keeps `aliases` rich enough that the `device:` fields in
+#    each rule resolve unambiguously; switchbot resolves the alias at
+#    fire time and stamps the real deviceId into the audit log.
+#
+#  When to pick this:
+#    - You have MQTT enabled on the SwitchBot account (events mqtt-tail
+#      must be working — check with `switchbot doctor --section mqtt`).
+#    - You want every rule fire recorded in the audit log before it
+#      touches real devices — every rule here sets `dry_run: true`.
+#    - You're evaluating the preview engine and want a working baseline
+#      to diff against.
+#
+#  Trade-off:
+#    - cron rule is recognised by the schema but not wired yet (E1). It
+#      does not fire; `rules lint` reports status=unsupported for it.
+#    - `rules run` is long-running. Use `--max-firings N` to bound a
+#      demo session; the engine stops cleanly after N successful fires.
+#
+#  Copy to install:
+#    cp automation.yaml ~/.config/openclaw/switchbot/policy.yaml
+#    switchbot policy validate        # full schema check
+#    switchbot rules lint             # rule-level static check
+#    switchbot rules list             # human summary
+#    switchbot rules run --max-firings 3   # dry-run 3 fires, then stop
+#
+# ============================================================================
+
+version: "0.2"
+
+aliases:
+  # Replace with your own deviceIds. `switchbot devices list --format=tsv`
+  # prints the upper-case ID the schema requires.
+  "hallway lamp":      "01-202407090924-26354212"
+  "front door":        "02-202501201700-99887766"
+  "kitchen plug":      "03-202503081500-55443322"
+  "living room motion": "04-202506110830-11223344"
+
+confirmations:
+  # Rules fire without prompts (they are declarative by design), but
+  # ad-hoc `switchbot devices command ...` runs still use these gates.
+  always_confirm:
+    - "turnOn"
+    - "turnOff"
+  never_confirm: []
+
+# Overnight window for the motion-at-night rule. start > end means the
+# window crosses midnight.
+quiet_hours:
+  start: "22:00"
+  end:   "07:00"
+
+audit:
+  log_path: "~/.switchbot/audit.log"
+  retention: "90d"
+
+automation:
+  enabled: true
+  rules:
+    # ------------------------------------------------------------------
+    #  Rule 1: hallway motion at night → turn the hallway lamp on.
+    # ------------------------------------------------------------------
+    - name: hallway motion at night
+      when:
+        source: mqtt
+        event: motion.detected
+        # Scope to the motion sensor in the living room. Without this
+        # filter, any motion event from any device would match.
+        device: living room motion
+      conditions:
+        # AND-joined: every condition must pass for the rule to fire.
+        - time_between: ["22:00", "07:00"]
+      then:
+        - command: "devices command <id> turnOn"
+          device: hallway lamp
+      throttle:
+        # Minimum spacing between fires. Second motion inside 10 minutes
+        # is suppressed and audited as `rule-throttled`.
+        max_per: "10m"
+      dry_run: true
+
+    # ------------------------------------------------------------------
+    #  Rule 2: front door opened → log only (no action).
+    #
+    #  A dry-run rule that does nothing useful beyond writing an audit
+    #  line. Useful as a regression check: you can tail
+    #  `~/.switchbot/audit.log` and confirm `rule-fire-dry` entries
+    #  appear in real time.
+    # ------------------------------------------------------------------
+    - name: front door opened notify
+      when:
+        source: mqtt
+        event: contact.opened
+        device: front door
+      then:
+        # Any "read" command works — we just want the audit trail.
+        - command: "devices status <id>"
+          device: front door
+      dry_run: true
+
+    # ------------------------------------------------------------------
+    #  Rule 3: 22:00 every night → turn off the kitchen plug.
+    #
+    #  Preview only. `rules lint` reports this as
+    #  `status: unsupported` (trigger-unsupported) until E1 wires the
+    #  cron scheduler in. The engine today will not fire this rule —
+    #  there's no scheduler loop to drive cron triggers.
+    # ------------------------------------------------------------------
+    - name: nightly kitchen plug off
+      when:
+        source: cron
+        schedule: "0 22 * * *"
+      then:
+        - command: "devices command <id> turnOff"
+          device: kitchen plug
+      dry_run: true

@@ -26,8 +26,6 @@ interface SchemaEntry {
     commandType: 'command' | 'customize';
     idempotent: boolean;
     safetyTier: SafetyTier;
-    /** @deprecated Derived from safetyTier === 'destructive'. Will be removed in v3.0. */
-    destructive: boolean;
     safetyReason?: string;
     exampleParams?: string[];
   }>;
@@ -45,8 +43,6 @@ interface CompactSchemaEntry {
     commandType: 'command' | 'customize';
     idempotent: boolean;
     safetyTier: SafetyTier;
-    /** @deprecated Derived from safetyTier === 'destructive'. Will be removed in v3.0. */
-    destructive: boolean;
   }>;
   statusFields: string[];
 }
@@ -74,7 +70,6 @@ function toSchemaCommand(c: CommandSpec, entry: DeviceCatalogEntry) {
     commandType: (c.commandType ?? 'command') as 'command' | 'customize',
     idempotent: Boolean(c.idempotent),
     safetyTier: tier,
-    destructive: tier === 'destructive',
     ...(reason ? { safetyReason: reason } : {}),
     ...(c.exampleParams ? { exampleParams: c.exampleParams } : {}),
   };
@@ -94,7 +89,6 @@ function toCompactEntry(e: DeviceCatalogEntry): CompactSchemaEntry {
         commandType: (c.commandType ?? 'command') as 'command' | 'customize',
         idempotent: Boolean(c.idempotent),
         safetyTier: tier,
-        destructive: tier === 'destructive',
       };
     }),
     statusFields: e.statusFields ?? [],

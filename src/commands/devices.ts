@@ -901,7 +901,6 @@ function normalizeCatalogForJson(entry: DeviceCatalogEntry): object {
       return {
         ...c,
         safetyTier: tier,
-        destructive: tier === 'destructive',
         ...(reason ? { safetyReason: reason } : {}),
       };
     }),

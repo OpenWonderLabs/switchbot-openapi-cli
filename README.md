@@ -14,17 +14,30 @@ Run scenes, stream real-time events over MQTT, and plug AI agents into your home
 - **Releases / changelog:** [GitHub Releases](https://github.com/OpenWonderLabs/switchbot-openapi-cli/releases)
 - **Issues / feature requests:** [GitHub Issues](https://github.com/OpenWonderLabs/switchbot-openapi-cli/issues)
 
+> Looking for the **conversational skill** that drives this CLI from a chat
+> agent? A companion skill for third-party agent hosts is maintained in a
+> separate repository.
+> See [`docs/agent-guide.md`](./docs/agent-guide.md) for the authoritative
+> surfaces (MCP, `agent-bootstrap`, `schema export`, `capabilities --json`)
+> the skill consumes. Skill packaging + registry entry is tracked
+> as Phase 3B — see [`docs/design/roadmap.md`](./docs/design/roadmap.md).
+
 ---
 
 ## Who is this for?
 
 Three entry points, same binary — pick the one that matches how you use it:
 
-| Audience  | Where to start                                                | What you get                                                                                      |
-|-----------|---------------------------------------------------------------|---------------------------------------------------------------------------------------------------|
-| **Human** | this README ([Quick start](#quick-start))                     | Colored tables, helpful hints on errors, shell completion, `switchbot doctor` self-check.         |
-| **Script**| [Output modes](#output-modes), [Scripting examples](#scripting-examples) | `--json`, `--format=tsv/yaml/id`, `--fields`, stable exit codes, `history replay`, audit log.     |
-| **Agent** | [`docs/agent-guide.md`](./docs/agent-guide.md)                | `switchbot mcp serve` (stdio MCP server), `schema export`, `plan run`, destructive-command guard. |
+- **Human**: start with this README ([Quick start](#quick-start)).
+  You get colored tables, helpful error hints, shell completion, and
+  `switchbot doctor` self-check.
+- **Script**: start with [Output modes](#output-modes) and
+  [Scripting examples](#scripting-examples).
+  You get `--json`, `--format=tsv/yaml/id`, `--fields`, stable exit codes,
+  `history replay`, and audit log support.
+- **Agent**: start with [`docs/agent-guide.md`](./docs/agent-guide.md).
+  You get `switchbot mcp serve` (stdio MCP server), `schema export`,
+  `plan run`, and destructive-command guards.
 
 Under the hood every surface shares the same catalog, cache, and HMAC client — switching between them costs nothing.
 
@@ -37,6 +50,7 @@ Under the hood every surface shares the same catalog, cache, and HMAC client —
 - [Installation](#installation)
 - [Quick start](#quick-start)
 - [Credentials](#credentials)
+- [Policy](#policy)
 - [Global options](#global-options)
 - [Commands](#commands)
   - [`config`](#config--credential-management)
@@ -46,6 +60,7 @@ Under the hood every surface shares the same catalog, cache, and HMAC client —
   - [`scenes`](#scenes--run-manual-scenes)
   - [`webhook`](#webhook--receive-device-events-over-http)
   - [`events`](#events--receive-device-events)
+  - [`status-sync`](#status-sync--mqttopenclaw-bridge)
   - [`plan`](#plan--declarative-batch-operations)
   - [`mcp`](#mcp--model-context-protocol-server)
   - [`doctor`](#doctor--self-check)
@@ -55,9 +70,10 @@ Under the hood every surface shares the same catalog, cache, and HMAC client —
   - [`schema`](#schema--export-catalog-as-json)
   - [`capabilities`](#capabilities--cli-manifest)
   - [`cache`](#cache--inspect-and-clear-local-cache)
+  - [`policy`](#policy--validate-scaffold-and-migrate-policyyaml)
   - [`completion`](#completion--shell-tab-completion)
 - [Output modes](#output-modes)
-- [Cache](#cache-1)
+  - [Cache](#cache)
 - [Exit codes & error codes](#exit-codes--error-codes)
 - [Environment variables](#environment-variables)
 - [Scripting examples](#scripting-examples)
@@ -76,7 +92,7 @@ Under the hood every surface shares the same catalog, cache, and HMAC client —
 - 🎨 **Dual output modes** — colorized tables by default; `--json` passthrough for `jq` and scripting
 - 🔐 **Secure credentials** — HMAC-SHA256 signed requests; config file written with `0600`; env-var override for CI
 - 🔍 **Dry-run mode** — preview every mutating request before it hits the API
-- 🧪 **Fully tested** — 692 Vitest tests, mocked axios, zero network in CI
+- 🧪 **Fully tested** — 1765 Vitest tests, mocked axios, zero network in CI
 - ⚡ **Shell completion** — Bash / Zsh / Fish / PowerShell
 
 ## Requirements
@@ -113,6 +129,16 @@ switchbot --help
 
 ## Quick start
 
+The fast path (credentials + policy + skill link, with rollback on failure):
+
+```bash
+switchbot install --agent claude-code --skill-path ../switchbot-skill
+# or preview first
+switchbot install --dry-run
+```
+
+Prefer the manual 4-step walk-through? Here it is:
+
 ```bash
 # 1. Save your credentials (one-time)
 switchbot config set-token <token> <secret>
@@ -120,16 +146,44 @@ switchbot config set-token <token> <secret>
 # 2. List every device on your account
 switchbot devices list
 
-# 3. Control a device
-switchbot devices command <deviceId> turnOn
+# 3. Control a device, writing a structured entry to the audit log
+switchbot devices command <deviceId> turnOn --audit-log
+
+# 4. Confirm everything is healthy — network, catalog, credentials, cache.
+#    Any non-"ok" check prints with a hint; fix those first.
+switchbot doctor --json | jq '.checks[] | select(.status!="ok")'
 ```
+
+Adding an AI agent or declarative automation? A few more one-liners
+round out the first-day path:
+
+```bash
+# 5. Cold-start snapshot an LLM can read before its first tool call.
+switchbot agent-bootstrap --compact | jq '.identity, .devices.total'
+
+# 6. Scaffold a policy.yaml (aliases, quiet hours, confirmations) and
+#    validate it. Safe to run — defaults apply if you never edit it.
+switchbot policy new
+switchbot policy validate
+
+# 7. Stream real-time device events over MQTT (events land as JSONL).
+switchbot events mqtt-tail --max 3 --json
+
+# 8. Run the OpenClaw status bridge in the background.
+switchbot status-sync start --openclaw-model home-agent
+```
+
+See [Policy](#policy) for the authoring flow, [Rules engine](#rules-engine)
+for automations, and [`docs/agent-guide.md`](./docs/agent-guide.md)
+for the agent surface.
 
 ## Credentials
 
 The CLI reads credentials in this order (first match wins):
 
 1. **Environment variables** — `SWITCHBOT_TOKEN` and `SWITCHBOT_SECRET`
-2. **Config file** — `~/.switchbot/config.json` (written by `config set-token`, mode `0600`)
+2. **OS keychain** — native keychain (macOS Keychain / Windows Credential Manager / libsecret on Linux) when populated via `switchbot auth keychain set`
+3. **Config file** — `~/.switchbot/config.json` (written by `config set-token`, mode `0600`)
 
 Obtain the token and secret from the SwitchBot mobile app:
 **Profile → Preferences → Developer Options → Get Token**.
@@ -146,30 +200,129 @@ export SWITCHBOT_SECRET=...
 switchbot config show
 ```
 
+### OS keychain
+
+Prefer native OS storage over the `0600` JSON on disk:
+
+```bash
+# See which backend is active on this machine
+switchbot auth keychain describe
+
+# Move existing ~/.switchbot/config.json into the keychain.
+#   With --delete-file, the CLI deletes the source only when it contains
+#   nothing except token/secret; otherwise it scrubs those fields and keeps
+#   profile metadata such as labels and limits.
+switchbot auth keychain migrate
+
+# Or write credentials directly (TTY prompt or --stdin-file <path>)
+switchbot auth keychain set
+
+# Verify a profile has credentials without leaking the material
+switchbot auth keychain get
+```
+
+Backends: `security(1)` on macOS, `libsecret` / `secret-tool` on Linux,
+Credential Manager (via PowerShell + Win32 `CredReadW`/`CredWriteW`) on
+Windows. If no native backend is available, the file backend takes
+over transparently so the CLI keeps working. `switchbot doctor`
+surfaces which backend is active and warns when file-stored credentials
+could be moved into a writable keychain.
+
+## Policy
+
+`policy.yaml` is an optional per-user file that declares preferences
+the CLI (and any connected AI agent) should honour: device aliases,
+quiet-hours, confirmation overrides, audit-log location, and CLI
+profile. The file lives at:
+
+- Linux / macOS: default policy path resolved by the CLI
+- Windows: default policy path resolved by the CLI
+
+Everything in it is optional — if the file is missing, safe defaults
+apply. Scaffold, edit, and validate:
+
+```bash
+switchbot policy new        # write a commented starter template
+$EDITOR <policy-path>
+switchbot policy validate   # exit 0 if OK, otherwise line-accurate error
+```
+
+Why most users want a policy file: it makes name resolution
+deterministic. Without it, "turn on the bedroom light" falls through
+the CLI's prefix/substring/fuzzy match strategies and can pick the
+wrong device when two names collide. A one-line `aliases` entry
+removes the ambiguity.
+
+**Schema version.** The CLI requires **policy v0.2**. If you have an existing
+v0.1 file from an earlier release, migrate it first:
+
+```bash
+switchbot policy migrate   # in-place upgrade, preserves comments
+```
+
+The v0.2 schema adds a typed `automation.rules[]` block (triggers, conditions,
+throttles, dry-run) used by the rules engine (see
+[Rules engine](#rules-engine)). Full field-by-field reference, validation flow,
+and error catalogue: [`docs/policy-reference.md`](./docs/policy-reference.md).
+Five annotated starter files covering common setups live in
+[`examples/policies/`](./examples/policies/).
+
+### Rules engine
+
+With a policy.yaml (v0.2) you can declare automations that the CLI
+executes for you. Supported triggers: **MQTT** (device events),
+**cron** (schedule-driven), and **webhook** (local HTTP POST).
+Supported conditions: `time_between` (quiet hours) and `device_state`
+(live API check with per-tick dedup). Every fire is recorded in
+`~/.switchbot/audit.log`. `rules run` is long-running; use
+`rules reload` to hot-reload policy without dropping listeners.
+
+```bash
+# 1. Author rules under `automation.rules`. See examples/policies/automation.yaml
+#    for a walkthrough covering the three trigger sources.
+
+# 2. Static-check before running.
+switchbot rules lint                       # exit 0 valid, 1 error
+switchbot rules list --json | jq .         # structured summary
+
+# 3. Run the engine. --dry-run overrides every rule into audit-only mode;
+#    --max-firings bounds a demo session.
+switchbot rules run --dry-run --max-firings 5
+
+# 4. Edit policy.yaml in another shell, then hot-reload without restart.
+switchbot rules reload                     # SIGHUP on Unix, sentinel file on Windows
+
+# 5. Review recorded fires.
+switchbot rules tail --follow              # stream rule-* audit lines
+switchbot rules replay --since 1h --json   # per-rule fires/dries/throttled/errors
+```
+
+See [`docs/design/phase4-rules.md`](./docs/design/phase4-rules.md) for
+the engine's pipeline (subscribe → classify → match → conditions →
+throttle → action → audit).
+
 ## Global options
 
-| Option                      | Description                                                              |
-| --------------------------- | ------------------------------------------------------------------------ |
-| `--json`                    | Print the raw JSON response instead of a formatted table                 |
-| `--format <fmt>`            | Output format: `tsv`, `yaml`, `jsonl`, `json`, `id`                     |
-| `--fields <cols>`           | Comma-separated column names to include (e.g. `deviceId,type`)          |
-| `-v`, `--verbose`           | Log HTTP request/response details to stderr                              |
-| `--dry-run`                 | Print mutating requests (POST/PUT/DELETE) without sending them           |
-| `--timeout <ms>`            | HTTP request timeout in milliseconds (default: `30000`)                  |
-| `--config <path>`           | Override credential file location (default: `~/.switchbot/config.json`) |
-| `--profile <name>`          | Use a named credential profile (`~/.switchbot/profiles/<name>.json`)    |
-| `--cache <dur>`             | Set list and status cache TTL, e.g. `5m`, `1h`, `off`, `auto` (default) |
-| `--cache-list <dur>`        | Set list-cache TTL independently (overrides `--cache`)                   |
-| `--cache-status <dur>`      | Set status-cache TTL independently (default off; overrides `--cache`)   |
-| `--no-cache`                | Disable all cache reads for this invocation                              |
-| `--retry-on-429 <n>`        | Max 429 retry attempts (default: `3`)                                    |
-| `--no-retry`                | Disable automatic 429 retries                                            |
-| `--backoff <strategy>`      | Retry backoff: `exponential` (default) or `linear`                      |
-| `--no-quota`                | Disable local request-quota tracking                                     |
-| `--audit-log`               | Append mutating commands to a JSONL audit log (default path: `~/.switchbot/audit.log`) |
-| `--audit-log-path <path>`   | Custom audit log path; use together with `--audit-log`                   |
-| `-V`, `--version`           | Print the CLI version                                                    |
-| `-h`, `--help`              | Show help for any command or subcommand                                  |
+- `--json`: Print the raw JSON response instead of a formatted table.
+- `--format <fmt>`: Output format: `tsv`, `yaml`, `jsonl`, `json`, `id`.
+- `--fields <cols>`: Comma-separated column names to include (for example `deviceId,type`).
+- `-v`, `--verbose`: Log HTTP request/response details to stderr.
+- `--dry-run`: Print mutating requests (POST/PUT/DELETE) without sending them.
+- `--timeout <ms>`: HTTP request timeout in milliseconds (default `30000`).
+- `--config <path>`: Override credential file location (default `~/.switchbot/config.json`).
+- `--profile <name>`: Use a named credential profile (`~/.switchbot/profiles/<name>.json`).
+- `--cache <dur>`: Set list and status cache TTL, for example `5m`, `1h`, `off`, `auto` (default).
+- `--cache-list <dur>`: Set list-cache TTL independently (overrides `--cache`).
+- `--cache-status <dur>`: Set status-cache TTL independently (default off; overrides `--cache`).
+- `--no-cache`: Disable all cache reads for this invocation.
+- `--retry-on-429 <n>`: Max 429 retry attempts (default `3`).
+- `--no-retry`: Disable automatic 429 retries.
+- `--backoff <strategy>`: Retry backoff: `exponential` (default) or `linear`.
+- `--no-quota`: Disable local request-quota tracking.
+- `--audit-log`: Append mutating commands to a JSONL audit log (default path `~/.switchbot/audit.log`).
+- `--audit-log-path <path>`: Custom audit log path; use together with `--audit-log`.
+- `-V`, `--version`: Print the CLI version.
+- `-h`, `--help`: Show help for any command or subcommand.
 
 Every subcommand supports `--help`, and most include a parameter-format reference and examples.
 
@@ -231,7 +384,7 @@ switchbot devices list --filter 'name~living'
 switchbot devices list --filter 'type=/Hub.*/'
 switchbot devices list --filter 'name~office,type=/Bulb|Strip/'
 
-# Filter by family / room (family & room info requires the 'src: OpenClaw'
+# Filter by family / room (family & room info requires the platform source
 # header, which this CLI sends on every request)
 switchbot devices list --json | jq '.deviceList[] | select(.familyName == "Home")'
 switchbot devices list --json | jq '[.deviceList[], .infraredRemoteList[]] | group_by(.familyName)'
@@ -270,11 +423,16 @@ switchbot devices commands curtain      # Case-insensitive, substring match
 Three commands accept `--filter`. They share one four-operator grammar,
 but each exposes its own key set:
 
-| Command                             | Operators                                                                                     | Supported keys                        |
-|-------------------------------------|-----------------------------------------------------------------------------------------------|---------------------------------------|
-| `devices list`                      | `=` (substring; **exact** for `category`), `!=` (negated), `~` (substring), `=/regex/` (case-insensitive regex) | `type`, `name`, `category`, `room`    |
-| `devices batch`                     | same                                                                                          | `type`, `family`, `room`, `category`  |
-| `events tail` / `events mqtt-tail`  | same (tail only; mqtt-tail uses `--topic` instead)                                            | `deviceId`, `type`                    |
+- `devices list`
+  Operators: `=` (substring; **exact** for `category`), `!=` (negated),
+  `~` (substring), `=/regex/` (case-insensitive regex).
+  Keys: `type`, `name`, `category`, `room`.
+- `devices batch`
+  Operators: same as `devices list`.
+  Keys: `type`, `family`, `room`, `category`.
+- `events tail` / `events mqtt-tail`
+  Operators: same (tail only; mqtt-tail uses `--topic` instead).
+  Keys: `deviceId`, `type`.
 
 Clauses are comma-separated and AND-ed. No OR across clauses — use regex
 alternation (`=/A|B/`) for that. `category` is the one key that stays exact
@@ -441,7 +599,8 @@ switchbot events tail --port 8080 --path /hook --json
 Run `switchbot webhook setup https://your.host/hook` first to tell SwitchBot where to send events, then expose the local port via ngrok/cloudflared and point the webhook URL at it. `events tail` only runs the local receiver — tunnelling is up to you.
 
 Output (one JSON line per matched event):
-```
+
+```json
 { "t": "2024-01-01T12:00:00.000Z", "remote": "1.2.3.4:54321", "path": "/", "body": {...}, "matched": true }
 ```
 
@@ -466,7 +625,8 @@ switchbot events mqtt-tail --for 30s --json
 Connects to the SwitchBot MQTT service automatically using the same credentials configured for the REST API (`SWITCHBOT_TOKEN` + `SWITCHBOT_SECRET`). No additional MQTT configuration is required — the client certificates are provisioned on first use.
 
 Output (one JSON line per message):
-```
+
+```json
 { "t": "2024-01-01T12:00:00.000Z", "topic": "switchbot/abc123/status", "payload": {...} }
 ```
 
@@ -482,31 +642,65 @@ nohup switchbot events mqtt-tail --json >> ~/switchbot-events.log 2>&1 &
 
 Run `switchbot doctor` to verify MQTT credentials are configured correctly before connecting.
 
+### `status-sync` — MQTT/OpenClaw bridge
+
+Use this command family when you want the CLI itself to own the lifecycle of a
+long-running bridge that forwards SwitchBot MQTT shadow events into an OpenClaw
+gateway. Internally it reuses `events mqtt-tail --sink openclaw`, but adds a
+stable command surface for foreground execution, background startup, status
+inspection, and shutdown.
+
+```bash
+# Foreground mode for supervisors / containers
+switchbot status-sync run --openclaw-model home-agent
+
+# Background mode for a normal shell session
+switchbot status-sync start --openclaw-model home-agent
+
+# Inspect the current bridge
+switchbot status-sync status --json
+
+# Stop the running bridge
+switchbot status-sync stop
+```
+
+Required input:
+
+- `OPENCLAW_MODEL` or `--openclaw-model <id>`
+- `OPENCLAW_TOKEN` or `--openclaw-token <token>`
+
+Optional input:
+
+- `OPENCLAW_URL` or `--openclaw-url <url>`
+- `--topic <pattern>` to narrow the MQTT subscription
+- `SWITCHBOT_STATUS_SYNC_HOME` or `--state-dir <path>` for custom runtime state
+
+Background mode writes these files under the state directory:
+
+- `state.json` — current pid, start time, effective command
+- `stdout.log` — child stdout
+- `stderr.log` — child stderr
+
+Foreground vs background:
+
+- `status-sync run` keeps the bridge attached to the current terminal
+- `status-sync start` detaches the bridge and returns immediately
+- `status-sync status` reports whether the bridge is alive plus paths/logs
+- `status-sync stop` terminates the managed bridge process tree
+
 #### `mqtt-tail` sinks — route events to external services
 
 By default `mqtt-tail` prints JSONL to stdout. Use `--sink` (repeatable) to route events to one or more destinations instead:
 
 | Sink | Required flags |
-|---|---|
+| --- | --- |
 | `stdout` | (default when no `--sink` given) |
 | `file` | `--sink-file <path>` — append JSONL |
 | `webhook` | `--webhook-url <url>` — HTTP POST each event |
-| `openclaw` | `--openclaw-url`, `--openclaw-token` (or `$OPENCLAW_TOKEN`), `--openclaw-model` |
 | `telegram` | `--telegram-token` (or `$TELEGRAM_TOKEN`), `--telegram-chat <chatId>` |
 | `homeassistant` | `--ha-url <url>` + `--ha-webhook-id` (no auth) or `--ha-token` (REST event API) |
 
 ```bash
-# Push events to an OpenClaw agent (replaces the SwitchBot channel plugin)
-switchbot events mqtt-tail \
-  --sink openclaw \
-  --openclaw-token <token> \
-  --openclaw-model my-home-agent
-
-# Write to file + push to OpenClaw simultaneously
-switchbot events mqtt-tail \
-  --sink file --sink-file ~/.switchbot/events.jsonl \
-  --sink openclaw --openclaw-token <token> --openclaw-model home
-
 # Generic webhook (n8n, Make, etc.)
 switchbot events mqtt-tail --sink webhook --webhook-url https://n8n.local/hook/abc
 
@@ -540,6 +734,9 @@ Supported shells: `bash`, `zsh`, `fish`, `powershell` (`pwsh` is accepted as an 
 # Print the plan JSON Schema (give to your agent framework)
 switchbot plan schema
 
+# Draft a candidate plan from natural language intent
+switchbot plan suggest --intent "turn off all lights" --device <id1> --device <id2>
+
 # Validate a plan file without running it
 switchbot plan validate plan.json
 
@@ -549,9 +746,12 @@ switchbot --dry-run plan run plan.json
 # Run — pass --yes to allow destructive steps
 switchbot plan run plan.json --yes
 switchbot plan run plan.json --continue-on-error
+
+# Run with per-step TTY confirmation for destructive steps (human-in-the-loop)
+switchbot plan run plan.json --require-approval
 ```
 
-A plan file is a JSON document with `version`, `description`, and a `steps` array of `command`, `scene`, or `wait` steps. Steps execute sequentially; a failed step stops the run unless `--continue-on-error` is set. See [`docs/agent-guide.md`](./docs/agent-guide.md) for the full schema and agent integration patterns.
+A plan file is a JSON document with `version`, `description`, and a `steps` array of `command`, `scene`, or `wait` steps. Steps execute sequentially; a failed step stops the run unless `--continue-on-error` is set. `--require-approval` prompts for each destructive step individually, letting you approve or reject without re-running the whole plan. See [`docs/agent-guide.md`](./docs/agent-guide.md) for the full schema and agent integration patterns.
 
 ### `devices watch` — poll status
 
@@ -575,7 +775,12 @@ Output is a JSONL stream of status-change events (with `--json`) or a refreshed 
 switchbot mcp serve
 ```
 
-Exposes 8 MCP tools (`list_devices`, `describe_device`, `get_device_status`, `send_command`, `list_scenes`, `run_scene`, `search_catalog`, `account_overview`) plus a `switchbot://events` resource for real-time shadow updates.
+Exposes MCP tools (`list_devices`, `describe_device`, `get_device_status`,
+`send_command`, `list_scenes`, `run_scene`, `search_catalog`,
+`account_overview`, `plan_suggest`, `plan_run`, `audit_query`,
+`audit_stats`, `policy_diff`, `policy_validate`, `policy_new`,
+`policy_migrate`) plus a `switchbot://events` resource for real-time
+shadow updates.
 See [`docs/agent-guide.md`](./docs/agent-guide.md) for the full tool reference and safety rules (destructive-command guard).
 
 ### `doctor` — self-check
@@ -585,7 +790,7 @@ switchbot doctor
 switchbot doctor --json
 ```
 
-Runs 8 local checks (Node version, credentials, profiles, catalog, cache, quota file, clock, MQTT) and exits 1 if any check fails. `warn` results exit 0. The MQTT check reports `ok` when REST credentials are configured (auto-provisioned on first use). Use this to diagnose connectivity or config issues before running automation.
+Runs local checks (Node version, credentials, profiles, catalog, cache, quota, clock, MQTT, policy, MCP) and exits 1 if any check fails. `warn` results exit 0. The MQTT check reports `ok` when REST credentials are configured (auto-provisioned on first use). Use this to diagnose connectivity or config issues before running automation.
 
 ### `quota` — API request counter
 
@@ -654,7 +859,45 @@ switchbot cache clear --key list
 switchbot cache clear --key status
 ```
 
+### `policy` — validate, scaffold, and migrate policy.yaml
 
+Companion to the separate SwitchBot skill repository for third-party agent hosts. The skill reads behaviour (aliases, confirmations, quiet hours, audit path) from `policy.yaml`. This command group checks that file before the skill ever sees it, turning what used to be silent failures into line-accurate errors.
+
+```bash
+# Write a starter policy at the default location
+switchbot policy new                              # writes to the resolved default policy path
+switchbot policy new ./custom/policy.yaml --force
+
+# Validate (compiler-style errors with line:col + caret + hints)
+switchbot policy validate
+switchbot policy validate ./custom/policy.yaml
+switchbot policy validate --json | jq '.data.errors'
+switchbot policy validate --no-snippet             # plain error list, no source preview
+
+# Report the schema version the file declares
+switchbot policy migrate
+```
+
+Path resolution order: positional `[path]` > `SWITCHBOT_POLICY_PATH` env var > default policy path.
+
+**Exit codes:** `0` valid / `1` invalid / `2` file-not-found / `3` yaml-parse / `4` internal / `5` file already exists (on `new`, overridden with `--force`) / `6` unsupported schema version (on `migrate`).
+
+Example — editing an alias without quoting the deviceId:
+
+```console
+$ switchbot policy validate
+<policy-path>:14:11
+  14 |   bedroom light: 01-abc-12345
+                 ^^^^^^^^^^^^^
+error: /aliases/bedroom light does not match pattern ^[A-Z0-9]{2,}-[A-Z0-9-]+$
+hint:  paste the deviceId from `switchbot devices list --format=tsv`, e.g. 01-202407090924-26354212
+
+✗ 1 error in <policy-path> (schema v0.1)
+```
+
+The default policy schema shipped with the CLI (`src/policy/schema/v0.2.json`) is mirrored as `examples/policy.schema.json` in the companion skill repo; a CI job on every push diffs the two to prevent drift.
+
+## Output modes
 
 - **Default** — ANSI-colored tables for `list`/`status`, key-value tables for details.
 - **`--json`** — raw API payload passthrough. Output is the exact JSON the SwitchBot API returned, ideal for `jq` and scripting. Errors are also JSON on stderr: `{ "error": { "code", "kind", "message", "hint?" } }`.
@@ -675,10 +918,10 @@ switchbot devices status <id> --format yaml
 
 The CLI maintains two local disk caches under `~/.switchbot/`:
 
-| File | Contents | Default TTL |
-| ---- | -------- | ----------- |
-| `devices.json` | Device metadata (id, name, type, category, hub, room…) | 1 hour |
-| `status.json`  | Per-device status bodies | off (0) |
+- `devices.json`: Device metadata (id, name, type, category, hub, room…).
+  Default TTL: 1 hour.
+- `status.json`: Per-device status bodies.
+  Default TTL: off (0).
 
 The device-list cache powers offline validation (command name checks, destructive-command guard) and the MCP server's `send_command` tool. It is refreshed automatically on every `devices list` call.
 
@@ -718,32 +961,28 @@ switchbot cache clear --key status
 
 ## Exit codes & error codes
 
-| Code | Meaning                                                                                                                   |
-| ---- | ------------------------------------------------------------------------------------------------------------------------- |
-| `0`  | Success (including `--dry-run` intercept when validation passes)                                                           |
-| `1`  | Runtime error — API error, network failure, missing credentials                                                           |
-| `2`  | Usage error — bad flag, missing/invalid argument, unknown subcommand, unknown device type, invalid URL, conflicting flags |
+- `0`: Success (including `--dry-run` intercept when validation passes).
+- `1`: Runtime error — API error, network failure, missing credentials.
+- `2`: Usage error — bad flag, missing/invalid argument, unknown subcommand,
+  unknown device type, invalid URL, conflicting flags.
 
-Typical errors bubble up in the form `Error: <message>` on stderr. The SwitchBot-specific error codes that get mapped to readable English messages:
+Typical errors bubble up in the form `Error: <message>` on stderr. The
+SwitchBot-specific error codes mapped to readable messages:
 
-| Code | Meaning                                     |
-| ---- | ------------------------------------------- |
-| 151  | Device type error                           |
-| 152  | Device not found                            |
-| 160  | Command not supported by this device        |
-| 161  | Device offline (BLE devices need a Hub)     |
-| 171  | Hub offline                                 |
-| 190  | Device internal error / server busy         |
-| 401  | Authentication failed (check token/secret)  |
-| 429  | Request rate too high (10,000 req/day cap)  |
+- `151`: Device type error.
+- `152`: Device not found.
+- `160`: Command not supported by this device.
+- `161`: Device offline (BLE devices need a Hub).
+- `171`: Hub offline.
+- `190`: Device internal error / server busy.
+- `401`: Authentication failed (check token/secret).
+- `429`: Request rate too high (10,000 req/day cap).
 
 ## Environment variables
 
-| Variable                    | Description                                                        |
-| --------------------------- | ------------------------------------------------------------------ |
-| `SWITCHBOT_TOKEN`           | API token — takes priority over the config file                    |
-| `SWITCHBOT_SECRET`          | API secret — takes priority over the config file                   |
-| `NO_COLOR`                  | Disable ANSI colors in all output (automatically respected)        |
+- `SWITCHBOT_TOKEN`: API token — takes priority over the config file.
+- `SWITCHBOT_SECRET`: API secret — takes priority over the config file.
+- `NO_COLOR`: Disable ANSI colors in all output (automatically respected).
 
 ## Scripting examples
 
@@ -766,37 +1005,69 @@ npm install
 
 npm run dev -- <args>       # Run from TypeScript sources via tsx
 npm run build               # Compile to dist/
-npm test                    # Run the Vitest suite (692 tests)
+npm test                    # Run the Vitest suite (1765 tests)
 npm run test:watch          # Watch mode
 npm run test:coverage       # Coverage report (v8, HTML + text)
 ```
 
 ### Project layout
 
-```
+```text
 src/
 ├── index.ts              # Commander entry; mounts all subcommands; global flags
 ├── auth.ts               # HMAC-SHA256 signature (token + t + nonce → sign)
-├── config.ts             # Credential load/save; env > file priority; --config override
+├── config.ts             # Credential load/save; env > keychain > file priority
 ├── api/client.ts         # axios instance + request/response interceptors;
 │                         # --verbose / --dry-run / --timeout wiring
+├── credentials/
+│   ├── keychain.ts       # Credential store interface + OS backend selection
+│   └── backends/         # macos.ts / linux.ts / windows.ts / file.ts
 ├── devices/
 │   ├── catalog.ts        # Static device catalog (commands, params, status fields)
 │   └── cache.ts          # Disk + in-memory cache for device list and status
+├── install/
+│   ├── steps.ts          # Generic step runner with rollback support
+│   ├── preflight.ts      # Pre-flight checks (Node, npm, network, agent)
+│   └── default-steps.ts  # Concrete steps: credentials, keychain, policy, skill, doctor
+├── policy/
+│   ├── validate.ts       # Schema version dispatch + JSON Schema validation
+│   ├── migrate.ts        # v0.1 → v0.2 migration
+│   ├── load.ts           # YAML file loading + error handling
+│   ├── add-rule.ts       # Rule injection into automation.rules[]
+│   ├── diff.ts           # Structural + line diff
+│   └── schema/v0.2.json  # Authoritative v0.2 JSON Schema
+├── rules/
+│   ├── engine.ts         # Main orchestrator (MQTT + cron + webhook)
+│   ├── matcher.ts        # Trigger + condition matchers
+│   ├── action.ts         # Command renderer + executor
+│   ├── throttle.ts       # Per-rule throttle gate
+│   ├── cron-scheduler.ts # 5-field cron + days filter
+│   ├── webhook-listener.ts # HTTP listener (bearer token, localhost-only)
+│   ├── pid-file.ts       # Hot-reload via SIGHUP or sentinel file
+│   ├── audit-query.ts    # Audit log filtering + aggregation
+│   ├── suggest.ts        # Heuristic-based rule YAML generation
+│   └── types.ts          # Shared rule/trigger/condition/action types
+├── status-sync/
+│   └── manager.ts        # Spawn/stop logic, state file, OpenClaw bridge
 ├── lib/
 │   └── devices.ts        # Shared logic: listDevices, describeDevice, isDestructiveCommand
 ├── commands/
+│   ├── auth.ts           # `auth keychain` subcommand group
 │   ├── config.ts
 │   ├── devices.ts
 │   ├── expand.ts         # `devices expand` — semantic flag builder
 │   ├── explain.ts        # `devices explain` — one-shot device summary
 │   ├── device-meta.ts    # `devices meta` — local aliases / hide flags
+│   ├── install.ts        # `switchbot install` / `uninstall`
+│   ├── policy.ts         # `policy validate/new/migrate/diff/add-rule`
+│   ├── rules.ts          # `rules suggest/lint/list/run/reload/tail/replay`
 │   ├── scenes.ts
+│   ├── status-sync.ts    # `status-sync run/start/stop/status`
 │   ├── webhook.ts
 │   ├── watch.ts          # `devices watch <deviceId>`
 │   ├── events.ts         # `events tail` / `events mqtt-tail`
 │   ├── mcp.ts            # `mcp serve` (MCP stdio/HTTP server)
-│   ├── plan.ts           # `plan run/validate`
+│   ├── plan.ts           # `plan run/validate/suggest`
 │   ├── cache.ts          # `cache show/clear`
 │   ├── history.ts        # `history show/replay`
 │   ├── quota.ts          # `quota status/reset`
@@ -807,11 +1078,11 @@ src/
 │   └── completion.ts     # `completion bash|zsh|fish|powershell`
 └── utils/
     ├── flags.ts          # Global flag readers (isVerbose / isDryRun / getCacheMode / …)
-    ├── output.ts         # printTable / printKeyValue / printJson / handleError / buildErrorPayload
+    ├── output.ts         # printTable / printKeyValue / printJson / handleError
     ├── format.ts         # renderRows / filterFields / output-format dispatch
     ├── audit.ts          # JSONL audit log writer
     └── quota.ts          # Local daily-quota counter
-tests/                    # Vitest suite (592 tests, mocked axios, no network)
+tests/                    # Vitest suite (1765 tests, mocked axios, no network)
 ```
 
 ### Release flow
@@ -836,18 +1107,29 @@ Bug reports, feature requests, and PRs are welcome.
 
 ## Roadmap
 
-Tracked for a future v3.x line (OpenClaw B-17 / B-18 / B-19 / B-21) — each is a
-standalone track rather than a bug fix:
+Phase 1 through Phase 4 are shipped. The authoritative phase/track table
+(including skill-side `autonomyLevel` L1/L2/L3 mapping) lives in
+[`docs/design/roadmap.md`](./docs/design/roadmap.md).
 
-- **Daemon mode** — long-running local process with a Unix/named-pipe socket so
-  repeated MCP or plan invocations don't pay fresh-process startup every call.
-- **`npx @switchbot/mcp-server`** — split the MCP server into its own tiny
-  published package so non-CLI users can `npx` it directly without installing
-  the full CLI.
-- **`switchbot self-test`** — scripted end-to-end harness that checks a live
-  token + a representative device and prints a go/no-go report.
-- **Record / replay** — capture raw request/response pairs into a fixture file
-  and replay them offline for deterministic testing and CI.
+Shipped tracks summary:
+
+- **Track β**: one-command install/uninstall surface (`switchbot install` / `switchbot uninstall`).
+- **Track γ**: rules v0.2 runtime increment (`days` + `all`/`any`/`not`).
+- **Track δ (L2)**: plan authoring + guarded execution (`plan suggest`, `plan run --require-approval`) and MCP review/execute tools (`plan_suggest`, `plan_run`, `audit_query`, `audit_stats`, `policy_diff`).
+- **Track ζ (L3)**: autonomous rule authoring (`rules suggest`, `policy add-rule`) with MCP parity (`rules_suggest`, `policy_add_rule`).
+- **Track ε**: cross-OS keychain CI matrix (macOS + Linux libsecret + Windows Credential Manager).
+
+Backlog tracks still open:
+
+1. **Daemon mode** — long-running local process with Unix/named-pipe
+  transport so repeated MCP or plan invocations avoid fresh-process
+  startup cost.
+2. **`npx @switchbot/mcp-server`** — split the MCP server into a tiny
+  package so non-CLI users can run it directly with `npx`.
+3. **`switchbot self-test`** — scripted end-to-end go/no-go checks for
+  token/secret validity plus representative device control.
+4. **Record / replay** — capture request/response fixtures and replay
+  offline for deterministic integration tests and CI.
 
 ## License
 

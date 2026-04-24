@@ -1,0 +1,86 @@
+# ============================================================================
+#  rental.yaml — short-term-rental / guest-house setup
+# ============================================================================
+#
+#  Why this shape:
+#    A rental unit has a different threat model than a personal home:
+#    - Guests interact with the account (via voice or a shared panel).
+#    - The host is off-site and reads the audit log after the fact.
+#    - Physical actions (especially locks) must stay behind a confirmation
+#      wall — a guest should never be able to get the agent to unlock the
+#      front door with a casual remark.
+#    - A loud override is better than silent confusion, so we widen
+#      `always_confirm` to cover actions a guest could reasonably try
+#      but which the host wants to approve.
+#
+#    Aliases are friendly, human-facing names (as a guest might say them).
+#
+#    quiet_hours matches the rental's published "quiet hours" policy —
+#    useful because a mid-night mutation gets flagged *and* audited.
+#
+#    Audit retention is long enough to cover a guest's stay plus a full
+#    billing cycle, so disputes ("who left the AC on?") are investigable.
+#
+#  When to pick this:
+#    - Short-term rental (Airbnb, Vrbo, corporate housing).
+#    - Any multi-guest environment where you don't own the account's
+#      interaction surface.
+#    - Any account where an unlock event has real-world consequences.
+#
+#  Trade-off:
+#    - Guests will see confirmation prompts more often. Include this in
+#      the welcome booklet so it isn't surprising.
+#    - The audit log grows faster — rotate it with logrotate / a scheduled
+#      task; the CLI respects `retention` as a lexical hint only.
+#
+#  Copy to install:
+#    cp rental.yaml ~/.config/openclaw/switchbot/policy.yaml
+#    switchbot policy validate
+#
+# ============================================================================
+
+version: "0.1"
+
+aliases:
+  "front door":          "03-202501201700-99887766"
+  "living room lights":  "01-202407090924-26354212"
+  "bedroom AC":          "02-202502111234-85411230"
+  "thermostat":          "06-202407150822-77889900"
+  "kitchen plug":        "04-202503081500-55443322"
+
+confirmations:
+  # Widen the confirm wall: anything that changes HVAC setpoints or light
+  # scenes gets a prompt. Guests hardly notice; hosts keep control.
+  always_confirm:
+    - "setTargetTemperature"
+    - "setThermostatMode"
+    - "setFanMode"
+    - "setMode"
+    - "setHumidity"
+    - "setColor"
+    - "setBrightness"
+    - "setColorTemperature"
+
+  # Never-confirm stays empty. We pre-approve nothing because the guest
+  # population is unknown. The schema would reject destructive actions
+  # here anyway, but we don't even want basic turnOn/turnOff auto-running.
+  never_confirm: []
+
+# Rental-typical quiet hours. Everything confirms during these hours,
+# not just the destructive set.
+quiet_hours:
+  start: "21:00"
+  end:   "09:00"
+
+audit:
+  # Keep the audit trail in a location your backup / rotation tooling
+  # already knows about. Example: a hosted Dropbox folder synced off-box.
+  log_path: "~/.switchbot/audit.log"
+  # Long retention — cover stay length + billing + dispute window.
+  retention: "365d"
+
+# Automations are off by default for rentals. A guest-triggered rule can
+# cascade in ways you did not anticipate. If you turn this on later,
+# start with `dry_run: true` on every rule for at least a week.
+automation:
+  enabled: false

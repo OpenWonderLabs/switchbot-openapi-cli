@@ -1,0 +1,302 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.openclaw.ai/switchbot/v0.2/policy.json",
+  "title": "OpenClaw SwitchBot policy v0.2",
+  "description": "Tightens the `automation.rules[]` shape that v0.1 left as a loose `array of object`. Validator reads this when the policy file's top-level `version` field is \"0.2\". See docs/design/phase4-rules-schema.md for the field-level rationale.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "const": "0.2",
+      "description": "Policy schema version. Will migrate 0.1 -> 0.2 in place via `switchbot policy migrate`."
+    },
+
+    "aliases": {
+      "type": ["object", "null"],
+      "description": "Unchanged from v0.1.",
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[A-Z0-9]{2,}-[A-Z0-9-]+$"
+      }
+    },
+
+    "confirmations": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "description": "Unchanged from v0.1.",
+      "properties": {
+        "always_confirm": {
+          "type": ["array", "null"],
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "never_confirm": {
+          "type": ["array", "null"],
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "not": {
+              "enum": ["lock", "unlock", "deleteWebhook", "deleteScene", "factoryReset"]
+            }
+          }
+        }
+      }
+    },
+
+    "quiet_hours": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "description": "Unchanged from v0.1.",
+      "properties": {
+        "start": { "type": "string", "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$" },
+        "end":   { "type": "string", "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$" }
+      },
+      "dependentRequired": { "start": ["end"], "end": ["start"] }
+    },
+
+    "audit": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "log_path":  { "type": "string", "minLength": 1 },
+        "retention": { "type": "string", "pattern": "^(never|\\d+[dwm])$" }
+      }
+    },
+
+    "automation": {
+      "type": ["object", "null"],
+      "description": "In v0.2, `rules[]` gets a real shape. `enabled: false` still fully disables the engine regardless of rules defined.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "rules": {
+          "type": ["array", "null"],
+          "items": { "$ref": "#/$defs/rule" }
+        }
+      }
+    },
+
+    "cli": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "description": "Unchanged from v0.1.",
+      "properties": {
+        "profile":   { "type": "string", "minLength": 1, "default": "default" },
+        "cache_ttl": { "type": "string", "pattern": "^\\d+[smh]$" }
+      }
+    }
+  },
+
+  "$defs": {
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "when", "then"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human label used in audit log and dry-run output. Unique per policy file."
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Lets you disable a single rule without deleting it."
+        },
+        "when": { "$ref": "#/$defs/trigger" },
+        "conditions": {
+          "type": ["array", "null"],
+          "description": "Optional AND-joined gates evaluated after the trigger matches. All must pass for the rule to fire.",
+          "items": { "$ref": "#/$defs/condition" }
+        },
+        "then": {
+          "type": "array",
+          "minItems": 1,
+          "description": "One or more actions executed in order. If any action fails, the remainder still runs (policy log records each result).",
+          "items": { "$ref": "#/$defs/action" }
+        },
+        "throttle": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "description": "Optional rate limit. Applied per-rule, keyed by the trigger's deviceId when present.",
+          "properties": {
+            "max_per": {
+              "type": "string",
+              "pattern": "^\\d+[smh]$",
+              "description": "Minimum spacing between fires, e.g. \"10m\". Later triggers inside the window are suppressed and audited."
+            }
+          },
+          "required": ["max_per"]
+        },
+        "dry_run": {
+          "type": "boolean",
+          "default": true,
+          "description": "When true, actions write to the audit log (kind=dry-run) but do NOT hit the SwitchBot API."
+        }
+      }
+    },
+
+    "trigger": {
+      "type": "object",
+      "oneOf": [
+        { "$ref": "#/$defs/triggerMqtt" },
+        { "$ref": "#/$defs/triggerCron" },
+        { "$ref": "#/$defs/triggerWebhook" }
+      ]
+    },
+
+    "triggerMqtt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "event"],
+      "properties": {
+        "source": { "const": "mqtt" },
+        "event": {
+          "type": "string",
+          "description": "Event type from `switchbot events mqtt-tail --json`, e.g. `motion.detected`, `contact.opened`, `button.pressed`, `device.shadow`."
+        },
+        "device": {
+          "type": "string",
+          "description": "Optional filter by deviceId or alias. Matches the trigger's `deviceId` payload field."
+        }
+      }
+    },
+
+    "triggerCron": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "schedule"],
+      "properties": {
+        "source": { "const": "cron" },
+        "schedule": {
+          "type": "string",
+          "description": "Standard 5-field cron (minute hour dom month dow). Interpreted in local system timezone."
+        },
+        "days": {
+          "type": "array",
+          "description": "Optional weekday filter applied after the cron expression fires. Values are full-name or 3-letter day abbreviations (case-insensitive): mon/monday … sun/sunday. When omitted, all days pass.",
+          "uniqueItems": true,
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "enum": ["mon", "tue", "wed", "thu", "fri", "sat", "sun",
+                     "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+          }
+        }
+      }
+    },
+
+    "triggerWebhook": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "path"],
+      "properties": {
+        "source": { "const": "webhook" },
+        "path": {
+          "type": "string",
+          "pattern": "^/[a-z0-9/_-]+$",
+          "description": "Local HTTP path the rule engine listens on. Auth + transport are configured elsewhere (Phase 3)."
+        }
+      }
+    },
+
+    "condition": {
+      "description": "Predicate evaluated after the trigger matches. Leaf shapes: time_between, device_state. Composites: all (AND), any (OR), not (negation). `additionalProperties: false` lives on each `oneOf` branch so keys are validated per-shape.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["time_between"],
+          "properties": {
+            "time_between": {
+              "type": "array",
+              "items": { "type": "string", "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$" },
+              "minItems": 2,
+              "maxItems": 2,
+              "description": "Two HH:MM strings: [start, end]. End-before-start means overnight window."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["device", "field", "op", "value"],
+          "properties": {
+            "device": { "type": "string", "description": "deviceId or alias" },
+            "field":  { "type": "string", "description": "status field name, e.g. `online`, `power`, `brightness`" },
+            "op":     { "enum": ["==", "!=", "<", ">", "<=", ">="] },
+            "value":  { "description": "Literal to compare against. Booleans, strings, numbers." }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["all"],
+          "properties": {
+            "all": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/condition" },
+              "description": "All sub-conditions must be true (logical AND)."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["any"],
+          "properties": {
+            "any": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/condition" },
+              "description": "At least one sub-condition must be true (logical OR)."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["not"],
+          "properties": {
+            "not": {
+              "$ref": "#/$defs/condition",
+              "description": "Negates the sub-condition."
+            }
+          }
+        }
+      ]
+    },
+
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command"],
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "A CLI invocation fragment, e.g. `devices command <id> turnOn`. The engine prepends `switchbot` and appends `--audit-log`."
+        },
+        "device": {
+          "type": "string",
+          "description": "deviceId or alias resolved before building the command. Substituted into the `<id>` slot."
+        },
+        "args": {
+          "type": ["object", "null"],
+          "description": "Extra key/value pairs rendered as `--key value` flags."
+        },
+        "on_error": {
+          "enum": ["continue", "stop"],
+          "default": "continue",
+          "description": "If this action fails, should the rule keep executing its remaining `then[]` entries?"
+        }
+      }
+    }
+  }
+}

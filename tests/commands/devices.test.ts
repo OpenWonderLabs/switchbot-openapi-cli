@@ -1716,7 +1716,7 @@ describe('devices command', () => {
       expect(parsed.data.suggestedActions[0].command).toBe('turnOn');
     });
 
-    it('--json for a Smart Lock surfaces destructive flag on unlock', async () => {
+    it('--json for a Smart Lock surfaces safetyTier on unlock', async () => {
       const lockBody = {
         deviceList: [{
           deviceId: 'LOCK-1',
@@ -1739,7 +1739,7 @@ describe('devices command', () => {
         (c: { command: string }) => c.command === 'unlock'
       );
       expect(unlock).toBeDefined();
-      expect(unlock.destructive).toBe(true);
+      expect(unlock.safetyTier).toBe('destructive');
       expect(unlock.idempotent).toBe(true);
       // suggestedActions must NOT include the destructive unlock
       expect(
@@ -2419,29 +2419,29 @@ describe('devices command', () => {
   });
 
   // =====================================================================
-  // destructive normalization
+  // safetyTier normalization
   // =====================================================================
-  describe('devices commands --json destructive normalization', () => {
-    it('every command in Bot catalog has explicit destructive boolean', async () => {
+  describe('devices commands --json safetyTier normalization', () => {
+    it('every command in Bot catalog has explicit safetyTier string', async () => {
       const res = await runCli(registerDevicesCommand, ['--json', 'devices', 'commands', 'Bot']);
       expect(res.exitCode).toBeNull();
       const parsed = JSON.parse(res.stdout.join('\n'));
-      const cmds: Array<{ destructive?: boolean }> = parsed.data.commands;
+      const cmds: Array<{ safetyTier?: string }> = parsed.data.commands;
       expect(cmds.length).toBeGreaterThan(0);
       for (const c of cmds) {
-        expect(typeof c.destructive).toBe('boolean');
+        expect(typeof c.safetyTier).toBe('string');
       }
     });
 
-    it('Smart Lock unlock has destructive:true, lock has destructive:false', async () => {
+    it('Smart Lock unlock has safetyTier:"destructive", lock has safetyTier:"mutation"', async () => {
       const res = await runCli(registerDevicesCommand, ['--json', 'devices', 'commands', 'Smart Lock']);
       expect(res.exitCode).toBeNull();
       const parsed = JSON.parse(res.stdout.join('\n'));
-      const cmds: Array<{ command: string; destructive: boolean }> = parsed.data.commands;
+      const cmds: Array<{ command: string; safetyTier: string }> = parsed.data.commands;
       const unlock = cmds.find((c) => c.command === 'unlock');
       const lock = cmds.find((c) => c.command === 'lock');
-      expect(unlock?.destructive).toBe(true);
-      expect(lock?.destructive).toBe(false);
+      expect(unlock?.safetyTier).toBe('destructive');
+      expect(lock?.safetyTier).toBe('mutation');
     });
   });
 });
