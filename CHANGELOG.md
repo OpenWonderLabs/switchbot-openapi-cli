@@ -7,7 +7,43 @@ All notable changes to `@switchbot/openapi-cli` are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.15.0] - 2026-04-24
+## [3.0.0] - 2026-04-24
+
+Major release — breaking changes, full feature parity across all branches.
+
+Includes all features shipped in v2.10.0 through v2.15.0: one-command install/uninstall,
+L3 autonomous rule authoring, plan suggest + `--require-approval`, MCP policy_diff and
+audit tools, and rules engine enhancements (all/any/not conditions, cron day_of_week filter).
+
+### BREAKING — removed `destructive: boolean` output field
+
+The `destructive` boolean field has been removed from all CLI and MCP JSON output surfaces:
+
+- `switchbot schema export` / `schema export --compact`
+- `switchbot devices describe <id>` command list
+- `switchbot agent-bootstrap --compact`
+- MCP `catalog_search` tool response
+- `switchbot explain <deviceId>`
+
+**Migration**: replace `entry.commands[].destructive` checks with
+`entry.commands[].safetyTier === 'destructive'`. The `safetyTier` field has been
+present since v2.7.0 and carries the same information.
+
+### BREAKING — removed policy schema v0.1 support
+
+`policy.yaml` files with `version: "0.1"` are no longer accepted. The validator now
+returns a clear error with migration instructions.
+
+**Migration**: if you have a v0.1 policy file, run `switchbot policy migrate` with
+CLI ≤2.15 first, then upgrade to v3.0.
+
+### Changed — `deriveSafetyTier` no longer reads `spec.destructive`
+
+The `CommandSpec.destructive` boolean and `CommandSpec.destructiveReason` fields have
+been removed from the catalog interface. Custom `~/.switchbot/catalog.json` overlays
+that used `destructive: true` must switch to `safetyTier: "destructive"`.
+
+
 
 Quality release — v0.2 policy default + contract hardening + docs baseline cleanup.
 

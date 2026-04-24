@@ -10,9 +10,6 @@
  *   - CommandSpec.safetyTier: explicit action safety classification. See
  *     SafetyTier for the 5-tier enum. Built-in entries set this on the
  *     destructive tier; other tiers are derived (see deriveSafetyTier).
- *   - CommandSpec.destructive (deprecated, v3.0 removal): legacy boolean
- *     that maps to safetyTier === 'destructive'. Still accepted in
- *     ~/.switchbot/catalog.json overlays and derived into safetyTier.
  *   - DeviceCatalogEntry.role: functional grouping for filter/search
  *     ("all lighting", "all security"). Does not affect API behavior.
  *   - DeviceCatalogEntry.readOnly: the device has no control commands; it
@@ -58,17 +55,12 @@ export interface CommandSpec {
   idempotent?: boolean;
   /**
    * Explicit safety tier. When omitted, deriveSafetyTier() infers:
-   *   destructive: true      → 'destructive'
    *   commandType: 'customize' or entry.category === 'ir'  → 'ir-fire-forget'
    *   otherwise              → 'mutation'
    */
   safetyTier?: SafetyTier;
   /** One sentence explaining *why* this command needs caution — used in guard errors. */
   safetyReason?: string;
-  /** @deprecated Since v2.7 — use safetyTier: 'destructive'. Will be removed in v3.0. */
-  destructive?: boolean;
-  /** @deprecated Since v2.7 — use safetyReason. Will be removed in v3.0. */
-  destructiveReason?: string;
   exampleParams?: string[];
 }
 
@@ -728,17 +720,15 @@ export function findCatalogEntry(query: string): DeviceCatalogEntry | DeviceCata
  *
  * The inference order is:
  *   1. Explicit `spec.safetyTier`.
- *   2. Legacy `spec.destructive: true` → `'destructive'` (overlay compat).
- *   3. IR context (customize command OR entry.category === 'ir')
+ *   2. IR context (customize command OR entry.category === 'ir')
  *      → `'ir-fire-forget'`.
- *   4. Default → `'mutation'`.
+ *   3. Default → `'mutation'`.
  */
 export function deriveSafetyTier(
   spec: CommandSpec,
   entry?: Pick<DeviceCatalogEntry, 'category'>,
 ): SafetyTier {
   if (spec.safetyTier) return spec.safetyTier;
-  if (spec.destructive) return 'destructive';
   if (spec.commandType === 'customize') return 'ir-fire-forget';
   if (entry?.category === 'ir') return 'ir-fire-forget';
   return 'mutation';

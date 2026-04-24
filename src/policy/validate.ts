@@ -179,6 +179,10 @@ function readDeclaredVersion(data: unknown): string | undefined {
 
 function unsupportedVersionResult(loaded: LoadedPolicy, declared: string): PolicyValidationResult {
   const supported = SUPPORTED_POLICY_SCHEMA_VERSIONS.map((v) => `"${v}"`).join(' / ');
+  const isLegacy = declared === '0.1';
+  const hint = isLegacy
+    ? `v0.1 policy support was removed in v3.0. Run \`switchbot policy migrate\` with CLI ≤2.15 first, then upgrade.`
+    : `supported versions: ${supported}. upgrade the CLI or downgrade the file.`;
   return {
     policyPath: loaded.path,
     schemaVersion: CURRENT_POLICY_SCHEMA_VERSION,
@@ -190,7 +194,7 @@ function unsupportedVersionResult(loaded: LoadedPolicy, declared: string): Polic
         col: 1,
         keyword: 'unsupported-version',
         message: `policy schema version "${declared}" is not supported by this CLI`,
-        hint: `supported versions: ${supported}. upgrade the CLI or downgrade the file.`,
+        hint,
         schemaPath: '#/properties/version',
       },
     ],

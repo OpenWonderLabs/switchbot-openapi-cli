@@ -182,7 +182,6 @@ Examples:
               command: c.command,
               parameter: c.parameter,
               safetyTier: tier,
-              destructive: tier === 'destructive',
               idempotent: Boolean(c.idempotent),
             };
           }),

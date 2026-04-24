@@ -23,8 +23,6 @@ interface ExplainResult {
     parameter: string;
     idempotent?: boolean;
     safetyTier?: SafetyTier;
-    /** @deprecated Derived from safetyTier === 'destructive'. Will be removed in v3.0. */
-    destructive?: boolean;
   }>;
   statusFields: string[];
   children: Array<{ deviceId: string; name: string; type: string }>;

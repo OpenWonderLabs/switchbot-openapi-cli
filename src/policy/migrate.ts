@@ -16,13 +16,7 @@ export class PolicyMigrationError extends Error {
   }
 }
 
-const MIGRATION_CHAIN: MigrationPlan[] = [
-  {
-    fromVersion: '0.1',
-    toVersion: '0.2',
-    migrate: (doc) => bumpVersionScalar(doc, '0.2'),
-  },
-];
+const MIGRATION_CHAIN: MigrationPlan[] = [];
 
 function bumpVersionScalar(doc: Document.Parsed, target: string): void {
   if (!isMap(doc.contents)) {
