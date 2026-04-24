@@ -2,6 +2,15 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execSync } from 'node:child_process';
+
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return {
+    ...actual,
+    execSync: vi.fn(),
+  };
+});
 
 import { registerDoctorCommand } from '../../src/commands/doctor.js';
 import { runCli } from '../helpers/cli.js';
@@ -18,6 +27,8 @@ describe('doctor command', () => {
     // DEFAULT_POLICY_PATH is evaluated at module load time using the real homedir,
     // so mock the env var to keep tests isolated from the developer's real policy file.
     process.env.SWITCHBOT_POLICY_PATH = path.join(tmp, '.config', 'openclaw', 'switchbot', 'policy.yaml');
+    // Default: execSync throws (simulates binary not on PATH / npm not available)
+    vi.mocked(execSync).mockReset().mockImplementation(() => { throw new Error('not found'); });
   });
   afterEach(() => {
     homedirSpy.mockRestore();
@@ -527,5 +538,59 @@ describe('doctor command', () => {
     } finally {
       delete process.env.SWITCHBOT_POLICY_PATH;
     }
+  });
+
+  // ---------------------------------------------------------------------
+  // P0-1: PATH / binary discoverability check
+  // ---------------------------------------------------------------------
+  it('path check: is present in the --list output', async () => {
+    const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--list']);
+    const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    const names = payload.data.checks.map((c: { name: string }) => c.name);
+    expect(names).toContain('path');
+  });
+
+  it('path check: returns ok with binaryOnPath:true when binary is found', async () => {
+    vi.mocked(execSync).mockImplementation((cmd: unknown) => {
+      const c = String(cmd);
+      if (c.includes('npm prefix')) return '/usr/local\n' as never;
+      if (c.includes('which') || c.includes('where')) return '/usr/local/bin/switchbot\n' as never;
+      throw new Error('unexpected');
+    });
+    const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--section', 'path']);
+    const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    const check = payload.data.checks.find((c: { name: string }) => c.name === 'path');
+    expect(check).toBeDefined();
+    expect(check.status).toBe('ok');
+    expect(check.detail.binaryOnPath).toBe(true);
+    expect(typeof check.detail.resolvedPath).toBe('string');
+  });
+
+  it('path check: returns warn with fix hint when binary is not on PATH', async () => {
+    vi.mocked(execSync).mockImplementation((cmd: unknown) => {
+      const c = String(cmd);
+      if (c.includes('npm prefix')) return '/usr/local\n' as never;
+      throw new Error('not found');
+    });
+    const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--section', 'path']);
+    const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    const check = payload.data.checks.find((c: { name: string }) => c.name === 'path');
+    expect(check).toBeDefined();
+    expect(check.status).toBe('warn');
+    expect(check.detail.binaryOnPath).toBe(false);
+    expect(check.detail.resolvedPath).toBeNull();
+    expect(typeof check.detail.fix).toBe('string');
+  });
+
+  it('path check: detail includes npmBinDir when npm prefix succeeds', async () => {
+    vi.mocked(execSync).mockImplementation((cmd: unknown) => {
+      const c = String(cmd);
+      if (c.includes('npm prefix')) return '/home/user/.npm-global\n' as never;
+      throw new Error('not found');
+    });
+    const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--section', 'path']);
+    const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    const check = payload.data.checks.find((c: { name: string }) => c.name === 'path');
+    expect(check.detail.npmBinDir).toBeTruthy();
   });
 });

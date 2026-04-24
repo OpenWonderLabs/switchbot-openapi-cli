@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execSync } from 'node:child_process';
 import { printJson, isJsonMode, exitWithError } from '../utils/output.js';
 import { getEffectiveCatalog } from '../devices/catalog.js';
 import { configFilePath, listProfiles, readProfileMeta } from '../config.js';
@@ -513,6 +514,75 @@ function checkNodeVersion(): Check {
   return { name: 'node', status: 'ok', detail: `Node ${process.versions.node}` };
 }
 
+function checkPathDiscoverability(): Check {
+  // Detect whether the `switchbot` binary is reachable on PATH.
+  // This catches the common "npm install -g worked but PATH not updated" failure.
+  const isWindows = process.platform === 'win32';
+  const binaryName = isWindows ? 'switchbot.cmd' : 'switchbot';
+
+  // Find where npm puts global bins.
+  let npmBinDir: string | null = null;
+  try {
+    const prefix = execSync('npm prefix -g', { timeout: 4000, encoding: 'utf-8' }).trim();
+    npmBinDir = isWindows ? prefix : path.join(prefix, 'bin');
+  } catch {
+    // npm not on PATH or other error; fall through.
+  }
+
+  // Check whether `switchbot` resolves via PATH.
+  let binaryOnPath = false;
+  let resolvedPath: string | null = null;
+  try {
+    const which = execSync(
+      isWindows ? `where ${binaryName}` : `which ${binaryName}`,
+      { timeout: 3000, encoding: 'utf-8' },
+    ).trim().split(/\r?\n/)[0];
+    if (which) {
+      binaryOnPath = true;
+      resolvedPath = which;
+    }
+  } catch {
+    binaryOnPath = false;
+  }
+
+  if (binaryOnPath) {
+    return {
+      name: 'path',
+      status: 'ok',
+      detail: {
+        binaryOnPath: true,
+        resolvedPath,
+        npmBinDir,
+        message: `switchbot is reachable at ${resolvedPath}`,
+      },
+    };
+  }
+
+  // Not on PATH — figure out what the user should add.
+  const currentPath = process.env.PATH ?? '';
+  const missingSegment = npmBinDir && !currentPath.split(path.delimiter).includes(npmBinDir)
+    ? npmBinDir
+    : null;
+
+  const shellFix = missingSegment
+    ? `export PATH="${missingSegment}:$PATH"  # add to ~/.bashrc, ~/.zshrc, or ~/.profile`
+    : 'Run: npm prefix -g  — then add <prefix>/bin to your PATH.';
+
+  return {
+    name: 'path',
+    status: 'warn',
+    detail: {
+      binaryOnPath: false,
+      resolvedPath: null,
+      npmBinDir,
+      missingPathSegment: missingSegment,
+      currentShell: process.env.SHELL ?? process.env.COMSPEC ?? 'unknown',
+      fix: shellFix,
+      message: `'switchbot' is not on PATH. ${shellFix}`,
+    },
+  };
+}
+
 function checkMqtt(): Check {
   // MQTT credentials are auto-provisioned from the SwitchBot API using the
   // account's token+secret — no extra env vars needed. Report availability
@@ -641,6 +711,7 @@ interface DoctorRunOpts {
 
 const CHECK_REGISTRY: CheckDef[] = [
   { name: 'node', description: 'Node.js version compatibility', run: () => checkNodeVersion() },
+  { name: 'path', description: 'switchbot binary reachable on PATH', run: () => checkPathDiscoverability() },
   { name: 'credentials', description: 'credentials file present and parseable', run: () => checkCredentials() },
   { name: 'profiles', description: 'profile definitions valid', run: () => checkProfiles() },
   { name: 'catalog', description: 'catalog loads', run: () => checkCatalog() },
