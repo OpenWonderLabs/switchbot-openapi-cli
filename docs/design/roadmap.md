@@ -5,7 +5,10 @@
 > command), Phase 3B tracked in the separate companion skill repo,
 > Phase 4 shipped at v0.2 (rules engine with MQTT + cron +
 > webhook triggers, condition composition, weekday filter).
-> Tracks β / γ / δ / ε all shipped between v2.10.0 and v2.12.0.
+> Tracks β / γ / δ / ε / ζ shipped between v2.10.0 and v2.13.0;
+> v2.14.0 extends MCP with `plan_run`, `audit_query`, `audit_stats`,
+> and `policy_diff`; v2.15.0 flips `policy new` default schema to v0.2
+> and starts the v0.1 deprecation window.
 > Note: Track γ is a runtime capability increment on the v0.2 rule
 > model, not a separate policy schema version.
 
@@ -25,7 +28,7 @@ points back to.
 ## Completion matrix (scope clarity)
 
 | Capability | This repo (`switchbot-openapi-cli`) | Cross-repo (`+ companion skill repo`) | Notes |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Phase 1 (manual orchestration) | Shipped | Shipped | Stable in v2.7.x |
 | Phase 2 (policy tooling) | Shipped | Shipped | v0.1 + v0.2 policy schema support |
 | Phase 3A (keychain + install CLI) | Shipped | Shipped | `switchbot install` / `switchbot uninstall` |
@@ -76,7 +79,7 @@ reads it, the MCP server reads it, and `doctor` reports on it.
 
 Surfaces:
 
-- `policy new | validate | migrate` (v0.1 and v0.2 schemas)
+- `policy new | validate | migrate | diff` (v0.1 and v0.2 schemas)
 - Default `policy.yaml` discovery rules
 - Aliases (human-readable device names)
 - Quiet hours (local-time windows, midnight-crossing supported)
@@ -137,11 +140,18 @@ Phase 4 is **opt-in**. Existing Phase 1/2 users who never enable
 The skill repo uses an orthogonal label — `autonomyLevel` — so that
 skill releases do not need to wait on CLI phase boundaries.
 
-| Level | Meaning                                          | What the skill does                                                      | CLI phase it requires |
-|-------|--------------------------------------------------|--------------------------------------------------------------------------|-----------------------|
-| **L1** | Manual orchestration, one command at a time    | Skill turns NL into CLI calls; user confirms each mutation               | Phase 1 or later      |
-| **L2** | Semi-autonomous, propose-then-approve            | Skill composes multi-step plans; `--require-approval` gates each step   | Phase 2 or later      |
-| **L3** | Fully autonomous inside the policy envelope     | Skill writes a rule, the engine owns execution without further prompts  | Phase 4 or later      |
+- **L1**
+  Meaning: manual orchestration, one command at a time.
+  Skill behavior: turns natural language into CLI calls; user confirms each mutation.
+  Required CLI phase: Phase 1 or later.
+- **L2**
+  Meaning: semi-autonomous, propose-then-approve.
+  Skill behavior: composes multi-step plans; `--require-approval` gates each step.
+  Required CLI phase: Phase 2 or later.
+- **L3**
+  Meaning: fully autonomous inside the policy envelope.
+  Skill behavior: writes a rule and lets the engine execute without further prompts.
+  Required CLI phase: Phase 4 or later.
 
 The mapping from `autonomyLevel` to `tracksCliPhase` is declared in
 the skill's `manifest.json` `roadmap` block, which points back here.
@@ -161,10 +171,39 @@ the skill's `manifest.json` `roadmap` block, which points back here.
 - **Track δ — semi-autonomous workflow L2 *(shipped, v2.12.0)*.**
   `plan suggest --intent <text> --device <id>...` scaffolds a Plan
   JSON from natural language. `plan run --require-approval` gates each
-  destructive step with a TTY prompt. MCP tool `plan_suggest` available.
+  destructive step with a TTY prompt. MCP tools `plan_suggest` +
+  `plan_run` are available; review support includes MCP `audit_query` +
+  `audit_stats` and `policy_diff`.
+- **Track ζ — fully autonomous rule authoring L3 *(shipped, v2.13.0)*.**
+  `rules suggest` + `policy add-rule` let agents author a rule from
+  intent and inject it into `automation.rules[]`; MCP tools
+  `rules_suggest` + `policy_add_rule` provide the same flow.
 - **Track ε — cross-OS CI matrix for keychain *(shipped, v2.11.0)*.**
   GitHub Actions matrix: macOS (temp keychain), Linux (D-Bus +
   gnome-keyring), Windows (native Credential Manager).
+
+## Next execution queue (ordered)
+
+1. **v0.1 policy deprecation window (post-default-flip hardening).**
+  Keep validating v0.1, but emit explicit migration guidance in UX/docs.
+  Exit when: policy docs and CLI examples consistently steer new users to
+  v0.2, and migration guidance is visible in `policy migrate` help.
+2. **Daemon mode for repeated agent invocations.**
+  Add a local long-lived process with Unix socket / named pipe transport.
+  Exit when: repeated MCP + plan runs no longer pay fresh-process startup,
+  and `doctor` can verify daemon health.
+3. **Standalone MCP package (`npx @switchbot/mcp-server`).**
+  Split MCP serve entrypoint into a tiny publishable package while
+  preserving tool contract parity with the main CLI.
+  Exit when: `npx @switchbot/mcp-server` boots and passes the same MCP
+  contract tests as `switchbot mcp serve`.
+4. **`switchbot self-test` command.**
+  Add scripted go/no-go checks for credentials + one representative device.
+  Exit when: CI can run a deterministic self-test job with pass/fail JSON.
+5. **Record/replay fixtures for deterministic integration tests.**
+  Capture request/response transcripts and replay offline in CI.
+  Exit when: at least one full scenario (list → status → command guard)
+  is replayable without live API calls.
 
 ---
 

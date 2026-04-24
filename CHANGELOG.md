@@ -1,9 +1,65 @@
 # Changelog
 
+<!-- markdownlint-configure-file {"MD024": false} -->
+
 All notable changes to `@switchbot/openapi-cli` are documented in this file.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [2.15.0] - 2026-04-24
+
+Quality release — v0.2 policy default + contract hardening + docs baseline cleanup.
+
+### Changed — policy schema defaults
+
+- `CURRENT_POLICY_SCHEMA_VERSION` now points to `0.2`, so `switchbot policy new`
+  scaffolds v0.2 files by default.
+- Embedded starter template updated to v0.2 and refreshed wording for
+  third-party agent hosts.
+- Migration guidance updated to recommend explicit scalar `version` values
+  using the current default (`0.2`) while keeping `0.1` compatibility.
+
+### Added — policy diff parity guardrail
+
+- Added a cross-surface contract test asserting MCP `policy_diff`
+  `structuredContent` matches CLI `switchbot --json policy diff` output
+  exactly for the same inputs.
+
+### Changed — docs quality baseline
+
+- Normalized markdown table/fence styles in roadmap, agent guide, and README
+  to reduce lint noise and improve publish consistency.
+- Restored README `Output modes` anchor and fixed broken table-of-contents links.
+- Updated roadmap/README backlog text with an ordered execution queue and
+  explicit acceptance-oriented wording.
+
+## [2.14.0] - 2026-04-24
+
+Feature release — policy review parity for MCP + dry-run default alignment.
+
+### Added — MCP `policy_diff`
+
+- New read-only MCP tool `policy_diff({ left_path, right_path })` returns
+  the same contract as `switchbot --json policy diff`:
+  `{ leftPath, rightPath, equal, changeCount, truncated, stats, changes, diff }`.
+- Enables side-by-side policy review flows in MCP-only agent hosts.
+
+### Added — MCP review/execute parity for L2 workflows
+
+- `plan_run` executes Plan JSON directly in MCP (same destructive-step
+  gating semantics as CLI: skipped unless approved).
+- `audit_query` filters audit log entries by time/device/rule/result.
+- `audit_stats` aggregates audit entries by kind/result/device/rule.
+- MCP tool count: 17 → 21.
+
+### Changed — `dry_run` defaults and docs consistency
+
+- Policy schema v0.2 now defaults rule `dry_run` to `true`.
+- Design/spec docs and quickstart examples now document explicit arming
+  as `dry_run: false` (instead of “remove dry_run: true”).
+- Roadmap / agent guide / README capability statements updated to match
+  implemented CLI + MCP surfaces.
 
 ## [2.13.0] - 2026-04-24
 
@@ -82,7 +138,7 @@ Feature release — semi-autonomous L2 workflow for agents.
   `suggestPlan()` for agents that prefer to stay in the MCP session.
   Returns `{ plan, warnings }` structured content.
 
-
+## [2.11.0] - 2026-04-23
 
 Feature release — install/uninstall UX polish, cross-OS keychain CI,
 and two rules engine enhancements.
@@ -121,12 +177,14 @@ and two rules engine enhancements.
 ### Added — `rules trigger.days` (γ-lite)
 
 - Cron triggers now accept an optional **`days`** filter:
+
   ```yaml
   when:
     source: cron
     schedule: "0 9 * * *"
     days: [mon, tue, wed, thu, fri]
   ```
+
   Values are matched case-insensitively; both 3-letter abbreviations
   (`mon`) and full names (`monday`) are accepted. Firings on unlisted
   weekdays are silently suppressed before dispatch — throttle counters and
@@ -136,6 +194,7 @@ and two rules engine enhancements.
 
 - Rule conditions can now be composed with **`all`** (AND), **`any`** (OR),
   and **`not`** (negation):
+
   ```yaml
   conditions:
     - any:
@@ -147,6 +206,7 @@ and two rules engine enhancements.
     - not:
         time_between: ["08:00", "20:00"]
   ```
+
   Nesting is unlimited. The top-level `conditions[]` array remains
   AND-joined so existing flat rules are unaffected.
 
@@ -799,7 +859,7 @@ used to require exact matches are now substrings. See
   steps. Unknown sceneId returns structured `scene_not_found` with a
   candidate list. (bug #17)
 - **`--no-color` flag + `NO_COLOR` env var** — honors the standard
-  https://no-color.org/ contract; disables chalk colors globally before
+  [no-color](https://no-color.org/) contract; disables chalk colors globally before
   any subcommand runs. (bug #12)
 - **`--format markdown`** — accepted as an alias for `--format table`
   with `--table-style markdown` forced at render time, independent of
@@ -953,7 +1013,7 @@ fields when they upgrade.
   The cache is **process-local, in-memory**: keys live as SHA-256
   fingerprints on the heap (never raw, so heap dumps / log captures don't
   leak the user-supplied key) and vanish when the process exits. Replay
-  + conflict therefore apply within a single long-lived process — MCP
+  and conflict therefore apply within a single long-lived process — MCP
   server session, `devices batch` run, `plan run`, `history replay` — and
   do **not** carry across independent CLI invocations.
 - **Profile label / description / daily cap / default flags** — `config

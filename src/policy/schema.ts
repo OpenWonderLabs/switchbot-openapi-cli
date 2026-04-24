@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 export type PolicySchemaVersion = '0.1' | '0.2';
 
 export const SUPPORTED_POLICY_SCHEMA_VERSIONS: PolicySchemaVersion[] = ['0.1', '0.2'];
-export const CURRENT_POLICY_SCHEMA_VERSION: PolicySchemaVersion = '0.1';
+export const CURRENT_POLICY_SCHEMA_VERSION: PolicySchemaVersion = '0.2';
 
 const schemaCache = new Map<PolicySchemaVersion, object>();
 

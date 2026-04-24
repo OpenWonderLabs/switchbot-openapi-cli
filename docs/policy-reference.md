@@ -200,7 +200,7 @@ automation:
           on_error: continue          # continue (default) | stop
       throttle:
         max_per: "10m"                # minimum spacing: \d+[smh]
-      dry_run: true                   # writes audit but skips the API call
+      dry_run: true                   # default true in v0.2; writes audit but skips the API call
 ```
 
 **Trigger sources (v0.2).**

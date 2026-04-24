@@ -84,7 +84,7 @@ describe('switchbot policy (commander surface)', () => {
       expect(exitCode).toBe(0);
       expect(fs.existsSync(p)).toBe(true);
       const contents = fs.readFileSync(p, 'utf-8');
-      expect(contents).toMatch(/version: "0\.1"/);
+      expect(contents).toMatch(/version: "0\.2"/);
       expect(stdout.join('\n')).toContain('wrote starter policy');
     });
 
@@ -102,7 +102,7 @@ describe('switchbot policy (commander surface)', () => {
       fs.writeFileSync(p, 'original\n', 'utf-8');
       const { exitCode } = runCli(['policy', 'new', p, '--force']);
       expect(exitCode).toBe(0);
-      expect(fs.readFileSync(p, 'utf-8')).toMatch(/version: "0\.1"/);
+      expect(fs.readFileSync(p, 'utf-8')).toMatch(/version: "0\.2"/);
     });
 
     it('emits a structured --json envelope on success', () => {
@@ -115,7 +115,7 @@ describe('switchbot policy (commander surface)', () => {
       };
       expect(parsed.schemaVersion).toBeDefined();
       expect(parsed.data.policyPath).toBe(p);
-      expect(parsed.data.schemaVersion).toBe('0.1');
+      expect(parsed.data.schemaVersion).toBe('0.2');
     });
 
     it('emits a --json error envelope when the file exists', () => {
@@ -325,6 +325,55 @@ describe('switchbot policy (commander surface)', () => {
       const missing = path.join(tmpDir, 'nope.yaml');
       const { exitCode } = runCli(['policy', 'migrate', missing]);
       expect(exitCode).toBe(2);
+    });
+  });
+
+  describe('policy diff', () => {
+    it('prints no-difference message for identical files', () => {
+      const left = path.join(tmpDir, 'left.yaml');
+      const right = path.join(tmpDir, 'right.yaml');
+      const body = ['version: "0.1"', 'aliases:', '  "lamp": "01-202407090924-26354212"', ''].join('\n');
+      fs.writeFileSync(left, body, 'utf-8');
+      fs.writeFileSync(right, body, 'utf-8');
+
+      const { stdout, exitCode } = runCli(['policy', 'diff', left, right]);
+      expect(exitCode).toBe(0);
+      expect(stdout.join('\n')).toContain('no structural differences');
+    });
+
+    it('emits structured --json diff output with change stats', () => {
+      const left = path.join(tmpDir, 'left.yaml');
+      const right = path.join(tmpDir, 'right.yaml');
+      fs.writeFileSync(left, ['version: "0.1"', 'quiet_hours:', '  start: "22:00"', ''].join('\n'), 'utf-8');
+      fs.writeFileSync(right, ['version: "0.2"', 'quiet_hours:', '  start: "23:00"', ''].join('\n'), 'utf-8');
+
+      const { stdout, exitCode } = runCli(['--json', 'policy', 'diff', left, right]);
+      expect(exitCode).toBe(0);
+      const parsed = JSON.parse(stdout[0]) as {
+        data: {
+          equal: boolean;
+          changeCount: number;
+          stats: { changed: number };
+          changes: Array<{ path: string; kind: string }>;
+          diff: string;
+        };
+      };
+      expect(parsed.data.equal).toBe(false);
+      expect(parsed.data.changeCount).toBeGreaterThan(0);
+      expect(parsed.data.stats.changed).toBeGreaterThan(0);
+      expect(parsed.data.changes.some((c) => c.path === '$.version')).toBe(true);
+      expect(parsed.data.diff).toContain('--- before');
+      expect(parsed.data.diff).toContain('+++ after');
+    });
+
+    it('exits 2 when either input file does not exist', () => {
+      const left = path.join(tmpDir, 'left.yaml');
+      fs.writeFileSync(left, 'version: "0.1"\n', 'utf-8');
+      const missing = path.join(tmpDir, 'missing.yaml');
+
+      const { stderr, exitCode } = runCli(['policy', 'diff', left, missing]);
+      expect(exitCode).toBe(2);
+      expect(stderr.join('\n')).toContain('policy file not found');
     });
   });
 });

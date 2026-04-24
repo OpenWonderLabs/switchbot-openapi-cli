@@ -36,11 +36,17 @@ If you're a human looking for a tour, start with the [top-level README](../READM
 
 All three share the same catalog, HMAC client, retry/backoff, destructive-command guard, cache, and audit-log. Choose based on how your agent is hosted:
 
-| Surface     | Use when…                                                                  | Entry point                                     |
-|-------------|----------------------------------------------------------------------------|-------------------------------------------------|
-| MCP server  | Your agent host speaks [MCP](https://modelcontextprotocol.io) (Claude Desktop, Cursor, Zed, Anthropic Agent SDK) | `switchbot mcp serve` (stdio) or `--port <n>`   |
-| Plan runner | Your agent is already producing structured JSON and you want the CLI to validate + execute it | `switchbot plan run <file>` / stdin               |
-| Direct CLI  | Your agent wraps subprocesses and parses their output                      | Any subcommand with `--json`                    |
+- **MCP server**
+  Use when your agent host speaks [MCP](https://modelcontextprotocol.io)
+  (Claude Desktop, Cursor, Zed, Anthropic Agent SDK).
+  Entry point: `switchbot mcp serve` (stdio) or `--port <n>`.
+- **Plan runner**
+  Use when your agent already produces structured JSON and you want the CLI
+  to validate and execute it.
+  Entry point: `switchbot plan run <file>` or stdin.
+- **Direct CLI**
+  Use when your agent wraps subprocesses and parses output directly.
+  Entry point: any subcommand with `--json`.
 
 ---
 
@@ -70,19 +76,31 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 }
 ```
 
-### Available tools (9)
+### Available tools (21)
 
-| Tool                   | Purpose                                                           | Destructive-guard?       |
-|------------------------|-------------------------------------------------------------------|--------------------------|
-| `list_devices`         | Enumerate physical devices + IR remotes                           | —                        |
-| `get_device_status`    | Live status for one device                                        | —                        |
-| `send_command`         | Dispatch a built-in or customize command                          | yes (`confirm: true` required) |
-| `list_scenes`          | Enumerate saved manual scenes                                     | —                        |
-| `run_scene`            | Execute a saved manual scene                                      | —                        |
-| `search_catalog`       | Look up device type by name/alias                                  | —                        |
-| `describe_device`      | Live status **plus** catalog-derived commands + suggested actions | —                        |
-| `account_overview`     | Single cold-start snapshot — devices, scenes, quota, cache, MQTT state. Call this first in a new agent session to avoid multiple round-trips. | — |
-| `get_device_history`   | Latest state + rolling history from disk — zero quota cost        | —                        |
+| Tool | Purpose | Safety tier |
+| --- | --- | --- |
+| `list_devices` | Enumerate physical devices + IR remotes | read |
+| `get_device_status` | Live status for one device | read |
+| `send_command` | Dispatch a built-in or customize command | action (destructive needs `confirm: true`) |
+| `list_scenes` | Enumerate saved manual scenes | read |
+| `run_scene` | Execute a saved manual scene | action |
+| `search_catalog` | Look up device type by name/alias | read |
+| `describe_device` | Catalog-derived capabilities + optional live status | read |
+| `account_overview` | Cold-start snapshot (devices/scenes/quota/cache/MQTT) | read |
+| `get_device_history` | Latest state + ring history from disk | read |
+| `query_device_history` | Time-range query over JSONL history | read |
+| `aggregate_device_history` | Bucketed statistics over history | read |
+| `policy_validate` | Validate policy.yaml | read |
+| `policy_new` | Scaffold a starter policy file | action |
+| `policy_migrate` | Upgrade policy schema in-place | action |
+| `policy_diff` | Compare two policy files (`leftPath/rightPath/equal/.../diff`) | read |
+| `plan_suggest` | Draft plan JSON from intent + devices | read |
+| `plan_run` | Validate and execute a plan JSON object | action |
+| `audit_query` | Filter audit log entries | read |
+| `audit_stats` | Aggregate audit stats by kind/result/device/rule | read |
+| `rules_suggest` | Draft automation rule YAML from intent | read |
+| `policy_add_rule` | Inject rule YAML into `automation.rules[]` with diff | action |
 
 The MCP server refuses destructive commands (Smart Lock `unlock`, Garage Door `open`, etc.) unless the tool call includes `confirm: true`. The allowed list is the `destructive: true` commands in the catalog — `switchbot schema export | jq '[.data.types[].commands[] | select(.destructive)]'` shows every one.
 
@@ -106,11 +124,14 @@ Reads `~/.switchbot/device-history/<deviceId>.json` written by `events mqtt-tail
 
 After `events mqtt-tail` runs on a device, `~/.switchbot/device-history/` contains up to three companion files per device:
 
-| File | Description |
-|------|-------------|
-| `<deviceId>.jsonl` | Append-only, authoritative event log. Source of truth for `history range` and `history aggregate`. Rotated at ~50 MB (up to 3 segments). |
-| `<deviceId>.json` | Latest 100-entry ring buffer. Written on every MQTT event. Read by MCP `get_device_history` for fast, zero-quota retrieval. |
-| `__control.jsonl` | MQTT connection lifecycle events (heartbeat, connect, disconnect). Not a device log; used for diagnostics. |
+- `<deviceId>.jsonl`: append-only, authoritative event log.
+  Source of truth for `history range` and `history aggregate`.
+  Rotated at ~50 MB (up to 3 segments).
+- `<deviceId>.json`: latest 100-entry ring buffer.
+  Written on every MQTT event. Read by MCP `get_device_history`
+  for fast, zero-quota retrieval.
+- `__control.jsonl`: MQTT connection lifecycle events
+  (heartbeat, connect, disconnect). Not a device log; used for diagnostics.
 
 The `.json` file is **not** the source of truth for historical queries — use `.jsonl` (via `history range` or `history aggregate`) when you need a complete, time-bounded record. The `.json` file is optimised for "what is the latest state?" lookups.
 
@@ -184,10 +205,12 @@ cat plan.json | switchbot --json plan run -         # machine-readable outcome
 
 ### `--json` vs `--format=json` — pick the right one
 
-| Flag | Output | When to use |
-|------|--------|-------------|
-| `--json` | **Raw API payload** — exact JSON the SwitchBot API returned | `jq` pipelines, scripts that need the full response body |
-| `--format=json` | **Projected row view** — CLI column model, `--fields` applies | When you only need specific fields; consistent shape across all commands |
+- `--json`
+  Output: **Raw API payload** — exact JSON the SwitchBot API returned.
+  Use when: building `jq` pipelines or scripts that need the full response body.
+- `--format=json`
+  Output: **Projected row view** — CLI column model, `--fields` applies.
+  Use when: you only need specific fields with a consistent row shape.
 
 `--json` and `--format=json` differ only in output shape — they share the same HTTP client and auth.
 
@@ -349,7 +372,7 @@ pipeline without shell access.
 After the user confirms the rule fires correctly:
 
 ```bash
-# Edit policy.yaml: remove dry_run: true (or set dry_run: false)
+# Edit policy.yaml: set dry_run: false
 # Then reload:
 switchbot rules lint && switchbot rules reload
 ```

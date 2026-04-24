@@ -34,7 +34,7 @@ function bumpVersionScalar(doc: Document.Parsed, target: string): void {
   const pair = doc.contents.items.find((p) => isScalar(p.key) && p.key.value === 'version');
   if (!pair || !isScalar(pair.value)) {
     throw new PolicyMigrationError(
-      'policy has no `version` scalar to migrate; add `version: "0.1"` and retry',
+      'policy has no `version` scalar to migrate; add `version: "0.2"` (or `"0.1"`) and retry',
       'no-version-field',
     );
   }

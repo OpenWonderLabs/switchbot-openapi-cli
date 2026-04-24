@@ -97,7 +97,7 @@ describe('policy validator (v0.1)', () => {
     const missing = result.errors.find((e) => e.keyword === 'required');
     expect(missing).toBeDefined();
     expect(missing!.message).toContain('version');
-    expect(missing!.hint).toContain('0.1');
+    expect(missing!.hint).toContain('0.2');
   });
 
   it('rejects an unsupported schema version with a helpful hint', () => {
@@ -346,13 +346,13 @@ describe('policy validator (v0.2)', () => {
     expect(req).toBeDefined();
   });
 
-  it('falls back to v0.1 validation when version is missing', () => {
-    // Declared version is undefined → dispatch to CURRENT (0.1). The resulting
-    // error is the v0.1 "required: version" gate, not an unsupported-version
+  it('falls back to current-schema validation when version is missing', () => {
+    // Declared version is undefined → dispatch to CURRENT (0.2). The resulting
+    // error is the v0.2 "required: version" gate, not an unsupported-version
     // short-circuit.
     const loaded = writeAndLoad(tmpDir, 'aliases:\n  "lamp": "01-ABC-12345"\n');
     const result = validateLoadedPolicy(loaded);
-    expect(result.schemaVersion).toBe('0.1');
+    expect(result.schemaVersion).toBe('0.2');
     expect(result.valid).toBe(false);
     const req = result.errors.find((e) => e.keyword === 'required');
     expect(req).toBeDefined();

@@ -1,21 +1,21 @@
 # ============================================================================
-#  OpenClaw SwitchBot policy — example
+#  SwitchBot policy — example
 # ============================================================================
 #  Copy this file to your user config directory and edit it:
 #
-#    mkdir -p ~/.config/openclaw/switchbot
-#    cp policy.example.yaml ~/.config/openclaw/switchbot/policy.yaml
+#    mkdir -p ~/.switchbot
+#    cp policy.example.yaml ~/.switchbot/policy.yaml
 #
-#  Every section is OPTIONAL. If a field isn't set, the skill falls back to
+#  Every section is OPTIONAL. If a field isn't set, the CLI/agent layer falls back to
 #  a safe default (documented next to each field).
 #
-#  The skill reads this file before every session. It never writes to it
+#  Agents read this file before every session. They never write to it
 #  without showing you the diff and asking first.
 # ============================================================================
 
 # Schema version. Do not remove this line — the skill uses it to detect
-# breaking changes and migrate your file when policy v0.2 ships.
-version: "0.1"
+# breaking changes and migrate your file when a newer schema ships.
+version: "0.2"
 
 # ----------------------------------------------------------------------------
 # aliases  —  friendly names the agent can resolve to real devices

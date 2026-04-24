@@ -60,7 +60,7 @@ audit:
   retention_days: 90
 
 # One dry-run rule: prove the engine fires end-to-end without touching
-# the bulb. Remove `dry_run: true` once you're confident.
+# the bulb. Once you're confident, set `dry_run: false` to arm it.
 automation:
   enabled: true
   rules:

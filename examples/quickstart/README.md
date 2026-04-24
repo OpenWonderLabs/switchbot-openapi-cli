@@ -157,6 +157,6 @@ switchbot rules run --dry-run --max-firings 5
 switchbot rules tail --follow
 ```
 
-When you're ready, remove `dry_run: true` from the rule and restart
+When you're ready, set `dry_run: false` on the rule and restart
 with `rules reload` — no process restart needed (SIGHUP on Unix,
 sentinel file on Windows).
