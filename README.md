@@ -60,6 +60,7 @@ Under the hood every surface shares the same catalog, cache, and HMAC client —
   - [`scenes`](#scenes--run-manual-scenes)
   - [`webhook`](#webhook--receive-device-events-over-http)
   - [`events`](#events--receive-device-events)
+  - [`status-sync`](#status-sync--mqttopenclaw-bridge)
   - [`plan`](#plan--declarative-batch-operations)
   - [`mcp`](#mcp--model-context-protocol-server)
   - [`doctor`](#doctor--self-check)
@@ -167,6 +168,9 @@ switchbot policy validate
 
 # 7. Stream real-time device events over MQTT (events land as JSONL).
 switchbot events mqtt-tail --max 3 --json
+
+# 8. Run the OpenClaw status bridge in the background.
+switchbot status-sync start --openclaw-model home-agent
 ```
 
 See [Policy](#policy) for the authoring flow, [Rules engine](#rules-engine-v02-opt-in)
@@ -651,6 +655,52 @@ nohup switchbot events mqtt-tail --json >> ~/switchbot-events.log 2>&1 &
 ```
 
 Run `switchbot doctor` to verify MQTT credentials are configured correctly before connecting.
+
+### `status-sync` — MQTT/OpenClaw bridge
+
+Use this command family when you want the CLI itself to own the lifecycle of a
+long-running bridge that forwards SwitchBot MQTT shadow events into an OpenClaw
+gateway. Internally it reuses `events mqtt-tail --sink openclaw`, but adds a
+stable command surface for foreground execution, background startup, status
+inspection, and shutdown.
+
+```bash
+# Foreground mode for supervisors / containers
+switchbot status-sync run --openclaw-model home-agent
+
+# Background mode for a normal shell session
+switchbot status-sync start --openclaw-model home-agent
+
+# Inspect the current bridge
+switchbot status-sync status --json
+
+# Stop the running bridge
+switchbot status-sync stop
+```
+
+Required input:
+
+- `OPENCLAW_MODEL` or `--openclaw-model <id>`
+- `OPENCLAW_TOKEN` or `--openclaw-token <token>`
+
+Optional input:
+
+- `OPENCLAW_URL` or `--openclaw-url <url>`
+- `--topic <pattern>` to narrow the MQTT subscription
+- `SWITCHBOT_STATUS_SYNC_HOME` or `--state-dir <path>` for custom runtime state
+
+Background mode writes these files under the state directory:
+
+- `state.json` — current pid, start time, effective command
+- `stdout.log` — child stdout
+- `stderr.log` — child stderr
+
+Foreground vs background:
+
+- `status-sync run` keeps the bridge attached to the current terminal
+- `status-sync start` detaches the bridge and returns immediately
+- `status-sync status` reports whether the bridge is alive plus paths/logs
+- `status-sync stop` terminates the managed bridge process tree
 
 #### `mqtt-tail` sinks — route events to external services
 

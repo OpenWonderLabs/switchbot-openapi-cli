@@ -28,6 +28,7 @@ import { registerRulesCommand } from './commands/rules.js';
 import { registerAuthCommand } from './commands/auth.js';
 import { registerInstallCommand } from './commands/install.js';
 import { registerUninstallCommand } from './commands/uninstall.js';
+import { registerStatusSyncCommand } from './commands/status-sync.js';
 import { primeCredentials } from './credentials/prime.js';
 import { getActiveProfile } from './lib/request-context.js';
 
@@ -52,7 +53,7 @@ if (isJsonMode()) {
 const TOP_LEVEL_COMMANDS = [
   'config', 'devices', 'scenes', 'webhook', 'completion', 'mcp',
   'quota', 'catalog', 'cache', 'events', 'doctor', 'schema',
-  'history', 'plan', 'capabilities', 'agent-bootstrap', 'install', 'uninstall',
+  'history', 'plan', 'capabilities', 'agent-bootstrap', 'install', 'uninstall', 'status-sync',
 ] as const;
 
 const cacheModeArg = (value: string): string => {
@@ -115,6 +116,7 @@ registerRulesCommand(program);
 registerAuthCommand(program);
 registerInstallCommand(program);
 registerUninstallCommand(program);
+registerStatusSyncCommand(program);
 
 // Prime keychain-stored credentials before any command runs. This is a
 // best-effort probe: failures are silently swallowed inside primeCredentials,
@@ -152,6 +154,7 @@ Examples:
   $ switchbot devices command <deviceId> turnOn --dry-run
   $ switchbot scenes execute <sceneId> --verbose
   $ switchbot webhook setup https://your.host/hook
+  $ switchbot status-sync start --openclaw-model home-agent
 
 Discovery:
   Don't know a device ID / what it supports?
