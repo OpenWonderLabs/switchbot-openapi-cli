@@ -34,12 +34,25 @@ function countStatusQueries(entries: DeviceCatalogEntry[]): number {
 
 export type AgentSafetyTier = 'read' | 'action' | 'destructive';
 export type Verifiability = 'local' | 'deviceConfirmed' | 'deviceDependent' | 'none';
+export type RiskLevel = 'low' | 'medium' | 'high';
+export type IdempotencyHint = 'safe' | 'caution' | 'non-idempotent';
+export type RecommendedMode = 'direct' | 'plan' | 'review-before-execute';
 
 const AGENT_GUIDE = {
   safetyTiers: {
     read: 'No state mutation; safe to call freely — does not consume quota unless noted.',
     action: 'Mutates device or cloud state but is reversible and routine (turnOn, setColor).',
     destructive: 'Hard to reverse / physical-world side effects (unlock, garage open, delete key). Requires explicit user confirmation.',
+  },
+  riskLevels: {
+    low: 'Read-only or non-mutating. Safe to call autonomously.',
+    medium: 'Mutates state (action tier). Prefer `plan` workflow. Reversible.',
+    high: 'Destructive / hard-to-reverse. Must go through review-before-execute. Requires --yes or plan approval.',
+  },
+  recommendedModes: {
+    direct: 'May be called directly without a plan step.',
+    plan: 'Prefer batching in a plan for traceability and dry-run support.',
+    'review-before-execute': 'Must be reviewed/approved before execution. Use `plan run --require-approval` or pass --yes interactively.',
   },
   verifiability: {
     local: 'Result is fully verifiable from the CLI return value itself.',
@@ -59,6 +72,27 @@ interface CommandMeta {
   agentSafetyTier: AgentSafetyTier;
   verifiability: Verifiability;
   typicalLatencyMs: number;
+}
+
+interface RiskMeta {
+  riskLevel: RiskLevel;
+  requiresConfirmation: boolean;
+  supportsDryRun: boolean;
+  idempotencyHint: IdempotencyHint;
+  recommendedMode: RecommendedMode;
+}
+
+function deriveRiskMeta(meta: CommandMeta): RiskMeta {
+  const riskLevel: RiskLevel = meta.agentSafetyTier === 'destructive' ? 'high'
+    : meta.agentSafetyTier === 'action' ? 'medium' : 'low';
+  return {
+    riskLevel,
+    requiresConfirmation: meta.agentSafetyTier === 'destructive',
+    supportsDryRun: meta.mutating,
+    idempotencyHint: meta.idempotencySupported ? 'safe' : meta.mutating ? 'non-idempotent' : 'safe',
+    recommendedMode: meta.agentSafetyTier === 'destructive' ? 'review-before-execute'
+      : meta.agentSafetyTier === 'action' ? 'plan' : 'direct',
+  };
 }
 
 const COMMAND_META: Record<string, CommandMeta> = {
@@ -148,6 +182,11 @@ interface CompactLeaf {
   agentSafetyTier: AgentSafetyTier;
   verifiability: Verifiability;
   typicalLatencyMs: number;
+  riskLevel: RiskLevel;
+  requiresConfirmation: boolean;
+  supportsDryRun: boolean;
+  idempotencyHint: IdempotencyHint;
+  recommendedMode: RecommendedMode;
 }
 
 function enumerateLeaves(program: Command, prefix = ''): CompactLeaf[] {
@@ -157,18 +196,18 @@ function enumerateLeaves(program: Command, prefix = ''): CompactLeaf[] {
     if (cmd.commands.length === 0) {
       const meta = metaFor(full);
       if (meta) {
-        out.push({ name: full, ...meta });
+        out.push({ name: full, ...meta, ...deriveRiskMeta(meta) });
       } else {
         // Unknown leaf → default to read-safe with a warning flag so agents notice.
-        out.push({
-          name: full,
+        const defaultMeta: CommandMeta = {
           mutating: false,
           consumesQuota: false,
           idempotencySupported: false,
           agentSafetyTier: 'read',
           verifiability: 'local',
           typicalLatencyMs: 50,
-        });
+        };
+        out.push({ name: full, ...defaultMeta, ...deriveRiskMeta(defaultMeta) });
       }
     } else {
       out.push(...enumerateLeaves(cmd, full));
@@ -289,8 +328,10 @@ export function registerCapabilitiesCommand(program: Command): void {
         // Flat command → meta map keyed by full command path. Published in
         // addition to the tree (where every leaf `subcommands[*]` already
         // carries the same fields via spread) so agents can do O(1) lookup
-        // without walking the tree.
-        commandMeta: COMMAND_META,
+        // without walking the tree. Includes derived risk metadata fields.
+        commandMeta: Object.fromEntries(
+          Object.entries(COMMAND_META).map(([k, v]) => [k, { ...v, ...deriveRiskMeta(v) }])
+        ),
         ...(globalFlags ? { globalFlags } : {}),
         catalog: {
           typeCount: catalog.length,

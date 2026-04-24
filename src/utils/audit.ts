@@ -48,6 +48,8 @@ export interface AuditEntry {
   dryRun: boolean;
   result?: 'ok' | 'error';
   error?: string;
+  /** When execution is initiated via `plan run`, the stable plan ID for traceability. */
+  planId?: string;
   /** Present for rule-engine kinds; absent for direct CLI command entries. */
   rule?: AuditRuleContext;
 }

@@ -554,8 +554,8 @@ Examples:
             kind: 'guard',
             message: `Refusing to run destructive command "${cmd}" on ${typeLabel} without --yes.`,
             hint: reason
-              ? `Re-run with --yes to confirm. Reason: ${reason}`
-              : 'Re-run with --yes to confirm, or --dry-run to preview without sending.',
+              ? `Re-run with --yes to confirm, or use 'plan run --require-approval' for interactive approval. Reason: ${reason}`
+              : "Re-run with --yes to confirm, use 'plan run --require-approval' for interactive approval, or --dry-run to preview without sending.",
             context: { command: cmd, deviceType: typeLabel, deviceId, ...(reason ? { safetyReason: reason, destructiveReason: reason } : {}) },
           });
         }

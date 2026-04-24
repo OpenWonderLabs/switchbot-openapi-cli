@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import fs from 'node:fs';
 import readline from 'node:readline';
+import { randomUUID } from 'node:crypto';
 import { printJson, isJsonMode, handleError } from '../utils/output.js';
 import { executeCommand, isDestructiveCommand } from '../lib/devices.js';
 import { executeScene } from '../lib/scenes.js';
@@ -412,6 +413,8 @@ against the live API without executing any mutations.
           summary: { total: v.plan.steps.length, ok: 0, error: 0, skipped: 0 },
         };
 
+        const planId = randomUUID();
+
         try {
           for (let i = 0; i < v.plan.steps.length; i++) {
             const step = v.plan.steps[i];
@@ -482,7 +485,7 @@ against the live API without executing any mutations.
               }
             }
             try {
-              await executeCommand(resolvedDeviceId, step.command, step.parameter, commandType);
+              await executeCommand(resolvedDeviceId, step.command, step.parameter, commandType, undefined, { planId });
               out.results.push({
                 step: idx,
                 type: 'command',
