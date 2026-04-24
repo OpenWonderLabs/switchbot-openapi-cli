@@ -7,6 +7,59 @@ All notable changes to `@switchbot/openapi-cli` are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.2.0] - 2026-04-25
+
+### Added — daemon, upgrade-check, scenes validate/simulate, rules summary
+
+- `switchbot daemon start/stop/status` — runs `rules run` as a cross-platform detached
+  background process; PID written to `~/.switchbot/daemon.pid`; log at `daemon.log`.
+- `switchbot upgrade-check` — fetches latest version from npm registry, compares semver,
+  and prints an upgrade command; exits 1 when a newer version is available.
+- `switchbot scenes validate [sceneId...]` — confirms scene IDs exist in your account;
+  exits 1 if any are missing.
+- `switchbot scenes simulate <sceneId>` — shows exactly what `scenes execute` would POST
+  without sending the request.
+- `switchbot rules summary` — aggregates `rule-fire` audit entries per rule over a
+  configurable time window, printing a table of fires / throttled / errors.
+- `switchbot rules last-fired` — shows the N most recent `rule-fire` / `rule-fire-dry`
+  audit entries, newest first; `--rule` filter supported.
+
+### Added — circuit breaker, health report, `--explain`, keychain hints
+
+- `CircuitBreaker` class in `utils/retry.ts`; module-level `apiCircuitBreaker` singleton
+  wired in `api/client.ts`. Opens after 5 consecutive 5xx/network failures; auto-probes
+  after 60 s. 4xx responses excluded from failure counting.
+- `switchbot health` — reports quota usage, audit error rate, circuit-breaker state, and
+  process info in JSON or Prometheus text (`--prometheus`) format.
+- `devices command --explain` — prints risk level, device type, and safety reason before
+  execution without sending the request.
+- `config set-token` now prints a tip to run `switchbot auth keychain store` when
+  file-backend credentials are saved on a platform with a native keychain.
+- `doctor` now includes a `keychain` check that warns when file-backend credentials are
+  in use and a native keychain is available.
+
+### Added — rules safety schema + conflict analyzer
+
+- Policy schema v0.2 extended with optional fields: `throttle.dedupe_window`,
+  `cooldown`, `requires_stable_for`. All validated by `rules lint`.
+- `ThrottleGate.check()` now accepts `dedupeWindowMs` and returns `dedupedBy` field.
+- `rules/conflict-analyzer.ts` — static analysis detecting opposing-action pairs,
+  high-frequency catch-all triggers without throttle, and destructive rule actions.
+- `switchbot rules conflicts [path]` and `switchbot rules doctor [path]` subcommands.
+
+### Added — risk metadata, plan traceability
+
+- `agentSafetyTier` in capabilities output maps to `riskLevel` (`high`/`medium`/`low`),
+  `idempotencyHint`, and `recommendedMode`.
+- `plan run` now generates a UUID `planId` and stamps it on every audit entry produced
+  during that run, enabling plan-to-audit traceability.
+
+### Added — stable error JSON, path diagnostics, doctor enhancements
+
+- `resolutionHint` and `candidateMatches` fields added to structured error output.
+- `name-resolver.ts` now rejects ambiguous device names when multiple candidates match.
+- `doctor` reports PATH discoverability and npm global bin reachability.
+
 ## [3.0.0] - 2026-04-24
 
 Major release — breaking changes, full feature parity across all branches.
