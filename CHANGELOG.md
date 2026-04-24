@@ -43,8 +43,6 @@ The `CommandSpec.destructive` boolean and `CommandSpec.destructiveReason` fields
 been removed from the catalog interface. Custom `~/.switchbot/catalog.json` overlays
 that used `destructive: true` must switch to `safetyTier: "destructive"`.
 
-
-
 Quality release — v0.2 policy default + contract hardening + docs baseline cleanup.
 
 ### Changed — policy schema defaults
