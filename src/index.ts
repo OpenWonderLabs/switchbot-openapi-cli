@@ -30,6 +30,8 @@ import { registerInstallCommand } from './commands/install.js';
 import { registerUninstallCommand } from './commands/uninstall.js';
 import { registerStatusSyncCommand } from './commands/status-sync.js';
 import { registerHealthCommand } from './commands/health.js';
+import { registerUpgradeCheckCommand } from './commands/upgrade-check.js';
+import { registerDaemonCommand } from './commands/daemon.js';
 import { primeCredentials } from './credentials/prime.js';
 import { getActiveProfile } from './lib/request-context.js';
 
@@ -55,6 +57,7 @@ const TOP_LEVEL_COMMANDS = [
   'config', 'devices', 'scenes', 'webhook', 'completion', 'mcp',
   'quota', 'catalog', 'cache', 'events', 'doctor', 'schema',
   'history', 'plan', 'capabilities', 'agent-bootstrap', 'install', 'uninstall', 'status-sync',
+  'health', 'upgrade-check', 'daemon',
 ] as const;
 
 const cacheModeArg = (value: string): string => {
@@ -119,6 +122,8 @@ registerInstallCommand(program);
 registerUninstallCommand(program);
 registerStatusSyncCommand(program);
 registerHealthCommand(program);
+registerUpgradeCheckCommand(program);
+registerDaemonCommand(program);
 
 // Prime keychain-stored credentials before any command runs. This is a
 // best-effort probe: failures are silently swallowed inside primeCredentials,

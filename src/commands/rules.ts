@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { isJsonMode, printJson, exitWithError } from '../utils/output.js';
+import { isJsonMode, printJson, exitWithError, printTable } from '../utils/output.js';
 import {
   loadPolicyFile,
   resolvePolicyPath,
@@ -733,6 +733,77 @@ function registerDoctor(rules: Command): void {
     });
 }
 
+function registerSummary(rules: Command): void {
+  rules
+    .command('summary')
+    .description('Aggregate rule-* audit entries per rule over a time window (fires, throttled, errors).')
+    .option('--file <path>', `Audit log path (default ${DEFAULT_AUDIT_PATH})`)
+    .option('--since <duration>', 'Only entries newer than this window (default: 24h). E.g. 1h, 7d.')
+    .option('--rule <name>', 'Filter to a single rule name.')
+    .action((opts: { file?: string; since?: string; rule?: string }) => {
+      const file = opts.file ?? DEFAULT_AUDIT_PATH;
+      const entries = fs.existsSync(file) ? readAudit(file) : [];
+      const sinceMs = resolveSinceMs(opts.since ?? '24h');
+      const filtered = filterRuleAudits(entries, { sinceMs, ruleName: opts.rule });
+      const report = aggregateRuleAudits(filtered);
+      if (isJsonMode()) {
+        printJson({ file, window: opts.since ?? '24h', ruleFilter: opts.rule ?? null, ...report });
+        return;
+      }
+      console.log(`Rule summary (${opts.since ?? '24h'} window, ${report.total} entries)`);
+      if (report.summaries.length === 0) {
+        console.log('(no rule activity in this window)');
+        return;
+      }
+      printTable(
+        ['Rule', 'Trigger', 'Fires', 'Throttled', 'Errors', 'Error%', 'Last fired'],
+        report.summaries.map((s) => [
+          s.rule,
+          s.triggerSource ?? '-',
+          String(s.fires),
+          String(s.throttled),
+          String(s.errors),
+          `${(s.errorRate * 100).toFixed(1)}%`,
+          s.lastAt ?? '-',
+        ]),
+      );
+    });
+}
+
+function registerLastFired(rules: Command): void {
+  rules
+    .command('last-fired')
+    .description('Show the N most recently fired rule-fire entries from the audit log.')
+    .option('--file <path>', `Audit log path (default ${DEFAULT_AUDIT_PATH})`)
+    .option('--rule <name>', 'Filter to a single rule name.')
+    .option('-n <count>', 'Number of entries to show (default: 10).', (v) => Number.parseInt(v, 10))
+    .action((opts: { file?: string; rule?: string; n?: number }) => {
+      const file = opts.file ?? DEFAULT_AUDIT_PATH;
+      const n = opts.n ?? 10;
+      const entries = fs.existsSync(file) ? readAudit(file) : [];
+      const fires = filterRuleAudits(entries, {
+        ruleName: opts.rule,
+        kinds: ['rule-fire', 'rule-fire-dry'],
+      });
+      const recent = fires.slice(-n).reverse();
+      if (isJsonMode()) {
+        printJson({ file, ruleFilter: opts.rule ?? null, count: recent.length, entries: recent });
+        return;
+      }
+      if (recent.length === 0) {
+        console.log(`(no rule-fire entries in ${file}${opts.rule ? ` for rule "${opts.rule}"` : ''})`);
+        return;
+      }
+      for (const e of recent) {
+        const parts = [e.t, e.kind, e.rule?.name ?? '-'];
+        if (e.deviceId) parts.push(`device=${e.deviceId}`);
+        if (e.command) parts.push(`cmd=${e.command}`);
+        if (e.result) parts.push(`result=${e.result}`);
+        console.log(parts.join('  '));
+      }
+    });
+}
+
 export function registerRulesCommand(program: Command): void {
   const rules = program
     .command('rules')
@@ -754,6 +825,8 @@ Subcommands:
   replay                    Per-rule aggregate: fires/dries/throttled/errors + window.
   conflicts [path]          Detect conflicting or risky rule patterns.
   doctor [path]             Combined health check: lint + conflict analysis + summary.
+  summary                   Aggregate rule-fire counts per rule over a time window.
+  last-fired                Show the N most recently fired rule-fire audit entries.
   webhook-rotate-token      Rotate the bearer token used for webhook triggers.
   webhook-show-token        Print the current bearer token (creating one if absent).
 
@@ -777,6 +850,8 @@ Exit codes (lint):
   registerReplay(rules);
   registerConflicts(rules);
   registerDoctor(rules);
+  registerSummary(rules);
+  registerLastFired(rules);
   registerWebhookRotateToken(rules);
   registerWebhookShowToken(rules);
 }
