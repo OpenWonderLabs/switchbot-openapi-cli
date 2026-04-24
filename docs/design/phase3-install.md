@@ -7,22 +7,22 @@
 > (preflight + rollback-aware step runner). v2.10.0 wraps that
 > library as the built-in `switchbot install` / `switchbot uninstall`
 > commands — the 7-step Quickstart collapses to a single command
-> with rollback on failure. The external plugin-manager install wrapper
-> and the external registry entry remain Phase 3B proper and
+> with rollback on failure. The external `openclaw plugins install`
+> wrapper and the ClawHub registry entry remain Phase 3B proper and
 > live outside this repo.
 
 ## Implementation delta (what changed from this design)
 
 This document was written before `switchbot install` shipped. The body
-below describes the original design intent (external plugin-manager
+below describes the original design intent (`openclaw plugins install`
 surface). What actually landed in v2.10.0 differs in three ways:
 
 | Design doc says | What shipped |
 |---|---|
-| Entry point: `plugins install switchbot` | Built-in: `switchbot install` (no external registry dependency) |
+| Entry point: `openclaw plugins install clawhub:switchbot` | Built-in: `switchbot install` (no ClawHub dependency) |
 | Step 2: `npm i -g @switchbot/openapi-cli` | Skipped — CLI already in PATH is the precondition |
 | Step 8: `switchbot doctor` failure → full rollback | `--verify` flag makes doctor a warn-only post-step; failure never triggers rollback |
-| Uninstall: `plugins uninstall switchbot` | Built-in: `switchbot uninstall [--purge]` |
+| Uninstall: `openclaw plugins uninstall` | Built-in: `switchbot uninstall [--purge]` |
 
 Additional flags not in this design: `--force` (replace existing
 symlink), `--verify` (opt-in post-install doctor check), `--purge`
@@ -35,7 +35,7 @@ flow: install npm package, set token, create policy, install skill,
 restart agent. Phase 3 collapses that to:
 
 ```bash
-plugins install switchbot
+openclaw plugins install clawhub:switchbot
 ```
 
 On success, every check passes: `switchbot doctor` → all green, the
@@ -187,7 +187,7 @@ records an undo. Otherwise the step is informational.
 Parity with install:
 
 ```bash
-plugins uninstall switchbot
+openclaw plugins uninstall
 ```
 
 Walks the exact reverse of the install flow. Prompts before each
