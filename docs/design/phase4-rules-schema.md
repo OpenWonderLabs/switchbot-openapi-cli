@@ -49,7 +49,7 @@ automation:
           device: "hallway lamp"
       throttle:
         max_per: "10m"
-      dry_run: false
+      dry_run: true
 ```
 
 Fields:
@@ -62,7 +62,7 @@ Fields:
 | `conditions` | no | AND-joined predicates; `time_between` or device-state compare |
 | `then` | yes (`minItems: 1`) | Ordered list of actions |
 | `throttle.max_per` | no | Min spacing between fires, e.g. `"10m"` |
-| `dry_run` | no (default `false`) | Write audit entries but skip the API |
+| `dry_run` | no (default `true`) | Write audit entries but skip the API |
 
 ### `when` (trigger) — `oneOf`
 

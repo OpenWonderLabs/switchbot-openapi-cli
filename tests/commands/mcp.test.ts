@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { Command } from 'commander';
 
 // ---------------------------------------------------------------------------
 // Mock the API layer so we don't hit real HTTPS.
@@ -72,6 +73,7 @@ vi.mock('../../src/devices/cache.js', () => ({
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createSwitchBotMcpServer } from '../../src/commands/mcp.js';
+import { registerPolicyCommand } from '../../src/commands/policy.js';
 import { ApiError } from '../../src/api/client.js';
 
 /** Connect a fresh server + client pair and return both. */
@@ -83,6 +85,46 @@ async function pair() {
   return { server, client };
 }
 
+class ExitError extends Error {
+  constructor(public code: number) {
+    super(`__exit:${code}__`);
+  }
+}
+
+function runPolicyDiffCliJson(leftPath: string, rightPath: string): Record<string, unknown> {
+  const stdout: string[] = [];
+  const logSpy = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+    stdout.push(args.map(String).join(' '));
+  });
+  const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+    throw new ExitError(code ?? 0);
+  }) as never);
+
+  const program = new Command();
+  program.option('--json');
+  registerPolicyCommand(program);
+  const prevArgv = process.argv;
+
+  let exitCode = 0;
+  try {
+    process.argv = ['node', 'switchbot', '--json', 'policy', 'diff', leftPath, rightPath];
+    program.parse(['node', 'switchbot', '--json', 'policy', 'diff', leftPath, rightPath]);
+  } catch (err) {
+    if (err instanceof ExitError) exitCode = err.code;
+    else throw err;
+  } finally {
+    process.argv = prevArgv;
+    logSpy.mockRestore();
+    errSpy.mockRestore();
+    exitSpy.mockRestore();
+  }
+
+  expect(exitCode).toBe(0);
+  const parsed = JSON.parse(stdout[0]) as { data: Record<string, unknown> };
+  return parsed.data;
+}
+
 describe('mcp server', () => {
   beforeEach(() => {
     apiMock.__instance.get.mockReset();
@@ -92,7 +134,7 @@ describe('mcp server', () => {
     cacheMock.updateCacheFromDeviceList.mockClear();
   });
 
-  it('exposes the seventeen tools with titles and input schemas', async () => {
+  it('exposes the twenty-one tools with titles and input schemas', async () => {
     const { client } = await pair();
     const { tools } = await client.listTools();
 
@@ -101,13 +143,17 @@ describe('mcp server', () => {
       [
         'account_overview',
         'aggregate_device_history',
+        'audit_query',
+        'audit_stats',
         'describe_device',
         'get_device_history',
         'get_device_status',
         'list_devices',
         'list_scenes',
+        'plan_run',
         'plan_suggest',
         'policy_add_rule',
+        'policy_diff',
         'policy_migrate',
         'policy_new',
         'policy_validate',
@@ -637,7 +683,129 @@ describe('mcp server', () => {
     expect(sc?.error?.subKind).toBe('device-internal-error');
   });
 
-  // ---- policy_validate / policy_new / policy_migrate -----------------------
+  describe('plan/audit tools', () => {
+    it('plan_run skips destructive steps when yes is not set', async () => {
+      cacheMock.map.set('LOCK1', { type: 'Smart Lock', name: 'Front Door', category: 'physical' });
+      const { client } = await pair();
+
+      const res = await client.callTool({
+        name: 'plan_run',
+        arguments: {
+          plan: {
+            version: '1.0',
+            steps: [{ type: 'command', deviceId: 'LOCK1', command: 'unlock' }],
+          },
+        },
+      });
+
+      expect(res.isError).toBeFalsy();
+      const sc = (res as { structuredContent?: Record<string, unknown> }).structuredContent!;
+      const summary = sc.summary as Record<string, number>;
+      expect(summary.total).toBe(1);
+      expect(summary.skipped).toBe(1);
+      expect(summary.error).toBe(0);
+    });
+
+    it('audit_query filters entries by result', async () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sbmcp-audit-'));
+      const auditPath = path.join(tmp, 'audit.log');
+      const lines = [
+        JSON.stringify({
+          auditVersion: 2,
+          t: '2026-04-24T00:00:00.000Z',
+          kind: 'command',
+          deviceId: 'BOT1',
+          command: 'turnOn',
+          parameter: 'default',
+          commandType: 'command',
+          dryRun: false,
+          result: 'ok',
+        }),
+        JSON.stringify({
+          auditVersion: 2,
+          t: '2026-04-24T00:05:00.000Z',
+          kind: 'rule-fire',
+          deviceId: 'BOT1',
+          command: 'turnOff',
+          parameter: 'default',
+          commandType: 'command',
+          dryRun: false,
+          result: 'error',
+          error: 'boom',
+          rule: { name: 'night-off', triggerSource: 'cron', fireId: 'f1' },
+        }),
+      ];
+      fs.writeFileSync(auditPath, lines.join('\n') + '\n', 'utf-8');
+
+      const { client } = await pair();
+      const res = await client.callTool({
+        name: 'audit_query',
+        arguments: { file: auditPath, results: ['error'] },
+      });
+
+      expect(res.isError).toBeFalsy();
+      const sc = (res as { structuredContent?: Record<string, unknown> }).structuredContent!;
+      expect(sc.totalMatched).toBe(1);
+      expect(sc.returned).toBe(1);
+      const entries = sc.entries as Array<{ kind: string; result?: string }>;
+      expect(entries[0].kind).toBe('rule-fire');
+      expect(entries[0].result).toBe('error');
+
+      fs.rmSync(tmp, { recursive: true, force: true });
+    });
+
+    it('audit_stats aggregates by kind/result/device/rule', async () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sbmcp-audit-'));
+      const auditPath = path.join(tmp, 'audit.log');
+      const lines = [
+        JSON.stringify({
+          auditVersion: 2,
+          t: '2026-04-24T01:00:00.000Z',
+          kind: 'command',
+          deviceId: 'BOT1',
+          command: 'turnOn',
+          parameter: 'default',
+          commandType: 'command',
+          dryRun: false,
+          result: 'ok',
+        }),
+        JSON.stringify({
+          auditVersion: 2,
+          t: '2026-04-24T01:01:00.000Z',
+          kind: 'rule-fire',
+          deviceId: 'BOT1',
+          command: 'turnOff',
+          parameter: 'default',
+          commandType: 'command',
+          dryRun: false,
+          result: 'ok',
+          rule: { name: 'night-off', triggerSource: 'cron', fireId: 'f2' },
+        }),
+      ];
+      fs.writeFileSync(auditPath, lines.join('\n') + '\n', 'utf-8');
+
+      const { client } = await pair();
+      const res = await client.callTool({
+        name: 'audit_stats',
+        arguments: { file: auditPath },
+      });
+
+      expect(res.isError).toBeFalsy();
+      const sc = (res as { structuredContent?: Record<string, unknown> }).structuredContent!;
+      expect(sc.totalMatched).toBe(2);
+      const byKind = sc.byKind as Record<string, number>;
+      expect(byKind.command).toBe(1);
+      expect(byKind['rule-fire']).toBe(1);
+      const topDevices = sc.topDevices as Array<{ deviceId: string; count: number }>;
+      expect(topDevices[0]).toMatchObject({ deviceId: 'BOT1', count: 2 });
+      const topRules = sc.topRules as Array<{ ruleName: string; count: number }>;
+      expect(topRules[0]).toMatchObject({ ruleName: 'night-off', count: 1 });
+
+      fs.rmSync(tmp, { recursive: true, force: true });
+    });
+  });
+
+  // ---- policy_validate / policy_new / policy_migrate / policy_diff ---------
   describe('policy tools', () => {
     let tmp: string;
     beforeEach(() => {
@@ -810,6 +978,48 @@ describe('mcp server', () => {
       });
       const sc = (res as { structuredContent?: Record<string, unknown> }).structuredContent!;
       expect(sc.status).toBe('file-not-found');
+    });
+
+    it('policy_diff returns the same output contract as CLI policy diff --json', async () => {
+      const leftPath = path.join(tmp, 'left.yaml');
+      const rightPath = path.join(tmp, 'right.yaml');
+      fs.writeFileSync(leftPath, ['version: "0.1"', 'quiet_hours:', '  start: "22:00"', ''].join('\n'));
+      fs.writeFileSync(rightPath, ['version: "0.2"', 'quiet_hours:', '  start: "23:00"', ''].join('\n'));
+      const { client } = await pair();
+      const res = await client.callTool({
+        name: 'policy_diff',
+        arguments: { left_path: leftPath, right_path: rightPath },
+      });
+      expect(res.isError).toBeFalsy();
+      const sc = (res as { structuredContent?: Record<string, unknown> }).structuredContent!;
+      expect(sc.leftPath).toBe(leftPath);
+      expect(sc.rightPath).toBe(rightPath);
+      expect(sc.equal).toBe(false);
+      expect((sc.changeCount as number) > 0).toBe(true);
+      const stats = sc.stats as Record<string, number>;
+      expect(stats.changed > 0).toBe(true);
+      const changes = sc.changes as Array<{ path: string; kind: string }>;
+      expect(changes.some((c) => c.path === '$.version' && c.kind === 'changed')).toBe(true);
+      expect((sc.diff as string).includes('--- before')).toBe(true);
+      expect((sc.diff as string).includes('+++ after')).toBe(true);
+    });
+
+    it('policy_diff MCP structuredContent matches CLI --json data exactly', async () => {
+      const leftPath = path.join(tmp, 'left-parity.yaml');
+      const rightPath = path.join(tmp, 'right-parity.yaml');
+      fs.writeFileSync(leftPath, ['version: "0.2"', 'quiet_hours:', '  start: "22:00"', ''].join('\n'));
+      fs.writeFileSync(rightPath, ['version: "0.2"', 'quiet_hours:', '  start: "23:00"', ''].join('\n'));
+
+      const cliData = runPolicyDiffCliJson(leftPath, rightPath);
+      const { client } = await pair();
+      const mcp = await client.callTool({
+        name: 'policy_diff',
+        arguments: { left_path: leftPath, right_path: rightPath },
+      });
+
+      expect(mcp.isError).toBeFalsy();
+      const sc = (mcp as { structuredContent?: Record<string, unknown> }).structuredContent!;
+      expect(sc).toEqual(cliData);
     });
   });
 });

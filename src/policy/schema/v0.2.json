@@ -136,7 +136,7 @@
         },
         "dry_run": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "description": "When true, actions write to the audit log (kind=dry-run) but do NOT hit the SwitchBot API."
         }
       }

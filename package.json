@@ -1,6 +1,6 @@
 {
   "name": "@switchbot/openapi-cli",
-  "version": "2.13.0",
+  "version": "2.14.0",
   "description": "SwitchBot smart home CLI — control devices, run scenes, stream real-time events, and integrate AI agents via MCP. Full API v1.1 coverage.",
   "keywords": [
     "switchbot",
@@ -40,6 +40,8 @@
     "build:prod": "tsc -p tsconfig.build.json && node scripts/copy-assets.mjs",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "dev": "tsx src/index.ts",
+    "lint:md": "markdownlint \"**/*.md\"",
+    "lint:md:changelog": "markdownlint CHANGELOG.md",
     "start": "node dist/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -66,6 +68,7 @@
     "@types/node": "^22.10.7",
     "@types/uuid": "^10.0.0",
     "@vitest/coverage-v8": "^2.1.9",
+    "markdownlint-cli": "^0.48.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
     "vitest": "^2.1.9"

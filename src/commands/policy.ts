@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
+import { parse as yamlParse } from 'yaml';
 import { printJson, emitJsonError, isJsonMode } from '../utils/output.js';
 import {
   loadPolicyFile,
@@ -19,10 +20,10 @@ import {
 } from '../policy/schema.js';
 import { planMigration, PolicyMigrationError } from '../policy/migrate.js';
 import { addRuleToPolicyFile, AddRuleError } from '../policy/add-rule.js';
+import { diffPolicyValues } from '../policy/diff.js';
 
-// Latest version the CLI knows how to migrate *to*. Distinct from
-// CURRENT_POLICY_SCHEMA_VERSION (the version `policy new` emits), which stays
-// conservative so fresh files don't leap ahead of what users have adopted.
+// Latest version the CLI knows how to migrate *to*.
+// CURRENT_POLICY_SCHEMA_VERSION is the version `policy new` emits by default.
 const LATEST_SUPPORTED_VERSION: PolicySchemaVersion =
   SUPPORTED_POLICY_SCHEMA_VERSIONS[SUPPORTED_POLICY_SCHEMA_VERSIONS.length - 1];
 
@@ -88,6 +89,16 @@ function exitPolicyError(kind: 'file-not-found' | 'yaml-parse' | 'internal', mes
   process.exit(code);
 }
 
+function summarizeChangeValue(v: unknown): string {
+  if (v === null) return 'null';
+  if (v === undefined) return 'undefined';
+  if (typeof v === 'string') return JSON.stringify(v.length > 64 ? `${v.slice(0, 61)}...` : v);
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+  if (Array.isArray(v)) return `[array:${v.length}]`;
+  if (typeof v === 'object') return `{object:${Object.keys(v as Record<string, unknown>).length}}`;
+  return String(v);
+}
+
 export function registerPolicyCommand(program: Command): void {
   const policy = program
     .command('policy')
@@ -104,6 +115,8 @@ Subcommands:
   new [path]        Write a starter policy to the default location (or a given path)
   migrate [path]    Upgrade a policy file to the latest supported schema
                     (v${CURRENT_POLICY_SCHEMA_VERSION} → v${LATEST_SUPPORTED_VERSION} today; no-op if already current)
+  diff <left> <right>
+                    Compare two policy files and print structural + line diff
   add-rule          Append a rule YAML (from stdin) into automation.rules[]
 
 Exit codes (validate):
@@ -127,6 +140,7 @@ Examples:
   $ switchbot policy new
   $ switchbot policy new ./policy.yaml --force
   $ switchbot policy migrate
+  $ switchbot policy diff ./policy.before.yaml ./policy.after.yaml
 `,
     );
 
@@ -345,6 +359,82 @@ Examples:
         console.log(`✓ migrated ${policyPath} to schema v${plan.toVersion} (from v${plan.fromVersion})`);
         console.log(`  bytes written: ${bytesWritten}`);
       }
+    });
+
+  policy
+    .command('diff <left> <right>')
+    .description('Compare two policy files and print structural changes + line diff')
+    .action((leftPath: string, rightPath: string) => {
+      let leftSource = '';
+      let rightSource = '';
+      try {
+        leftSource = readFileSync(leftPath, 'utf-8');
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') {
+          exitPolicyError('file-not-found', `policy file not found: ${leftPath}`, { policyPath: leftPath });
+        }
+        exitPolicyError('internal', `failed to read ${leftPath}: ${String(err)}`);
+      }
+      try {
+        rightSource = readFileSync(rightPath, 'utf-8');
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') {
+          exitPolicyError('file-not-found', `policy file not found: ${rightPath}`, { policyPath: rightPath });
+        }
+        exitPolicyError('internal', `failed to read ${rightPath}: ${String(err)}`);
+      }
+
+      let leftDoc: unknown;
+      let rightDoc: unknown;
+      try {
+        leftDoc = yamlParse(leftSource);
+      } catch (err) {
+        exitPolicyError('yaml-parse', `YAML parse error in ${leftPath}: ${(err as Error).message}`, {
+          policyPath: leftPath,
+        });
+      }
+      try {
+        rightDoc = yamlParse(rightSource);
+      } catch (err) {
+        exitPolicyError('yaml-parse', `YAML parse error in ${rightPath}: ${(err as Error).message}`, {
+          policyPath: rightPath,
+        });
+      }
+
+      const result = diffPolicyValues(leftDoc, rightDoc, leftSource, rightSource);
+
+      if (isJsonMode()) {
+        printJson({
+          leftPath,
+          rightPath,
+          ...result,
+        });
+        return;
+      }
+
+      if (result.equal) {
+        console.log(`✓ no structural differences between ${leftPath} and ${rightPath}`);
+        return;
+      }
+
+      console.log(`~ policy diff: ${leftPath} -> ${rightPath}`);
+      console.log(
+        `  changes: ${result.changeCount} (added=${result.stats.added}, removed=${result.stats.removed}, changed=${result.stats.changed})`,
+      );
+      if (result.truncated) {
+        console.log('  note: output truncated at max structural changes');
+      }
+      for (const c of result.changes) {
+        if (c.kind === 'added') {
+          console.log(`  + ${c.path}: ${summarizeChangeValue(c.after)}`);
+        } else if (c.kind === 'removed') {
+          console.log(`  - ${c.path}: ${summarizeChangeValue(c.before)}`);
+        } else {
+          console.log(`  ~ ${c.path}: ${summarizeChangeValue(c.before)} -> ${summarizeChangeValue(c.after)}`);
+        }
+      }
+      console.log('');
+      console.log(result.diff);
     });
 
   policy

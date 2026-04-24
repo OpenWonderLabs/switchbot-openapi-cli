@@ -59,11 +59,18 @@ import { suggestPlan } from './plan.js';
 import { suggestRule } from '../rules/suggest.js';
 import { addRuleToPolicyFile, AddRuleError } from '../policy/add-rule.js';
 import { writeFileSync } from 'node:fs';
+import { readAudit, type AuditEntry } from '../utils/audit.js';
+import { parseDurationToMs } from '../utils/flags.js';
+import { resolveDeviceId } from '../utils/name-resolver.js';
+import { validatePlan } from './plan.js';
+import { parse as yamlParse } from 'yaml';
+import { diffPolicyValues } from '../policy/diff.js';
 
 const LATEST_SUPPORTED_VERSION: PolicySchemaVersion =
   SUPPORTED_POLICY_SCHEMA_VERSIONS[SUPPORTED_POLICY_SCHEMA_VERSIONS.length - 1];
 import { fileURLToPath } from 'node:url';
-import { dirname as pathDirname } from 'node:path';
+import { dirname as pathDirname, join as pathJoin } from 'node:path';
+import os from 'node:os';
 import fs from 'node:fs';
 
 /**
@@ -117,6 +124,78 @@ function apiErrorToMcpError(err: unknown) {
     transient: payload.transient,
     retryAfterMs: payload.retryAfterMs,
   });
+}
+
+const DEFAULT_AUDIT_LOG_FILE = pathJoin(os.homedir(), '.switchbot', 'audit.log');
+
+interface AuditFilterOptions {
+  since?: string;
+  from?: string;
+  to?: string;
+  kinds?: AuditEntry['kind'][];
+  deviceId?: string;
+  ruleName?: string;
+  results?: Array<'ok' | 'error'>;
+}
+
+function resolveAuditRange(opts: Pick<AuditFilterOptions, 'since' | 'from' | 'to'>): {
+  fromMs: number;
+  toMs: number;
+} {
+  if (opts.since && (opts.from || opts.to)) {
+    throw new Error('--since is mutually exclusive with --from/--to.');
+  }
+  if (opts.since) {
+    const dur = parseDurationToMs(opts.since);
+    if (dur === null) {
+      throw new Error(`Invalid --since value "${opts.since}". Expected e.g. "30s", "15m", "1h", "7d".`);
+    }
+    return { fromMs: Date.now() - dur, toMs: Number.POSITIVE_INFINITY };
+  }
+
+  let fromMs = Number.NEGATIVE_INFINITY;
+  let toMs = Number.POSITIVE_INFINITY;
+  if (opts.from) {
+    const parsed = Date.parse(opts.from);
+    if (!Number.isFinite(parsed)) {
+      throw new Error(`Invalid --from value "${opts.from}". Expected ISO-8601 timestamp.`);
+    }
+    fromMs = parsed;
+  }
+  if (opts.to) {
+    const parsed = Date.parse(opts.to);
+    if (!Number.isFinite(parsed)) {
+      throw new Error(`Invalid --to value "${opts.to}". Expected ISO-8601 timestamp.`);
+    }
+    toMs = parsed;
+  }
+  if (fromMs > toMs) {
+    throw new Error('--from must be <= --to.');
+  }
+  return { fromMs, toMs };
+}
+
+function filterAuditEntries(entries: AuditEntry[], opts: AuditFilterOptions): AuditEntry[] {
+  const { fromMs, toMs } = resolveAuditRange(opts);
+  return entries.filter((entry) => {
+    const tMs = Date.parse(entry.t);
+    if (!Number.isFinite(tMs)) return false;
+    if (tMs < fromMs || tMs > toMs) return false;
+    if (opts.kinds && opts.kinds.length > 0 && !opts.kinds.includes(entry.kind)) return false;
+    if (opts.deviceId && entry.deviceId !== opts.deviceId) return false;
+    if (opts.ruleName && entry.rule?.name !== opts.ruleName) return false;
+    if (opts.results && opts.results.length > 0) {
+      if (!entry.result || !opts.results.includes(entry.result)) return false;
+    }
+    return true;
+  });
+}
+
+function topNFromMap(counts: Map<string, number>, n: number): Array<{ key: string; count: number }> {
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, n)
+    .map(([key, count]) => ({ key, count }));
 }
 
 export function createSwitchBotMcpServer(options?: { eventManager?: EventSubscriptionManager }): McpServer {
@@ -1241,6 +1320,89 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
     }
   );
 
+  // ---- policy_diff ---------------------------------------------------------
+  server.registerTool(
+    'policy_diff',
+    {
+      title: 'Compare two policy files',
+      description:
+        'Compare two policy YAML files and return the same contract as `switchbot --json policy diff`: ' +
+        '{ leftPath, rightPath, equal, changeCount, truncated, stats, changes, diff }.',
+      _meta: { agentSafetyTier: 'read' },
+      inputSchema: z.object({
+        left_path: z.string().min(1).describe('Path to the baseline policy file.'),
+        right_path: z.string().min(1).describe('Path to the candidate policy file.'),
+      }).strict(),
+      outputSchema: {
+        leftPath: z.string(),
+        rightPath: z.string(),
+        equal: z.boolean(),
+        changeCount: z.number().int(),
+        truncated: z.boolean(),
+        stats: z.object({
+          added: z.number().int(),
+          removed: z.number().int(),
+          changed: z.number().int(),
+        }),
+        changes: z.array(z.object({
+          path: z.string(),
+          kind: z.enum(['added', 'removed', 'changed']),
+          before: z.unknown().optional(),
+          after: z.unknown().optional(),
+        })),
+        diff: z.string(),
+      },
+    },
+    ({ left_path, right_path }) => {
+      let leftSource = '';
+      let rightSource = '';
+      try {
+        leftSource = fs.readFileSync(left_path, 'utf-8');
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') {
+          return mcpError('usage', 2, `policy file not found: ${left_path}`, {
+            context: { policyPath: left_path },
+          });
+        }
+        return mcpError('runtime', 1, `failed to read ${left_path}: ${String(err)}`);
+      }
+      try {
+        rightSource = fs.readFileSync(right_path, 'utf-8');
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') {
+          return mcpError('usage', 2, `policy file not found: ${right_path}`, {
+            context: { policyPath: right_path },
+          });
+        }
+        return mcpError('runtime', 1, `failed to read ${right_path}: ${String(err)}`);
+      }
+
+      let leftDoc: unknown;
+      let rightDoc: unknown;
+      try {
+        leftDoc = yamlParse(leftSource);
+      } catch (err) {
+        return mcpError('usage', 2, `YAML parse error in ${left_path}: ${(err as Error).message}`);
+      }
+      try {
+        rightDoc = yamlParse(rightSource);
+      } catch (err) {
+        return mcpError('usage', 2, `YAML parse error in ${right_path}: ${(err as Error).message}`);
+      }
+
+      const result = {
+        leftPath: left_path,
+        rightPath: right_path,
+        ...diffPolicyValues(leftDoc, rightDoc, leftSource, rightSource),
+      };
+
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+        structuredContent: result,
+      };
+    },
+  );
+
   // switchbot://events resource — snapshot of recent shadow events from the ring buffer.
   // Returns up to 100 recent events. When MQTT is disabled, returns an empty list with a state note.
   // URI: switchbot://events  (optional query: ?filter=<expression>  ?limit=<n>)
@@ -1302,6 +1464,279 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         };
       } catch (err) {
         return apiErrorToMcpError(err);
+      }
+    },
+  );
+
+  // ---- plan_run -------------------------------------------------------------
+  server.registerTool(
+    'plan_run',
+    {
+      title: 'Validate and execute a SwitchBot plan',
+      description:
+        'Execute a Plan JSON object (version 1.0). Destructive command steps are skipped unless yes=true. ' +
+        'Scene and wait steps run in order. Returns per-step results and a summary.',
+      _meta: { agentSafetyTier: 'action' },
+      inputSchema: z.object({
+        plan: z.unknown().describe('Plan JSON object (same schema as `switchbot plan run`).'),
+        yes: z.boolean().optional().describe('Authorize destructive command steps.'),
+        continue_on_error: z.boolean().optional().describe('Keep executing later steps after a failed step.'),
+      }).strict(),
+      outputSchema: {
+        ran: z.boolean(),
+        plan: z.unknown(),
+        results: z.array(z.unknown()),
+        summary: z.object({
+          total: z.number().int(),
+          ok: z.number().int(),
+          error: z.number().int(),
+          skipped: z.number().int(),
+        }),
+      },
+    },
+    async ({ plan, yes, continue_on_error }) => {
+      const validated = validatePlan(plan);
+      if (!validated.ok) {
+        return mcpError('usage', 2, 'plan invalid', {
+          context: { issues: validated.issues },
+          hint: 'Fix the reported issues and retry plan_run.',
+        });
+      }
+
+      const out: {
+        ran: true;
+        plan: typeof validated.plan;
+        results: Array<
+          | { step: number; type: 'command'; deviceId: string; command: string; status: 'ok' | 'error' | 'skipped'; error?: string }
+          | { step: number; type: 'scene'; sceneId: string; status: 'ok' | 'error'; error?: string }
+          | { step: number; type: 'wait'; ms: number; status: 'ok' }
+        >;
+        summary: { total: number; ok: number; error: number; skipped: number };
+      } = {
+        ran: true,
+        plan: validated.plan,
+        results: [],
+        summary: { total: validated.plan.steps.length, ok: 0, error: 0, skipped: 0 },
+      };
+
+      const continueOnError = continue_on_error === true;
+      const allowDestructive = yes === true;
+
+      for (let i = 0; i < validated.plan.steps.length; i++) {
+        const step = validated.plan.steps[i];
+        const idx = i + 1;
+
+        if (step.type === 'wait') {
+          await new Promise((resolve) => setTimeout(resolve, step.ms));
+          out.results.push({ step: idx, type: 'wait', ms: step.ms, status: 'ok' });
+          out.summary.ok++;
+          continue;
+        }
+
+        if (step.type === 'scene') {
+          try {
+            await executeScene(step.sceneId);
+            out.results.push({ step: idx, type: 'scene', sceneId: step.sceneId, status: 'ok' });
+            out.summary.ok++;
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            out.results.push({ step: idx, type: 'scene', sceneId: step.sceneId, status: 'error', error: msg });
+            out.summary.error++;
+            if (!continueOnError) break;
+          }
+          continue;
+        }
+
+        let resolvedDeviceId = '';
+        try {
+          resolvedDeviceId = resolveDeviceId(step.deviceId, step.deviceName);
+          const commandType = step.commandType ?? 'command';
+          const deviceType = getCachedDevice(resolvedDeviceId)?.type;
+          const destructive = isDestructiveCommand(deviceType, step.command, commandType);
+          if (destructive && !allowDestructive) {
+            out.results.push({
+              step: idx,
+              type: 'command',
+              deviceId: resolvedDeviceId,
+              command: step.command,
+              status: 'skipped',
+              error: 'destructive — rerun with yes=true',
+            });
+            out.summary.skipped++;
+            if (!continueOnError) break;
+            continue;
+          }
+
+          await executeCommand(resolvedDeviceId, step.command, step.parameter, commandType);
+          out.results.push({
+            step: idx,
+            type: 'command',
+            deviceId: resolvedDeviceId,
+            command: step.command,
+            status: 'ok',
+          });
+          out.summary.ok++;
+        } catch (err) {
+          if (err instanceof Error && err.name === 'DryRunSignal') {
+            out.results.push({
+              step: idx,
+              type: 'command',
+              deviceId: resolvedDeviceId || step.deviceId || 'unknown',
+              command: step.command,
+              status: 'ok',
+            });
+            out.summary.ok++;
+            continue;
+          }
+          const msg = err instanceof Error ? err.message : String(err);
+          out.results.push({
+            step: idx,
+            type: 'command',
+            deviceId: resolvedDeviceId || step.deviceId || 'unknown',
+            command: step.command,
+            status: 'error',
+            error: msg,
+          });
+          out.summary.error++;
+          if (!continueOnError) break;
+        }
+      }
+
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(out, null, 2) }],
+        structuredContent: out,
+      };
+    },
+  );
+
+  // ---- audit_query ----------------------------------------------------------
+  server.registerTool(
+    'audit_query',
+    {
+      title: 'Query command/rule audit log entries',
+      description:
+        'Filter entries from the local audit log (default ~/.switchbot/audit.log) by time range, kind, device, rule, and result. ' +
+        'Useful for review flows and rule-fire inspection without leaving MCP.',
+      _meta: { agentSafetyTier: 'read' },
+      inputSchema: z.object({
+        file: z.string().optional().describe('Optional audit log path; defaults to ~/.switchbot/audit.log.'),
+        since: z.string().optional().describe('Relative window ending now (e.g. "30m", "24h"). Mutually exclusive with from/to.'),
+        from: z.string().optional().describe('Range start (ISO-8601).'),
+        to: z.string().optional().describe('Range end (ISO-8601).'),
+        kinds: z.array(z.enum(['command', 'rule-fire', 'rule-fire-dry', 'rule-throttled', 'rule-webhook-rejected'])).optional(),
+        device_id: z.string().optional().describe('Filter by deviceId.'),
+        rule_name: z.string().optional().describe('Filter by rule.name (rule-engine entries).'),
+        results: z.array(z.enum(['ok', 'error'])).optional().describe('Filter by execution result.'),
+        limit: z.number().int().min(1).max(5000).optional().describe('Max entries returned from the tail of the filtered set (default 200).'),
+      }).strict(),
+      outputSchema: {
+        file: z.string(),
+        totalMatched: z.number().int(),
+        returned: z.number().int(),
+        entries: z.array(z.unknown()),
+      },
+    },
+    ({ file, since, from, to, kinds, device_id, rule_name, results, limit }) => {
+      const filePath = file ?? DEFAULT_AUDIT_LOG_FILE;
+      const entries = readAudit(filePath);
+      try {
+        const filtered = filterAuditEntries(entries, {
+          since,
+          from,
+          to,
+          kinds,
+          deviceId: device_id,
+          ruleName: rule_name,
+          results,
+        });
+        const bounded = filtered.slice(-Math.max(1, limit ?? 200));
+        const out = {
+          file: filePath,
+          totalMatched: filtered.length,
+          returned: bounded.length,
+          entries: bounded,
+        };
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(out, null, 2) }],
+          structuredContent: out,
+        };
+      } catch (err) {
+        return mcpError('usage', 2, err instanceof Error ? err.message : 'invalid audit query options');
+      }
+    },
+  );
+
+  // ---- audit_stats ----------------------------------------------------------
+  server.registerTool(
+    'audit_stats',
+    {
+      title: 'Aggregate audit log counts for review dashboards',
+      description:
+        'Compute summary counters over the local audit log: by kind, by result, top devices, and top rules. ' +
+        'Supports the same filters as audit_query.',
+      _meta: { agentSafetyTier: 'read' },
+      inputSchema: z.object({
+        file: z.string().optional().describe('Optional audit log path; defaults to ~/.switchbot/audit.log.'),
+        since: z.string().optional().describe('Relative window ending now (e.g. "6h"). Mutually exclusive with from/to.'),
+        from: z.string().optional().describe('Range start (ISO-8601).'),
+        to: z.string().optional().describe('Range end (ISO-8601).'),
+        kinds: z.array(z.enum(['command', 'rule-fire', 'rule-fire-dry', 'rule-throttled', 'rule-webhook-rejected'])).optional(),
+        device_id: z.string().optional().describe('Filter by deviceId.'),
+        rule_name: z.string().optional().describe('Filter by rule.name (rule-engine entries).'),
+        results: z.array(z.enum(['ok', 'error'])).optional().describe('Filter by execution result.'),
+        top_n: z.number().int().min(1).max(100).optional().describe('Number of top device/rule rows to return (default 10).'),
+      }).strict(),
+      outputSchema: {
+        file: z.string(),
+        totalMatched: z.number().int(),
+        byKind: z.record(z.string(), z.number().int()),
+        byResult: z.record(z.string(), z.number().int()),
+        topDevices: z.array(z.object({ deviceId: z.string(), count: z.number().int() })),
+        topRules: z.array(z.object({ ruleName: z.string(), count: z.number().int() })),
+      },
+    },
+    ({ file, since, from, to, kinds, device_id, rule_name, results, top_n }) => {
+      const filePath = file ?? DEFAULT_AUDIT_LOG_FILE;
+      const entries = readAudit(filePath);
+      try {
+        const filtered = filterAuditEntries(entries, {
+          since,
+          from,
+          to,
+          kinds,
+          deviceId: device_id,
+          ruleName: rule_name,
+          results,
+        });
+
+        const byKind = new Map<string, number>();
+        const byResult = new Map<string, number>();
+        const byDevice = new Map<string, number>();
+        const byRule = new Map<string, number>();
+
+        for (const entry of filtered) {
+          byKind.set(entry.kind, (byKind.get(entry.kind) ?? 0) + 1);
+          if (entry.result) byResult.set(entry.result, (byResult.get(entry.result) ?? 0) + 1);
+          if (entry.deviceId) byDevice.set(entry.deviceId, (byDevice.get(entry.deviceId) ?? 0) + 1);
+          if (entry.rule?.name) byRule.set(entry.rule.name, (byRule.get(entry.rule.name) ?? 0) + 1);
+        }
+
+        const topN = top_n ?? 10;
+        const out = {
+          file: filePath,
+          totalMatched: filtered.length,
+          byKind: Object.fromEntries([...byKind.entries()].sort((a, b) => a[0].localeCompare(b[0]))),
+          byResult: Object.fromEntries([...byResult.entries()].sort((a, b) => a[0].localeCompare(b[0]))),
+          topDevices: topNFromMap(byDevice, topN).map((item) => ({ deviceId: item.key, count: item.count })),
+          topRules: topNFromMap(byRule, topN).map((item) => ({ ruleName: item.key, count: item.count })),
+        };
+
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(out, null, 2) }],
+          structuredContent: out,
+        };
+      } catch (err) {
+        return mcpError('usage', 2, err instanceof Error ? err.message : 'invalid audit stats options');
       }
     },
   );
@@ -1426,7 +1861,7 @@ export function registerMcpCommand(program: Command): void {
     .command('mcp')
     .description('Run as a Model Context Protocol server so AI agents can call SwitchBot tools')
     .addHelpText('after', `
-The MCP server exposes sixteen tools:
+  The MCP server exposes twenty-one tools:
   - list_devices            fetch all physical + IR devices
   - get_device_status       live status for a physical device
   - send_command            control a device (destructive commands need confirm:true)
@@ -1441,7 +1876,11 @@ The MCP server exposes sixteen tools:
   - policy_validate         check policy.yaml against the embedded schema (v0.1 / v0.2)
   - policy_new              scaffold a starter policy.yaml (action — confirm first)
   - policy_migrate          upgrade policy.yaml to the latest schema (action — preserves comments)
+  - policy_diff             compare two policy files with structural + line diff output
   - plan_suggest            draft a Plan JSON from intent + device IDs (heuristic, no LLM)
+  - plan_run                validate + execute a Plan JSON document
+  - audit_query             filter audit log entries by time/device/rule/result
+  - audit_stats             aggregate audit counts by kind/result/device/rule
   - rules_suggest           draft an automation rule YAML from intent (heuristic, no LLM)
   - policy_add_rule         append a rule into automation.rules[] in policy.yaml
 
