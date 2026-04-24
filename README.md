@@ -92,7 +92,7 @@ Under the hood every surface shares the same catalog, cache, and HMAC client —
 - 🎨 **Dual output modes** — colorized tables by default; `--json` passthrough for `jq` and scripting
 - 🔐 **Secure credentials** — HMAC-SHA256 signed requests; config file written with `0600`; env-var override for CI
 - 🔍 **Dry-run mode** — preview every mutating request before it hits the API
-- 🧪 **Fully tested** — 1624 Vitest tests, mocked axios, zero network in CI
+- 🧪 **Fully tested** — 1765 Vitest tests, mocked axios, zero network in CI
 - ⚡ **Shell completion** — Bash / Zsh / Fish / PowerShell
 
 ## Requirements
@@ -173,7 +173,7 @@ switchbot events mqtt-tail --max 3 --json
 switchbot status-sync start --openclaw-model home-agent
 ```
 
-See [Policy](#policy) for the authoring flow, [Rules engine](#rules-engine-v02-opt-in)
+See [Policy](#policy) for the authoring flow, [Rules engine](#rules-engine)
 for automations, and [`docs/agent-guide.md`](./docs/agent-guide.md)
 for the agent surface.
 
@@ -253,29 +253,23 @@ the CLI's prefix/substring/fuzzy match strategies and can pick the
 wrong device when two names collide. A one-line `aliases` entry
 removes the ambiguity.
 
-**Schema versions.** The CLI understands two schemas:
+**Schema version.** The CLI requires **policy v0.2**. If you have an existing
+v0.1 file from an earlier release, migrate it first:
 
-- **v0.1** — the stable shape covering aliases, confirmations,
-  quiet hours, audit, and CLI profile. `switchbot policy new` emits
-  this by default so fresh files stay compatible with older CLI
-  builds on other machines.
-- **v0.2** — adds a typed `automation.rules[]` block (triggers,
-  conditions, throttles, dry-run) used by the rules engine (see
-  [Rules engine](#rules-engine-v02-opt-in)).
-  Opt in via `switchbot policy migrate` when you are ready to author
-  rules; the migration is in place and preserves comments, and
-  refuses to touch the file if the upgraded document would not
-  validate.
+```bash
+switchbot policy migrate   # in-place upgrade, preserves comments
+```
 
-Full field-by-field reference, validation flow, and error catalogue:
-[`docs/policy-reference.md`](./docs/policy-reference.md).
-Five annotated starter files covering common setups
-(solo / shared household / rental / defaults-only / rules-engine v0.2)
-live in [`examples/policies/`](./examples/policies/).
+The v0.2 schema adds a typed `automation.rules[]` block (triggers, conditions,
+throttles, dry-run) used by the rules engine (see
+[Rules engine](#rules-engine)). Full field-by-field reference, validation flow,
+and error catalogue: [`docs/policy-reference.md`](./docs/policy-reference.md).
+Five annotated starter files covering common setups live in
+[`examples/policies/`](./examples/policies/).
 
-### Rules engine (v0.2, opt-in)
+### Rules engine
 
-With a v0.2 policy file you can declare automations that the CLI
+With a policy.yaml (v0.2) you can declare automations that the CLI
 executes for you. Supported triggers: **MQTT** (device events),
 **cron** (schedule-driven), and **webhook** (local HTTP POST).
 Supported conditions: `time_between` (quiet hours) and `device_state`
@@ -283,30 +277,22 @@ Supported conditions: `time_between` (quiet hours) and `device_state`
 `~/.switchbot/audit.log`. `rules run` is long-running; use
 `rules reload` to hot-reload policy without dropping listeners.
 
-v0.2 is opt-in today: `policy new` still writes v0.1 so fresh files
-stay compatible with older CLI builds. Run `switchbot policy migrate`
-on a copy when you're ready to author rules. v0.2 is scheduled to
-become the default schema in the next major CLI release.
-
 ```bash
-# 1. Migrate your existing policy.yaml to v0.2 (preserves comments).
-switchbot policy migrate
-
-# 2. Author rules under `automation.rules`. See examples/policies/automation.yaml
+# 1. Author rules under `automation.rules`. See examples/policies/automation.yaml
 #    for a walkthrough covering the three trigger sources.
 
-# 3. Static-check before running.
+# 2. Static-check before running.
 switchbot rules lint                       # exit 0 valid, 1 error
 switchbot rules list --json | jq .         # structured summary
 
-# 4. Run the engine. --dry-run overrides every rule into audit-only mode;
+# 3. Run the engine. --dry-run overrides every rule into audit-only mode;
 #    --max-firings bounds a demo session.
 switchbot rules run --dry-run --max-firings 5
 
-# 5. Edit policy.yaml in another shell, then hot-reload without restart.
+# 4. Edit policy.yaml in another shell, then hot-reload without restart.
 switchbot rules reload                     # SIGHUP on Unix, sentinel file on Windows
 
-# 6. Review recorded fires.
+# 5. Review recorded fires.
 switchbot rules tail --follow              # stream rule-* audit lines
 switchbot rules replay --since 1h --json   # per-rule fires/dries/throttled/errors
 ```
@@ -789,7 +775,12 @@ Output is a JSONL stream of status-change events (with `--json`) or a refreshed 
 switchbot mcp serve
 ```
 
-Exposes 8 MCP tools (`list_devices`, `describe_device`, `get_device_status`, `send_command`, `list_scenes`, `run_scene`, `search_catalog`, `account_overview`) plus a `switchbot://events` resource for real-time shadow updates.
+Exposes MCP tools (`list_devices`, `describe_device`, `get_device_status`,
+`send_command`, `list_scenes`, `run_scene`, `search_catalog`,
+`account_overview`, `plan_suggest`, `plan_run`, `audit_query`,
+`audit_stats`, `policy_diff`, `policy_validate`, `policy_new`,
+`policy_migrate`) plus a `switchbot://events` resource for real-time
+shadow updates.
 See [`docs/agent-guide.md`](./docs/agent-guide.md) for the full tool reference and safety rules (destructive-command guard).
 
 ### `doctor` — self-check
@@ -799,7 +790,7 @@ switchbot doctor
 switchbot doctor --json
 ```
 
-Runs 8 local checks (Node version, credentials, profiles, catalog, cache, quota file, clock, MQTT) and exits 1 if any check fails. `warn` results exit 0. The MQTT check reports `ok` when REST credentials are configured (auto-provisioned on first use). Use this to diagnose connectivity or config issues before running automation.
+Runs local checks (Node version, credentials, profiles, catalog, cache, quota, clock, MQTT, policy, MCP) and exits 1 if any check fails. `warn` results exit 0. The MQTT check reports `ok` when REST credentials are configured (auto-provisioned on first use). Use this to diagnose connectivity or config issues before running automation.
 
 ### `quota` — API request counter
 
@@ -1014,7 +1005,7 @@ npm install
 
 npm run dev -- <args>       # Run from TypeScript sources via tsx
 npm run build               # Compile to dist/
-npm test                    # Run the Vitest suite (1624 tests)
+npm test                    # Run the Vitest suite (1765 tests)
 npm run test:watch          # Watch mode
 npm run test:coverage       # Coverage report (v8, HTML + text)
 ```
@@ -1025,26 +1016,58 @@ npm run test:coverage       # Coverage report (v8, HTML + text)
 src/
 ├── index.ts              # Commander entry; mounts all subcommands; global flags
 ├── auth.ts               # HMAC-SHA256 signature (token + t + nonce → sign)
-├── config.ts             # Credential load/save; env > file priority; --config override
+├── config.ts             # Credential load/save; env > keychain > file priority
 ├── api/client.ts         # axios instance + request/response interceptors;
 │                         # --verbose / --dry-run / --timeout wiring
+├── credentials/
+│   ├── keychain.ts       # Credential store interface + OS backend selection
+│   └── backends/         # macos.ts / linux.ts / windows.ts / file.ts
 ├── devices/
 │   ├── catalog.ts        # Static device catalog (commands, params, status fields)
 │   └── cache.ts          # Disk + in-memory cache for device list and status
+├── install/
+│   ├── steps.ts          # Generic step runner with rollback support
+│   ├── preflight.ts      # Pre-flight checks (Node, npm, network, agent)
+│   └── default-steps.ts  # Concrete steps: credentials, keychain, policy, skill, doctor
+├── policy/
+│   ├── validate.ts       # Schema version dispatch + JSON Schema validation
+│   ├── migrate.ts        # v0.1 → v0.2 migration
+│   ├── load.ts           # YAML file loading + error handling
+│   ├── add-rule.ts       # Rule injection into automation.rules[]
+│   ├── diff.ts           # Structural + line diff
+│   └── schema/v0.2.json  # Authoritative v0.2 JSON Schema
+├── rules/
+│   ├── engine.ts         # Main orchestrator (MQTT + cron + webhook)
+│   ├── matcher.ts        # Trigger + condition matchers
+│   ├── action.ts         # Command renderer + executor
+│   ├── throttle.ts       # Per-rule throttle gate
+│   ├── cron-scheduler.ts # 5-field cron + days filter
+│   ├── webhook-listener.ts # HTTP listener (bearer token, localhost-only)
+│   ├── pid-file.ts       # Hot-reload via SIGHUP or sentinel file
+│   ├── audit-query.ts    # Audit log filtering + aggregation
+│   ├── suggest.ts        # Heuristic-based rule YAML generation
+│   └── types.ts          # Shared rule/trigger/condition/action types
+├── status-sync/
+│   └── manager.ts        # Spawn/stop logic, state file, OpenClaw bridge
 ├── lib/
 │   └── devices.ts        # Shared logic: listDevices, describeDevice, isDestructiveCommand
 ├── commands/
+│   ├── auth.ts           # `auth keychain` subcommand group
 │   ├── config.ts
 │   ├── devices.ts
 │   ├── expand.ts         # `devices expand` — semantic flag builder
 │   ├── explain.ts        # `devices explain` — one-shot device summary
 │   ├── device-meta.ts    # `devices meta` — local aliases / hide flags
+│   ├── install.ts        # `switchbot install` / `uninstall`
+│   ├── policy.ts         # `policy validate/new/migrate/diff/add-rule`
+│   ├── rules.ts          # `rules suggest/lint/list/run/reload/tail/replay`
 │   ├── scenes.ts
+│   ├── status-sync.ts    # `status-sync run/start/stop/status`
 │   ├── webhook.ts
 │   ├── watch.ts          # `devices watch <deviceId>`
 │   ├── events.ts         # `events tail` / `events mqtt-tail`
 │   ├── mcp.ts            # `mcp serve` (MCP stdio/HTTP server)
-│   ├── plan.ts           # `plan run/validate`
+│   ├── plan.ts           # `plan run/validate/suggest`
 │   ├── cache.ts          # `cache show/clear`
 │   ├── history.ts        # `history show/replay`
 │   ├── quota.ts          # `quota status/reset`
@@ -1055,11 +1078,11 @@ src/
 │   └── completion.ts     # `completion bash|zsh|fish|powershell`
 └── utils/
     ├── flags.ts          # Global flag readers (isVerbose / isDryRun / getCacheMode / …)
-    ├── output.ts         # printTable / printKeyValue / printJson / handleError / buildErrorPayload
+    ├── output.ts         # printTable / printKeyValue / printJson / handleError
     ├── format.ts         # renderRows / filterFields / output-format dispatch
     ├── audit.ts          # JSONL audit log writer
     └── quota.ts          # Local daily-quota counter
-tests/                    # Vitest suite (1624 tests, mocked axios, no network)
+tests/                    # Vitest suite (1765 tests, mocked axios, no network)
 ```
 
 ### Release flow
@@ -1098,17 +1121,14 @@ Shipped tracks summary:
 
 Backlog tracks still open:
 
-1. **v0.1 policy deprecation window** — `policy new` now emits v0.2;
-  keep validating v0.1 while migration guidance remains explicit in
-  docs and command help.
-2. **Daemon mode** — long-running local process with Unix/named-pipe
+1. **Daemon mode** — long-running local process with Unix/named-pipe
   transport so repeated MCP or plan invocations avoid fresh-process
   startup cost.
-3. **`npx @switchbot/mcp-server`** — split the MCP server into a tiny
+2. **`npx @switchbot/mcp-server`** — split the MCP server into a tiny
   package so non-CLI users can run it directly with `npx`.
-4. **`switchbot self-test`** — scripted end-to-end go/no-go checks for
+3. **`switchbot self-test`** — scripted end-to-end go/no-go checks for
   token/secret validity plus representative device control.
-5. **Record / replay** — capture request/response fixtures and replay
+4. **Record / replay** — capture request/response fixtures and replay
   offline for deterministic integration tests and CI.
 
 ## License
