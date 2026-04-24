@@ -142,10 +142,10 @@ export function startReceiver(
       if (size > MAX_BODY_BYTES) {
         bailed = true;
         res.statusCode = 413;
-        res.setHeader('connection', 'close');
         res.end('payload too large');
-        // Drop remaining upload without destroying the socket mid-flush.
-        req.on('data', () => {});
+        // Drain remaining upload so the client can read the 413 response before
+        // the connection closes naturally (avoids ECONNRESET racing the response).
+        req.resume();
         return;
       }
       chunks.push(c);

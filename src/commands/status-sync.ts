@@ -12,8 +12,9 @@ import {
 function printHumanStatus(status: StatusSyncStatus): void {
   if (!status.running) {
     console.log('status-sync is not running');
-    console.log(`state: ${status.stateDir}`);
-    console.log(`logs:  ${status.stdoutLog}`);
+    console.log(`state:  ${status.stateDir}`);
+    console.log(`stdout: ${status.stdoutLog}`);
+    console.log(`stderr: ${status.stderrLog}`);
     return;
   }
 
@@ -106,8 +107,9 @@ Examples:
           return;
         }
         console.log(`Started status-sync (PID ${status.pid}).`);
-        console.log(`state: ${status.stateDir}`);
-        console.log(`logs:  ${status.stdoutLog}`);
+        console.log(`state:  ${status.stateDir}`);
+        console.log(`stdout: ${status.stdoutLog}`);
+        console.log(`stderr: ${status.stderrLog}`);
       } catch (error) {
         handleError(error);
       }

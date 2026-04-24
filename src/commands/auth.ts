@@ -312,7 +312,7 @@ export function registerAuthCommand(program: Command): void {
       let parsed: Record<string, unknown>;
       try {
         const raw = JSON.parse(fs.readFileSync(sourceFile, 'utf-8'));
-        if (!raw || typeof raw !== 'object') {
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
           throw new Error('expected a JSON object');
         }
         parsed = raw as Record<string, unknown>;

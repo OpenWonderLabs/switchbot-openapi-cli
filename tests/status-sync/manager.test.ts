@@ -76,7 +76,6 @@ describe('status-sync manager', () => {
 
     const args = buildStatusSyncChildArgs({
       openclawUrl: 'http://localhost:18789',
-      openclawToken: 'abc',
       openclawModel: 'home-agent',
       topic: 'topic/a',
     });
@@ -91,8 +90,6 @@ describe('status-sync manager', () => {
       'openclaw',
       '--openclaw-url',
       'http://localhost:18789',
-      '--openclaw-token',
-      'abc',
       '--openclaw-model',
       'home-agent',
       '--topic',
@@ -122,14 +119,16 @@ describe('status-sync manager', () => {
         'openclaw',
         '--openclaw-url',
         'http://localhost:18789',
-        '--openclaw-token',
-        'env-token',
         '--openclaw-model',
         'env-model',
         '--topic',
         'sb/topic',
       ],
-      expect.objectContaining({ detached: true, windowsHide: true }),
+      expect.objectContaining({
+        detached: true,
+        windowsHide: true,
+        env: expect.objectContaining({ OPENCLAW_TOKEN: 'env-token' }),
+      }),
     );
     expect(fsMock.writeFileSync).toHaveBeenCalledWith(
       paths.stateFile,

@@ -111,7 +111,6 @@ export function resolveStatusSyncPaths(explicitStateDir?: string): StatusSyncPat
 
 export function buildStatusSyncChildArgs(options: {
   openclawUrl: string;
-  openclawToken: string;
   openclawModel: string;
   topic?: string;
 }): string[] {
@@ -137,8 +136,6 @@ export function buildStatusSyncChildArgs(options: {
     'openclaw',
     '--openclaw-url',
     options.openclawUrl,
-    '--openclaw-token',
-    options.openclawToken,
     '--openclaw-model',
     options.openclawModel,
   );
@@ -173,7 +170,12 @@ function readStateFile(paths: StatusSyncPaths): StatusSyncStateFile | null {
   if (!fs.existsSync(paths.stateFile)) return null;
 
   try {
-    const parsed = JSON.parse(fs.readFileSync(paths.stateFile, 'utf-8')) as Partial<StatusSyncStateFile>;
+    const raw = JSON.parse(fs.readFileSync(paths.stateFile, 'utf-8'));
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      safeUnlink(paths.stateFile);
+      return null;
+    }
+    const parsed = raw as Partial<StatusSyncStateFile>;
     if (
       typeof parsed.pid !== 'number' ||
       !Number.isInteger(parsed.pid) ||
@@ -281,6 +283,9 @@ export function stopStatusSync(options: StatusSyncStatusOptions = {}): StopStatu
   }
 
   killProcessTree(state.pid);
+  if (isProcessRunning(state.pid)) {
+    throw new Error(`Failed to stop status-sync process (PID ${state.pid}); process is still running.`);
+  }
   safeUnlink(paths.stateFile);
   return {
     stopped: true,
@@ -305,6 +310,7 @@ export function startStatusSync(options: StartStatusSyncOptions = {}): StatusSyn
   }
 
   fs.mkdirSync(paths.stateDir, { recursive: true });
+  const configPath = getConfigPath();
   const command = buildStatusSyncChildArgs(runtime);
 
   let stdoutFd: number | null = null;
@@ -317,6 +323,7 @@ export function startStatusSync(options: StartStatusSyncOptions = {}): StatusSyn
       detached: true,
       stdio: ['ignore', stdoutFd, stderrFd],
       windowsHide: true,
+      env: { ...process.env, OPENCLAW_TOKEN: runtime.openclawToken },
     });
 
     if (!child.pid) {
@@ -331,8 +338,8 @@ export function startStatusSync(options: StartStatusSyncOptions = {}): StatusSyn
       openclawUrl: runtime.openclawUrl,
       openclawModel: runtime.openclawModel,
       topic: runtime.topic ?? null,
-      configPath: getConfigPath() ? path.resolve(getConfigPath() as string) : null,
-      profile: getConfigPath() ? null : (getActiveProfile() ?? null),
+      configPath: configPath ? path.resolve(configPath) : null,
+      profile: configPath ? null : (getActiveProfile() ?? null),
       stdoutLog: paths.stdoutLog,
       stderrLog: paths.stderrLog,
     };
@@ -352,6 +359,7 @@ export async function runStatusSyncForeground(options: Omit<StartStatusSyncOptio
     const child = spawn(process.execPath, command, {
       stdio: 'inherit',
       windowsHide: true,
+      env: { ...process.env, OPENCLAW_TOKEN: runtime.openclawToken },
     });
 
     child.once('error', reject);
