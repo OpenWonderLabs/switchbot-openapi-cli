@@ -32,6 +32,20 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `rules lint` now validates `hysteresis` / `requires_stable_for` duration syntax and warns
   when `hysteresis` and `requires_stable_for` are both set.
 
+### Changed — release pipeline
+
+- Pre-publish `smoke:pack-install` now runs in `publish.yml` before `npm publish`, and the
+  same smoke runs locally via `pre-push` hook (`verify:pre-push`) and on every PR in CI
+  (`pack-install-smoke`).
+- `scripts/copy-assets.mjs` now injects the `#!/usr/bin/env node` shebang into `dist/index.js`
+  and chmods it to `0755` after every build, so the npm bin entry is always executable.
+- New `pack-install-smoke-tsc` CI job validates the same `npm run build` (tsc) artifact that
+  `publish.yml` actually ships, closing the gap where the PR gate was testing the esbuild
+  bundle while publish shipped the tsc output. See [`docs/release-pipeline.md`](./docs/release-pipeline.md).
+- New `npm-published-smoke.yml` workflow verifies published tarballs on the npm registry,
+  auto-promotes `next → latest` on success, and auto-deprecates on package-install/offline
+  smoke failures only (never on live API flakes).
+
 ## [3.2.0] - 2026-04-25
 
 ### Added — daemon, upgrade-check, scenes validate/simulate, rules summary

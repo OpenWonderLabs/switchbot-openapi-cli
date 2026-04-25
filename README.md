@@ -1219,6 +1219,8 @@ git push --follow-tags
 
 Then on GitHub → **Releases → Draft a new release → select tag → Publish**. The `publish.yml` workflow runs tests, verifies the tag matches `package.json`, and publishes `@switchbot/openapi-cli` to npm with [provenance](https://docs.npmjs.com/generating-provenance-statements).
 
+See [`docs/release-pipeline.md`](./docs/release-pipeline.md) for the full pre-publish and post-publish verification flow (local hooks → CI → `publish.yml` → `npm-published-smoke.yml`).
+
 ## License
 
 [MIT](./LICENSE) © chenliuyun
