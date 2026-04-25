@@ -1192,41 +1192,6 @@ git push --follow-tags
 
 Then on GitHub → **Releases → Draft a new release → select tag → Publish**. The `publish.yml` workflow runs tests, verifies the tag matches `package.json`, and publishes `@switchbot/openapi-cli` to npm with [provenance](https://docs.npmjs.com/generating-provenance-statements).
 
-## Contributing
-
-Bug reports, feature requests, and PRs are welcome.
-
-1. Fork the repo and create a topic branch.
-2. Keep changes small and focused; add or update Vitest cases for any behavior change.
-3. Run `npm test` and `npm run build` locally — both must pass.
-4. Open a pull request against `main`. CI runs on Node 18/20/22; all three must stay green.
-
-## Roadmap
-
-Phase 1 through Phase 4 are shipped. The authoritative phase/track table
-(including skill-side `autonomyLevel` L1/L2/L3 mapping) lives in
-[`docs/design/roadmap.md`](./docs/design/roadmap.md).
-
-Shipped tracks summary:
-
-- **Track β**: one-command install/uninstall surface (`switchbot install` / `switchbot uninstall`).
-- **Track γ**: rules v0.2 runtime increment (`days` + `all`/`any`/`not`).
-- **Track δ (L2)**: plan authoring + guarded execution (`plan suggest`, `plan run --require-approval`) and MCP review/execute tools (`plan_suggest`, `plan_run`, `audit_query`, `audit_stats`, `policy_diff`).
-- **Track ζ (L3)**: autonomous rule authoring (`rules suggest`, `policy add-rule`) with MCP parity (`rules_suggest`, `policy_add_rule`).
-- **Track ε**: cross-OS keychain CI matrix (macOS + Linux libsecret + Windows Credential Manager).
-
-Backlog tracks still open:
-
-1. **Daemon mode** — long-running local process with Unix/named-pipe
-  transport so repeated MCP or plan invocations avoid fresh-process
-  startup cost.
-2. **`npx @switchbot/mcp-server`** — split the MCP server into a tiny
-  package so non-CLI users can run it directly with `npx`.
-3. **`switchbot self-test`** — scripted end-to-end go/no-go checks for
-  token/secret validity plus representative device control.
-4. **Record / replay** — capture request/response fixtures and replay
-  offline for deterministic integration tests and CI.
-
 ## License
 
 [MIT](./LICENSE) © chenliuyun
