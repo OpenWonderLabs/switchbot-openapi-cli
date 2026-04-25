@@ -29,6 +29,14 @@ function planPath(planId: string): string {
   return path.join(PLANS_DIR, `${planId}.json`);
 }
 
+const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function assertValidPlanId(planId: string): void {
+  if (!UUID_V4_RE.test(planId)) {
+    throw new Error(`invalid planId: ${planId}`);
+  }
+}
+
 export function savePlanRecord(plan: Plan): PlanRecord {
   ensurePlansDir();
   const record: PlanRecord = {
@@ -42,6 +50,7 @@ export function savePlanRecord(plan: Plan): PlanRecord {
 }
 
 export function loadPlanRecord(planId: string): PlanRecord | null {
+  assertValidPlanId(planId);
   try {
     const raw = fs.readFileSync(planPath(planId), 'utf-8');
     return JSON.parse(raw) as PlanRecord;
@@ -51,6 +60,7 @@ export function loadPlanRecord(planId: string): PlanRecord | null {
 }
 
 export function updatePlanRecord(planId: string, updates: Partial<PlanRecord>): PlanRecord {
+  assertValidPlanId(planId);
   const record = loadPlanRecord(planId);
   if (!record) throw new Error(`Plan ${planId} not found in ${PLANS_DIR}`);
   const updated = { ...record, ...updates };
