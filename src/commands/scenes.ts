@@ -210,4 +210,60 @@ Example:
         handleError(error);
       }
     });
+
+  // switchbot scenes explain <sceneId>
+  scenes
+    .command('explain')
+    .description('Explain in plain language what a scene does and how to execute it safely.')
+    .argument('<sceneId>', 'Scene ID from "scenes list"')
+    .addHelpText('after', `
+Shows the scene name, action description, risk level, and the exact command to
+run. Unlike "simulate" (which shows raw HTTP detail), "explain" is aimed at a
+human or agent deciding whether to proceed.
+
+Note: SwitchBot API v1.1 does not expose scene step details; risk is reported
+as "low" because scenes only trigger pre-configured automations in the app.
+
+Example:
+  $ switchbot scenes explain T12345678
+`)
+    .action(async (sceneId: string) => {
+      try {
+        const sceneList = await fetchScenes();
+        const found = sceneList.find((s) => s.sceneId === sceneId);
+        if (!found) {
+          throw new StructuredUsageError(`scene not found: ${sceneId}`, {
+            error: 'scene_not_found',
+            sceneId,
+            candidates: sceneList.map((s) => ({ sceneId: s.sceneId, sceneName: s.sceneName })),
+          });
+        }
+        const explanation = {
+          sceneId: found.sceneId,
+          sceneName: found.sceneName,
+          action: `Trigger scene (POST /v1.1/scenes/${found.sceneId}/execute)`,
+          riskLevel: 'low' as const,
+          idempotent: null as boolean | null,
+          toExecute: `switchbot scenes execute ${found.sceneId}`,
+          dryRun: isDryRun(),
+          note: 'SwitchBot API v1.1 does not expose individual scene steps.',
+        };
+        if (isJsonMode()) {
+          printJson(explanation);
+          return;
+        }
+        console.log(`sceneId:    ${explanation.sceneId}`);
+        console.log(`sceneName:  ${explanation.sceneName}`);
+        console.log(`action:     ${explanation.action}`);
+        console.log(`riskLevel:  ${explanation.riskLevel}`);
+        console.log(`idempotent: unknown (scene steps not exposed by API)`);
+        console.log(`toExecute:  ${explanation.toExecute}`);
+        if (explanation.dryRun) {
+          console.log(`dryRun:     true  (pass --dry-run to execute would be a no-op)`);
+        }
+        console.log(`note:       ${explanation.note}`);
+      } catch (error) {
+        handleError(error);
+      }
+    });
 }

@@ -254,4 +254,48 @@ describe('scenes command', () => {
       expect(err).not.toContain('Did you mean:');
     });
   });
+
+  describe('explain', () => {
+    function mockScenes() {
+      apiMock.__instance.get.mockResolvedValue({
+        data: {
+          body: [
+            { sceneId: 'S1', sceneName: 'Good Morning' },
+            { sceneId: 'S2', sceneName: 'Movie Time' },
+          ],
+        },
+      });
+    }
+
+    it('--json returns explanation envelope with riskLevel and toExecute', async () => {
+      mockScenes();
+      const res = await runCli(registerScenesCommand, ['--json', 'scenes', 'explain', 'S1']);
+      expect(res.exitCode).not.toBe(2);
+      const out = JSON.parse(res.stdout.find((l) => l.trim().startsWith('{'))!) as Record<string, unknown>;
+      expect((out.data as Record<string, unknown>).sceneId).toBe('S1');
+      expect((out.data as Record<string, unknown>).sceneName).toBe('Good Morning');
+      expect((out.data as Record<string, unknown>).riskLevel).toBe('low');
+      expect((out.data as Record<string, unknown>).toExecute).toBe('switchbot scenes execute S1');
+      expect((out.data as Record<string, unknown>).idempotent).toBeNull();
+    });
+
+    it('plaintext output includes key explanation fields', async () => {
+      mockScenes();
+      const res = await runCli(registerScenesCommand, ['scenes', 'explain', 'S1']);
+      expect(res.exitCode).not.toBe(2);
+      const out = res.stdout.join('\n');
+      expect(out).toContain('Good Morning');
+      expect(out).toContain('riskLevel');
+      expect(out).toContain('toExecute');
+      expect(out).toContain('scenes execute S1');
+    });
+
+    it('--json emits error envelope for unknown sceneId', async () => {
+      mockScenes();
+      const res = await runCli(registerScenesCommand, ['--json', 'scenes', 'explain', 'MISSING']);
+      expect(res.exitCode).toBe(2);
+      const out = JSON.parse(res.stdout.find((l) => l.trim().startsWith('{'))!) as Record<string, unknown>;
+      expect((out.error as Record<string, unknown>).message).toMatch(/scene not found/i);
+    });
+  });
 });
