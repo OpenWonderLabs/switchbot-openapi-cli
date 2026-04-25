@@ -174,17 +174,18 @@ describe('plan resource model', () => {
       expect(updated?.executedAt).toBeUndefined();
     });
 
-    it('marks status=failed when a destructive step is skipped (no --yes)', async () => {
+    it('marks status=failed when a destructive step errors (plan execute forces yes:true)', async () => {
       cacheMock.map.set('LOCK1', { type: 'Smart Lock', name: 'Front', category: 'physical' });
       const record = makeApproved(lockPlan());
 
+      // No API mock for unlock — the step is attempted (plan execute forces yes:true)
+      // and fails because the mock returns undefined.
       const res = await runCli(registerPlanCommand, ['plan', 'execute', record.planId]);
 
       expect(res.exitCode).toBe(1);
       const updated = planStore.store.get(record.planId);
       expect(updated?.status).toBe('failed');
-      expect(updated?.failureReason).toMatch(/skipped/);
-      expect(updated?.executedAt).toBeUndefined();
+      expect(updated?.failureReason).toMatch(/error/);
     });
 
     it('failed plan can be re-approved and retried', async () => {
