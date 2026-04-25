@@ -64,6 +64,8 @@ Under the hood every surface shares the same catalog, cache, and HMAC client —
   - [`plan`](#plan--declarative-batch-operations)
   - [`mcp`](#mcp--model-context-protocol-server)
   - [`doctor`](#doctor--self-check)
+  - [`health`](#health--runtime-health-report)
+  - [`upgrade-check`](#upgrade-check--version-check)
   - [`quota`](#quota--api-request-counter)
   - [`history`](#history--audit-log)
   - [`catalog`](#catalog--device-type-catalog)
@@ -92,7 +94,7 @@ Under the hood every surface shares the same catalog, cache, and HMAC client —
 - 🎨 **Dual output modes** — colorized tables by default; `--json` passthrough for `jq` and scripting
 - 🔐 **Secure credentials** — HMAC-SHA256 signed requests; config file written with `0600`; env-var override for CI
 - 🔍 **Dry-run mode** — preview every mutating request before it hits the API
-- 🧪 **Fully tested** — 1765 Vitest tests, mocked axios, zero network in CI
+- 🧪 **Fully tested** — 1856 Vitest tests, mocked axios, zero network in CI
 - ⚡ **Shell completion** — Bash / Zsh / Fish / PowerShell
 
 ## Requirements
@@ -285,16 +287,37 @@ Supported conditions: `time_between` (quiet hours) and `device_state`
 switchbot rules lint                       # exit 0 valid, 1 error
 switchbot rules list --json | jq .         # structured summary
 
-# 3. Run the engine. --dry-run overrides every rule into audit-only mode;
+# 3. Inspect a single rule in full detail (trigger, conditions, actions,
+#    cooldown, hysteresis, maxFiringsPerHour, suppressIfAlreadyDesired, last fired).
+switchbot rules explain "motion on"
+switchbot rules explain "motion on" --json
+
+# 4. Run the engine. --dry-run overrides every rule into audit-only mode;
 #    --max-firings bounds a demo session.
 switchbot rules run --dry-run --max-firings 5
 
-# 4. Edit policy.yaml in another shell, then hot-reload without restart.
+# 5. Edit policy.yaml in another shell, then hot-reload without restart.
 switchbot daemon reload                    # managed daemon reload
 
-# 5. Review recorded fires.
+# 6. Review recorded fires.
 switchbot rules tail --follow              # stream rule-* audit lines
 switchbot rules replay --since 1h --json   # per-rule fires/dries/throttled/errors
+switchbot rules summary                    # aggregate fires/errors per rule (24h window)
+switchbot rules last-fired -n 20           # 20 most recent fire entries
+
+# 7. Conflict and health analysis.
+switchbot rules conflicts                  # opposing actions, high-frequency MQTT,
+                                           # destructive commands, quiet-hours gaps
+switchbot rules doctor --json              # lint + conflicts combined; exit 0 when clean
+```
+
+When `quiet_hours` is configured in `policy.yaml`, `rules conflicts` additionally flags event-driven (MQTT / webhook) rules that lack a `time_between` condition — they would fire uninhibited during the quiet window. The hint in each finding includes a ready-to-paste `time_between` condition to add.
+
+Webhook trigger token management:
+
+```bash
+switchbot rules webhook-rotate-token       # rotate the bearer token for webhook triggers
+switchbot rules webhook-show-token         # print current token (creates one if absent)
 ```
 
 See [`docs/design/phase4-rules.md`](./docs/design/phase4-rules.md) for
@@ -356,6 +379,12 @@ switchbot devices command ABC123 turnOn --dry-run
 switchbot config set-token <token> <secret>   # Save to ~/.switchbot/config.json
 switchbot config show                          # Print current source + masked secret
 switchbot config list-profiles                 # List saved profiles
+
+# Print (or write) the recommended AI-agent profile template
+switchbot config agent-profile                 # print to stdout
+switchbot config agent-profile --write         # write to ~/.switchbot/profiles/agent.json (mode 0600)
+switchbot config agent-profile --write --force # overwrite if it already exists
+switchbot config agent-profile --json          # structured JSON envelope
 ```
 
 ### `devices` — list, status, control
@@ -551,6 +580,10 @@ skipped devices appear under `summary.skipped` with `skippedReason:'offline'`.
 ```bash
 switchbot scenes list                 # Columns: sceneId, sceneName
 switchbot scenes execute <sceneId>
+
+# One-shot summary: risk profile, execution hint, estimated commands
+switchbot scenes explain <sceneId>
+switchbot scenes explain <sceneId> --json
 ```
 
 ### `webhook` — receive device events over HTTP
@@ -795,6 +828,56 @@ switchbot doctor --json
 
 Runs local checks (Node version, credentials, profiles, catalog, cache, quota, clock, MQTT, policy, MCP) and exits 1 if any check fails. `warn` results exit 0. The MQTT check reports `ok` when REST credentials are configured (auto-provisioned on first use). Use this to diagnose connectivity or config issues before running automation.
 
+`--json` output includes `maturityScore` (0–100) and `maturityLabel` (`production-ready` / `mostly-ready` / `needs-work` / `not-ready`) to give an at-a-glance readiness rating:
+
+```bash
+switchbot doctor --json | jq '{score: .data.maturityScore, label: .data.maturityLabel}'
+```
+
+Pass `--fix --yes` to auto-apply safe fixes (e.g. clear stale cache entries) without a prompt.
+
+### `health` — runtime health report
+
+```bash
+# One-shot report: quota, audit error rate, circuit-breaker state
+switchbot health check
+switchbot health check --prometheus      # Prometheus text format
+switchbot health check --json
+
+# Start a long-running HTTP server with /healthz and /metrics
+switchbot health serve                   # default port 3100, bind 127.0.0.1
+switchbot health serve --port 8080
+switchbot health serve --json            # print {"status":"listening",...} on start
+```
+
+`/healthz` returns a JSON health report (HTTP 200 when `ok`/`degraded`, 503 when circuit is open).
+`/metrics` returns Prometheus text metrics (`switchbot_quota_used_total`, `switchbot_circuit_open`, …).
+Port conflicts are reported immediately with a clear hint to choose a different port via `--port`.
+
+### `upgrade-check` — version check
+
+```bash
+switchbot upgrade-check                      # human output; exits 1 when update available
+switchbot upgrade-check --json               # structured JSON output
+switchbot upgrade-check --timeout 5000       # custom registry timeout (ms)
+```
+
+Queries the npm registry for the latest published version and compares it against the running version.
+`--json` output:
+
+```json
+{
+  "current": "3.2.1",
+  "latest": "4.0.0",
+  "upToDate": false,
+  "updateAvailable": true,
+  "breakingChange": true,
+  "installCommand": "npm install -g @switchbot/openapi-cli@4.0.0"
+}
+```
+
+`breakingChange` is `true` when the latest major version is higher than the current — useful for agents or CI that need to distinguish breaking upgrades from patch releases.
+
 ### `quota` — API request counter
 
 ```bash
@@ -879,6 +962,11 @@ switchbot policy validate --no-snippet             # plain error list, no source
 
 # Report the schema version the file declares
 switchbot policy migrate
+
+# Snapshot and restore the active policy
+switchbot policy backup                            # write timestamped backup alongside policy file
+switchbot policy backup --out ./backups/           # custom destination directory
+switchbot policy restore <backup-file>             # overwrite active policy from backup (auto-backups first)
 ```
 
 Path resolution order: positional `[path]` > `SWITCHBOT_POLICY_PATH` env var > default policy path.
@@ -1008,7 +1096,7 @@ npm install
 
 npm run dev -- <args>       # Run from TypeScript sources via tsx
 npm run build               # Compile to dist/
-npm test                    # Run the Vitest suite (1765 tests)
+npm test                    # Run the Vitest suite (1856 tests)
 npm run test:watch          # Watch mode
 npm run test:coverage       # Coverage report (v8, HTML + text)
 ```
@@ -1048,6 +1136,8 @@ src/
 │   ├── webhook-listener.ts # HTTP listener (bearer token, localhost-only)
 │   ├── pid-file.ts       # Hot-reload via SIGHUP or sentinel file
 │   ├── audit-query.ts    # Audit log filtering + aggregation
+│   ├── conflict-analyzer.ts # Static conflict detection (opposing actions,
+│   │                     #   high-freq MQTT, destructive cmds, quiet-hours gaps)
 │   ├── suggest.ts        # Heuristic-based rule YAML generation
 │   └── types.ts          # Shared rule/trigger/condition/action types
 ├── status-sync/
@@ -1063,8 +1153,11 @@ src/
 │   ├── device-meta.ts    # `devices meta` — local aliases / hide flags
 │   ├── install.ts        # `switchbot install` / `uninstall`
 │   ├── policy.ts         # `policy validate/new/migrate/diff/add-rule`
-│   ├── rules.ts          # `rules suggest/lint/list/run/reload/tail/replay`
+│   ├── rules.ts          # `rules suggest/lint/list/explain/run/reload/tail/replay/
+│   │                     #   conflicts/doctor/summary/last-fired/webhook-*`
 │   ├── scenes.ts
+│   ├── health.ts         # `health check/serve` — report + HTTP endpoints
+│   ├── upgrade-check.ts  # `upgrade-check` — npm registry version check
 │   ├── status-sync.ts    # `status-sync run/start/stop/status`
 │   ├── webhook.ts
 │   ├── watch.ts          # `devices watch <deviceId>`
@@ -1085,7 +1178,7 @@ src/
     ├── format.ts         # renderRows / filterFields / output-format dispatch
     ├── audit.ts          # JSONL audit log writer
     └── quota.ts          # Local daily-quota counter
-tests/                    # Vitest suite (1765 tests, mocked axios, no network)
+tests/                    # Vitest suite (1856 tests, mocked axios, no network)
 ```
 
 ### Release flow
