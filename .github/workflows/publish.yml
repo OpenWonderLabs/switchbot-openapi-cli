@@ -28,6 +28,9 @@ jobs:
             echo "Tag $TAG_VERSION does not match package.json version $PKG_VERSION"
             exit 1
           fi
-      - run: npm publish --provenance --access public
+      - name: Smoke test packed npm artifact
+        run: npm run smoke:pack-install
+      - name: Publish package to npm dist-tag next
+        run: npm publish --tag next --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -40,13 +40,18 @@
     "build:prod": "node scripts/bundle.mjs && node scripts/copy-assets.mjs",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "dev": "tsx src/index.ts",
+    "hooks:install": "node scripts/install-git-hooks.mjs",
     "lint:md": "markdownlint \"**/*.md\"",
     "lint:md:changelog": "markdownlint CHANGELOG.md",
+    "prepare": "node scripts/install-git-hooks.mjs",
     "start": "node dist/index.js",
+    "smoke:pack-install": "node scripts/smoke-pack-install.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "prepublishOnly": "npm test && npm run clean && npm run build && node dist/index.js --version"
+    "verify:pre-commit": "npm run build:prod && npm test -- tests/version.test.ts",
+    "verify:pre-push": "npm run build:prod && npm test -- tests/version.test.ts && npm run smoke:pack-install",
+    "prepublishOnly": "npm test && npm run clean && npm run build:prod && node dist/index.js --version"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
