@@ -379,4 +379,114 @@ describe('switchbot policy (commander surface)', () => {
       expect(stderr.join('\n')).toContain('policy file not found');
     });
   });
+
+  // ── policy backup / restore ──────────────────────────────────────────────
+  describe('policy backup', () => {
+    let policyFile: string;
+
+    beforeEach(() => {
+      policyFile = path.join(tmpDir, 'policy.yaml');
+      fs.writeFileSync(policyFile, 'version: "0.2"\n', 'utf-8');
+      process.env.SWITCHBOT_POLICY_PATH = policyFile;
+    });
+
+    afterEach(() => {
+      delete process.env.SWITCHBOT_POLICY_PATH;
+    });
+
+    it('creates a .bak.yaml backup alongside the policy', () => {
+      const { stdout, exitCode } = runCli(['policy', 'backup']);
+      expect(exitCode).toBe(0);
+      const backupPath = policyFile.replace(/\.yaml$/, '.bak.yaml');
+      expect(fs.existsSync(backupPath)).toBe(true);
+      expect(fs.readFileSync(backupPath, 'utf-8')).toBe(fs.readFileSync(policyFile, 'utf-8'));
+      expect(stdout.join('\n')).toContain('Backup written');
+    });
+
+    it('writes backup to an explicit path', () => {
+      const dest = path.join(tmpDir, 'my-snapshot.yaml');
+      const { stdout, exitCode } = runCli(['policy', 'backup', dest]);
+      expect(exitCode).toBe(0);
+      expect(fs.existsSync(dest)).toBe(true);
+      expect(stdout.join('\n')).toContain(dest);
+    });
+
+    it('refuses to overwrite existing backup without --force', () => {
+      const backupPath = policyFile.replace(/\.yaml$/, '.bak.yaml');
+      fs.writeFileSync(backupPath, 'original\n', 'utf-8');
+
+      const { exitCode } = runCli(['policy', 'backup']);
+      expect(exitCode).toBe(2);
+      expect(fs.readFileSync(backupPath, 'utf-8')).toBe('original\n');
+    });
+
+    it('overwrites existing backup with --force', () => {
+      const backupPath = policyFile.replace(/\.yaml$/, '.bak.yaml');
+      fs.writeFileSync(backupPath, 'old\n', 'utf-8');
+
+      const { exitCode } = runCli(['policy', 'backup', '--force']);
+      expect(exitCode).toBe(0);
+      expect(fs.readFileSync(backupPath, 'utf-8')).not.toBe('old\n');
+    });
+
+    it('--json returns ok:true with source and dest', () => {
+      const { stdout, exitCode } = runCli(['--json', 'policy', 'backup']);
+      expect(exitCode).toBe(0);
+      const out = JSON.parse(stdout[0]) as { data: Record<string, unknown> };
+      expect(out.data.ok).toBe(true);
+      expect(typeof out.data.source).toBe('string');
+      expect(typeof out.data.dest).toBe('string');
+    });
+
+    it('exits 2 when the policy file does not exist', () => {
+      fs.unlinkSync(policyFile);
+      const { exitCode } = runCli(['policy', 'backup']);
+      expect(exitCode).toBe(2);
+    });
+  });
+
+  describe('policy restore', () => {
+    let policyFile: string;
+    let backupFile: string;
+
+    beforeEach(() => {
+      policyFile = path.join(tmpDir, 'policy.yaml');
+      backupFile = path.join(tmpDir, 'policy.bak.yaml');
+      // Write a valid v0.2 policy as the backup source.
+      fs.writeFileSync(backupFile, 'version: "0.2"\n', 'utf-8');
+      // Write a different active policy.
+      fs.writeFileSync(policyFile, 'version: "0.2"\n# original\n', 'utf-8');
+      process.env.SWITCHBOT_POLICY_PATH = policyFile;
+    });
+
+    afterEach(() => {
+      delete process.env.SWITCHBOT_POLICY_PATH;
+    });
+
+    it('restores the backup to the active policy path', () => {
+      const { stdout, exitCode } = runCli(['policy', 'restore', backupFile]);
+      expect(exitCode).toBe(0);
+      expect(fs.readFileSync(policyFile, 'utf-8')).toBe(fs.readFileSync(backupFile, 'utf-8'));
+      expect(stdout.join('\n')).toContain('Policy restored');
+    });
+
+    it('auto-creates a pre-restore backup of the existing policy', () => {
+      runCli(['policy', 'restore', backupFile]);
+      const autoBackup = policyFile.replace(/\.yaml$/, '.pre-restore.bak.yaml');
+      expect(fs.existsSync(autoBackup)).toBe(true);
+    });
+
+    it('exits 2 when the restore source does not exist', () => {
+      const { exitCode } = runCli(['policy', 'restore', path.join(tmpDir, 'missing.yaml')]);
+      expect(exitCode).toBe(2);
+    });
+
+    it('--json returns ok:true with restored path', () => {
+      const { stdout, exitCode } = runCli(['--json', 'policy', 'restore', backupFile]);
+      expect(exitCode).toBe(0);
+      const out = JSON.parse(stdout[0]) as { data: Record<string, unknown> };
+      expect(out.data.ok).toBe(true);
+      expect(out.data.restored).toBe(policyFile);
+    });
+  });
 });
