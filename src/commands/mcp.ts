@@ -430,6 +430,18 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         command: z.string().optional(),
         deviceId: z.string().optional(),
         result: z.unknown().optional().describe('API response body from SwitchBot (absent on dryRun)'),
+        riskProfile: z
+          .object({
+            riskLevel: z.enum(['high', 'medium', 'low']),
+            requiresConfirmation: z.boolean(),
+            supportsDryRun: z.literal(true),
+            idempotencyHint: z.enum(['safe', 'non-idempotent']),
+            recommendedMode: z.enum(['review-before-execute', 'plan', 'direct']),
+          })
+          .optional()
+          .describe(
+            'Device+command-specific risk metadata. riskLevel:"high" means confirm:true was required. Always present on dryRun responses so agents can preview risk before committing.',
+          ),
         verification: z
           .object({
             verifiable: z.boolean(),
@@ -511,7 +523,15 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
           parameter: effectiveParameter ?? 'default',
           commandType: effectiveType,
         };
-        const structured = { ok: true as const, dryRun: true as const, wouldSend };
+        const dryIsDestructive = isDestructiveCommand(cached.type, effectiveCommand, effectiveType);
+        const dryRiskProfile = {
+          riskLevel: (dryIsDestructive ? 'high' : effectiveType === 'command' ? 'medium' : 'low') as 'high' | 'medium' | 'low',
+          requiresConfirmation: dryIsDestructive,
+          supportsDryRun: true,
+          idempotencyHint: (dryIsDestructive ? 'non-idempotent' : 'safe') as 'safe' | 'non-idempotent',
+          recommendedMode: (dryIsDestructive ? 'review-before-execute' : 'plan') as 'review-before-execute' | 'plan' | 'direct',
+        };
+        const structured = { ok: true as const, dryRun: true as const, riskProfile: dryRiskProfile, wouldSend };
         return {
           content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
           structuredContent: structured,
@@ -610,17 +630,26 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         return apiErrorToMcpError(err);
       }
       const isIr = getCachedDevice(deviceId)?.category === 'ir';
+      const liveIsDestructive = isDestructiveCommand(typeName, effectiveCommand, effectiveType);
+      const riskProfile = {
+        riskLevel: (liveIsDestructive ? 'high' : effectiveType === 'command' ? 'medium' : 'low') as 'high' | 'medium' | 'low',
+        requiresConfirmation: liveIsDestructive,
+        supportsDryRun: true,
+        idempotencyHint: (liveIsDestructive ? 'non-idempotent' : 'safe') as 'safe' | 'non-idempotent',
+        recommendedMode: (liveIsDestructive ? 'review-before-execute' : 'plan') as 'review-before-execute' | 'plan' | 'direct',
+      };
       const structured: {
         ok: true;
         command: string;
         deviceId: string;
         result: unknown;
+        riskProfile: typeof riskProfile;
         verification?: {
           verifiable: boolean;
           reason: string;
           suggestedFollowup: string;
         };
-      } = { ok: true as const, command: effectiveCommand, deviceId, result };
+      } = { ok: true as const, command: effectiveCommand, deviceId, result, riskProfile };
       if (isIr) {
         structured.verification = {
           verifiable: false,

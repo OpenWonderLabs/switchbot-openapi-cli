@@ -8,6 +8,13 @@ import { executeScene } from '../lib/scenes.js';
 import { getCachedDevice } from '../devices/cache.js';
 import { resolveDeviceId } from '../utils/name-resolver.js';
 import { COMMAND_KEYWORDS } from '../lib/command-keywords.js';
+import {
+  savePlanRecord,
+  loadPlanRecord,
+  updatePlanRecord,
+  listPlanRecords,
+  PLANS_DIR,
+} from '../lib/plan-store.js';
 
 export interface PlanCommandStep {
   type: 'command';
@@ -265,6 +272,89 @@ interface PlanRunResult {
   summary: { total: number; ok: number; error: number; skipped: number };
 }
 
+/** Shared plan-execution core used by both `plan run` and `plan execute`. */
+async function executePlanSteps(
+  plan: Plan,
+  planId: string,
+  options: { yes?: boolean; requireApproval?: boolean; continueOnError?: boolean },
+): Promise<PlanRunResult> {
+  const out: PlanRunResult = {
+    plan,
+    results: [],
+    summary: { total: plan.steps.length, ok: 0, error: 0, skipped: 0 },
+  };
+  for (let i = 0; i < plan.steps.length; i++) {
+    const step = plan.steps[i];
+    const idx = i + 1;
+    if (step.type === 'wait') {
+      await new Promise((r) => setTimeout(r, step.ms));
+      out.results.push({ step: idx, type: 'wait', ms: step.ms, status: 'ok' });
+      out.summary.ok++;
+      if (!isJsonMode()) console.log(`  ${idx}. wait ${step.ms}ms`);
+      continue;
+    }
+    if (step.type === 'scene') {
+      try {
+        await executeScene(step.sceneId);
+        out.results.push({ step: idx, type: 'scene', sceneId: step.sceneId, status: 'ok' });
+        out.summary.ok++;
+        if (!isJsonMode()) console.log(`  ${idx}. ✓ scene ${step.sceneId}`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        out.results.push({ step: idx, type: 'scene', sceneId: step.sceneId, status: 'error', error: msg });
+        out.summary.error++;
+        if (!isJsonMode()) console.log(`  ${idx}. ✗ scene ${step.sceneId}: ${msg}`);
+        if (!options.continueOnError) break;
+      }
+      continue;
+    }
+    const resolvedDeviceId = resolveDeviceId(step.deviceId, step.deviceName);
+    const deviceType = getCachedDevice(resolvedDeviceId)?.type;
+    const commandType = step.commandType ?? 'command';
+    const destructive = isDestructiveCommand(deviceType, step.command, commandType);
+    let approvalDecision: 'approved' | undefined;
+    if (destructive && !options.yes) {
+      if (options.requireApproval) {
+        const approved = await promptApproval(idx, step.command, resolvedDeviceId);
+        if (approved) {
+          approvalDecision = 'approved';
+        } else {
+          out.results.push({ step: idx, type: 'command', deviceId: resolvedDeviceId, command: step.command, status: 'skipped', error: 'destructive — rejected at prompt', decision: 'rejected' });
+          out.summary.skipped++;
+          if (!isJsonMode()) console.log(`  ${idx}. ✗ skipped ${step.command} on ${resolvedDeviceId} (rejected)`);
+          if (!options.continueOnError) break;
+          continue;
+        }
+      } else {
+        out.results.push({ step: idx, type: 'command', deviceId: resolvedDeviceId, command: step.command, status: 'skipped', error: 'destructive — rerun with --yes' });
+        out.summary.skipped++;
+        if (!isJsonMode()) console.log(`  ${idx}. ⚠ skipped ${step.command} on ${resolvedDeviceId} (destructive — pass --yes)`);
+        if (!options.continueOnError) break;
+        continue;
+      }
+    }
+    try {
+      await executeCommand(resolvedDeviceId, step.command, step.parameter, commandType, undefined, { planId });
+      out.results.push({ step: idx, type: 'command', deviceId: resolvedDeviceId, command: step.command, status: 'ok', ...(approvalDecision ? { decision: approvalDecision } : {}) });
+      out.summary.ok++;
+      if (!isJsonMode()) console.log(`  ${idx}. ✓ ${step.command} on ${resolvedDeviceId}`);
+    } catch (err) {
+      if (err instanceof Error && err.name === 'DryRunSignal') {
+        out.results.push({ step: idx, type: 'command', deviceId: resolvedDeviceId, command: step.command, status: 'ok' });
+        out.summary.ok++;
+        if (!isJsonMode()) console.log(`  ${idx}. ◦ dry-run ${step.command} on ${resolvedDeviceId}`);
+        continue;
+      }
+      const msg = err instanceof Error ? err.message : String(err);
+      out.results.push({ step: idx, type: 'command', deviceId: resolvedDeviceId, command: step.command, status: 'error', error: msg });
+      out.summary.error++;
+      if (!isJsonMode()) console.log(`  ${idx}. ✗ ${step.command} on ${resolvedDeviceId}: ${msg}`);
+      if (!options.continueOnError) break;
+    }
+  }
+  return out;
+}
+
 export function registerPlanCommand(program: Command): void {
   const plan = program
     .command('plan')
@@ -406,137 +496,181 @@ against the live API without executing any mutations.
           }
           process.exit(2);
         }
-
-        const out: PlanRunResult = {
-          plan: v.plan,
-          results: [],
-          summary: { total: v.plan.steps.length, ok: 0, error: 0, skipped: 0 },
-        };
-
         const planId = randomUUID();
-
+        let out: PlanRunResult;
         try {
-          for (let i = 0; i < v.plan.steps.length; i++) {
-            const step = v.plan.steps[i];
-            const idx = i + 1;
-            if (step.type === 'wait') {
-              await new Promise((r) => setTimeout(r, step.ms));
-              out.results.push({ step: idx, type: 'wait', ms: step.ms, status: 'ok' });
-              out.summary.ok++;
-              if (!isJsonMode()) console.log(`  ${idx}. wait ${step.ms}ms`);
-              continue;
-            }
-            if (step.type === 'scene') {
-              try {
-                await executeScene(step.sceneId);
-                out.results.push({ step: idx, type: 'scene', sceneId: step.sceneId, status: 'ok' });
-                out.summary.ok++;
-                if (!isJsonMode()) console.log(`  ${idx}. ✓ scene ${step.sceneId}`);
-              } catch (err) {
-                const msg = err instanceof Error ? err.message : String(err);
-                out.results.push({ step: idx, type: 'scene', sceneId: step.sceneId, status: 'error', error: msg });
-                out.summary.error++;
-                if (!isJsonMode()) console.log(`  ${idx}. ✗ scene ${step.sceneId}: ${msg}`);
-                if (!options.continueOnError) break;
-              }
-              continue;
-            }
-            // command
-            const resolvedDeviceId = resolveDeviceId(step.deviceId, step.deviceName);
-            const deviceType = getCachedDevice(resolvedDeviceId)?.type;
-            const commandType = step.commandType ?? 'command';
-            const destructive = isDestructiveCommand(deviceType, step.command, commandType);
-            let approvalDecision: 'approved' | undefined;
-            if (destructive && !options.yes) {
-              if (options.requireApproval) {
-                const approved = await promptApproval(idx, step.command, resolvedDeviceId);
-                if (approved) {
-                  approvalDecision = 'approved';
-                } else {
-                  out.results.push({
-                    step: idx,
-                    type: 'command',
-                    deviceId: resolvedDeviceId,
-                    command: step.command,
-                    status: 'skipped',
-                    error: 'destructive — rejected at prompt',
-                    decision: 'rejected',
-                  });
-                  out.summary.skipped++;
-                  if (!isJsonMode())
-                    console.log(`  ${idx}. ✗ skipped ${step.command} on ${resolvedDeviceId} (rejected)`);
-                  if (!options.continueOnError) break;
-                  continue;
-                }
-              } else {
-                out.results.push({
-                  step: idx,
-                  type: 'command',
-                  deviceId: resolvedDeviceId,
-                  command: step.command,
-                  status: 'skipped',
-                  error: 'destructive — rerun with --yes',
-                });
-                out.summary.skipped++;
-                if (!isJsonMode())
-                  console.log(`  ${idx}. ⚠ skipped ${step.command} on ${resolvedDeviceId} (destructive — pass --yes)`);
-                if (!options.continueOnError) break;
-                continue;
-              }
-            }
-            try {
-              await executeCommand(resolvedDeviceId, step.command, step.parameter, commandType, undefined, { planId });
-              out.results.push({
-                step: idx,
-                type: 'command',
-                deviceId: resolvedDeviceId,
-                command: step.command,
-                status: 'ok',
-                ...(approvalDecision ? { decision: approvalDecision } : {}),
-              });
-              out.summary.ok++;
-              if (!isJsonMode())
-                console.log(`  ${idx}. ✓ ${step.command} on ${resolvedDeviceId}`);
-            } catch (err) {
-              if (err instanceof Error && err.name === 'DryRunSignal') {
-                out.results.push({
-                  step: idx,
-                  type: 'command',
-                  deviceId: resolvedDeviceId,
-                  command: step.command,
-                  status: 'ok',
-                });
-                out.summary.ok++;
-                if (!isJsonMode())
-                  console.log(`  ${idx}. ◦ dry-run ${step.command} on ${resolvedDeviceId}`);
-                continue;
-              }
-              const msg = err instanceof Error ? err.message : String(err);
-              out.results.push({
-                step: idx,
-                type: 'command',
-                deviceId: resolvedDeviceId,
-                command: step.command,
-                status: 'error',
-                error: msg,
-              });
-              out.summary.error++;
-              if (!isJsonMode())
-                console.log(`  ${idx}. ✗ ${step.command} on ${resolvedDeviceId}: ${msg}`);
-              if (!options.continueOnError) break;
-            }
-          }
-
+          out = await executePlanSteps(v.plan, planId, options);
           if (isJsonMode()) {
-            printJson({ ran: true, ...out });
+            printJson({ ran: true, planId, ...out });
           } else {
             const { ok, error, skipped, total } = out.summary;
             console.log(`\nsummary: ok=${ok} error=${error} skipped=${skipped} total=${total}`);
           }
         } catch (err) {
           handleError(err);
+          return;
         }
         if (out.summary.error > 0) process.exit(1);
       },
     );
+
+  // ---- Plan resource-model subcommands (P0-3) --------------------------------
+
+  plan
+    .command('save')
+    .description('Save a plan JSON to ~/.switchbot/plans/ with status=pending (waiting for approval).')
+    .argument('[file]', 'Path to plan.json, or "-" / omit to read stdin')
+    .action(async (file: string | undefined) => {
+      let raw: unknown;
+      try {
+        raw = await readPlanSource(file);
+      } catch (err) {
+        handleError(err);
+        return;
+      }
+      const v = validatePlan(raw);
+      if (!v.ok) {
+        if (isJsonMode()) {
+          printJson({ saved: false, issues: v.issues });
+        } else {
+          console.error('✗ plan invalid:');
+          for (const i of v.issues) console.error(`  ${i.path}: ${i.message}`);
+        }
+        process.exit(2);
+      }
+      const record = savePlanRecord(v.plan);
+      if (isJsonMode()) {
+        printJson({ saved: true, planId: record.planId, status: record.status, createdAt: record.createdAt, plansDir: PLANS_DIR });
+      } else {
+        console.log(`✓ Plan saved — planId: ${record.planId}`);
+        console.log(`  Status:  ${record.status}`);
+        console.log(`  Path:    ${PLANS_DIR}/${record.planId}.json`);
+        console.log(`  Next:    switchbot plan review ${record.planId}`);
+        console.log(`           switchbot plan approve ${record.planId}`);
+      }
+    });
+
+  plan
+    .command('list')
+    .description('List saved plans in ~/.switchbot/plans/ with their approval status.')
+    .action(() => {
+      const records = listPlanRecords();
+      if (isJsonMode()) {
+        printJson({ plans: records.map((r) => ({ planId: r.planId, status: r.status, createdAt: r.createdAt, approvedAt: r.approvedAt ?? null, executedAt: r.executedAt ?? null, description: r.plan.description ?? null })) });
+        return;
+      }
+      if (records.length === 0) {
+        console.log('No saved plans. Use: switchbot plan save <file>');
+        return;
+      }
+      for (const r of records) {
+        const parts = [`${r.planId.slice(0, 8)}…`, r.status, r.createdAt.slice(0, 16)];
+        if (r.plan.description) parts.push(`"${r.plan.description}"`);
+        console.log(parts.join('  '));
+      }
+    });
+
+  plan
+    .command('review')
+    .description('Show the details of a saved plan (steps, status, approval history).')
+    .argument('<planId>', 'Plan UUID from "plan list"')
+    .action((planId: string) => {
+      const record = loadPlanRecord(planId);
+      if (!record) {
+        console.error(`Plan ${planId} not found in ${PLANS_DIR}`);
+        process.exit(2);
+      }
+      if (isJsonMode()) {
+        printJson(record);
+        return;
+      }
+      console.log(`planId:     ${record.planId}`);
+      console.log(`status:     ${record.status}`);
+      console.log(`createdAt:  ${record.createdAt}`);
+      if (record.approvedAt) console.log(`approvedAt: ${record.approvedAt}`);
+      if (record.executedAt) console.log(`executedAt: ${record.executedAt}`);
+      if (record.plan.description) console.log(`description: ${record.plan.description}`);
+      console.log(`steps (${record.plan.steps.length}):`);
+      for (let i = 0; i < record.plan.steps.length; i++) {
+        const step = record.plan.steps[i];
+        if (step.type === 'command') {
+          const id = step.deviceId ?? step.deviceName ?? '?';
+          console.log(`  ${i + 1}. command  ${step.command} on ${id}${step.note ? `  # ${step.note}` : ''}`);
+        } else if (step.type === 'scene') {
+          console.log(`  ${i + 1}. scene    ${step.sceneId}${step.note ? `  # ${step.note}` : ''}`);
+        } else {
+          console.log(`  ${i + 1}. wait     ${step.ms}ms`);
+        }
+      }
+    });
+
+  plan
+    .command('approve')
+    .description('Approve a saved plan, allowing `plan execute` to run it.')
+    .argument('<planId>', 'Plan UUID from "plan list"')
+    .action((planId: string) => {
+      const record = loadPlanRecord(planId);
+      if (!record) {
+        console.error(`Plan ${planId} not found in ${PLANS_DIR}`);
+        process.exit(2);
+      }
+      if (record.status === 'executed') {
+        console.error(`Plan ${planId} has already been executed.`);
+        process.exit(2);
+      }
+      if (record.status === 'rejected') {
+        console.error(`Plan ${planId} was rejected. Save a new plan to start fresh.`);
+        process.exit(2);
+      }
+      const updated = updatePlanRecord(planId, { status: 'approved', approvedAt: new Date().toISOString() });
+      if (isJsonMode()) {
+        printJson({ approved: true, planId: updated.planId, status: updated.status, approvedAt: updated.approvedAt });
+      } else {
+        console.log(`✓ Plan ${planId.slice(0, 8)}… approved.`);
+        console.log(`  Next:  switchbot plan execute ${planId}`);
+      }
+    });
+
+  plan
+    .command('execute')
+    .description('Execute a pre-approved plan. Only runs if status=approved; audit entries are tagged with planId.')
+    .argument('<planId>', 'Plan UUID from "plan list" (must be in approved status)')
+    .option('--yes', 'Authorize destructive commands')
+    .option('--require-approval', 'Prompt for each destructive step (TTY only)')
+    .option('--continue-on-error', 'Keep running after a failed step')
+    .action(async (planId: string, options: { yes?: boolean; requireApproval?: boolean; continueOnError?: boolean }) => {
+      if (options.requireApproval && isJsonMode()) {
+        console.error('error: --require-approval cannot be used with --json');
+        process.exit(1);
+      }
+      const record = loadPlanRecord(planId);
+      if (!record) {
+        console.error(`Plan ${planId} not found in ${PLANS_DIR}`);
+        process.exit(2);
+      }
+      if (record.status !== 'approved') {
+        if (isJsonMode()) {
+          printJson({ ran: false, reason: `status is "${record.status}", expected "approved"`, planId });
+        } else {
+          console.error(`Plan ${planId.slice(0, 8)}… cannot be executed: status is "${record.status}".`);
+          if (record.status === 'pending') console.error(`  Run: switchbot plan approve ${planId}`);
+        }
+        process.exit(2);
+      }
+      let out: PlanRunResult;
+      try {
+        out = await executePlanSteps(record.plan, planId, options);
+      } catch (err) {
+        handleError(err);
+        return;
+      }
+      updatePlanRecord(planId, { status: 'executed', executedAt: new Date().toISOString() });
+      if (isJsonMode()) {
+        printJson({ ran: true, planId, ...out });
+      } else {
+        const { ok, error, skipped, total } = out.summary;
+        console.log(`\nsummary: ok=${ok} error=${error} skipped=${skipped} total=${total}`);
+      }
+      if (out.summary.error > 0) process.exit(1);
+    });
 }

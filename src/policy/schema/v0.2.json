@@ -149,6 +149,20 @@
           "pattern": "^\\d+[smh]$",
           "description": "Hysteresis guard — the triggering device state must remain stable (unchanged) for this duration before the rule fires. Prevents action storms from transient sensor flicker. Validated at lint; enforcement is best-effort in the engine."
         },
+        "hysteresis": {
+          "type": "string",
+          "pattern": "^\\d+[smh]$",
+          "description": "Alias for requires_stable_for with clearer semantics. Takes precedence when both are set. The triggering state must be continuously observed for this duration before the rule fires."
+        },
+        "maxFiringsPerHour": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum number of times this rule may fire in any rolling 60-minute window. Applied after cooldown/throttle checks. Useful as an absolute safety cap for high-frequency MQTT triggers."
+        },
+        "suppressIfAlreadyDesired": {
+          "type": "boolean",
+          "description": "When true, skip the rule's actions if the target device's last-known cached state already matches the expected outcome of the command (e.g. skip turnOn if powerState is already 'on'). Best-effort: requires a warm device cache."
+        },
         "dry_run": {
           "type": "boolean",
           "default": true,

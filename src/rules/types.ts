@@ -96,6 +96,12 @@ export interface Rule {
   cooldown?: string;
   /** Hysteresis guard — device state must remain stable for this duration before the rule fires. */
   requires_stable_for?: string;
+  /** Alias for requires_stable_for with clearer semantics (takes precedence when both are set). */
+  hysteresis?: string;
+  /** Maximum times this rule may fire per rolling hour (count-based rate limit). */
+  maxFiringsPerHour?: number;
+  /** Skip the action if the device's last-known cached state already matches the desired command outcome. */
+  suppressIfAlreadyDesired?: boolean;
 }
 
 export interface AutomationBlock {

@@ -7,6 +7,31 @@ All notable changes to `@switchbot/openapi-cli` are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.2.1] - 2026-04-25
+
+### Added — plan resource model, MCP risk profiles, rules safety primitives
+
+- `switchbot plan save [file]` — persist a validated plan to `~/.switchbot/plans/<planId>.json`
+  with status `pending`; prints the assigned `planId`.
+- `switchbot plan list` — table of saved plans with status, creation time, and step count.
+- `switchbot plan review <planId>` — show full step list and current status of a saved plan.
+- `switchbot plan approve <planId>` — transition a `pending` plan to `approved`; required
+  before `plan execute` will run it.
+- `switchbot plan execute <planId>` — execute an `approved` plan; marks it `executed` on
+  completion; all steps are recorded in the audit log with `planId` traceability.
+- MCP `send_command` now returns a `riskProfile` field per action: `riskLevel`, `requiresConfirmation`,
+  `supportsDryRun`, `idempotencyHint`, and `recommendedMode` — computed from actual device type
+  and command at request time.
+- Rules engine now enforces `maxFiringsPerHour` (sliding 3600 s count window),
+  `suppressIfAlreadyDesired` (skip `turnOn`/`turnOff` when device's live state already matches),
+  and `hysteresis` / `requires_stable_for` (fire only after trigger is continuously stable for
+  the specified duration). All three are validated in `rules lint`.
+
+### Fixed
+
+- `rules lint` now validates `hysteresis` / `requires_stable_for` duration syntax and warns
+  when `hysteresis` and `requires_stable_for` are both set.
+
 ## [3.2.0] - 2026-04-25
 
 ### Added — daemon, upgrade-check, scenes validate/simulate, rules summary
