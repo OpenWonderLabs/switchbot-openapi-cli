@@ -1,6 +1,6 @@
 import http from 'node:http';
 import { Command } from 'commander';
-import { printJson, isJsonMode, printTable } from '../utils/output.js';
+import { printJson, isJsonMode, printTable, handleError } from '../utils/output.js';
 import { getHealthReport, toPrometheusText } from '../utils/health.js';
 import { intArg } from '../utils/arg-parsers.js';
 
@@ -90,6 +90,14 @@ Example:
       const port = parseInt(opts.port, 10);
       const handler = createHealthHandler(opts.auditLog);
       const server = http.createServer(handler);
+
+      server.on('error', (err: NodeJS.ErrnoException) => {
+        if (err.code === 'EADDRINUSE') {
+          handleError(Object.assign(new Error(`Port ${port} is already in use. Choose a different port with --port.`), { code: err.code }));
+        } else {
+          handleError(err);
+        }
+      });
 
       server.listen(port, opts.host, () => {
         const addr = server.address();

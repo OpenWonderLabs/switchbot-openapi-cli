@@ -114,3 +114,27 @@ describe('health serve HTTP endpoints', () => {
     expect(body.paths).toBeDefined();
   });
 });
+
+describe('health serve — port conflict', () => {
+  it('emits EADDRINUSE error when the port is already in use', async () => {
+    const blocker = await new Promise<{ server: Server; port: number }>((resolve, reject) => {
+      const s = createServer();
+      s.listen(0, '127.0.0.1', () => {
+        const addr = s.address();
+        if (!addr || typeof addr === 'string') { reject(new Error('unexpected')); return; }
+        resolve({ server: s, port: addr.port });
+      });
+      s.on('error', reject);
+    });
+
+    const { createHealthHandler } = await import('../../src/commands/health.js');
+    const conflictServer = createServer(createHealthHandler());
+    const err = await new Promise<NodeJS.ErrnoException>((resolve) => {
+      conflictServer.on('error', resolve as (e: Error) => void);
+      conflictServer.listen(blocker.port, '127.0.0.1');
+    });
+
+    await new Promise<void>((r) => blocker.server.close(() => r()));
+    expect(err.code).toBe('EADDRINUSE');
+  });
+});
