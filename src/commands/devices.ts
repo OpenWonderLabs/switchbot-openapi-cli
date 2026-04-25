@@ -579,12 +579,12 @@ Examples:
         }
 
         const destructive = isDestructiveCommand(cachedForGuard?.type, cmd, options.type);
-        if (!isDryRun() && destructive && !allowsDirectDestructiveExecution()) {
+        if (!isDryRun() && destructive && !options.yes && !allowsDirectDestructiveExecution()) {
           const typeLabel = cachedForGuard?.type ?? 'unknown';
           const reason = getDestructiveReason(cachedForGuard?.type, cmd, options.type);
           exitWithError({
             kind: 'guard',
-            message: `Direct destructive execution is disabled for command "${cmd}" on ${typeLabel}.`,
+            message: `Direct destructive execution disabled — destructive command "${cmd}" on ${typeLabel}.`,
             hint: reason ? `${destructiveExecutionHint()} Reason: ${reason}` : destructiveExecutionHint(),
             context: {
               command: cmd,

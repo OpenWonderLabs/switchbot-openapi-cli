@@ -2041,7 +2041,7 @@ describe('devices command', () => {
       expect(res.exitCode).toBe(2);
       expect(apiMock.__instance.post).not.toHaveBeenCalled();
       expect(res.stderr.join('\n')).toMatch(/destructive command "unlock"/);
-      expect(res.stderr.join('\n')).toMatch(/--yes/);
+      expect(res.stderr.join('\n')).toMatch(/plan/);
     });
 
     it('allows Smart Lock unlock when --yes is passed', async () => {
