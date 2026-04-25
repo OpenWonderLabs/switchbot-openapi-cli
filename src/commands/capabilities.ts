@@ -115,7 +115,7 @@ const DESTRUCTIVE_LOCAL = meta(true, false, false, 'destructive', 'local', 20);
 const DESTRUCTIVE_REMOTE = meta(true, true, false, 'destructive', 'deviceDependent', 1200);
 const READ_NONE = meta(false, false, false, 'read', 'none', 50);
 
-const COMMAND_META: Record<string, CommandMeta> = {
+export const COMMAND_META: Record<string, CommandMeta> = {
   'agent-bootstrap': READ_LOCAL,
   'auth keychain describe': READ_LOCAL,
   'auth keychain get': READ_LOCAL,
@@ -197,6 +197,7 @@ const COMMAND_META: Record<string, CommandMeta> = {
   'rules doctor': READ_LOCAL,
   'rules summary': READ_LOCAL,
   'rules last-fired': READ_LOCAL,
+  'rules explain': READ_LOCAL,
   'schema export': READ_LOCAL,
   'scenes list': READ_REMOTE,
   'scenes execute': ACTION_REMOTE,
