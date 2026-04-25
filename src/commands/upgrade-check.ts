@@ -1,11 +1,10 @@
 import { Command } from 'commander';
-import { createRequire } from 'node:module';
 import https from 'node:https';
 import { isJsonMode, printJson } from '../utils/output.js';
 import chalk from 'chalk';
+import { VERSION as currentVersion } from '../version.js';
 
-const require = createRequire(import.meta.url);
-const { name: pkgName, version: currentVersion } = require('../../package.json') as { name: string; version: string };
+const pkgName = '@switchbot/openapi-cli';
 
 function fetchLatestVersion(packageName: string, timeoutMs = 8000): Promise<string> {
   const encoded = packageName.replace('/', '%2F');

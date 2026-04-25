@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 import { Command, CommanderError, InvalidArgumentError } from 'commander';
 import { createRequire } from 'node:module';
 import chalk from 'chalk';

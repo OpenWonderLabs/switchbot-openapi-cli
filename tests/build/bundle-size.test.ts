@@ -1,29 +1,52 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync, execSync } from 'node:child_process';
 
-describe('production bundle size', () => {
-  const distEntry = path.resolve('dist/index.js');
+// Build to a separate path so we don't overwrite the tsc dist/index.js
+// that other tests (install smoke, status-sync smoke) depend on.
+// Must stay in dist/ (not a subdirectory) so require('../package.json') resolves correctly.
+const bundleEntry = path.resolve('dist/bundle-test.js');
 
-  // tsc output has relative imports like `from './utils/...'`; esbuild inlines everything.
-  function isBundledOutput(): boolean {
-    if (!fs.existsSync(distEntry)) return false;
-    const head = fs.readFileSync(distEntry, 'utf-8').slice(0, 4096);
-    return !head.includes("from './");
-  }
+describe('esbuild production bundle', () => {
+  beforeAll(() => {
+    execSync(`node scripts/bundle.mjs --outfile=${bundleEntry}`, {
+      stdio: 'pipe',
+      env: { ...process.env, BUNDLE_OUTFILE: bundleEntry },
+    });
+  }, 30_000);
 
-  it('dist/index.js exists', () => {
-    expect(fs.existsSync(distEntry)).toBe(true);
+  it('bundle output exists', () => {
+    expect(fs.existsSync(bundleEntry), `${bundleEntry} not found after build:prod`).toBe(true);
   });
 
-  it('esbuild bundle is under 15 MB (skipped when tsc output is present)', () => {
-    if (!isBundledOutput()) {
-      // CI runs `npm run build` (tsc), not `npm run build:prod` (esbuild).
-      // Skip size guard when the single-file esbuild bundle has not been built.
-      return;
-    }
-    const { size } = fs.statSync(distEntry);
+  it('has exactly one shebang line', () => {
+    const content = fs.readFileSync(bundleEntry, 'utf-8');
+    const count = (content.match(/^#!\/usr\/bin\/env node/gm) ?? []).length;
+    expect(count, `Expected exactly 1 shebang, found ${count} — check bundle.mjs banner vs src/index.ts`).toBe(1);
+  });
+
+  it('passes Node.js syntax check', () => {
+    const result = spawnSync(process.execPath, ['--check', bundleEntry], { encoding: 'utf-8' });
+    expect(result.status, `node --check failed (exit ${result.status}):\n${result.stderr}`).toBe(0);
+    expect(result.stderr).toBe('');
+  });
+
+  it('--version exits 0 and outputs a valid semver', () => {
+    const result = spawnSync(process.execPath, [bundleEntry, '--version'], { encoding: 'utf-8' });
+    expect(result.status, `--version exited ${result.status}:\n${result.stderr}`).toBe(0);
+    expect(result.stdout.trim()).toMatch(/^\d+\.\d+\.\d+/);
+  });
+
+  it('--version matches package.json version', () => {
+    const pkgVersion = JSON.parse(fs.readFileSync(path.resolve('package.json'), 'utf-8')).version as string;
+    const result = spawnSync(process.execPath, [bundleEntry, '--version'], { encoding: 'utf-8' });
+    expect(result.stdout.trim(), `Bundle reports ${result.stdout.trim()} but package.json says ${pkgVersion}`).toBe(pkgVersion);
+  });
+
+  it('is under 15 MB', () => {
+    const { size } = fs.statSync(bundleEntry);
     const sizeMb = size / (1024 * 1024);
-    expect(sizeMb, `dist/index.js is ${sizeMb.toFixed(1)} MB — exceeds 15 MB budget`).toBeLessThan(15);
+    expect(sizeMb, `bundle is ${sizeMb.toFixed(1)} MB — exceeds 15 MB budget`).toBeLessThan(15);
   });
 });

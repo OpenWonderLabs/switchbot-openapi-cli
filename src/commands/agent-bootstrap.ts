@@ -18,10 +18,7 @@ import {
 } from '../policy/load.js';
 import { validateLoadedPolicy } from '../policy/validate.js';
 import { selectCredentialStore, CredentialBackendName } from '../credentials/keychain.js';
-import { createRequire } from 'node:module';
-
-const require = createRequire(import.meta.url);
-const { version: pkgVersion } = require('../../package.json') as { version: string };
+import { VERSION as pkgVersion } from '../version.js';
 
 /**
  * Schema version of the agent-bootstrap payload. Must stay in lockstep
