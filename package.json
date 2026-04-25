@@ -46,7 +46,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "prepublishOnly": "npm test && npm run clean && npm run build:prod"
+    "prepublishOnly": "npm test && npm run clean && npm run build && node dist/index.js --version"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
