@@ -35,6 +35,7 @@ vi.mock('../../src/api/client.js', () => ({
 }));
 
 import { registerDevicesCommand } from '../../src/commands/devices.js';
+import { ApiError } from '../../src/api/client.js';
 import { runCli } from '../helpers/cli.js';
 import { updateCacheFromDeviceList, resetListCache } from '../../src/devices/cache.js';
 
@@ -2442,6 +2443,45 @@ describe('devices command', () => {
       const lock = cmds.find((c) => c.command === 'lock');
       expect(unlock?.safetyTier).toBe('destructive');
       expect(lock?.safetyTier).toBe('mutation');
+    });
+  });
+
+  // =====================================================================
+  // API error exit codes (P0 regression guard)
+  // =====================================================================
+  describe('devices status — API error exit codes', () => {
+    beforeEach(() => {
+      apiMock.__instance.get.mockReset();
+      apiMock.__instance.post.mockReset();
+    });
+
+    it('exits 1 when API returns code 190 in human mode', async () => {
+      apiMock.__instance.get.mockRejectedValue(
+        new ApiError('Device internal error', 190),
+      );
+      const res = await runCli(registerDevicesCommand, ['devices', 'status', 'BOGUS123']);
+      expect(res.exitCode).toBe(1);
+      expect(res.stderr.join('')).toMatch(/190/);
+    });
+
+    it('exits 1 when API returns code 190 in JSON mode', async () => {
+      apiMock.__instance.get.mockRejectedValue(
+        new ApiError('Device internal error', 190),
+      );
+      const res = await runCli(registerDevicesCommand, ['--json', 'devices', 'status', 'BOGUS123']);
+      expect(res.exitCode).toBe(1);
+      const out = res.stdout.join('');
+      const parsed = JSON.parse(out) as { error?: { code: number } };
+      expect(parsed).toHaveProperty('error');
+      expect(parsed.error?.code).toBe(190);
+    });
+
+    it('exits 0 for a successful status call', async () => {
+      apiMock.__instance.get.mockResolvedValue({
+        data: { statusCode: 100, body: { power: 'on', battery: 90 } },
+      });
+      const res = await runCli(registerDevicesCommand, ['devices', 'status', 'DEVICE123']);
+      expect(res.exitCode).toBeNull();
     });
   });
 });
