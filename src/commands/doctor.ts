@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execSync } from 'node:child_process';
 import { printJson, isJsonMode, exitWithError } from '../utils/output.js';
 import { getEffectiveCatalog } from '../devices/catalog.js';
 import { configFilePath, listProfiles, readProfileMeta } from '../config.js';
@@ -19,6 +20,8 @@ import {
 import { validateLoadedPolicy } from '../policy/validate.js';
 import { selectCredentialStore } from '../credentials/keychain.js';
 import { getActiveProfile } from '../lib/request-context.js';
+import { readDaemonState } from '../lib/daemon-state.js';
+import { isPidAlive } from '../rules/pid-file.js';
 
 interface Check {
   name: string;
@@ -505,12 +508,233 @@ function checkPolicy(): Check {
   }
 }
 
+async function checkKeychain(): Promise<Check> {
+  try {
+    const { selectCredentialStore } = await import('../credentials/keychain.js');
+    const store = await selectCredentialStore();
+    const desc = store.describe();
+    const isNative = desc.backend !== 'file';
+    if (!isNative) {
+      // Native keychain not available or not detected
+      return {
+        name: 'keychain',
+        status: 'warn',
+        detail: {
+          backend: desc.backend,
+          message: 'OS native keychain not detected — credentials stored in plain file (~/.switchbot/config.json). Consider installing a keychain backend for better security.',
+          hint: process.platform === 'linux'
+            ? 'Install libsecret (secret-tool) for GNOME Keyring support.'
+            : process.platform === 'darwin'
+            ? 'macOS Keychain is available — re-run `switchbot config set-token` to store credentials there.'
+            : 'Windows Credential Manager is available — re-run `switchbot config set-token` to use it.',
+        },
+      };
+    }
+    return {
+      name: 'keychain',
+      status: 'ok',
+      detail: {
+        backend: desc.backend,
+        writable: desc.writable,
+        message: `Credentials stored in OS keychain (${desc.backend}).`,
+      },
+    };
+  } catch (err) {
+    return {
+      name: 'keychain',
+      status: 'warn',
+      detail: { message: `Keychain probe failed: ${err instanceof Error ? err.message : String(err)}` },
+    };
+  }
+}
+
 function checkNodeVersion(): Check {
   const major = Number(process.versions.node.split('.')[0]);
   if (Number.isFinite(major) && major < 18) {
     return { name: 'node', status: 'fail', detail: `Node ${process.versions.node} — minimum is 18` };
   }
   return { name: 'node', status: 'ok', detail: `Node ${process.versions.node}` };
+}
+
+type ShellFlavor = 'powershell' | 'cmd' | 'bash' | 'zsh' | 'fish' | 'unknown';
+
+function detectShellFlavor(): ShellFlavor {
+  const shell = (process.env.SHELL ?? '').toLowerCase();
+  const comspec = (process.env.COMSPEC ?? '').toLowerCase();
+  if (shell.includes('pwsh') || shell.includes('powershell')) return 'powershell';
+  if (comspec.includes('powershell') || comspec.includes('pwsh')) return 'powershell';
+  if (comspec.endsWith('cmd.exe')) return 'cmd';
+  if (shell.endsWith('/fish') || shell === 'fish') return 'fish';
+  if (shell.endsWith('/zsh') || shell === 'zsh') return 'zsh';
+  if (shell.endsWith('/bash') || shell === 'bash') return 'bash';
+  return process.platform === 'win32' ? 'powershell' : 'unknown';
+}
+
+function buildPathFix(shell: ShellFlavor, missingSegment: string | null, npmBinDir: string | null): string {
+  if (!npmBinDir) {
+    return process.platform === 'win32'
+      ? 'Run: npm prefix -g and add that directory to your PATH.'
+      : 'Run: npm prefix -g and add <prefix>/bin to your PATH.';
+  }
+  switch (shell) {
+    case 'powershell':
+      return `$env:Path = "${missingSegment};" + $env:Path  # persist via your PowerShell profile or System Properties`;
+    case 'cmd':
+      return `set PATH=${missingSegment};%PATH%  &&  setx PATH "${missingSegment};%PATH%"`;
+    case 'fish':
+      return `fish_add_path "${missingSegment}"`;
+    case 'zsh':
+      return `export PATH="${missingSegment}:$PATH"  # add to ~/.zshrc`;
+    case 'bash':
+      return `export PATH="${missingSegment}:$PATH"  # add to ~/.bashrc`;
+    default:
+      return `export PATH="${missingSegment}:$PATH"`;
+  }
+}
+
+function checkPathDiscoverability(): Check {
+  // Detect whether the `switchbot` binary is reachable on PATH.
+  // This catches the common "npm install -g worked but PATH not updated" failure.
+  const isWindows = process.platform === 'win32';
+  const binaryName = isWindows ? 'switchbot.cmd' : 'switchbot';
+
+  // Find where npm puts global bins.
+  let npmBinDir: string | null = null;
+  try {
+    const prefix = execSync('npm prefix -g', { timeout: 4000, encoding: 'utf-8' }).trim();
+    npmBinDir = isWindows ? prefix : path.join(prefix, 'bin');
+  } catch {
+    // npm not on PATH or other error; fall through.
+  }
+
+  // Check whether `switchbot` resolves via PATH.
+  let binaryOnPath = false;
+  let resolvedPath: string | null = null;
+  try {
+    const which = execSync(
+      isWindows ? `where ${binaryName}` : `which ${binaryName}`,
+      { timeout: 3000, encoding: 'utf-8' },
+    ).trim().split(/\r?\n/)[0];
+    if (which) {
+      binaryOnPath = true;
+      resolvedPath = which;
+    }
+  } catch {
+    binaryOnPath = false;
+  }
+
+  if (binaryOnPath) {
+    return {
+      name: 'path',
+      status: 'ok',
+      detail: {
+        binaryOnPath: true,
+        resolvedPath,
+        npmBinDir,
+        message: `switchbot is reachable at ${resolvedPath}`,
+      },
+    };
+  }
+
+  // Not on PATH — figure out what the user should add.
+  const currentPath = process.env.PATH ?? '';
+  const missingSegment = npmBinDir && !currentPath.split(path.delimiter).includes(npmBinDir)
+    ? npmBinDir
+    : null;
+  const currentShell = detectShellFlavor();
+  const shellFix = buildPathFix(currentShell, missingSegment, npmBinDir);
+
+  return {
+    name: 'path',
+    status: 'warn',
+    detail: {
+      binaryOnPath: false,
+      resolvedPath: null,
+      npmBinDir,
+      missingPathSegment: missingSegment,
+      currentShell,
+      fix: shellFix,
+      message: `'switchbot' is not on PATH. ${shellFix}`,
+    },
+  };
+}
+
+function checkDaemon(): Check {
+  const state = readDaemonState();
+  if (!state) {
+    return {
+      name: 'daemon',
+      status: 'warn',
+      detail: {
+        present: false,
+        message: 'No daemon state file found. Start one with `switchbot daemon start` if you want long-running automation.',
+      },
+    };
+  }
+  const pid = state.pid;
+  const running = pid !== null && (pid === process.pid || isPidAlive(pid));
+  return {
+    name: 'daemon',
+    status: running ? 'ok' : 'warn',
+    detail: {
+      present: true,
+      status: running ? 'running' : state.status,
+      pid: running ? pid : null,
+      stateFile: state.stateFile,
+      pidFile: state.pidFile,
+      logFile: state.logFile,
+      startedAt: state.startedAt ?? null,
+      stoppedAt: state.stoppedAt ?? null,
+      lastReloadAt: state.lastReloadAt ?? null,
+      lastReloadStatus: state.lastReloadStatus ?? null,
+      healthConfigured: typeof state.healthzPort === 'number',
+      healthzPort: state.healthzPort ?? null,
+      message: running
+        ? 'daemon running'
+        : 'daemon not running; use `switchbot daemon start` for long-running automation',
+    },
+  };
+}
+
+async function checkHealthEndpoint(): Promise<Check> {
+  const state = readDaemonState();
+  if (!state || typeof state.healthzPort !== 'number') {
+    return {
+      name: 'health',
+      status: 'warn',
+      detail: {
+        present: false,
+        message: 'No health endpoint configured. Start the daemon with `--healthz-port <n>` to enable it.',
+      },
+    };
+  }
+  const url = `http://127.0.0.1:${state.healthzPort}/healthz`;
+  try {
+    const res = await fetch(url);
+    const body = await res.json() as { data?: { overall?: string } };
+    const overall = body?.data?.overall ?? 'unknown';
+    return {
+      name: 'health',
+      status: res.ok && overall !== 'down' ? 'ok' : 'warn',
+      detail: {
+        present: true,
+        url,
+        httpStatus: res.status,
+        overall,
+        message: res.ok ? `health endpoint reachable at ${url}` : `health endpoint returned HTTP ${res.status}`,
+      },
+    };
+  } catch (err) {
+    return {
+      name: 'health',
+      status: 'warn',
+      detail: {
+        present: true,
+        url,
+        message: `health endpoint probe failed: ${err instanceof Error ? err.message : String(err)}`,
+      },
+    };
+  }
 }
 
 function checkMqtt(): Check {
@@ -641,7 +865,9 @@ interface DoctorRunOpts {
 
 const CHECK_REGISTRY: CheckDef[] = [
   { name: 'node', description: 'Node.js version compatibility', run: () => checkNodeVersion() },
+  { name: 'path', description: 'switchbot binary reachable on PATH', run: () => checkPathDiscoverability() },
   { name: 'credentials', description: 'credentials file present and parseable', run: () => checkCredentials() },
+  { name: 'keychain', description: 'OS keychain backend availability and usage', run: () => checkKeychain() },
   { name: 'profiles', description: 'profile definitions valid', run: () => checkProfiles() },
   { name: 'catalog', description: 'catalog loads', run: () => checkCatalog() },
   { name: 'catalog-schema', description: 'catalog vs agent-bootstrap version aligned', run: () => checkCatalogSchema() },
@@ -656,6 +882,8 @@ const CHECK_REGISTRY: CheckDef[] = [
   { name: 'mcp', description: 'MCP server instantiable + tool count', run: () => checkMcp() },
   { name: 'policy', description: 'policy.yaml present + schema-valid (if configured)', run: () => checkPolicy() },
   { name: 'audit', description: 'recent command errors (last 24h)', run: () => checkAudit() },
+  { name: 'daemon', description: 'daemon state file + runtime status', run: () => checkDaemon() },
+  { name: 'health', description: 'health endpoint availability (daemon --healthz-port)', run: () => checkHealthEndpoint() },
 ];
 
 interface FixResult {
@@ -719,7 +947,7 @@ interface DoctorCliOptions {
 export function registerDoctorCommand(program: Command): void {
   program
     .command('doctor')
-    .description('Self-check the SwitchBot CLI setup: credentials, catalog, cache, quota, MQTT, MCP')
+    .description('Self-check the SwitchBot CLI setup: credentials, catalog, cache, quota, MQTT, daemon, health, MCP')
     .option('--section <names>', 'Comma-separated list of checks to run (see --list for names)')
     .option('--list', 'Print the registered check names and exit 0 without running any check')
     .option('--fix', 'Apply safe, reversible remediations for failing checks (e.g. clear stale cache)')
@@ -734,6 +962,7 @@ Examples:
   $ switchbot --json doctor | jq '.checks[] | select(.status != "ok")'
   $ switchbot doctor --list
   $ switchbot doctor --section credentials,mcp --json
+  $ switchbot doctor --section daemon,health --json
   $ switchbot doctor --probe --json
   $ switchbot doctor --fix --yes --json
 `)
@@ -788,6 +1017,15 @@ Examples:
       const overallFail = summary.fail > 0;
       const overall: 'ok' | 'warn' | 'fail' = overallFail ? 'fail' : summary.warn > 0 ? 'warn' : 'ok';
 
+      const total = summary.ok + summary.warn + summary.fail;
+      const rawScore = total > 0 ? Math.round(((summary.ok + summary.warn * 0.5) / total) * 100) : 100;
+      const maturityScore = Math.min(100, Math.max(0, rawScore));
+      const maturityLabel: 'production-ready' | 'mostly-ready' | 'needs-work' | 'not-ready' =
+        maturityScore >= 90 ? 'production-ready'
+        : maturityScore >= 70 ? 'mostly-ready'
+        : maturityScore >= 40 ? 'needs-work'
+        : 'not-ready';
+
       let fixes: FixResult[] | undefined;
       if (opts.fix) {
         fixes = applyFixes(checks, Boolean(opts.yes));
@@ -802,6 +1040,8 @@ Examples:
         const payload: Record<string, unknown> = {
           ok: overall === 'ok',
           overall,
+          maturityScore,
+          maturityLabel,
           generatedAt: new Date().toISOString(),
           schemaVersion: DOCTOR_SCHEMA_VERSION,
           summary,

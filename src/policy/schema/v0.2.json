@@ -130,9 +130,38 @@
               "type": "string",
               "pattern": "^\\d+[smh]$",
               "description": "Minimum spacing between fires, e.g. \"10m\". Later triggers inside the window are suppressed and audited."
+            },
+            "dedupe_window": {
+              "type": "string",
+              "pattern": "^\\d+[smh]$",
+              "description": "Deduplicate identical events arriving within this window after the last fire. Complements max_per: use when rapid sensor bursts should collapse into one action."
             }
           },
           "required": ["max_per"]
+        },
+        "cooldown": {
+          "type": "string",
+          "pattern": "^\\d+[smh]$",
+          "description": "Shorthand cooldown — minimum pause after a rule fires before it can fire again. Equivalent to throttle.max_per but at rule level. Takes precedence over throttle.max_per when both are set."
+        },
+        "requires_stable_for": {
+          "type": "string",
+          "pattern": "^\\d+[smh]$",
+          "description": "Hysteresis guard — the triggering device state must remain stable (unchanged) for this duration before the rule fires. Prevents action storms from transient sensor flicker. Validated at lint; enforcement is best-effort in the engine."
+        },
+        "hysteresis": {
+          "type": "string",
+          "pattern": "^\\d+[smh]$",
+          "description": "Alias for requires_stable_for with clearer semantics. Takes precedence when both are set. The triggering state must be continuously observed for this duration before the rule fires."
+        },
+        "maxFiringsPerHour": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum number of times this rule may fire in any rolling 60-minute window. Applied after cooldown/throttle checks. Useful as an absolute safety cap for high-frequency MQTT triggers."
+        },
+        "suppressIfAlreadyDesired": {
+          "type": "boolean",
+          "description": "When true, skip the rule's actions if the target device's last-known cached state already matches the expected outcome of the command (e.g. skip turnOn if powerState is already 'on'). Best-effort: requires a warm device cache."
         },
         "dry_run": {
           "type": "boolean",

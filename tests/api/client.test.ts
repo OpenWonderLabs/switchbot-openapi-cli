@@ -65,10 +65,11 @@ vi.mock('../../src/utils/quota.js', () => ({
   DAILY_QUOTA: 10_000,
 }));
 
-import { createClient, ApiError, DryRunSignal } from '../../src/api/client.js';
+import { createClient, ApiError, DryRunSignal, apiCircuitBreaker } from '../../src/api/client.js';
 
 describe('createClient', () => {
   beforeEach(() => {
+    apiCircuitBreaker.reset();
     captured.request = null;
     captured.success = null;
     captured.failure = null;
@@ -372,6 +373,7 @@ describe('createClient — 429 retry', () => {
   const originalArgv = process.argv;
 
   beforeEach(() => {
+    apiCircuitBreaker.reset();
     captured.request = null;
     captured.success = null;
     captured.failure = null;

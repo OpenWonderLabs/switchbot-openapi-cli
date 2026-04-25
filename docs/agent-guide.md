@@ -82,7 +82,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 | --- | --- | --- |
 | `list_devices` | Enumerate physical devices + IR remotes | read |
 | `get_device_status` | Live status for one device | read |
-| `send_command` | Dispatch a built-in or customize command | action (destructive needs `confirm: true`) |
+| `send_command` | Dispatch a built-in or customize command | action (destructive needs `confirm: true` and still defaults to reviewed execution) |
 | `list_scenes` | Enumerate saved manual scenes | read |
 | `run_scene` | Execute a saved manual scene | action |
 | `search_catalog` | Look up device type by name/alias | read |
@@ -102,7 +102,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 | `rules_suggest` | Draft automation rule YAML from intent | read |
 | `policy_add_rule` | Inject rule YAML into `automation.rules[]` with diff | action |
 
-The MCP server refuses destructive commands (Smart Lock `unlock`, Garage Door `open`, etc.) unless the tool call includes `confirm: true`. The allowed list is the `destructive: true` commands in the catalog — `switchbot schema export | jq '[.data.types[].commands[] | select(.destructive)]'` shows every one.
+The MCP server refuses destructive commands (Smart Lock `unlock`, Garage Door `open`, etc.) unless the tool call includes `confirm: true`, and the default safety profile still blocks direct destructive execution in favor of the reviewed CLI flow (`plan save` → `plan review` → `plan approve` → `plan execute`). The allowed list is the `destructive: true` commands in the catalog — `switchbot schema export | jq '[.data.types[].commands[] | select(.destructive)]'` shows every one.
 
 ### `get_device_history` — zero-cost state lookup
 
@@ -187,7 +187,10 @@ output before running.
 ```bash
 cat plan.json | switchbot plan validate -           # exit 2 on schema error
 cat plan.json | switchbot --dry-run plan run -      # preview — mutations skipped
-cat plan.json | switchbot plan run - --yes          # allow destructive steps
+cat plan.json | switchbot plan save -               # reviewed destructive path
+switchbot plan review <planId>
+switchbot plan approve <planId>
+switchbot plan execute <planId>
 cat plan.json | switchbot --json plan run -         # machine-readable outcome
 ```
 
@@ -195,8 +198,9 @@ cat plan.json | switchbot --json plan run -         # machine-readable outcome
 
 - Steps execute sequentially. A failed step stops the run (exit 1) unless you pass `--continue-on-error`.
 - `wait` uses `setTimeout`; `ms` is capped at 600 000 so a malformed plan can't hang the agent.
-- Destructive commands are **skipped** (not failed) without `--yes`, so an agent that omits the flag gets a clean "needs confirmation" summary.
-- `--require-approval` enables per-step TTY confirmation for destructive steps — approve with `y`, reject with any other key. Non-TTY environments (CI, pipes) auto-reject. Mutually exclusive with `--json`. `--yes` takes precedence.
+- Destructive commands are **skipped** (not failed) without `--yes`, so an agent that omits the flag gets a clean preview summary.
+- `plan run --yes` is reserved for explicit dev profiles. The default production path for destructive work is `plan save` → `plan review` → `plan approve` → `plan execute`.
+- `--require-approval` enables per-step TTY confirmation for destructive steps during execution. Non-TTY environments (CI, pipes) auto-reject.
 - Every successful/failed step lands in `--audit-log` (see [Observability](#observability)).
 
 ---
@@ -292,7 +296,7 @@ Use `switchbot doctor` to confirm the CLI is healthy before orchestrating anythi
 
 ## Safety rails
 
-1. **Destructive-command guard**: Smart Lock `unlock`, Garage Door `open`, and anything else tagged `destructive: true` in the catalog **refuses to run** without `--yes` (or `confirm: true` in MCP, or explicit dev intent). There is no bypass flag for autonomous agents beyond `--yes` — that's by design.
+1. **Destructive-command guard**: Smart Lock `unlock`, Garage Door `open`, and anything else tagged `destructive: true` in the catalog **refuses to run** directly in the default profile. Use the reviewed plan workflow by default; only explicit dev profiles may pair direct execution with `--yes` / `confirm: true`.
 2. **Dry-run**: Global `--dry-run` short-circuits every mutating HTTP request. GETs still execute. Command names are validated against the device catalog — unknown commands exit 2 when the device type has a known catalog entry, as do commands on read-only sensors. Use it for any "what would this do?" flow before letting the agent commit.
 3. **Quota**: The SwitchBot API has a per-account daily quota. `--retry-on-429 <n>` and `--backoff <linear|exponential>` handle throttling; `~/.switchbot/quota.json` tracks daily counts.
 4. **Audit log**: `--audit-log [path]` appends every mutating command (including dry-runs) to JSONL for post-hoc review.
@@ -354,7 +358,7 @@ switchbot rules suggest --intent "..." | switchbot policy add-rule --dry-run
 switchbot rules suggest --intent "..." | switchbot policy add-rule --enable
 
 # Step 4: Lint and reload
-switchbot rules lint && switchbot rules reload
+switchbot rules lint && switchbot daemon reload
 ```
 
 MCP agents use `rules_suggest` + `policy_add_rule` tools for the same
@@ -374,7 +378,7 @@ After the user confirms the rule fires correctly:
 ```bash
 # Edit policy.yaml: set dry_run: false
 # Then reload:
-switchbot rules lint && switchbot rules reload
+switchbot rules lint && switchbot daemon reload
 ```
 
 Use `switchbot rules replay --since 24h --json` regularly to surface misfires.

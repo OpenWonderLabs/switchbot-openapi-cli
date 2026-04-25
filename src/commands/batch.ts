@@ -13,6 +13,7 @@ import { parseFilter, applyFilter, FilterSyntaxError } from '../utils/filter.js'
 import { isDryRun } from '../utils/flags.js';
 import { DryRunSignal } from '../api/client.js';
 import { getCachedTypeMap, getCachedDevice, loadStatusCache } from '../devices/cache.js';
+import { allowsDirectDestructiveExecution, destructiveExecutionHint } from '../lib/destructive-mode.js';
 
 interface BatchStepTiming {
   startedAt: string;
@@ -155,7 +156,7 @@ export function registerBatchCommand(devices: Command): void {
     .option('--stagger <ms>', 'Fixed delay between task starts in ms (default 0 = random 20-60ms jitter)', intArg('--stagger', { min: 0 }), '0')
     .option('--plan', '[DEPRECATED, use --emit-plan] With --dry-run: emit a plan JSON document instead of executing anything')
     .option('--emit-plan', 'With --dry-run: emit a plan JSON document instead of executing anything')
-    .option('--yes', 'Allow destructive commands (Smart Lock unlock, garage open, ...)')
+    .option('--yes', 'Allow destructive commands only from an explicit dev profile')
     .option('--type <commandType>', '"command" (default) or "customize" for user-defined IR buttons', enumArg('--type', COMMAND_TYPES), 'command')
     .option('--stdin', 'Read deviceIds from stdin, one per line (same as trailing "-")')
     .option('--idempotency-key-prefix <prefix>', 'Client-supplied prefix for idempotency keys (key per device: <prefix>-<deviceId>). process-local 60s window; cache is per Node process (MCP session, batch run, plan run). Independent CLI invocations do not share cache.', stringArg('--idempotency-key-prefix'))
@@ -191,7 +192,8 @@ Planning:
 
 Safety:
   Destructive commands (Smart Lock unlock, Garage Door Opener turnOn/turnOff,
-  Keypad createKey/deleteKey) are blocked by default. Pass --yes to override.
+  Keypad createKey/deleteKey) are blocked by default. Use the reviewed plan
+  flow instead of direct execution.
   --dry-run intercepts every POST and reports the intended calls without
   hitting the API.
 
@@ -199,7 +201,7 @@ Examples:
   $ switchbot devices batch turnOff --filter 'type~=Light,family=home'
   $ switchbot devices batch turnOn --ids ID1,ID2,ID3
   $ switchbot devices list --format=id --filter 'type=Bot' | switchbot devices batch toggle -
-  $ switchbot devices batch unlock --filter 'type=Smart Lock' --yes
+  $ switchbot devices batch unlock --filter 'type=Smart Lock' --dry-run --emit-plan
 `)
     .action(
       async (
@@ -315,8 +317,23 @@ Examples:
             code: 2,
             kind: 'guard',
             message: `Refusing to run destructive command "${cmd}" on ${blockedForDestructive.length} device(s) without --yes: ${deviceIds.join(', ')}`,
-            hint: 'Re-issue the call with --yes to proceed.',
+            hint: 'Re-issue the call with --yes only from an explicit dev profile, or use the reviewed plan flow.',
             context: { command: cmd, deviceIds },
+          });
+        }
+
+        if (blockedForDestructive.length > 0 && options.yes && !allowsDirectDestructiveExecution()) {
+          exitWithError({
+            code: 2,
+            kind: 'guard',
+            message: `Direct destructive execution is disabled for batch command "${cmd}".`,
+            hint: destructiveExecutionHint(),
+            context: {
+              command: cmd,
+              blockedCount: blockedForDestructive.length,
+              deviceIds: blockedForDestructive.map((item) => item.deviceId),
+              requiredWorkflow: 'plan-approval',
+            },
           });
         }
 

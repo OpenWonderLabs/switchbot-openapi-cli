@@ -128,4 +128,142 @@ Example:
         handleError(error);
       }
     });
+
+  // switchbot scenes validate [sceneId...]
+  scenes
+    .command('validate')
+    .description('Verify that one or more scenes exist. If no IDs are given, validates all scenes are reachable.')
+    .argument('[sceneId...]', 'Scene IDs to validate (default: all scenes)')
+    .addHelpText('after', `
+Note: SwitchBot API v1.1 does not expose scene steps; validation only confirms
+the scene IDs exist in your account.
+
+Examples:
+  $ switchbot scenes validate
+  $ switchbot scenes validate T12345678 T87654321
+`)
+    .action(async (sceneIds: string[]) => {
+      try {
+        const sceneList = await fetchScenes();
+        const sceneMap = new Map(sceneList.map((s) => [s.sceneId, s.sceneName]));
+        const targets = sceneIds.length > 0 ? sceneIds : sceneList.map((s) => s.sceneId);
+        const results = targets.map((id) => ({
+          sceneId: id,
+          sceneName: sceneMap.get(id) ?? null,
+          valid: sceneMap.has(id),
+        }));
+        const allValid = results.every((r) => r.valid);
+        if (isJsonMode()) {
+          printJson({ ok: allValid, results });
+          if (!allValid) process.exit(1);
+          return;
+        }
+        for (const r of results) {
+          const icon = r.valid ? '✓' : '✗';
+          const label = r.valid ? r.sceneName! : '(not found)';
+          console.log(`${icon} ${r.sceneId}  ${label}`);
+        }
+        if (!allValid) process.exit(1);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  // switchbot scenes simulate <sceneId>
+  scenes
+    .command('simulate')
+    .description('Show what `scenes execute` would do without actually executing the scene.')
+    .argument('<sceneId>', 'Scene ID from "scenes list"')
+    .addHelpText('after', `
+Note: SwitchBot API v1.1 does not expose scene step details. Simulation reports
+the scene name, confirms it exists, and shows the POST that would be issued.
+
+Example:
+  $ switchbot scenes simulate T12345678
+`)
+    .action(async (sceneId: string) => {
+      try {
+        const sceneList = await fetchScenes();
+        const found = sceneList.find((s) => s.sceneId === sceneId);
+        if (!found) {
+          throw new StructuredUsageError(`scene not found: ${sceneId}`, {
+            error: 'scene_not_found',
+            sceneId,
+            candidates: sceneList.map((s) => ({ sceneId: s.sceneId, sceneName: s.sceneName })),
+          });
+        }
+        const simulation = {
+          sceneId: found.sceneId,
+          sceneName: found.sceneName,
+          wouldSend: { method: 'POST', url: `/v1.1/scenes/${sceneId}/execute` },
+          note: 'SwitchBot API v1.1 does not expose individual scene steps.',
+        };
+        if (isJsonMode()) {
+          printJson({ simulated: true, ...simulation });
+          return;
+        }
+        console.log(`sceneId:   ${simulation.sceneId}`);
+        console.log(`sceneName: ${simulation.sceneName}`);
+        console.log(`wouldSend: ${simulation.wouldSend.method} ${simulation.wouldSend.url}`);
+        console.log(`note:      ${simulation.note}`);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  // switchbot scenes explain <sceneId>
+  scenes
+    .command('explain')
+    .description('Explain in plain language what a scene does and how to execute it safely.')
+    .argument('<sceneId>', 'Scene ID from "scenes list"')
+    .addHelpText('after', `
+Shows the scene name, action description, risk level, and the exact command to
+run. Unlike "simulate" (which shows raw HTTP detail), "explain" is aimed at a
+human or agent deciding whether to proceed.
+
+Note: SwitchBot API v1.1 does not expose scene step details; risk is reported
+as "low" because scenes only trigger pre-configured automations in the app.
+
+Example:
+  $ switchbot scenes explain T12345678
+`)
+    .action(async (sceneId: string) => {
+      try {
+        const sceneList = await fetchScenes();
+        const found = sceneList.find((s) => s.sceneId === sceneId);
+        if (!found) {
+          throw new StructuredUsageError(`scene not found: ${sceneId}`, {
+            error: 'scene_not_found',
+            sceneId,
+            candidates: sceneList.map((s) => ({ sceneId: s.sceneId, sceneName: s.sceneName })),
+          });
+        }
+        const explanation = {
+          sceneId: found.sceneId,
+          sceneName: found.sceneName,
+          action: `Trigger scene (POST /v1.1/scenes/${found.sceneId}/execute)`,
+          riskLevel: 'low' as const,
+          idempotent: null as boolean | null,
+          toExecute: `switchbot scenes execute ${found.sceneId}`,
+          dryRun: isDryRun(),
+          note: 'SwitchBot API v1.1 does not expose individual scene steps.',
+        };
+        if (isJsonMode()) {
+          printJson(explanation);
+          return;
+        }
+        console.log(`sceneId:    ${explanation.sceneId}`);
+        console.log(`sceneName:  ${explanation.sceneName}`);
+        console.log(`action:     ${explanation.action}`);
+        console.log(`riskLevel:  ${explanation.riskLevel}`);
+        console.log(`idempotent: unknown (scene steps not exposed by API)`);
+        console.log(`toExecute:  ${explanation.toExecute}`);
+        if (explanation.dryRun) {
+          console.log(`dryRun:     true  (pass --dry-run to execute would be a no-op)`);
+        }
+        console.log(`note:       ${explanation.note}`);
+      } catch (error) {
+        handleError(error);
+      }
+    });
 }

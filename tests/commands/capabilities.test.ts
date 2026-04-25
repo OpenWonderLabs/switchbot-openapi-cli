@@ -29,10 +29,21 @@ function makeProgram(): Command {
   const history = p.command('history').description('Device history and aggregation');
   history.command('aggregate').description('Aggregate device history');
 
-  p.command('scenes').description('List and run scenes');
-  p.command('schema').description('Export device catalog');
-  p.command('mcp').description('Start MCP server');
-  p.command('plan').description('Execute batch plans');
+  const scenes = p.command('scenes').description('List and run scenes');
+  scenes.command('list').description('List scenes');
+  scenes.command('execute').description('Execute a scene');
+  scenes.command('describe').description('Describe a scene');
+
+  const schema = p.command('schema').description('Export device catalog');
+  schema.command('export').description('Export schema');
+
+  const mcp = p.command('mcp').description('Start MCP server');
+  mcp.command('serve').description('Serve MCP');
+
+  const plan = p.command('plan').description('Execute batch plans');
+  plan.command('schema').description('Plan schema');
+  plan.command('validate').description('Validate a plan');
+  plan.command('run').description('Run a plan');
 
   return p;
 }
@@ -245,6 +256,19 @@ describe('capabilities B3/B4', () => {
     expect(metaSet).toBeDefined();
     expect(metaSet!.agentSafetyTier).toBe('action');
     expect(metaSet!.mutating).toBe(true);
+  });
+
+  it('fails closed when a leaf command is missing metadata', async () => {
+    const program = makeProgram();
+    program.command('mystery').description('Unknown leaf');
+    program.exitOverride();
+    const chunks: string[] = [];
+    const logSpy = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      chunks.push(args.map(String).join(' '));
+    });
+    registerCapabilitiesCommand(program);
+    await expect(program.parseAsync(['node', 'test', 'capabilities'])).rejects.toThrow(/missing:mystery/);
+    logSpy.mockRestore();
   });
 
   it('P15: resources catalog exposes scenes / webhooks / keys', async () => {

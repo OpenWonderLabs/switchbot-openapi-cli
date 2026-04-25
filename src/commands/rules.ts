@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { isJsonMode, printJson, exitWithError } from '../utils/output.js';
+import { isJsonMode, printJson, exitWithError, printTable } from '../utils/output.js';
 import {
   loadPolicyFile,
   resolvePolicyPath,
@@ -14,6 +14,11 @@ import { validateLoadedPolicy } from '../policy/validate.js';
 import type { AutomationBlock, Rule } from '../rules/types.js';
 import { isWebhookTrigger } from '../rules/types.js';
 import { lintRules, RulesEngine, type LintResult } from '../rules/engine.js';
+import {
+  analyzeConflicts,
+  type ConflictReport,
+  type QuietHours,
+} from '../rules/conflict-analyzer.js';
 import { tryLoadConfig } from '../config.js';
 import { fetchMqttCredential } from '../mqtt/credential.js';
 import { SwitchBotMqttClient } from '../mqtt/client.js';
@@ -45,6 +50,7 @@ interface LoadedAutomation {
   automation: AutomationBlock | null;
   aliases: Record<string, string>;
   schemaVersion?: string;
+  quietHours: QuietHours | null;
 }
 
 function loadAutomation(policyPathFlag: string | undefined): LoadedAutomation | null {
@@ -91,7 +97,12 @@ function loadAutomation(policyPathFlag: string | undefined): LoadedAutomation | 
       if (typeof v === 'string') aliases[k] = v;
     }
   }
-  return { path, automation, aliases, schemaVersion: result.schemaVersion };
+  const rawQH = data.quiet_hours as { start?: unknown; end?: unknown } | null | undefined;
+  const quietHours: QuietHours | null =
+    rawQH && typeof rawQH.start === 'string' && typeof rawQH.end === 'string'
+      ? { start: rawQH.start, end: rawQH.end }
+      : null;
+  return { path, automation, aliases, schemaVersion: result.schemaVersion, quietHours };
 }
 
 function describeTrigger(rule: Rule): string {
@@ -663,6 +674,210 @@ function registerSuggest(rules: Command): void {
     );
 }
 
+function formatConflictReport(report: ConflictReport): string {
+  const lines: string[] = [];
+  lines.push(`findings: ${report.findings.length}  errors: ${report.counts.error}  warnings: ${report.counts.warning}  info: ${report.counts.info}`);
+  if (report.findings.length === 0) {
+    lines.push('No conflicts detected.');
+    return lines.join('\n');
+  }
+  for (const f of report.findings) {
+    lines.push(`  [${f.severity}] ${f.code}: ${f.message}`);
+    if (f.hint) lines.push(`      hint: ${f.hint}`);
+  }
+  return lines.join('\n');
+}
+
+function registerConflicts(rules: Command): void {
+  rules
+    .command('conflicts [path]')
+    .description('Detect conflicting or risky rule patterns (opposing actions, high-frequency catch-all, destructive commands).')
+    .action((pathArg: string | undefined) => {
+      const loaded = loadAutomation(pathArg);
+      if (!loaded) return;
+      const allRules = loaded.automation?.rules ?? [];
+      const report = analyzeConflicts(allRules, loaded.quietHours);
+      if (isJsonMode()) {
+        printJson({
+          policyPath: loaded.path,
+          ruleCount: allRules.length,
+          ...report,
+        });
+      } else {
+        console.log(formatConflictReport(report));
+      }
+      process.exit(report.clean ? 0 : 1);
+    });
+}
+
+function registerDoctor(rules: Command): void {
+  rules
+    .command('doctor [path]')
+    .description('Combined health check: lint + conflict analysis + operational guidance.')
+    .action((pathArg: string | undefined) => {
+      const loaded = loadAutomation(pathArg);
+      if (!loaded) return;
+      const allRules = loaded.automation?.rules ?? [];
+      const lintResult = lintRules(loaded.automation);
+      const conflictReport = analyzeConflicts(allRules, loaded.quietHours);
+
+      const overall = lintResult.valid && conflictReport.clean;
+
+      if (isJsonMode()) {
+        printJson({
+          policyPath: loaded.path,
+          policySchemaVersion: loaded.schemaVersion,
+          automationEnabled: loaded.automation?.enabled === true,
+          overall,
+          lint: lintResult,
+          conflicts: conflictReport,
+        });
+      } else {
+        console.log('=== Lint ===');
+        console.log(formatLintHuman(lintResult, loaded.schemaVersion));
+        console.log('\n=== Conflicts ===');
+        console.log(formatConflictReport(conflictReport));
+        console.log(`\noverall: ${overall ? 'ok' : 'issues found'}`);
+      }
+      process.exit(overall ? 0 : 1);
+    });
+}
+
+function registerSummary(rules: Command): void {
+  rules
+    .command('summary')
+    .description('Aggregate rule-* audit entries per rule over a time window (fires, throttled, errors).')
+    .option('--file <path>', `Audit log path (default ${DEFAULT_AUDIT_PATH})`)
+    .option('--since <duration>', 'Only entries newer than this window (default: 24h). E.g. 1h, 7d.')
+    .option('--rule <name>', 'Filter to a single rule name.')
+    .action((opts: { file?: string; since?: string; rule?: string }) => {
+      const file = opts.file ?? DEFAULT_AUDIT_PATH;
+      const entries = fs.existsSync(file) ? readAudit(file) : [];
+      const sinceMs = resolveSinceMs(opts.since ?? '24h');
+      const filtered = filterRuleAudits(entries, { sinceMs, ruleName: opts.rule });
+      const report = aggregateRuleAudits(filtered);
+      if (isJsonMode()) {
+        printJson({ file, window: opts.since ?? '24h', ruleFilter: opts.rule ?? null, ...report });
+        return;
+      }
+      console.log(`Rule summary (${opts.since ?? '24h'} window, ${report.total} entries)`);
+      if (report.summaries.length === 0) {
+        console.log('(no rule activity in this window)');
+        return;
+      }
+      printTable(
+        ['Rule', 'Trigger', 'Fires', 'Throttled', 'Errors', 'Error%', 'Last fired'],
+        report.summaries.map((s) => [
+          s.rule,
+          s.triggerSource ?? '-',
+          String(s.fires),
+          String(s.throttled),
+          String(s.errors),
+          `${(s.errorRate * 100).toFixed(1)}%`,
+          s.lastAt ?? '-',
+        ]),
+      );
+    });
+}
+
+function registerLastFired(rules: Command): void {
+  rules
+    .command('last-fired')
+    .description('Show the N most recently fired rule-fire entries from the audit log.')
+    .option('--file <path>', `Audit log path (default ${DEFAULT_AUDIT_PATH})`)
+    .option('--rule <name>', 'Filter to a single rule name.')
+    .option('-n <count>', 'Number of entries to show (default: 10).', (v) => Number.parseInt(v, 10))
+    .action((opts: { file?: string; rule?: string; n?: number }) => {
+      const file = opts.file ?? DEFAULT_AUDIT_PATH;
+      const n = opts.n ?? 10;
+      const entries = fs.existsSync(file) ? readAudit(file) : [];
+      const fires = filterRuleAudits(entries, {
+        ruleName: opts.rule,
+        kinds: ['rule-fire', 'rule-fire-dry'],
+      });
+      const recent = fires.slice(-n).reverse();
+      if (isJsonMode()) {
+        printJson({ file, ruleFilter: opts.rule ?? null, count: recent.length, entries: recent });
+        return;
+      }
+      if (recent.length === 0) {
+        console.log(`(no rule-fire entries in ${file}${opts.rule ? ` for rule "${opts.rule}"` : ''})`);
+        return;
+      }
+      for (const e of recent) {
+        const parts = [e.t, e.kind, e.rule?.name ?? '-'];
+        if (e.deviceId) parts.push(`device=${e.deviceId}`);
+        if (e.command) parts.push(`cmd=${e.command}`);
+        if (e.result) parts.push(`result=${e.result}`);
+        console.log(parts.join('  '));
+      }
+    });
+}
+
+function registerExplain(rules: Command): void {
+  rules
+    .command('explain <name> [path]')
+    .description('Show full detail for a named rule: trigger, conditions, actions, and last-fired time.')
+    .option('--file <path>', `Audit log path (default ${DEFAULT_AUDIT_PATH}).`)
+    .action((name: string, pathArg: string | undefined, opts: { file?: string }) => {
+      const loaded = loadAutomation(pathArg);
+      if (!loaded) return;
+      const allRules = loaded.automation?.rules ?? [];
+      const rule = allRules.find((r) => r.name === name);
+      if (!rule) {
+        exitWithError({
+          code: 1,
+          kind: 'usage',
+          message: `Rule "${name}" not found in policy.`,
+          extra: {
+            subKind: 'rule-not-found',
+            available: allRules.map((r) => r.name),
+          },
+        });
+        return;
+      }
+
+      const auditFile = opts.file ?? DEFAULT_AUDIT_PATH;
+      const entries = fs.existsSync(auditFile) ? readAudit(auditFile) : [];
+      const fires = filterRuleAudits(entries, { ruleName: name, kinds: ['rule-fire', 'rule-fire-dry'] });
+      const lastFired = fires.length > 0 ? fires[fires.length - 1].t : null;
+
+      const detail = {
+        name: rule.name,
+        enabled: rule.enabled !== false,
+        trigger: describeTrigger(rule),
+        conditions: rule.conditions ?? [],
+        actions: rule.then,
+        cooldown: rule.cooldown ?? rule.throttle?.max_per ?? null,
+        hysteresis: rule.hysteresis ?? rule.requires_stable_for ?? null,
+        maxFiringsPerHour: rule.maxFiringsPerHour ?? null,
+        suppressIfAlreadyDesired: rule.suppressIfAlreadyDesired ?? false,
+        dryRun: rule.dry_run === true,
+        lastFired,
+      };
+
+      if (isJsonMode()) {
+        printJson(detail);
+        return;
+      }
+
+      console.log(`name:                  ${detail.name}`);
+      console.log(`enabled:               ${detail.enabled}`);
+      console.log(`trigger:               ${detail.trigger}`);
+      console.log(`conditions:            ${detail.conditions.length === 0 ? '(none)' : JSON.stringify(detail.conditions)}`);
+      console.log(`actions:               ${detail.actions.length}`);
+      for (const a of detail.actions) {
+        console.log(`  - ${a.command}${a.device ? ` [${a.device}]` : ''}${a.on_error ? ` on_error=${a.on_error}` : ''}`);
+      }
+      if (detail.cooldown) console.log(`cooldown:              ${detail.cooldown}`);
+      if (detail.hysteresis) console.log(`hysteresis:            ${detail.hysteresis}`);
+      if (detail.maxFiringsPerHour !== null) console.log(`maxFiringsPerHour:     ${detail.maxFiringsPerHour}`);
+      if (detail.suppressIfAlreadyDesired) console.log(`suppressIfAlreadyDesired: true`);
+      if (detail.dryRun) console.log(`dry_run:               true`);
+      console.log(`last fired:            ${detail.lastFired ?? '(never)'}`);
+    });
+}
+
 export function registerRulesCommand(program: Command): void {
   const rules = program
     .command('rules')
@@ -677,11 +892,16 @@ Subcommands:
   suggest                   Generate a candidate rule YAML from intent (heuristic, no LLM).
   lint [path]               Static-check rule definitions; no MQTT, no API calls.
   list [path]               Print a human/JSON summary of each rule's trigger + actions.
+  explain <name>            Show full detail for a rule: trigger, conditions, actions, last-fired.
   run  [path]               Subscribe to MQTT (+ cron/webhook) and execute matching rules.
   reload                    Hot-reload the running engine's policy (SIGHUP on Unix,
                             pid-file sentinel on Windows).
   tail                      Stream rule-* entries from the audit log (--follow tails).
   replay                    Per-rule aggregate: fires/dries/throttled/errors + window.
+  conflicts [path]          Detect conflicting or risky rule patterns.
+  doctor [path]             Combined health check: lint + conflict analysis + summary.
+  summary                   Aggregate rule-fire counts per rule over a time window.
+  last-fired                Show the N most recently fired rule-fire audit entries.
   webhook-rotate-token      Rotate the bearer token used for webhook triggers.
   webhook-show-token        Print the current bearer token (creating one if absent).
 
@@ -699,10 +919,15 @@ Exit codes (lint):
   registerSuggest(rules);
   registerLint(rules);
   registerList(rules);
+  registerExplain(rules);
   registerRun(rules);
   registerReload(rules);
   registerTail(rules);
   registerReplay(rules);
+  registerConflicts(rules);
+  registerDoctor(rules);
+  registerSummary(rules);
+  registerLastFired(rules);
   registerWebhookRotateToken(rules);
   registerWebhookShowToken(rules);
 }

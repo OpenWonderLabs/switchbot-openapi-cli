@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -152,6 +152,80 @@ describe('config command', () => {
       expect(res.exitCode).toBe(2);
       expect(configMock.saveConfig).not.toHaveBeenCalled();
       fs.rmSync(dir, { recursive: true, force: true });
+    });
+  });
+
+  describe('agent-profile', () => {
+    let tmpHome: string;
+    let homedirSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sbagent-'));
+      homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(tmpHome);
+    });
+
+    afterEach(() => {
+      homedirSpy.mockRestore();
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    });
+
+    it('emits the template as JSON without --write', async () => {
+      const res = await runCli(registerConfigCommand, ['--json', 'config', 'agent-profile']);
+      expect(res.exitCode).toBeNull();
+      const out = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+      const tpl = out.data ?? out;
+      expect(tpl.label).toBe('agent');
+      expect(tpl.limits.dailyCap).toBe(100);
+      expect(tpl.defaults.auditLog).toBe(true);
+    });
+
+    it('prints JSON to stdout in text mode without --write', async () => {
+      const res = await runCli(registerConfigCommand, ['config', 'agent-profile']);
+      expect(res.exitCode).toBeNull();
+      const combined = res.stdout.join('\n');
+      expect(combined).toContain('"label": "agent"');
+      expect(combined).toContain('"dailyCap": 100');
+    });
+
+    it('--write creates ~/.switchbot/profiles/agent.json with mode 0600', async () => {
+      const res = await runCli(registerConfigCommand, ['config', 'agent-profile', '--write']);
+      expect(res.exitCode).toBeNull();
+      const dest = path.join(tmpHome, '.switchbot', 'profiles', 'agent.json');
+      expect(fs.existsSync(dest)).toBe(true);
+      const parsed = JSON.parse(fs.readFileSync(dest, 'utf-8'));
+      expect(parsed.label).toBe('agent');
+      expect(parsed.limits.dailyCap).toBe(100);
+      expect(res.stdout.join('\n')).toContain('agent.json');
+    });
+
+    it('--write refuses to overwrite without --force (exit 2)', async () => {
+      const dest = path.join(tmpHome, '.switchbot', 'profiles', 'agent.json');
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.writeFileSync(dest, '{"original":true}', 'utf-8');
+
+      const res = await runCli(registerConfigCommand, ['config', 'agent-profile', '--write']);
+      expect(res.exitCode).toBe(2);
+      expect(JSON.parse(fs.readFileSync(dest, 'utf-8'))).toEqual({ original: true });
+    });
+
+    it('--write --force overwrites an existing agent.json', async () => {
+      const dest = path.join(tmpHome, '.switchbot', 'profiles', 'agent.json');
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.writeFileSync(dest, '{"original":true}', 'utf-8');
+
+      const res = await runCli(registerConfigCommand, ['config', 'agent-profile', '--write', '--force']);
+      expect(res.exitCode).toBeNull();
+      const parsed = JSON.parse(fs.readFileSync(dest, 'utf-8'));
+      expect(parsed.label).toBe('agent');
+    });
+
+    it('--write --json returns ok:true with path and template', async () => {
+      const res = await runCli(registerConfigCommand, ['--json', 'config', 'agent-profile', '--write']);
+      expect(res.exitCode).toBeNull();
+      const out = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+      expect(out.data.ok).toBe(true);
+      expect(typeof out.data.path).toBe('string');
+      expect(out.data.template.label).toBe('agent');
     });
   });
 });

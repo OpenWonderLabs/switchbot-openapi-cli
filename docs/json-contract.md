@@ -38,8 +38,11 @@ stdout.
   "error": {
     "code": 2,
     "kind": "usage" | "guard" | "api" | "runtime",
+    "subKind": "ambiguous-name-match" | "device-not-found" | "device-offline" | ... ,
     "message": "human-readable description",
     "hint": "optional remediation string",
+    "resolutionHint": "structured remediation for agent/script consumers",
+    "candidateMatches": [{ "deviceId": "...", "name": "..." }],
     "context": { "optional, command-specific": true }
   }
 }
@@ -48,8 +51,20 @@ stdout.
 - Both success and error envelopes are written to **stdout** so a single
   `cli --json ... | jq` pipe can decode either shape (SYS-1 contract).
 - `code` is the process exit code. `2` = usage / guard, `1` = runtime / api.
+- `subKind` classifies the specific error within its `kind`. Known values:
+  - `ambiguous-name-match` — `--name` matched more than one device; check `candidateMatches`
+  - `device-not-found` — device ID does not exist in the account
+  - `device-offline` — device is BLE-only or hub is offline
+  - `command-not-supported` — device does not support the requested command
+  - `auth-failed` — invalid token or secret
+  - `quota-exceeded` — daily API quota reached
+  - `device-internal-error` — API code 190 generic device error
+- `resolutionHint` is a machine-stable remediation string agents can surface
+  directly (e.g. "Narrow with --type / --room, or use the deviceId directly").
+- `candidateMatches` is populated on `ambiguous-name-match` errors; each
+  entry has at least `name` and one of `deviceId` / `sceneId`.
 - Additional fields may appear on specific error classes
-  (`retryable`, `retryAfterMs`, `transient`, `subKind`, `errorClass`).
+  (`retryable`, `retryAfterMs`, `transient`, `errorClass`).
 
 ---
 

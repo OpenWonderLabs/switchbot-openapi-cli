@@ -212,7 +212,14 @@ export type ErrorSubKind =
   | 'auth-failed'
   | 'quota-exceeded'
   | 'device-internal-error'
+  | 'ambiguous-name-match'
   | 'unknown-api-error';
+
+export interface CandidateMatch {
+  deviceId?: string;
+  sceneId?: string;
+  name: string;
+}
 
 export interface ErrorPayload {
   code: number;
@@ -220,6 +227,10 @@ export interface ErrorPayload {
   subKind?: ErrorSubKind;
   message: string;
   hint?: string;
+  /** Structured remediation hint for agent/script consumers. */
+  resolutionHint?: string;
+  /** Candidate matches when the error is caused by an ambiguous name query. */
+  candidateMatches?: CandidateMatch[];
   retryable?: boolean;
   context?: Record<string, unknown>;
   retryAfterMs?: number;
@@ -256,9 +267,36 @@ export function buildErrorPayload(error: unknown): ErrorPayload {
       kind: 'usage',
       message: error.message,
       errorClass: 'usage',
-      transient: false
+      transient: false,
     };
-    if (error.context) payload.context = error.context;
+    if (error.context) {
+      const ctx = error.context as Record<string, unknown>;
+      const { error: errorType, candidates, hint } = ctx;
+      if (errorType === 'ambiguous_name_match') {
+        payload.subKind = 'ambiguous-name-match';
+      }
+      if (Array.isArray(candidates) && candidates.length > 0) {
+        const normalized = (candidates as unknown[])
+          .map((c) => {
+            if (typeof c !== 'object' || c === null) return null;
+            const o = c as Record<string, unknown>;
+            const name = typeof o.name === 'string' ? o.name
+              : typeof o.sceneName === 'string' ? o.sceneName
+              : '';
+            const match: CandidateMatch = { name };
+            if (typeof o.deviceId === 'string') match.deviceId = o.deviceId;
+            if (typeof o.sceneId === 'string') match.sceneId = o.sceneId;
+            return match;
+          })
+          .filter((c): c is CandidateMatch => c !== null && c.name.length > 0);
+        if (normalized.length > 0) payload.candidateMatches = normalized;
+      }
+      if (typeof hint === 'string') {
+        payload.resolutionHint = hint;
+      }
+      // Preserve full context for backward compatibility (including candidates / hint).
+      payload.context = ctx;
+    }
     return payload;
   }
   if (error instanceof UsageError) {
@@ -344,29 +382,45 @@ export function handleError(error: unknown): never {
 
   if (payload.kind === 'usage') {
     console.error(payload.message);
-    const ctx = payload.context;
-    if (ctx && Array.isArray(ctx.candidates) && ctx.candidates.length > 0) {
-      const names = ctx.candidates
+    if (Array.isArray(payload.candidateMatches) && payload.candidateMatches.length > 0) {
+      const names = payload.candidateMatches
         .map((c) => {
-          if (typeof c === 'string') return c;
-          if (c && typeof c === 'object') {
-            const o = c as Record<string, unknown>;
-            const name = typeof o.name === 'string'
-              ? o.name
-              : typeof o.sceneName === 'string' ? o.sceneName : undefined;
-            const id = typeof o.deviceId === 'string'
-              ? o.deviceId
-              : typeof o.sceneId === 'string' ? o.sceneId : typeof o.id === 'string' ? o.id : undefined;
-            if (name && id) return `${name} (${id})`;
-            return name ?? id ?? JSON.stringify(c);
-          }
-          return String(c);
+          const id = c.deviceId ?? c.sceneId;
+          if (c.name && id) return `${c.name} (${id})`;
+          return c.name ?? id ?? JSON.stringify(c);
         })
         .slice(0, 6);
       console.error(`Did you mean: ${names.join(', ')}?`);
+    } else {
+      const ctx = payload.context;
+      if (ctx && Array.isArray(ctx.candidates) && ctx.candidates.length > 0) {
+        const names = (ctx.candidates as unknown[])
+          .map((c) => {
+            if (typeof c === 'string') return c;
+            if (c && typeof c === 'object') {
+              const o = c as Record<string, unknown>;
+              const name = typeof o.name === 'string'
+                ? o.name
+                : typeof o.sceneName === 'string' ? o.sceneName : undefined;
+              const id = typeof o.deviceId === 'string'
+                ? o.deviceId
+                : typeof o.sceneId === 'string' ? o.sceneId : typeof o.id === 'string' ? o.id : undefined;
+              if (name && id) return `${name} (${id})`;
+              return name ?? id ?? JSON.stringify(c);
+            }
+            return String(c);
+          })
+          .slice(0, 6);
+        console.error(`Did you mean: ${names.join(', ')}?`);
+      }
     }
-    if (ctx && typeof ctx.hint === 'string') {
-      console.error(ctx.hint);
+    if (payload.resolutionHint) {
+      console.error(payload.resolutionHint);
+    } else {
+      const ctx = payload.context;
+      if (ctx && typeof ctx.hint === 'string') {
+        console.error(ctx.hint);
+      }
     }
     process.exit(2);
   }

@@ -2,6 +2,15 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execSync } from 'node:child_process';
+
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return {
+    ...actual,
+    execSync: vi.fn(),
+  };
+});
 
 import { registerDoctorCommand } from '../../src/commands/doctor.js';
 import { runCli } from '../helpers/cli.js';
@@ -18,6 +27,9 @@ describe('doctor command', () => {
     // DEFAULT_POLICY_PATH is evaluated at module load time using the real homedir,
     // so mock the env var to keep tests isolated from the developer's real policy file.
     process.env.SWITCHBOT_POLICY_PATH = path.join(tmp, '.config', 'openclaw', 'switchbot', 'policy.yaml');
+    process.env.SHELL = '/bin/bash';
+    // Default: execSync throws (simulates binary not on PATH / npm not available)
+    vi.mocked(execSync).mockReset().mockImplementation(() => { throw new Error('not found'); });
   });
   afterEach(() => {
     homedirSpy.mockRestore();
@@ -527,5 +539,142 @@ describe('doctor command', () => {
     } finally {
       delete process.env.SWITCHBOT_POLICY_PATH;
     }
+  });
+
+  // ---------------------------------------------------------------------
+  // P0-1: PATH / binary discoverability check
+  // ---------------------------------------------------------------------
+  it('path check: is present in the --list output', async () => {
+    const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--list']);
+    const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    const names = payload.data.checks.map((c: { name: string }) => c.name);
+    expect(names).toContain('path');
+  });
+
+  it('path check: returns ok with binaryOnPath:true when binary is found', async () => {
+    vi.mocked(execSync).mockImplementation((cmd: unknown) => {
+      const c = String(cmd);
+      if (c.includes('npm prefix')) return '/usr/local\n' as never;
+      if (c.includes('which') || c.includes('where')) return '/usr/local/bin/switchbot\n' as never;
+      throw new Error('unexpected');
+    });
+    const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--section', 'path']);
+    const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    const check = payload.data.checks.find((c: { name: string }) => c.name === 'path');
+    expect(check).toBeDefined();
+    expect(check.status).toBe('ok');
+    expect(check.detail.binaryOnPath).toBe(true);
+    expect(typeof check.detail.resolvedPath).toBe('string');
+  });
+
+  it('path check: returns warn with fix hint when binary is not on PATH', async () => {
+    vi.mocked(execSync).mockImplementation((cmd: unknown) => {
+      const c = String(cmd);
+      if (c.includes('npm prefix')) return '/usr/local\n' as never;
+      throw new Error('not found');
+    });
+    const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--section', 'path']);
+    const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    const check = payload.data.checks.find((c: { name: string }) => c.name === 'path');
+    expect(check).toBeDefined();
+    expect(check.status).toBe('warn');
+    expect(check.detail.binaryOnPath).toBe(false);
+    expect(check.detail.resolvedPath).toBeNull();
+    expect(typeof check.detail.fix).toBe('string');
+    expect(['bash', 'cmd']).toContain(check.detail.currentShell);
+    expect(check.detail.fix).toMatch(/\.bashrc|export PATH|set PATH|setx PATH/);
+  });
+
+  it('path check: detail includes npmBinDir when npm prefix succeeds', async () => {
+    vi.mocked(execSync).mockImplementation((cmd: unknown) => {
+      const c = String(cmd);
+      if (c.includes('npm prefix')) return '/home/user/.npm-global\n' as never;
+      throw new Error('not found');
+    });
+    const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--section', 'path']);
+    const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    const check = payload.data.checks.find((c: { name: string }) => c.name === 'path');
+    expect(check.detail.npmBinDir).toBeTruthy();
+  });
+
+  it('path check: emits PowerShell-specific fix hints when SHELL indicates pwsh', async () => {
+    process.env.SHELL = 'pwsh';
+    vi.mocked(execSync).mockImplementation((cmd: unknown) => {
+      const c = String(cmd);
+      if (c.includes('npm prefix')) return '/usr/local\n' as never;
+      throw new Error('not found');
+    });
+    const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--section', 'path']);
+    const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    const check = payload.data.checks.find((c: { name: string }) => c.name === 'path');
+    expect(check.detail.currentShell).toBe('powershell');
+    expect(check.detail.fix).toMatch(/\$env:Path/);
+  });
+
+  it('daemon and health checks appear in --list output', async () => {
+    const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--list']);
+    const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    const names = payload.data.checks.map((c: { name: string }) => c.name);
+    expect(names).toContain('daemon');
+    expect(names).toContain('health');
+  });
+
+  it('daemon check reads daemon.state.json and reports running metadata', async () => {
+    const sbDir = path.join(tmp, '.switchbot');
+    fs.mkdirSync(sbDir, { recursive: true });
+    fs.writeFileSync(path.join(sbDir, 'daemon.pid'), `${process.pid}\n`);
+    fs.writeFileSync(
+      path.join(sbDir, 'daemon.state.json'),
+      JSON.stringify({
+        status: 'running',
+        pid: process.pid,
+        logFile: path.join(sbDir, 'daemon.log'),
+        pidFile: path.join(sbDir, 'daemon.pid'),
+        stateFile: path.join(sbDir, 'daemon.state.json'),
+        startedAt: '2026-04-25T00:00:00.000Z',
+        healthzPort: 3210,
+      }),
+    );
+    const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--section', 'daemon']);
+    const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    const daemon = payload.data.checks.find((c: { name: string }) => c.name === 'daemon');
+    expect(daemon.status).toBe('ok');
+    expect(daemon.detail.present).toBe(true);
+    expect(daemon.detail.pid).toBe(process.pid);
+    expect(daemon.detail.healthConfigured).toBe(true);
+  });
+
+  describe('maturity score', () => {
+    it('includes maturityScore (0–100) and maturityLabel in --json output', async () => {
+      process.env.SWITCHBOT_TOKEN = 't';
+      process.env.SWITCHBOT_SECRET = 's';
+      const res = await runCli(registerDoctorCommand, ['--json', 'doctor']);
+      const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+      expect(typeof payload.data.maturityScore).toBe('number');
+      expect(payload.data.maturityScore).toBeGreaterThanOrEqual(0);
+      expect(payload.data.maturityScore).toBeLessThanOrEqual(100);
+      expect(['production-ready', 'mostly-ready', 'needs-work', 'not-ready']).toContain(
+        payload.data.maturityLabel,
+      );
+    });
+
+    it('maturityLabel is lower when credentials are missing (score < 100)', async () => {
+      // No creds → credentials:fail → score is reduced
+      const res = await runCli(registerDoctorCommand, ['--json', 'doctor']);
+      expect(res.exitCode).toBe(1);
+      const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+      expect(payload.data.maturityScore).toBeLessThan(100);
+      expect(['production-ready', 'mostly-ready', 'needs-work', 'not-ready']).toContain(
+        payload.data.maturityLabel,
+      );
+    });
+
+    it('maturityScore is an integer', async () => {
+      process.env.SWITCHBOT_TOKEN = 't';
+      process.env.SWITCHBOT_SECRET = 's';
+      const res = await runCli(registerDoctorCommand, ['--json', 'doctor']);
+      const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+      expect(Number.isInteger(payload.data.maturityScore)).toBe(true);
+    });
   });
 });

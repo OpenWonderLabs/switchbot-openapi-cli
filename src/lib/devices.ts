@@ -160,7 +160,7 @@ export async function executeCommand(
   parameter: unknown,
   commandType: 'command' | 'customize',
   client?: AxiosInstance,
-  options?: { idempotencyKey?: string }
+  options?: { idempotencyKey?: string; planId?: string }
 ): Promise<unknown> {
   const c = client ?? createClient();
   const body = {
@@ -176,6 +176,7 @@ export async function executeCommand(
     parameter,
     commandType,
     dryRun: isDryRun(),
+    ...(options?.planId ? { planId: options.planId } : {}),
   };
 
   // Wrap in idempotency cache if key is provided

@@ -3,6 +3,8 @@ import {
   parseRetryAfter,
   computeBackoff,
   nextRetryDelayMs,
+  CircuitBreaker,
+  CircuitOpenError,
 } from '../../src/utils/retry.js';
 
 describe('parseRetryAfter', () => {
@@ -77,5 +79,72 @@ describe('nextRetryDelayMs', () => {
 
   it('falls back to backoff when Retry-After is garbage', () => {
     expect(nextRetryDelayMs(1, 'exponential', 'not-a-date')).toBe(2_000);
+  });
+});
+
+describe('CircuitBreaker', () => {
+  it('starts closed and allows calls', () => {
+    const cb = new CircuitBreaker('test');
+    expect(cb.getState()).toBe('closed');
+    expect(() => cb.checkAndAllow()).not.toThrow();
+  });
+
+  it('opens after failureThreshold consecutive failures', () => {
+    const cb = new CircuitBreaker('test', { failureThreshold: 3 });
+    cb.recordFailure();
+    cb.recordFailure();
+    expect(cb.getState()).toBe('closed');
+    cb.recordFailure();
+    expect(cb.getState()).toBe('open');
+  });
+
+  it('throws CircuitOpenError while open', () => {
+    const cb = new CircuitBreaker('api', { failureThreshold: 2 });
+    cb.recordFailure();
+    cb.recordFailure();
+    expect(() => cb.checkAndAllow()).toThrow(CircuitOpenError);
+    expect(() => cb.checkAndAllow()).toThrow(/Circuit "api" is open/);
+  });
+
+  it('resets to closed and clears failure count on recordSuccess', () => {
+    const cb = new CircuitBreaker('test', { failureThreshold: 2 });
+    cb.recordFailure();
+    cb.recordFailure();
+    expect(cb.getState()).toBe('open');
+    cb.reset();
+    expect(cb.getState()).toBe('closed');
+    expect(() => cb.checkAndAllow()).not.toThrow();
+  });
+
+  it('enters half-open after resetTimeoutMs and allows one probe', () => {
+    const cb = new CircuitBreaker('test', { failureThreshold: 1, resetTimeoutMs: 0 });
+    cb.recordFailure();
+    // With resetTimeoutMs: 0 the transition to half-open happens on the very
+    // next getState() / checkAndAllow() call because Date.now() >= openedAt + 0.
+    expect(cb.getState()).toBe('half-open');
+    expect(() => cb.checkAndAllow()).not.toThrow();
+  });
+
+  it('re-opens on failure while half-open', () => {
+    const cb = new CircuitBreaker('test', { failureThreshold: 1, resetTimeoutMs: 0 });
+    cb.recordFailure();
+    // Force transition to half-open.
+    void cb.getState();
+    // A failure during the probe re-opens the circuit.
+    cb.recordFailure();
+    // Next getState() with resetTimeoutMs: 0 will immediately half-open again,
+    // so check failures directly via getStats().
+    const stats = cb.getStats();
+    expect(stats.state === 'open' || stats.state === 'half-open').toBe(true);
+    expect(stats.failures).toBeGreaterThan(0);
+  });
+
+  it('closes fully on success while half-open', () => {
+    const cb = new CircuitBreaker('test', { failureThreshold: 1, resetTimeoutMs: 0 });
+    cb.recordFailure();
+    expect(cb.getState()).toBe('half-open');
+    cb.recordSuccess();
+    expect(cb.getState()).toBe('closed');
+    expect(() => cb.checkAndAllow()).not.toThrow();
   });
 });

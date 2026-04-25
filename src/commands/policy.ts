@@ -1,9 +1,9 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync, statSync } from 'node:fs';
+import { dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { parse as yamlParse } from 'yaml';
-import { printJson, emitJsonError, isJsonMode } from '../utils/output.js';
+import { printJson, emitJsonError, isJsonMode, exitWithError } from '../utils/output.js';
 import {
   loadPolicyFile,
   resolvePolicyPath,
@@ -491,6 +491,128 @@ Reads rule YAML from stdin. Combine with 'rules suggest' for a full pipeline:
           exitPolicyError('internal', err.message, { kind: err.code });
         }
         throw err;
+      }
+    });
+
+  // switchbot policy backup [file]
+  policy
+    .command('backup [file]')
+    .description('Copy the active policy to a backup file (default: <policy>.bak.yaml).')
+    .option('--force', 'Overwrite an existing backup file.')
+    .addHelpText('after', `
+Creates a point-in-time snapshot of the active policy file so it can be
+restored if a migration or manual edit breaks things.
+
+Default backup path: same directory as the policy, with ".bak.yaml" suffix.
+
+Examples:
+  $ switchbot policy backup
+  $ switchbot policy backup ./my-backup.yaml
+  $ switchbot policy backup --force
+`)
+    .action((fileArg: string | undefined, opts: { force?: boolean }) => {
+      const source = resolvePolicyPath({});
+      if (!existsSync(source)) {
+        exitPolicyError('file-not-found', `policy file not found: ${source}`, { path: source });
+      }
+
+      const dest = fileArg
+        ? resolvePath(fileArg)
+        : source.replace(/\.yaml$/, '.bak.yaml').replace(/\.yml$/, '.bak.yml');
+
+      if (!opts.force && existsSync(dest)) {
+        exitWithError({ code: 2, kind: 'usage', message: `Backup file already exists: ${dest}. Use --force to overwrite.` });
+      }
+
+      try {
+        copyFileSync(source, dest);
+      } catch (err) {
+        exitPolicyError('internal', `Failed to write backup: ${err instanceof Error ? err.message : String(err)}`, { source, dest });
+      }
+
+      const size = statSync(dest).size;
+      if (isJsonMode()) {
+        printJson({ ok: true, source, dest, sizeBytes: size });
+      } else {
+        console.log(`Backup written: ${dest}  (${size} bytes)`);
+        console.log(`Restore with:  switchbot policy restore ${dest}`);
+      }
+    });
+
+  // switchbot policy restore <file>
+  policy
+    .command('restore <file>')
+    .description('Restore a policy backup, validating it before applying.')
+    .option('--no-validate', 'Skip schema validation before restoring (use if migrating manually).')
+    .addHelpText('after', `
+Validates the backup file against the current schema before overwriting the
+active policy. A .pre-restore.bak.yaml snapshot of the current policy is
+automatically created before overwriting. Use --no-validate to skip
+validation (e.g. when restoring an older version for manual migration).
+
+Example:
+  $ switchbot policy restore ./policy.bak.yaml
+`)
+    .action((fileArg: string, opts: { validate?: boolean }) => {
+      const source = resolvePath(fileArg);
+      if (!existsSync(source)) {
+        exitPolicyError('file-not-found', `restore source not found: ${source}`, { path: source });
+      }
+
+      // Validate before touching the active policy.
+      if (opts.validate !== false) {
+        let loaded;
+        try {
+          loaded = loadPolicyFile(source);
+        } catch (err) {
+          if (err instanceof PolicyFileNotFoundError) {
+            exitPolicyError('file-not-found', `restore source not found: ${err.policyPath}`, { path: err.policyPath });
+          }
+          if (err instanceof PolicyYamlParseError) {
+            exitPolicyError('yaml-parse', `YAML parse error in ${err.policyPath}: ${err.message}`, { path: err.policyPath });
+          }
+          throw err;
+        }
+        const vResult = validateLoadedPolicy(loaded);
+        if (!vResult.valid) {
+          const firstError = vResult.errors[0]?.message ?? 'schema validation failed';
+          exitWithError({
+            code: 1, kind: 'usage',
+            message: `Backup failed validation: ${firstError}`,
+            context: { errorCount: vResult.errors.length, hint: 'Use --no-validate to restore anyway.' },
+          });
+        }
+      }
+
+      const dest = resolvePolicyPath({});
+      const destDir = dirname(dest);
+      if (!existsSync(destDir)) {
+        mkdirSync(destDir, { recursive: true, mode: 0o700 });
+      }
+
+      // Take an auto-backup of the current policy before overwriting.
+      if (existsSync(dest)) {
+        const autoBackup = dest.replace(/\.yaml$/, '.pre-restore.bak.yaml').replace(/\.yml$/, '.pre-restore.bak.yml');
+        try {
+          copyFileSync(dest, autoBackup);
+        } catch {
+          // best-effort — if it fails, proceed anyway
+        }
+      }
+
+      try {
+        copyFileSync(source, dest);
+      } catch (err) {
+        exitPolicyError('internal', `Failed to restore: ${err instanceof Error ? err.message : String(err)}`, { source, dest });
+      }
+
+      const size = statSync(dest).size;
+      if (isJsonMode()) {
+        printJson({ ok: true, restored: dest, from: source, sizeBytes: size });
+      } else {
+        console.log(`Policy restored from: ${source}`);
+        console.log(`Active policy:        ${dest}  (${size} bytes)`);
+        console.log('Run `switchbot policy validate` to confirm the restored file is valid.');
       }
     });
 }

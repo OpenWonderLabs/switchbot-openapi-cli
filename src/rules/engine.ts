@@ -31,7 +31,7 @@ import {
   type DeviceStatusFetcher,
 } from './matcher.js';
 import { ThrottleGate, parseMaxPerMs } from './throttle.js';
-import { executeRuleAction } from './action.js';
+import { executeRuleAction, parseRuleCommand } from './action.js';
 import { CronScheduler } from './cron-scheduler.js';
 import { WebhookListener, DEFAULT_WEBHOOK_PORT } from './webhook-listener.js';
 import {
@@ -141,6 +141,88 @@ export function lintRules(automation: AutomationBlock | null | undefined): LintR
           message: `throttle.max_per "${r.throttle.max_per}" is not a valid duration.`,
         });
       }
+      if (r.throttle.dedupe_window) {
+        try {
+          parseMaxPerMs(r.throttle.dedupe_window);
+        } catch {
+          issues.push({
+            rule: r.name,
+            severity: 'error',
+            code: 'invalid-dedupe-window',
+            message: `throttle.dedupe_window "${r.throttle.dedupe_window}" is not a valid duration.`,
+          });
+        }
+      }
+    }
+
+    // cooldown field validation
+    if (r.cooldown) {
+      try {
+        parseMaxPerMs(r.cooldown);
+      } catch {
+        issues.push({
+          rule: r.name,
+          severity: 'error',
+          code: 'invalid-cooldown',
+          message: `cooldown "${r.cooldown}" is not a valid duration (expected e.g. "10m", "1h").`,
+        });
+      }
+      if (r.throttle?.max_per) {
+        issues.push({
+          rule: r.name,
+          severity: 'warning',
+          code: 'cooldown-throttle-overlap',
+          message: `Both "cooldown" and "throttle.max_per" are set. "cooldown" takes precedence.`,
+        });
+      }
+    }
+
+    // requires_stable_for field validation
+    if (r.requires_stable_for) {
+      try {
+        parseMaxPerMs(r.requires_stable_for);
+      } catch {
+        issues.push({
+          rule: r.name,
+          severity: 'error',
+          code: 'invalid-requires-stable-for',
+          message: `requires_stable_for "${r.requires_stable_for}" is not a valid duration.`,
+        });
+      }
+    }
+
+    // hysteresis field validation
+    if (r.hysteresis) {
+      try {
+        parseMaxPerMs(r.hysteresis);
+      } catch {
+        issues.push({
+          rule: r.name,
+          severity: 'error',
+          code: 'invalid-hysteresis',
+          message: `hysteresis "${r.hysteresis}" is not a valid duration (expected e.g. "10m", "1h").`,
+        });
+      }
+      if (r.requires_stable_for) {
+        issues.push({
+          rule: r.name,
+          severity: 'warning',
+          code: 'hysteresis-requires-stable-overlap',
+          message: `Both "hysteresis" and "requires_stable_for" are set. "hysteresis" takes precedence.`,
+        });
+      }
+    }
+
+    // maxFiringsPerHour field validation
+    if (r.maxFiringsPerHour !== undefined) {
+      if (!Number.isInteger(r.maxFiringsPerHour) || r.maxFiringsPerHour < 1) {
+        issues.push({
+          rule: r.name,
+          severity: 'error',
+          code: 'invalid-maxFiringsPerHour',
+          message: `maxFiringsPerHour must be a positive integer (got ${r.maxFiringsPerHour}).`,
+        });
+      }
     }
 
     const enabled = r.enabled !== false;
@@ -223,6 +305,8 @@ export class RulesEngine {
   private rules: Rule[];
   private aliases: Record<string, string>;
   private readonly throttle = new ThrottleGate();
+  /** hysteresis / requires_stable_for: tracks when each (rule::device) trigger was first seen. */
+  private hysteresisFirstSeen = new Map<string, number>();
   private unsubscribeMessage: (() => void) | null = null;
   private unsubscribeState: (() => void) | null = null;
   private cronScheduler: CronScheduler | null = null;
@@ -461,6 +545,23 @@ export class RulesEngine {
   }
 
   /**
+   * Dispatch a pre-built EngineEvent through all matching MQTT rules.
+   * Used by tests that need full control over the event timestamp (e.g.
+   * hysteresis tests that advance time manually).
+   */
+  async ingestEventForTest(event: EngineEvent): Promise<void> {
+    for (const rule of this.rules) {
+      if (!isMqttTrigger(rule.when)) continue;
+      const resolvedFilter = rule.when.device
+        ? this.aliases[rule.when.device] ?? rule.when.device
+        : undefined;
+      if (!matchesMqttTrigger(rule.when, event, resolvedFilter)) continue;
+      this.stats.eventsProcessed++;
+      await this.enqueue(() => this.dispatchRule(rule, event));
+    }
+  }
+
+  /**
    * Fire a cron rule directly without needing the scheduler/timers.
    * Used by tests that want to exercise the dispatch pipeline without
    * depending on fake timers or croner's internals.
@@ -601,6 +702,13 @@ export class RulesEngine {
       fetchStatus,
     });
     if (!cond.matched) {
+      // If conditions are not met, the trigger is no longer "continuously stable" —
+      // reset the hysteresis clock so intermittent satisfaction never accumulates.
+      const hasHysteresis = rule.hysteresis ?? rule.requires_stable_for;
+      if (hasHysteresis) {
+        const hysteresisKey = `${rule.name}::${event.deviceId ?? ''}`;
+        this.hysteresisFirstSeen.delete(hysteresisKey);
+      }
       if (cond.unsupported.length > 0) {
         writeAudit({
           t: event.t.toISOString(),
@@ -628,9 +736,13 @@ export class RulesEngine {
       return;
     }
 
-    const windowMs = rule.throttle ? parseMaxPerMs(rule.throttle.max_per) : null;
+    // cooldown takes precedence over throttle.max_per when both are set.
+    const effectiveMaxPerMs = rule.cooldown
+      ? parseMaxPerMs(rule.cooldown)
+      : rule.throttle ? parseMaxPerMs(rule.throttle.max_per) : null;
+    const dedupeWindowMs = rule.throttle?.dedupe_window ? parseMaxPerMs(rule.throttle.dedupe_window) : null;
     const throttleKey = event.deviceId;
-    const check = this.throttle.check(rule.name, windowMs, event.t.getTime(), throttleKey);
+    const check = this.throttle.check(rule.name, effectiveMaxPerMs, event.t.getTime(), throttleKey, dedupeWindowMs);
     if (!check.allowed) {
       this.stats.throttled++;
       writeAudit({
@@ -648,12 +760,88 @@ export class RulesEngine {
           matchedDevice: event.deviceId,
           fireId,
           reason: check.nextAllowedAt
-            ? `throttled — next allowed at ${new Date(check.nextAllowedAt).toISOString()}`
-            : 'throttled',
+            ? `${check.dedupedBy ?? 'throttled'} — next allowed at ${new Date(check.nextAllowedAt).toISOString()}`
+            : check.dedupedBy ?? 'throttled',
         },
       });
       this.opts.onFire?.({ ruleName: rule.name, fireId, status: 'throttled', deviceId: event.deviceId });
       return;
+    }
+
+    // hysteresis / requires_stable_for: require the trigger to have been continuously
+    // observed for the specified duration before firing.
+    const hysteresisMs = rule.hysteresis
+      ? parseMaxPerMs(rule.hysteresis)
+      : rule.requires_stable_for ? parseMaxPerMs(rule.requires_stable_for) : null;
+    if (hysteresisMs !== null) {
+      const hysteresisKey = `${rule.name}::${event.deviceId ?? ''}`;
+      const firstSeen = this.hysteresisFirstSeen.get(hysteresisKey);
+      const now = event.t.getTime();
+      if (firstSeen === undefined) {
+        this.hysteresisFirstSeen.set(hysteresisKey, now);
+        writeAudit({
+          t: event.t.toISOString(), kind: 'rule-throttled',
+          deviceId: event.deviceId ?? 'unknown', command: rule.then[0]?.command ?? '',
+          parameter: null, commandType: 'command', dryRun: true, result: 'ok',
+          rule: { name: rule.name, triggerSource: rule.when.source, matchedDevice: event.deviceId, fireId, reason: `hysteresis — first observation, waiting ${hysteresisMs}ms for stability` },
+        });
+        this.opts.onFire?.({ ruleName: rule.name, fireId, status: 'throttled', deviceId: event.deviceId, reason: 'hysteresis-first-seen' });
+        return;
+      }
+      if (now - firstSeen < hysteresisMs) {
+        writeAudit({
+          t: event.t.toISOString(), kind: 'rule-throttled',
+          deviceId: event.deviceId ?? 'unknown', command: rule.then[0]?.command ?? '',
+          parameter: null, commandType: 'command', dryRun: true, result: 'ok',
+          rule: { name: rule.name, triggerSource: rule.when.source, matchedDevice: event.deviceId, fireId, reason: `hysteresis — stable for ${now - firstSeen}ms of required ${hysteresisMs}ms` },
+        });
+        this.opts.onFire?.({ ruleName: rule.name, fireId, status: 'throttled', deviceId: event.deviceId, reason: 'hysteresis-not-stable' });
+        return;
+      }
+      // Stable long enough — clear so the next trigger starts fresh.
+      this.hysteresisFirstSeen.delete(hysteresisKey);
+    }
+
+    // maxFiringsPerHour: count-based rate cap over a rolling 1-hour window.
+    if (rule.maxFiringsPerHour !== undefined) {
+      const countCheck = this.throttle.checkMaxFirings(rule.name, rule.maxFiringsPerHour, 3_600_000, event.t.getTime(), event.deviceId);
+      if (!countCheck.allowed) {
+        this.stats.throttled++;
+        writeAudit({
+          t: event.t.toISOString(), kind: 'rule-throttled',
+          deviceId: event.deviceId ?? 'unknown', command: rule.then[0]?.command ?? '',
+          parameter: null, commandType: 'command', dryRun: true, result: 'ok',
+          rule: { name: rule.name, triggerSource: rule.when.source, matchedDevice: event.deviceId, fireId, reason: `maxFiringsPerHour — ${countCheck.count}/${countCheck.max} in last hour` },
+        });
+        this.opts.onFire?.({ ruleName: rule.name, fireId, status: 'throttled', deviceId: event.deviceId, reason: 'maxFiringsPerHour' });
+        return;
+      }
+    }
+
+    // suppressIfAlreadyDesired: skip if device's live state already matches the command outcome.
+    if (rule.suppressIfAlreadyDesired) {
+      const firstAction = rule.then[0];
+      const parsed = firstAction ? parseRuleCommand(firstAction.command) : null;
+      const verb = parsed?.verb ?? firstAction?.command;
+      if ((verb === 'turnOn' || verb === 'turnOff') && (firstAction?.device || event.deviceId)) {
+        const targetId = firstAction?.device ? (this.aliases[firstAction.device] ?? firstAction.device) : event.deviceId!;
+        try {
+          const deviceStatus = await fetchStatus(targetId);
+          const powerState = deviceStatus['powerState'] as string | undefined;
+          if ((verb === 'turnOn' && powerState === 'on') || (verb === 'turnOff' && powerState === 'off')) {
+            writeAudit({
+              t: event.t.toISOString(), kind: 'rule-throttled',
+              deviceId: targetId, command: verb ?? '',
+              parameter: null, commandType: 'command', dryRun: true, result: 'ok',
+              rule: { name: rule.name, triggerSource: rule.when.source, matchedDevice: event.deviceId, fireId, reason: `suppressIfAlreadyDesired — powerState already "${powerState}"` },
+            });
+            this.opts.onFire?.({ ruleName: rule.name, fireId, status: 'throttled', deviceId: event.deviceId, reason: 'already-desired' });
+            return;
+          }
+        } catch {
+          // best-effort — if status fetch fails, proceed with the action
+        }
+      }
     }
 
     let fired = false;
@@ -680,6 +868,9 @@ export class RulesEngine {
     if (fired) {
       if (allDry) this.stats.dryFires++; else this.stats.fires++;
       this.throttle.record(rule.name, event.t.getTime(), throttleKey);
+      if (rule.maxFiringsPerHour !== undefined) {
+        this.throttle.recordFire(rule.name, event.t.getTime(), throttleKey);
+      }
       this.opts.onFire?.({ ruleName: rule.name, fireId, status: allDry ? 'dry' : 'fired', deviceId: event.deviceId });
     }
   }

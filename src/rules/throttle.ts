@@ -4,6 +4,8 @@
  * Semantics:
  *   - `max_per: "10m"` → a rule may fire at most once every 10 minutes
  *     per (rule, deviceId) pair.
+ *   - `dedupe_window: "5s"` → suppress fires whose key already fired
+ *     within the window (collapses rapid sensor bursts into one action).
  *   - Fires that would violate the window are **suppressed** (not
  *     queued) and surface as `{ allowed: false, reason: 'throttled' }`.
  *   - When a rule has no `throttle` block, `ThrottleGate.check` returns
@@ -32,10 +34,20 @@ export interface ThrottleCheckResult {
   lastFiredAt?: number;
   /** When the window will reopen. */
   nextAllowedAt?: number;
+  /** Whether this was blocked by the dedupe_window (vs max_per). */
+  dedupedBy?: 'dedupe_window' | 'max_per' | 'cooldown' | 'maxFiringsPerHour';
+}
+
+export interface MaxFiringsCheckResult {
+  allowed: boolean;
+  count: number;
+  max: number;
 }
 
 export class ThrottleGate {
   private lastFireAt = new Map<string, number>();
+  /** Sliding-window fire-time log for count-based maxFiringsPerHour. */
+  private fireTimes = new Map<string, number[]>();
 
   private keyOf(ruleName: string, deviceId?: string): string {
     return deviceId ? `${ruleName}::${deviceId}` : ruleName;
@@ -51,18 +63,47 @@ export class ThrottleGate {
     windowMs: number | null,
     now: number,
     deviceId?: string,
+    dedupeWindowMs?: number | null,
   ): ThrottleCheckResult {
-    if (windowMs === null || windowMs <= 0) return { allowed: true };
     const key = this.keyOf(ruleName, deviceId);
     const last = this.lastFireAt.get(key);
+
+    // dedupe_window check: suppress if last fire was within this (typically smaller) window
+    if (dedupeWindowMs !== null && dedupeWindowMs !== undefined && dedupeWindowMs > 0) {
+      if (last !== undefined) {
+        const dedupeEnd = last + dedupeWindowMs;
+        if (now < dedupeEnd) {
+          return { allowed: false, lastFiredAt: last, nextAllowedAt: dedupeEnd, dedupedBy: 'dedupe_window' };
+        }
+      }
+    }
+
+    // max_per / cooldown check
+    if (windowMs === null || windowMs <= 0) return { allowed: true, lastFiredAt: last };
     if (last === undefined) return { allowed: true };
     const earliest = last + windowMs;
     if (now >= earliest) return { allowed: true, lastFiredAt: last };
-    return { allowed: false, lastFiredAt: last, nextAllowedAt: earliest };
+    return { allowed: false, lastFiredAt: last, nextAllowedAt: earliest, dedupedBy: windowMs > 0 ? 'max_per' : undefined };
   }
 
   record(ruleName: string, now: number, deviceId?: string): void {
     this.lastFireAt.set(this.keyOf(ruleName, deviceId), now);
+  }
+
+  /** Count-based check: has the rule fired >= maxCount times in the last windowMs? */
+  checkMaxFirings(ruleName: string, maxCount: number, windowMs: number, now: number, deviceId?: string): MaxFiringsCheckResult {
+    const key = this.keyOf(ruleName, deviceId);
+    const times = (this.fireTimes.get(key) ?? []).filter((t) => now - t < windowMs);
+    this.fireTimes.set(key, times);
+    return { allowed: times.length < maxCount, count: times.length, max: maxCount };
+  }
+
+  /** Record a count-based fire (call alongside record()). */
+  recordFire(ruleName: string, now: number, deviceId?: string): void {
+    const key = this.keyOf(ruleName, deviceId);
+    const times = this.fireTimes.get(key) ?? [];
+    times.push(now);
+    this.fireTimes.set(key, times);
   }
 
   /** Drop everything — used by engine.reload when a rule is removed. */
@@ -70,6 +111,9 @@ export class ThrottleGate {
     const prefix = `${ruleName}::`;
     for (const k of this.lastFireAt.keys()) {
       if (k === ruleName || k.startsWith(prefix)) this.lastFireAt.delete(k);
+    }
+    for (const k of this.fireTimes.keys()) {
+      if (k === ruleName || k.startsWith(prefix)) this.fireTimes.delete(k);
     }
   }
 
@@ -84,6 +128,11 @@ export class ThrottleGate {
       const sep = k.indexOf('::');
       const ruleName = sep === -1 ? k : k.slice(0, sep);
       if (!ruleNames.has(ruleName)) this.lastFireAt.delete(k);
+    }
+    for (const k of this.fireTimes.keys()) {
+      const sep = k.indexOf('::');
+      const ruleName = sep === -1 ? k : k.slice(0, sep);
+      if (!ruleNames.has(ruleName)) this.fireTimes.delete(k);
     }
   }
 

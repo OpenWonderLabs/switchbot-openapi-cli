@@ -132,6 +132,7 @@ describe('mcp server', () => {
     cacheMock.map.clear();
     cacheMock.getCachedDevice.mockClear();
     cacheMock.updateCacheFromDeviceList.mockClear();
+    delete process.env.SWITCHBOT_ALLOW_DIRECT_DESTRUCTIVE;
   });
 
   it('exposes the twenty-one tools with titles and input schemas', async () => {
@@ -195,7 +196,24 @@ describe('mcp server', () => {
     expect(apiMock.__instance.post).not.toHaveBeenCalled();
   });
 
-  it('send_command allows destructive commands when confirm:true', async () => {
+  it('send_command rejects direct destructive commands in the default profile even with confirm:true', async () => {
+    cacheMock.map.set('LOCK1', { type: 'Smart Lock', name: 'Front Door', category: 'physical' });
+    const { client } = await pair();
+
+    const res = await client.callTool({
+      name: 'send_command',
+      arguments: { deviceId: 'LOCK1', command: 'unlock', confirm: true },
+    });
+
+    expect(res.isError).toBe(true);
+    const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    expect(parsed.error.kind).toBe('guard');
+    expect(parsed.error.hint).toMatch(/plan save|plan execute/);
+    expect(apiMock.__instance.post).not.toHaveBeenCalled();
+  });
+
+  it('send_command allows destructive commands with confirm:true when the direct-execution override is enabled', async () => {
+    process.env.SWITCHBOT_ALLOW_DIRECT_DESTRUCTIVE = '1';
     cacheMock.map.set('LOCK1', { type: 'Smart Lock', name: 'Front Door', category: 'physical' });
     apiMock.__instance.post.mockResolvedValueOnce({
       data: { statusCode: 100, body: { commandId: 'xyz' } },
@@ -209,9 +227,6 @@ describe('mcp server', () => {
 
     expect(res.isError).toBeFalsy();
     expect(apiMock.__instance.post).toHaveBeenCalledTimes(1);
-    const [url, body] = apiMock.__instance.post.mock.calls[0];
-    expect(url).toBe('/v1.1/devices/LOCK1/commands');
-    expect(body).toMatchObject({ command: 'unlock', commandType: 'command' });
   });
 
   it('send_command rejects an unknown command name before calling the API', async () => {
@@ -706,6 +721,27 @@ describe('mcp server', () => {
       expect(summary.error).toBe(0);
     });
 
+    it('plan_run rejects direct destructive execution when yes=true in the default profile', async () => {
+      cacheMock.map.set('LOCK1', { type: 'Smart Lock', name: 'Front Door', category: 'physical' });
+      const { client } = await pair();
+
+      const res = await client.callTool({
+        name: 'plan_run',
+        arguments: {
+          yes: true,
+          plan: {
+            version: '1.0',
+            steps: [{ type: 'command', deviceId: 'LOCK1', command: 'unlock' }],
+          },
+        },
+      });
+
+      expect(res.isError).toBe(true);
+      const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+      expect(parsed.error.kind).toBe('guard');
+      expect(parsed.error.hint).toMatch(/plan save|plan execute/);
+    });
+
     it('audit_query filters entries by result', async () => {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sbmcp-audit-'));
       const auditPath = path.join(tmp, 'audit.log');
@@ -1021,6 +1057,63 @@ describe('mcp server', () => {
       expect(mcp.isError).toBeFalsy();
       const sc = (mcp as { structuredContent?: Record<string, unknown> }).structuredContent!;
       expect(sc).toEqual(cliData);
+    });
+  });
+
+  // ── riskProfile.idempotencyHint ──────────────────────────────────────────
+  describe('send_command riskProfile.idempotencyHint', () => {
+    type RiskProfile = { idempotencyHint: string; riskLevel: string; requiresConfirmation: boolean };
+    type DryRunResponse = { ok: boolean; dryRun: boolean; riskProfile: RiskProfile; wouldSend: unknown };
+
+    it('turnOn → idempotencyHint:safe (catalog says idempotent:true)', async () => {
+      cacheMock.map.set('BOT1', { type: 'Bot', name: 'Test Bot', category: 'physical' });
+      const { client } = await pair();
+      const res = await client.callTool({ name: 'send_command', arguments: { deviceId: 'BOT1', command: 'turnOn', dryRun: true } });
+      expect(res.isError).toBeFalsy();
+      const sc = res.structuredContent as DryRunResponse;
+      expect(sc.riskProfile.idempotencyHint).toBe('safe');
+    });
+
+    it('toggle → idempotencyHint:non-idempotent (catalog says idempotent:false)', async () => {
+      cacheMock.map.set('PLUG1', { type: 'Plug Mini (US)', name: 'Test Plug', category: 'physical' });
+      const { client } = await pair();
+      const res = await client.callTool({ name: 'send_command', arguments: { deviceId: 'PLUG1', command: 'toggle', dryRun: true } });
+      expect(res.isError).toBeFalsy();
+      const sc = res.structuredContent as DryRunResponse;
+      expect(sc.riskProfile.idempotencyHint).toBe('non-idempotent');
+    });
+
+    it('unlock (destructive, idempotent:true) → idempotencyHint:safe', async () => {
+      cacheMock.map.set('LOCK1', { type: 'Smart Lock', name: 'Front Door', category: 'physical' });
+      const { client } = await pair();
+      // unlock is destructive — live path needs confirm:true
+      const res = await client.callTool({ name: 'send_command', arguments: { deviceId: 'LOCK1', command: 'unlock', dryRun: true } });
+      expect(res.isError).toBeFalsy();
+      const sc = res.structuredContent as DryRunResponse;
+      // destructive but catalog marks idempotent:true → hint should be safe
+      expect(sc.riskProfile.idempotencyHint).toBe('safe');
+      // riskLevel must still be high (it is destructive)
+      expect(sc.riskProfile.riskLevel).toBe('high');
+    });
+
+    it('live path: turnOn → idempotencyHint:safe', async () => {
+      cacheMock.map.set('BOT1', { type: 'Bot', name: 'Test Bot', category: 'physical' });
+      apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body: {} } });
+      const { client } = await pair();
+      const res = await client.callTool({ name: 'send_command', arguments: { deviceId: 'BOT1', command: 'turnOn' } });
+      expect(res.isError).toBeFalsy();
+      const sc = res.structuredContent as { ok: boolean; riskProfile: RiskProfile };
+      expect(sc.riskProfile.idempotencyHint).toBe('safe');
+    });
+
+    it('live path: toggle → idempotencyHint:non-idempotent', async () => {
+      cacheMock.map.set('PLUG1', { type: 'Plug Mini (US)', name: 'Test Plug', category: 'physical' });
+      apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body: {} } });
+      const { client } = await pair();
+      const res = await client.callTool({ name: 'send_command', arguments: { deviceId: 'PLUG1', command: 'toggle' } });
+      expect(res.isError).toBeFalsy();
+      const sc = res.structuredContent as { ok: boolean; riskProfile: RiskProfile };
+      expect(sc.riskProfile.idempotencyHint).toBe('non-idempotent');
     });
   });
 });

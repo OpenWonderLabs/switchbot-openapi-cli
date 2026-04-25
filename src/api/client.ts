@@ -15,7 +15,7 @@ import {
   getBackoffStrategy,
   isQuotaDisabled,
 } from '../utils/flags.js';
-import { nextRetryDelayMs, sleep } from '../utils/retry.js';
+import { nextRetryDelayMs, sleep, CircuitBreaker, CircuitOpenError } from '../utils/retry.js';
 import { recordRequest, checkDailyCap } from '../utils/quota.js';
 import { readProfileMeta } from '../config.js';
 import { getActiveProfile } from '../lib/request-context.js';
@@ -48,6 +48,19 @@ export class DryRunSignal extends Error {
   }
 }
 
+/**
+ * Module-level circuit breaker for the SwitchBot API. Shared across all
+ * client instances in the process. Opens after 5 consecutive 5xx / network
+ * errors; resets to half-open after 60 s.
+ * Exported for health-check inspection.
+ */
+export const apiCircuitBreaker = new CircuitBreaker('switchbot-api', {
+  failureThreshold: 5,
+  resetTimeoutMs: 60_000,
+});
+
+export { CircuitOpenError };
+
 type RetryableConfig = InternalAxiosRequestConfig & { __retryCount?: number };
 
 export function createClient(): AxiosInstance {
@@ -69,6 +82,9 @@ export function createClient(): AxiosInstance {
 
   // Inject auth headers; optionally log the request; short-circuit on --dry-run.
   client.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+    // Circuit breaker check — fail fast when the API is consistently down.
+    apiCircuitBreaker.checkAndAllow();
+
     // Pre-flight cap check: refuse the call before it touches the network.
     if (dailyCap) {
       const check = checkDailyCap(dailyCap);
@@ -130,6 +146,8 @@ export function createClient(): AxiosInstance {
           `API error code: ${data.statusCode}`;
         throw new ApiError(msg, data.statusCode);
       }
+      // Successful HTTP response — record for circuit breaker.
+      apiCircuitBreaker.recordSuccess();
       return response;
     },
     (error) => {
@@ -156,6 +174,8 @@ export function createClient(): AxiosInstance {
               return sleep(delay).then(() => client.request(config));
             }
           }
+          // Network-level failure — record for circuit breaker.
+          apiCircuitBreaker.recordFailure();
           throw new ApiError(
             `Request timed out after ${getTimeout()}ms (override with --timeout <ms>)`,
             0,
@@ -213,6 +233,12 @@ export function createClient(): AxiosInstance {
             }
             return sleep(delay).then(() => client.request(config));
           }
+        }
+
+        // Record 5xx and network errors for circuit breaker. 4xx errors are
+        // expected business responses — don't count toward circuit threshold.
+        if (status === undefined || status >= 500) {
+          apiCircuitBreaker.recordFailure();
         }
 
         // P8: quota already recorded in the request interceptor before

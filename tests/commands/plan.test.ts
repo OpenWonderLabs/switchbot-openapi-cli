@@ -75,6 +75,7 @@ describe('plan command', () => {
     apiMock.__instance.post.mockReset();
     cacheMock.map.clear();
     flagsMock.dryRun = false;
+    flagsMock.getProfile.mockReturnValue(undefined);
   });
 
   function writePlan(obj: unknown): string {
@@ -199,7 +200,20 @@ describe('plan command', () => {
       expect(res.stdout.join('\n')).toMatch(/skipped=1/);
     });
 
-    it('runs destructive commands when --yes is passed', async () => {
+    it('rejects direct destructive commands when --yes is passed outside a dev profile', async () => {
+      cacheMock.map.set('LOCK1', { type: 'Smart Lock', name: 'Front', category: 'physical' });
+      const file = writePlan({
+        version: '1.0',
+        steps: [{ type: 'command', deviceId: 'LOCK1', command: 'unlock' }],
+      });
+      const res = await runCli(registerPlanCommand, ['plan', 'run', file, '--yes']);
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
+      expect(res.exitCode).toBe(2);
+      expect(res.stderr.join('\n')).toMatch(/plan save|plan execute/);
+    });
+
+    it('allows direct destructive commands with --yes in a dev profile', async () => {
+      flagsMock.getProfile.mockReturnValue('dev');
       cacheMock.map.set('LOCK1', { type: 'Smart Lock', name: 'Front', category: 'physical' });
       const file = writePlan({
         version: '1.0',

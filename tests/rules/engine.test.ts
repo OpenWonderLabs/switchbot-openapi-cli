@@ -693,4 +693,280 @@ describe('RulesEngine.reload', () => {
     expect(result.changed).toBe(false);
     expect(result.errors.join(' ')).toMatch(/engine not running/);
   });
+
+  // ── hysteresis ─────────────────────────────────────────────────────────
+  describe('hysteresis / requires_stable_for', () => {
+    it('suppresses the first observation, fires after the window has elapsed', async () => {
+      const fires: EngineFireEntry[] = [];
+      const rule: Rule = {
+        name: 'stable-motion',
+        when: { source: 'mqtt', event: 'motion.detected' },
+        then: [{ command: 'devices command <id> turnOn', device: 'hallway lamp' }],
+        dry_run: true,
+        hysteresis: '5s',
+      };
+      const engine = new RulesEngine({
+        automation: automation([rule]),
+        aliases: { 'hallway lamp': 'AA-BB-CC' },
+        mqttClient: mqtt as unknown as SwitchBotMqttClient,
+        mqttCredential: fakeCredential,
+        skipApiCall: true,
+        onFire: (e) => fires.push(e),
+      });
+      await engine.start();
+
+      // first observation — should be throttled (first-seen)
+      const t0 = new Date(2026, 3, 22, 10, 0, 0);
+      await engine.ingestEventForTest({ source: 'mqtt', event: 'motion.detected', t: t0, deviceId: 'SENSOR1' });
+      await engine.drainForTest();
+      expect(fires.map((f) => f.status)).toContain('throttled');
+      expect(fires.at(-1)?.reason).toMatch(/hysteresis/);
+      fires.length = 0;
+
+      // second observation within window (3s later) — still throttled
+      const t1 = new Date(t0.getTime() + 3_000);
+      await engine.ingestEventForTest({ source: 'mqtt', event: 'motion.detected', t: t1, deviceId: 'SENSOR1' });
+      await engine.drainForTest();
+      expect(fires.map((f) => f.status)).toContain('throttled');
+      fires.length = 0;
+
+      // third observation after window (6s after start) — should fire
+      const t2 = new Date(t0.getTime() + 6_000);
+      await engine.ingestEventForTest({ source: 'mqtt', event: 'motion.detected', t: t2, deviceId: 'SENSOR1' });
+      await engine.drainForTest();
+      expect(fires.map((f) => f.status)).toContain('dry');
+
+      await engine.stop();
+    });
+
+    it('resets the hysteresis clock when conditions become unmatched', async () => {
+      const fires: EngineFireEntry[] = [];
+      const rule: Rule = {
+        name: 'stable-with-cond',
+        when: { source: 'mqtt', event: 'motion.detected' },
+        conditions: [{ device: 'hallway lamp', field: 'power', op: '==', value: 'on' }],
+        then: [{ command: 'devices command <id> turnOn', device: 'hallway lamp' }],
+        dry_run: true,
+        hysteresis: '5s',
+      };
+
+      // Flip the condition on/off via a mutable holder.
+      let lampOn = true;
+      const engine = new RulesEngine({
+        automation: automation([rule]),
+        aliases: { 'hallway lamp': 'AA-BB-CC' },
+        mqttClient: mqtt as unknown as SwitchBotMqttClient,
+        mqttCredential: fakeCredential,
+        skipApiCall: true,
+        statusFetcher: async () => ({ power: lampOn ? 'on' : 'off' }),
+        onFire: (e) => fires.push(e),
+      });
+      await engine.start();
+
+      const base = new Date(2026, 3, 22, 10, 0, 0);
+
+      // t=0: conditions pass — hysteresis starts
+      await engine.ingestEventForTest({ source: 'mqtt', event: 'motion.detected', t: base, deviceId: 'SENSOR1' });
+      await engine.drainForTest();
+      expect(fires.at(-1)?.status).toBe('throttled');
+      fires.length = 0;
+
+      // t=3s: conditions fail (lamp turns off) — clock must reset
+      lampOn = false;
+      await engine.ingestEventForTest({ source: 'mqtt', event: 'motion.detected', t: new Date(base.getTime() + 3_000), deviceId: 'SENSOR1' });
+      await engine.drainForTest();
+      expect(fires.at(-1)?.status).toBe('conditions-failed');
+      fires.length = 0;
+
+      // t=8s: conditions pass again — clock starts fresh from t=8s
+      lampOn = true;
+      await engine.ingestEventForTest({ source: 'mqtt', event: 'motion.detected', t: new Date(base.getTime() + 8_000), deviceId: 'SENSOR1' });
+      await engine.drainForTest();
+      // 8s > 5s from start but only 0s from reset — should be throttled again (first-seen)
+      expect(fires.at(-1)?.status).toBe('throttled');
+      fires.length = 0;
+
+      // t=14s: 6s after the second start — now stable long enough
+      await engine.ingestEventForTest({ source: 'mqtt', event: 'motion.detected', t: new Date(base.getTime() + 14_000), deviceId: 'SENSOR1' });
+      await engine.drainForTest();
+      expect(fires.at(-1)?.status).toBe('dry');
+
+      await engine.stop();
+    });
+  });
+
+  // ── maxFiringsPerHour ───────────────────────────────────────────────────
+  describe('maxFiringsPerHour', () => {
+    it('allows fires up to the cap and throttles once the cap is reached', async () => {
+      const fires: EngineFireEntry[] = [];
+      const rule: Rule = {
+        name: 'capped-rule',
+        when: { source: 'mqtt', event: 'motion.detected' },
+        then: [{ command: 'devices command <id> turnOn', device: 'hallway lamp' }],
+        dry_run: true,
+        maxFiringsPerHour: 2,
+      };
+      const engine = new RulesEngine({
+        automation: automation([rule]),
+        aliases: { 'hallway lamp': 'AA-BB-CC' },
+        mqttClient: mqtt as unknown as SwitchBotMqttClient,
+        mqttCredential: fakeCredential,
+        skipApiCall: true,
+        onFire: (e) => fires.push(e),
+      });
+      await engine.start();
+
+      const base = new Date(2026, 3, 22, 10, 0, 0);
+
+      // First fire: allowed
+      await engine.ingestEventForTest({ source: 'mqtt', event: 'motion.detected', t: base, deviceId: 'S1' });
+      await engine.drainForTest();
+      expect(fires.at(-1)?.status).toBe('dry');
+      fires.length = 0;
+
+      // Second fire (5 min later): still allowed
+      await engine.ingestEventForTest({ source: 'mqtt', event: 'motion.detected', t: new Date(base.getTime() + 5 * 60_000), deviceId: 'S1' });
+      await engine.drainForTest();
+      expect(fires.at(-1)?.status).toBe('dry');
+      fires.length = 0;
+
+      // Third fire (10 min later): throttled — cap reached
+      await engine.ingestEventForTest({ source: 'mqtt', event: 'motion.detected', t: new Date(base.getTime() + 10 * 60_000), deviceId: 'S1' });
+      await engine.drainForTest();
+      expect(fires.at(-1)?.status).toBe('throttled');
+      expect(fires.at(-1)?.reason).toMatch(/maxFiringsPerHour/);
+
+      await engine.stop();
+    });
+
+    it('resets the count after the 1-hour window slides', async () => {
+      const fires: EngineFireEntry[] = [];
+      const rule: Rule = {
+        name: 'hourly-reset',
+        when: { source: 'mqtt', event: 'motion.detected' },
+        then: [{ command: 'devices command <id> turnOn', device: 'hallway lamp' }],
+        dry_run: true,
+        maxFiringsPerHour: 1,
+      };
+      const engine = new RulesEngine({
+        automation: automation([rule]),
+        aliases: { 'hallway lamp': 'AA-BB-CC' },
+        mqttClient: mqtt as unknown as SwitchBotMqttClient,
+        mqttCredential: fakeCredential,
+        skipApiCall: true,
+        onFire: (e) => fires.push(e),
+      });
+      await engine.start();
+
+      const base = new Date(2026, 3, 22, 10, 0, 0);
+
+      // Fire once — consumes the cap
+      await engine.ingestEventForTest({ source: 'mqtt', event: 'motion.detected', t: base, deviceId: 'S1' });
+      await engine.drainForTest();
+      expect(fires.at(-1)?.status).toBe('dry');
+      fires.length = 0;
+
+      // 30 min later — cap still consumed
+      await engine.ingestEventForTest({ source: 'mqtt', event: 'motion.detected', t: new Date(base.getTime() + 30 * 60_000), deviceId: 'S1' });
+      await engine.drainForTest();
+      expect(fires.at(-1)?.status).toBe('throttled');
+      fires.length = 0;
+
+      // 61 min later — window has slid past; first fire dropped out of count
+      await engine.ingestEventForTest({ source: 'mqtt', event: 'motion.detected', t: new Date(base.getTime() + 61 * 60_000), deviceId: 'S1' });
+      await engine.drainForTest();
+      expect(fires.at(-1)?.status).toBe('dry');
+
+      await engine.stop();
+    });
+  });
+
+  // ── suppressIfAlreadyDesired ────────────────────────────────────────────
+  describe('suppressIfAlreadyDesired', () => {
+    it('suppresses turnOn when device is already on', async () => {
+      const fires: EngineFireEntry[] = [];
+      const rule: Rule = {
+        name: 'auto-on',
+        when: { source: 'mqtt', event: 'motion.detected' },
+        then: [{ command: 'devices command <id> turnOn', device: 'hallway lamp' }],
+        dry_run: true,
+        suppressIfAlreadyDesired: true,
+      };
+      const engine = new RulesEngine({
+        automation: automation([rule]),
+        aliases: { 'hallway lamp': 'LAMP-ID' },
+        mqttClient: mqtt as unknown as SwitchBotMqttClient,
+        mqttCredential: fakeCredential,
+        skipApiCall: true,
+        statusFetcher: async () => ({ powerState: 'on' }),
+        onFire: (e) => fires.push(e),
+      });
+      await engine.start();
+
+      await engine.ingestEventForTest({ source: 'mqtt', event: 'motion.detected', t: new Date(), deviceId: 'S1' });
+      await engine.drainForTest();
+
+      expect(fires.at(-1)?.status).toBe('throttled');
+      expect(fires.at(-1)?.reason).toMatch(/already-desired/);
+
+      await engine.stop();
+    });
+
+    it('allows turnOn when device is currently off', async () => {
+      const fires: EngineFireEntry[] = [];
+      const rule: Rule = {
+        name: 'auto-on',
+        when: { source: 'mqtt', event: 'motion.detected' },
+        then: [{ command: 'devices command <id> turnOn', device: 'hallway lamp' }],
+        dry_run: true,
+        suppressIfAlreadyDesired: true,
+      };
+      const engine = new RulesEngine({
+        automation: automation([rule]),
+        aliases: { 'hallway lamp': 'LAMP-ID' },
+        mqttClient: mqtt as unknown as SwitchBotMqttClient,
+        mqttCredential: fakeCredential,
+        skipApiCall: true,
+        statusFetcher: async () => ({ powerState: 'off' }),
+        onFire: (e) => fires.push(e),
+      });
+      await engine.start();
+
+      await engine.ingestEventForTest({ source: 'mqtt', event: 'motion.detected', t: new Date(), deviceId: 'S1' });
+      await engine.drainForTest();
+
+      expect(fires.at(-1)?.status).toBe('dry');
+
+      await engine.stop();
+    });
+
+    it('proceeds (best-effort) when statusFetcher rejects', async () => {
+      const fires: EngineFireEntry[] = [];
+      const rule: Rule = {
+        name: 'auto-on',
+        when: { source: 'mqtt', event: 'motion.detected' },
+        then: [{ command: 'devices command <id> turnOn', device: 'hallway lamp' }],
+        dry_run: true,
+        suppressIfAlreadyDesired: true,
+      };
+      const engine = new RulesEngine({
+        automation: automation([rule]),
+        aliases: { 'hallway lamp': 'LAMP-ID' },
+        mqttClient: mqtt as unknown as SwitchBotMqttClient,
+        mqttCredential: fakeCredential,
+        skipApiCall: true,
+        statusFetcher: async () => { throw new Error('network error'); },
+        onFire: (e) => fires.push(e),
+      });
+      await engine.start();
+
+      await engine.ingestEventForTest({ source: 'mqtt', event: 'motion.detected', t: new Date(), deviceId: 'S1' });
+      await engine.drainForTest();
+
+      // Status fetch failed — best-effort, so the rule should still fire
+      expect(fires.at(-1)?.status).toBe('dry');
+
+      await engine.stop();
+    });
+  });
 });
