@@ -900,6 +900,15 @@ Examples:
       const overallFail = summary.fail > 0;
       const overall: 'ok' | 'warn' | 'fail' = overallFail ? 'fail' : summary.warn > 0 ? 'warn' : 'ok';
 
+      const total = summary.ok + summary.warn + summary.fail;
+      const rawScore = total > 0 ? Math.round(((summary.ok + summary.warn * 0.5) / total) * 100) : 100;
+      const maturityScore = Math.min(100, Math.max(0, rawScore));
+      const maturityLabel: 'production-ready' | 'mostly-ready' | 'needs-work' | 'not-ready' =
+        maturityScore >= 90 ? 'production-ready'
+        : maturityScore >= 70 ? 'mostly-ready'
+        : maturityScore >= 40 ? 'needs-work'
+        : 'not-ready';
+
       let fixes: FixResult[] | undefined;
       if (opts.fix) {
         fixes = applyFixes(checks, Boolean(opts.yes));
@@ -914,6 +923,8 @@ Examples:
         const payload: Record<string, unknown> = {
           ok: overall === 'ok',
           overall,
+          maturityScore,
+          maturityLabel,
           generatedAt: new Date().toISOString(),
           schemaVersion: DOCTOR_SCHEMA_VERSION,
           summary,

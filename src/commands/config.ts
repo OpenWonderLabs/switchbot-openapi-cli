@@ -1,5 +1,7 @@
 import { Command } from 'commander';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import readline from 'node:readline';
 import { execFileSync } from 'node:child_process';
 import { stringArg } from '../utils/arg-parsers.js';
@@ -330,6 +332,64 @@ Files are written with mode 0600. Profiles live under ~/.switchbot/profiles/<nam
         if (p.label) bits.push(`— ${p.label}`);
         if (p.dailyCap) bits.push(`[dailyCap=${p.dailyCap}]`);
         console.log(bits.join(' '));
+      }
+    });
+
+  // switchbot config agent-profile [--write]
+  config
+    .command('agent-profile')
+    .description('Emit (or write) an agent-safe profile template with conservative rate limits and audit logging.')
+    .option('--write', 'Write the template to ~/.switchbot/profiles/agent.json (requires --profile agent config set-token to add credentials).')
+    .option('--force', 'Overwrite an existing agent.json when used with --write.')
+    .addHelpText('after', `
+Outputs a starter profile.json suitable for AI agent / MCP integration:
+  - dailyCap: 100 (conservative; prevents runaway automation)
+  - label: "agent"
+  - description: "AI agent profile — conservative limits + audit enabled"
+  - defaults: { auditLog: true }  (enables audit logging by default)
+
+After writing, add credentials:
+  $ switchbot --profile agent config set-token <token> <secret>
+
+Then use the profile:
+  $ switchbot --profile agent devices list
+`)
+    .action((opts: { write?: boolean; force?: boolean }) => {
+      const template = {
+        label: 'agent',
+        description: 'AI agent profile — conservative limits + audit enabled',
+        limits: {
+          dailyCap: 100,
+        },
+        defaults: {
+          auditLog: true,
+        },
+      };
+
+      if (opts.write) {
+        const dir = path.join(os.homedir(), '.switchbot', 'profiles');
+        const dest = path.join(dir, 'agent.json');
+        if (!opts.force && fs.existsSync(dest)) {
+          exitWithError({ code: 2, kind: 'usage', message: `Agent profile already exists: ${dest}. Use --force to overwrite.` });
+        }
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+        }
+        fs.writeFileSync(dest, JSON.stringify(template, null, 2), { mode: 0o600 });
+        if (isJsonMode()) {
+          printJson({ ok: true, path: dest, template });
+        } else {
+          console.log(`Agent profile written: ${dest}`);
+          console.log(`Next: switchbot --profile agent config set-token <token> <secret>`);
+        }
+      } else {
+        if (isJsonMode()) {
+          printJson(template);
+        } else {
+          console.log(JSON.stringify(template, null, 2));
+          console.log('');
+          console.log('Write with: switchbot config agent-profile --write');
+        }
       }
     });
 }

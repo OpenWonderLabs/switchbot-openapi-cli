@@ -593,4 +593,38 @@ describe('doctor command', () => {
     const check = payload.data.checks.find((c: { name: string }) => c.name === 'path');
     expect(check.detail.npmBinDir).toBeTruthy();
   });
+
+  describe('maturity score', () => {
+    it('includes maturityScore (0–100) and maturityLabel in --json output', async () => {
+      process.env.SWITCHBOT_TOKEN = 't';
+      process.env.SWITCHBOT_SECRET = 's';
+      const res = await runCli(registerDoctorCommand, ['--json', 'doctor']);
+      const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+      expect(typeof payload.data.maturityScore).toBe('number');
+      expect(payload.data.maturityScore).toBeGreaterThanOrEqual(0);
+      expect(payload.data.maturityScore).toBeLessThanOrEqual(100);
+      expect(['production-ready', 'mostly-ready', 'needs-work', 'not-ready']).toContain(
+        payload.data.maturityLabel,
+      );
+    });
+
+    it('maturityLabel is lower when credentials are missing (score < 100)', async () => {
+      // No creds → credentials:fail → score is reduced
+      const res = await runCli(registerDoctorCommand, ['--json', 'doctor']);
+      expect(res.exitCode).toBe(1);
+      const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+      expect(payload.data.maturityScore).toBeLessThan(100);
+      expect(['production-ready', 'mostly-ready', 'needs-work', 'not-ready']).toContain(
+        payload.data.maturityLabel,
+      );
+    });
+
+    it('maturityScore is an integer', async () => {
+      process.env.SWITCHBOT_TOKEN = 't';
+      process.env.SWITCHBOT_SECRET = 's';
+      const res = await runCli(registerDoctorCommand, ['--json', 'doctor']);
+      const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+      expect(Number.isInteger(payload.data.maturityScore)).toBe(true);
+    });
+  });
 });
