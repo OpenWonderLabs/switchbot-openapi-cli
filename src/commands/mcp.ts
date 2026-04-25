@@ -198,6 +198,45 @@ function topNFromMap(counts: Map<string, number>, n: number): Array<{ key: strin
     .map(([key, count]) => ({ key, count }));
 }
 
+/**
+ * Compute per-action risk metadata from the device catalog.
+ * `idempotencyHint` is sourced from CommandSpec.idempotent when available;
+ * falls back to "safe" only for unknown commands on non-destructive paths.
+ */
+function buildRiskProfile(
+  typeName: string | undefined,
+  command: string,
+  commandType: string,
+  isDestructive: boolean,
+): {
+  riskLevel: 'high' | 'medium' | 'low';
+  requiresConfirmation: boolean;
+  supportsDryRun: true;
+  idempotencyHint: 'safe' | 'non-idempotent';
+  recommendedMode: 'review-before-execute' | 'plan' | 'direct';
+} {
+  // Look up the catalog spec to get the authoritative idempotent flag.
+  let idempotencyHint: 'safe' | 'non-idempotent' = isDestructive ? 'non-idempotent' : 'safe';
+  if (typeName && commandType === 'command') {
+    const entry = findCatalogEntry(typeName);
+    const entries = Array.isArray(entry) ? entry : entry ? [entry] : [];
+    for (const e of entries) {
+      const spec = e.commands.find((c) => c.command === command);
+      if (spec !== undefined) {
+        idempotencyHint = spec.idempotent === true ? 'safe' : 'non-idempotent';
+        break;
+      }
+    }
+  }
+  return {
+    riskLevel: isDestructive ? 'high' : commandType === 'command' ? 'medium' : 'low',
+    requiresConfirmation: isDestructive,
+    supportsDryRun: true,
+    idempotencyHint,
+    recommendedMode: isDestructive ? 'review-before-execute' : 'plan',
+  };
+}
+
 export function createSwitchBotMcpServer(options?: { eventManager?: EventSubscriptionManager }): McpServer {
   const eventManager = options?.eventManager;
   const server = new McpServer(
@@ -524,13 +563,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
           commandType: effectiveType,
         };
         const dryIsDestructive = isDestructiveCommand(cached.type, effectiveCommand, effectiveType);
-        const dryRiskProfile = {
-          riskLevel: (dryIsDestructive ? 'high' : effectiveType === 'command' ? 'medium' : 'low') as 'high' | 'medium' | 'low',
-          requiresConfirmation: dryIsDestructive,
-          supportsDryRun: true,
-          idempotencyHint: (dryIsDestructive ? 'non-idempotent' : 'safe') as 'safe' | 'non-idempotent',
-          recommendedMode: (dryIsDestructive ? 'review-before-execute' : 'plan') as 'review-before-execute' | 'plan' | 'direct',
-        };
+        const dryRiskProfile = buildRiskProfile(cached.type, effectiveCommand, effectiveType, dryIsDestructive);
         const structured = { ok: true as const, dryRun: true as const, riskProfile: dryRiskProfile, wouldSend };
         return {
           content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
@@ -631,13 +664,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
       }
       const isIr = getCachedDevice(deviceId)?.category === 'ir';
       const liveIsDestructive = isDestructiveCommand(typeName, effectiveCommand, effectiveType);
-      const riskProfile = {
-        riskLevel: (liveIsDestructive ? 'high' : effectiveType === 'command' ? 'medium' : 'low') as 'high' | 'medium' | 'low',
-        requiresConfirmation: liveIsDestructive,
-        supportsDryRun: true,
-        idempotencyHint: (liveIsDestructive ? 'non-idempotent' : 'safe') as 'safe' | 'non-idempotent',
-        recommendedMode: (liveIsDestructive ? 'review-before-execute' : 'plan') as 'review-before-execute' | 'plan' | 'direct',
-      };
+      const riskProfile = buildRiskProfile(typeName, effectiveCommand, effectiveType, liveIsDestructive);
       const structured: {
         ok: true;
         command: string;

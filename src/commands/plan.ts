@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import fs from 'node:fs';
 import readline from 'node:readline';
 import { randomUUID } from 'node:crypto';
-import { printJson, isJsonMode, handleError } from '../utils/output.js';
+import { printJson, isJsonMode, handleError, exitWithError } from '../utils/output.js';
 import { executeCommand, isDestructiveCommand } from '../lib/devices.js';
 import { executeScene } from '../lib/scenes.js';
 import { getCachedDevice } from '../devices/cache.js';
@@ -577,8 +577,7 @@ against the live API without executing any mutations.
     .action((planId: string) => {
       const record = loadPlanRecord(planId);
       if (!record) {
-        console.error(`Plan ${planId} not found in ${PLANS_DIR}`);
-        process.exit(2);
+        exitWithError({ code: 2, kind: 'usage', message: `Plan ${planId} not found in ${PLANS_DIR}` });
       }
       if (isJsonMode()) {
         printJson(record);
@@ -611,20 +610,18 @@ against the live API without executing any mutations.
     .action((planId: string) => {
       const record = loadPlanRecord(planId);
       if (!record) {
-        console.error(`Plan ${planId} not found in ${PLANS_DIR}`);
-        process.exit(2);
+        exitWithError({ code: 2, kind: 'usage', message: `Plan ${planId} not found in ${PLANS_DIR}` });
       }
       if (record.status === 'executed') {
-        console.error(`Plan ${planId} has already been executed.`);
-        process.exit(2);
+        exitWithError({ code: 2, kind: 'guard', message: `Plan ${planId} has already been executed.` });
       }
       if (record.status === 'rejected') {
-        console.error(`Plan ${planId} was rejected. Save a new plan to start fresh.`);
-        process.exit(2);
+        exitWithError({ code: 2, kind: 'guard', message: `Plan ${planId} was rejected. Save a new plan to start fresh.` });
       }
+      // 'failed' plans may be re-approved and retried — intentionally no block here.
       const updated = updatePlanRecord(planId, { status: 'approved', approvedAt: new Date().toISOString() });
       if (isJsonMode()) {
-        printJson({ approved: true, planId: updated.planId, status: updated.status, approvedAt: updated.approvedAt });
+        printJson({ ok: true, planId: updated.planId, status: updated.status, approvedAt: updated.approvedAt });
       } else {
         console.log(`✓ Plan ${planId.slice(0, 8)}… approved.`);
         console.log(`  Next:  switchbot plan execute ${planId}`);
@@ -640,22 +637,19 @@ against the live API without executing any mutations.
     .option('--continue-on-error', 'Keep running after a failed step')
     .action(async (planId: string, options: { yes?: boolean; requireApproval?: boolean; continueOnError?: boolean }) => {
       if (options.requireApproval && isJsonMode()) {
-        console.error('error: --require-approval cannot be used with --json');
-        process.exit(1);
+        exitWithError({ code: 1, kind: 'usage', message: '--require-approval cannot be used with --json' });
       }
       const record = loadPlanRecord(planId);
       if (!record) {
-        console.error(`Plan ${planId} not found in ${PLANS_DIR}`);
-        process.exit(2);
+        exitWithError({ code: 2, kind: 'usage', message: `Plan ${planId} not found in ${PLANS_DIR}` });
       }
       if (record.status !== 'approved') {
-        if (isJsonMode()) {
-          printJson({ ran: false, reason: `status is "${record.status}", expected "approved"`, planId });
-        } else {
-          console.error(`Plan ${planId.slice(0, 8)}… cannot be executed: status is "${record.status}".`);
-          if (record.status === 'pending') console.error(`  Run: switchbot plan approve ${planId}`);
-        }
-        process.exit(2);
+        exitWithError({
+          code: 2, kind: 'guard',
+          message: `Plan ${planId.slice(0, 8)}… cannot be executed: status is "${record.status}", expected "approved".`,
+          hint: record.status === 'pending' ? `Run: switchbot plan approve ${planId}` : record.status === 'failed' ? `Re-run: switchbot plan approve ${planId}` : undefined,
+          context: { planId, status: record.status },
+        });
       }
       let out: PlanRunResult;
       try {
@@ -664,13 +658,20 @@ against the live API without executing any mutations.
         handleError(err);
         return;
       }
-      updatePlanRecord(planId, { status: 'executed', executedAt: new Date().toISOString() });
-      if (isJsonMode()) {
-        printJson({ ran: true, planId, ...out });
+      const { ok, error, skipped } = out.summary;
+      const succeeded = error === 0 && skipped === 0;
+      if (succeeded) {
+        updatePlanRecord(planId, { status: 'executed', executedAt: new Date().toISOString() });
       } else {
-        const { ok, error, skipped, total } = out.summary;
-        console.log(`\nsummary: ok=${ok} error=${error} skipped=${skipped} total=${total}`);
+        const reason = [error > 0 ? `${error} error${error > 1 ? 's' : ''}` : null, skipped > 0 ? `${skipped} skipped` : null].filter(Boolean).join(', ');
+        updatePlanRecord(planId, { status: 'failed', failedAt: new Date().toISOString(), failureReason: reason });
       }
-      if (out.summary.error > 0) process.exit(1);
+      if (isJsonMode()) {
+        printJson({ ran: true, planId, succeeded, ...out });
+      } else {
+        console.log(`\nsummary: ok=${ok} error=${error} skipped=${skipped} total=${out.summary.total}`);
+        if (!succeeded) console.error(`Plan marked as failed (${[error > 0 ? `${error} error${error > 1 ? 's' : ''}` : null, skipped > 0 ? `${skipped} skipped` : null].filter(Boolean).join(', ')}). Re-run after fixing to retry.`);
+      }
+      if (!succeeded) process.exit(1);
     });
 }

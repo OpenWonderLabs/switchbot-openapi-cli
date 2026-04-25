@@ -545,6 +545,22 @@ export class RulesEngine {
   }
 
   /**
+   * Dispatch a pre-built EngineEvent through all matching MQTT rules.
+   * Used by tests that need full control over the event timestamp (e.g.
+   * hysteresis tests that advance time manually).
+   */
+  async ingestEventForTest(event: EngineEvent): Promise<void> {
+    for (const rule of this.rules) {
+      if (!isMqttTrigger(rule.when)) continue;
+      const resolvedFilter = rule.when.device
+        ? this.aliases[rule.when.device] ?? rule.when.device
+        : undefined;
+      if (!matchesMqttTrigger(rule.when, event, resolvedFilter)) continue;
+      await this.enqueue(() => this.dispatchRule(rule, event));
+    }
+  }
+
+  /**
    * Fire a cron rule directly without needing the scheduler/timers.
    * Used by tests that want to exercise the dispatch pipeline without
    * depending on fake timers or croner's internals.
@@ -685,6 +701,13 @@ export class RulesEngine {
       fetchStatus,
     });
     if (!cond.matched) {
+      // If conditions are not met, the trigger is no longer "continuously stable" —
+      // reset the hysteresis clock so intermittent satisfaction never accumulates.
+      const hasHysteresis = rule.hysteresis ?? rule.requires_stable_for;
+      if (hasHysteresis) {
+        const hysteresisKey = `${rule.name}::${event.deviceId ?? ''}`;
+        this.hysteresisFirstSeen.delete(hysteresisKey);
+      }
       if (cond.unsupported.length > 0) {
         writeAudit({
           t: event.t.toISOString(),

@@ -6,7 +6,7 @@ import type { Plan } from '../commands/plan.js';
 
 export const PLANS_DIR = path.join(os.homedir(), '.switchbot', 'plans');
 
-export type PlanStatus = 'pending' | 'approved' | 'rejected' | 'executed';
+export type PlanStatus = 'pending' | 'approved' | 'rejected' | 'executed' | 'failed';
 
 export interface PlanRecord {
   planId: string;
@@ -14,6 +14,10 @@ export interface PlanRecord {
   status: PlanStatus;
   approvedAt?: string;
   executedAt?: string;
+  /** Set when status transitions to 'failed'. */
+  failedAt?: string;
+  /** Summary of why the plan failed (e.g. "1 error, 2 skipped"). */
+  failureReason?: string;
   plan: Plan;
 }
 

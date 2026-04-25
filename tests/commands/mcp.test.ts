@@ -1023,4 +1023,61 @@ describe('mcp server', () => {
       expect(sc).toEqual(cliData);
     });
   });
+
+  // ── riskProfile.idempotencyHint ──────────────────────────────────────────
+  describe('send_command riskProfile.idempotencyHint', () => {
+    type RiskProfile = { idempotencyHint: string; riskLevel: string; requiresConfirmation: boolean };
+    type DryRunResponse = { ok: boolean; dryRun: boolean; riskProfile: RiskProfile; wouldSend: unknown };
+
+    it('turnOn → idempotencyHint:safe (catalog says idempotent:true)', async () => {
+      cacheMock.map.set('BOT1', { type: 'Bot', name: 'Test Bot', category: 'physical' });
+      const { client } = await pair();
+      const res = await client.callTool({ name: 'send_command', arguments: { deviceId: 'BOT1', command: 'turnOn', dryRun: true } });
+      expect(res.isError).toBeFalsy();
+      const sc = res.structuredContent as DryRunResponse;
+      expect(sc.riskProfile.idempotencyHint).toBe('safe');
+    });
+
+    it('toggle → idempotencyHint:non-idempotent (catalog says idempotent:false)', async () => {
+      cacheMock.map.set('PLUG1', { type: 'Plug Mini (US)', name: 'Test Plug', category: 'physical' });
+      const { client } = await pair();
+      const res = await client.callTool({ name: 'send_command', arguments: { deviceId: 'PLUG1', command: 'toggle', dryRun: true } });
+      expect(res.isError).toBeFalsy();
+      const sc = res.structuredContent as DryRunResponse;
+      expect(sc.riskProfile.idempotencyHint).toBe('non-idempotent');
+    });
+
+    it('unlock (destructive, idempotent:true) → idempotencyHint:safe', async () => {
+      cacheMock.map.set('LOCK1', { type: 'Smart Lock', name: 'Front Door', category: 'physical' });
+      const { client } = await pair();
+      // unlock is destructive — live path needs confirm:true
+      const res = await client.callTool({ name: 'send_command', arguments: { deviceId: 'LOCK1', command: 'unlock', dryRun: true } });
+      expect(res.isError).toBeFalsy();
+      const sc = res.structuredContent as DryRunResponse;
+      // destructive but catalog marks idempotent:true → hint should be safe
+      expect(sc.riskProfile.idempotencyHint).toBe('safe');
+      // riskLevel must still be high (it is destructive)
+      expect(sc.riskProfile.riskLevel).toBe('high');
+    });
+
+    it('live path: turnOn → idempotencyHint:safe', async () => {
+      cacheMock.map.set('BOT1', { type: 'Bot', name: 'Test Bot', category: 'physical' });
+      apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body: {} } });
+      const { client } = await pair();
+      const res = await client.callTool({ name: 'send_command', arguments: { deviceId: 'BOT1', command: 'turnOn' } });
+      expect(res.isError).toBeFalsy();
+      const sc = res.structuredContent as { ok: boolean; riskProfile: RiskProfile };
+      expect(sc.riskProfile.idempotencyHint).toBe('safe');
+    });
+
+    it('live path: toggle → idempotencyHint:non-idempotent', async () => {
+      cacheMock.map.set('PLUG1', { type: 'Plug Mini (US)', name: 'Test Plug', category: 'physical' });
+      apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body: {} } });
+      const { client } = await pair();
+      const res = await client.callTool({ name: 'send_command', arguments: { deviceId: 'PLUG1', command: 'toggle' } });
+      expect(res.isError).toBeFalsy();
+      const sc = res.structuredContent as { ok: boolean; riskProfile: RiskProfile };
+      expect(sc.riskProfile.idempotencyHint).toBe('non-idempotent');
+    });
+  });
 });
