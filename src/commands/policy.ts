@@ -544,16 +544,16 @@ Examples:
     .command('restore <file>')
     .description('Restore a policy backup, validating it before applying.')
     .option('--no-validate', 'Skip schema validation before restoring (use if migrating manually).')
-    .option('--force', 'Overwrite the active policy without interactive confirmation prompt.')
     .addHelpText('after', `
 Validates the backup file against the current schema before overwriting the
-active policy. Use --no-validate to skip validation (e.g. when restoring an
-older version for manual migration).
+active policy. A .pre-restore.bak.yaml snapshot of the current policy is
+automatically created before overwriting. Use --no-validate to skip
+validation (e.g. when restoring an older version for manual migration).
 
 Example:
   $ switchbot policy restore ./policy.bak.yaml
 `)
-    .action((fileArg: string, opts: { validate?: boolean; force?: boolean }) => {
+    .action((fileArg: string, opts: { validate?: boolean }) => {
       const source = resolvePath(fileArg);
       if (!existsSync(source)) {
         exitPolicyError('file-not-found', `restore source not found: ${source}`, { path: source });
