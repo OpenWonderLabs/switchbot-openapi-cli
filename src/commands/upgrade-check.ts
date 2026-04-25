@@ -62,6 +62,21 @@ export function registerUpgradeCheckCommand(program: Command): void {
       const upToDate = !semverGt(latestVersion, currentVersion);
       const currentMajor = Number.parseInt(currentVersion.split('.')[0], 10);
       const latestMajor = Number.parseInt(latestVersion.split('.')[0], 10);
+
+      if (latestVersion.includes('-')) {
+        const msg = `Latest registry version (${latestVersion}) is a prerelease — skipping update check.`;
+        if (isJsonMode()) {
+          printJson({
+            current: currentVersion, latest: latestVersion, upToDate: true,
+            updateAvailable: false, breakingChange: false, installCommand: null,
+            note: msg,
+          });
+        } else {
+          console.log(`${chalk.green('✓')} You are running the latest stable version (${currentVersion}). Registry latest (${latestVersion}) is a prerelease — skipping.`);
+        }
+        return;
+      }
+
       const result = {
         current: currentVersion,
         latest: latestVersion,

@@ -1,4 +1,25 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { EventEmitter } from 'node:events';
+
+// ── https mock (for action-level tests) ─────────────────────────────────────
+const httpsMock = vi.hoisted(() => {
+  return { get: vi.fn() };
+});
+
+vi.mock('node:https', () => ({ default: httpsMock }));
+
+function makeHttpsGet(version: string) {
+  httpsMock.get.mockImplementation((_url: unknown, _opts: unknown, cb: (res: EventEmitter) => void) => {
+    const res = new EventEmitter();
+    const req = Object.assign(new EventEmitter(), { destroy: vi.fn() });
+    process.nextTick(() => {
+      cb(res);
+      res.emit('data', Buffer.from(JSON.stringify({ version })));
+      res.emit('end');
+    });
+    return req;
+  });
+}
 
 // Mirror of semverGt in upgrade-check.ts — tests pin the contract.
 // If the implementation changes, these tests should catch regressions.
@@ -55,5 +76,40 @@ describe('breakingChange detection (upgrade-check)', () => {
 
   it('older latest → no breaking change', () => {
     expect(isBreaking('2.0.0', '3.0.0')).toBe(false);
+  });
+});
+
+// ── action-level tests (prerelease guard) ────────────────────────────────────
+describe('upgrade-check action — prerelease guard', () => {
+  afterEach(() => {
+    httpsMock.get.mockReset();
+  });
+
+  it('--json: when registry returns a prerelease, upToDate=true and no installCommand', async () => {
+    makeHttpsGet('3.2.0-rc.1');
+    const { registerUpgradeCheckCommand } = await import('../../src/commands/upgrade-check.js');
+    const { runCli } = await import('../helpers/cli.js');
+
+    const res = await runCli(registerUpgradeCheckCommand, ['--json', 'upgrade-check']);
+    const line = res.stdout.find((l) => l.trim().startsWith('{'));
+    expect(line).toBeDefined();
+    const out = JSON.parse(line!) as Record<string, unknown>;
+    const data = (out.data ?? out) as Record<string, unknown>;
+    expect(data.upToDate).toBe(true);
+    expect(data.updateAvailable).toBe(false);
+    expect(data.installCommand).toBeNull();
+    expect(String(data.note ?? '')).toMatch(/prerelease/i);
+  });
+
+  it('human: when registry returns a prerelease, prints stable message without update prompt', async () => {
+    makeHttpsGet('3.2.0-rc.1');
+    const { registerUpgradeCheckCommand } = await import('../../src/commands/upgrade-check.js');
+    const { runCli } = await import('../helpers/cli.js');
+
+    const res = await runCli(registerUpgradeCheckCommand, ['upgrade-check']);
+    expect(res.exitCode).not.toBe(1);
+    const out = res.stdout.join('\n');
+    expect(out).toMatch(/prerelease/i);
+    expect(out).not.toMatch(/Update available/i);
   });
 });
