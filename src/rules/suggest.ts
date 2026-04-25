@@ -110,7 +110,7 @@ export function suggestRule(opts: SuggestRuleOptions): SuggestRuleResult {
   const then: Action[] = actionDevices.length > 0
     ? actionDevices.map((d) => ({
         command: `devices command <id> ${command}`,
-        device: d.name ?? d.id,
+        device: d.id,
       }))
     : [{ command: `devices command <id> ${command}` }];
 

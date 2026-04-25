@@ -73,6 +73,7 @@ Under the hood every surface shares the same catalog, cache, and HMAC client —
   - [`capabilities`](#capabilities--cli-manifest)
   - [`cache`](#cache--inspect-and-clear-local-cache)
   - [`policy`](#policy--validate-scaffold-and-migrate-policyyaml)
+  - [`daemon`](#daemon--background-rules-engine-process)
   - [`completion`](#completion--shell-tab-completion)
 - [Output modes](#output-modes)
   - [Cache](#cache)
@@ -80,8 +81,6 @@ Under the hood every surface shares the same catalog, cache, and HMAC client —
 - [Environment variables](#environment-variables)
 - [Scripting examples](#scripting-examples)
 - [Development](#development)
-- [Contributing](#contributing)
-- [Roadmap](#roadmap)
 - [License](#license)
 - [References](#references)
 
@@ -94,7 +93,7 @@ Under the hood every surface shares the same catalog, cache, and HMAC client —
 - 🎨 **Dual output modes** — colorized tables by default; `--json` passthrough for `jq` and scripting
 - 🔐 **Secure credentials** — HMAC-SHA256 signed requests; config file written with `0600`; env-var override for CI
 - 🔍 **Dry-run mode** — preview every mutating request before it hits the API
-- 🧪 **Fully tested** — 1856 Vitest tests, mocked axios, zero network in CI
+- 🧪 **Fully tested** — 1882 Vitest tests, mocked axios, zero network in CI
 - ⚡ **Shell completion** — Bash / Zsh / Fish / PowerShell
 
 ## Requirements
@@ -743,6 +742,34 @@ switchbot events mqtt-tail --sink homeassistant --ha-url http://homeassistant.lo
 
 Device state is also persisted to `~/.switchbot/device-history/<deviceId>.json` (latest + 100-entry ring buffer) regardless of sink configuration. This enables the `get_device_history` MCP tool to answer state queries without an API call.
 
+### `daemon` — background rules-engine process
+
+Runs `switchbot rules run` as a detached background process. Tracks runtime
+metadata in `~/.switchbot/daemon.state.json` and can co-launch a health HTTP
+server.
+
+```bash
+# Start the daemon (no-op if already running)
+switchbot daemon start
+switchbot daemon start --policy ./my-policy.yaml
+switchbot daemon start --healthz-port 3100     # also launch health serve on port 3100
+switchbot daemon start --force                 # restart even if already running
+
+# Inspect daemon state (pid, log path, health server, last reload)
+switchbot daemon status
+switchbot daemon status --json
+
+# Hot-reload policy without restarting (sends SIGHUP on Unix, writes sentinel on Windows)
+switchbot daemon reload
+
+# Stop the daemon and any co-launched health server
+switchbot daemon stop
+```
+
+Start prints the PID, log path, and state file location. If the process exits
+within 300 ms of launch, start fails immediately and includes the last 20 lines
+of the log in the error message for fast diagnosis.
+
 ### `completion` — shell tab-completion
 
 ```bash
@@ -862,7 +889,7 @@ switchbot upgrade-check --json               # structured JSON output
 switchbot upgrade-check --timeout 5000       # custom registry timeout (ms)
 ```
 
-Queries the npm registry for the latest published version and compares it against the running version.
+Queries the npm registry for the latest published version and compares it against the running version. When the registry's `dist-tags.latest` is itself a prerelease (e.g. `4.0.0-rc.1`), the check is skipped and the current version is treated as up-to-date — accidental prerelease tags don't trigger spurious upgrade prompts.
 `--json` output:
 
 ```json
@@ -1096,7 +1123,7 @@ npm install
 
 npm run dev -- <args>       # Run from TypeScript sources via tsx
 npm run build               # Compile to dist/
-npm test                    # Run the Vitest suite (1856 tests)
+npm test                    # Run the Vitest suite (1882 tests)
 npm run test:watch          # Watch mode
 npm run test:coverage       # Coverage report (v8, HTML + text)
 ```
@@ -1152,7 +1179,7 @@ src/
 │   ├── explain.ts        # `devices explain` — one-shot device summary
 │   ├── device-meta.ts    # `devices meta` — local aliases / hide flags
 │   ├── install.ts        # `switchbot install` / `uninstall`
-│   ├── policy.ts         # `policy validate/new/migrate/diff/add-rule`
+│   ├── policy.ts         # `policy validate/new/migrate/diff/add-rule/backup/restore`
 │   ├── rules.ts          # `rules suggest/lint/list/explain/run/reload/tail/replay/
 │   │                     #   conflicts/doctor/summary/last-fired/webhook-*`
 │   ├── scenes.ts
@@ -1178,7 +1205,7 @@ src/
     ├── format.ts         # renderRows / filterFields / output-format dispatch
     ├── audit.ts          # JSONL audit log writer
     └── quota.ts          # Local daily-quota counter
-tests/                    # Vitest suite (1856 tests, mocked axios, no network)
+tests/                    # Vitest suite (1882 tests, mocked axios, no network)
 ```
 
 ### Release flow
@@ -1191,41 +1218,6 @@ git push --follow-tags
 ```
 
 Then on GitHub → **Releases → Draft a new release → select tag → Publish**. The `publish.yml` workflow runs tests, verifies the tag matches `package.json`, and publishes `@switchbot/openapi-cli` to npm with [provenance](https://docs.npmjs.com/generating-provenance-statements).
-
-## Contributing
-
-Bug reports, feature requests, and PRs are welcome.
-
-1. Fork the repo and create a topic branch.
-2. Keep changes small and focused; add or update Vitest cases for any behavior change.
-3. Run `npm test` and `npm run build` locally — both must pass.
-4. Open a pull request against `main`. CI runs on Node 18/20/22; all three must stay green.
-
-## Roadmap
-
-Phase 1 through Phase 4 are shipped. The authoritative phase/track table
-(including skill-side `autonomyLevel` L1/L2/L3 mapping) lives in
-[`docs/design/roadmap.md`](./docs/design/roadmap.md).
-
-Shipped tracks summary:
-
-- **Track β**: one-command install/uninstall surface (`switchbot install` / `switchbot uninstall`).
-- **Track γ**: rules v0.2 runtime increment (`days` + `all`/`any`/`not`).
-- **Track δ (L2)**: plan authoring + guarded execution (`plan suggest`, `plan run --require-approval`) and MCP review/execute tools (`plan_suggest`, `plan_run`, `audit_query`, `audit_stats`, `policy_diff`).
-- **Track ζ (L3)**: autonomous rule authoring (`rules suggest`, `policy add-rule`) with MCP parity (`rules_suggest`, `policy_add_rule`).
-- **Track ε**: cross-OS keychain CI matrix (macOS + Linux libsecret + Windows Credential Manager).
-
-Backlog tracks still open:
-
-1. **Daemon mode** — long-running local process with Unix/named-pipe
-  transport so repeated MCP or plan invocations avoid fresh-process
-  startup cost.
-2. **`npx @switchbot/mcp-server`** — split the MCP server into a tiny
-  package so non-CLI users can run it directly with `npx`.
-3. **`switchbot self-test`** — scripted end-to-end go/no-go checks for
-  token/secret validity plus representative device control.
-4. **Record / replay** — capture request/response fixtures and replay
-  offline for deterministic integration tests and CI.
 
 ## License
 

@@ -9,6 +9,8 @@ const { name: pkgName, version: currentVersion } = require('../../package.json')
 
 function fetchLatestVersion(packageName: string, timeoutMs = 8000): Promise<string> {
   const encoded = packageName.replace('/', '%2F');
+  // /latest is shorthand for dist-tags.latest — always the current stable
+  // release tag, never a prerelease unless accidentally published as such.
   const url = `https://registry.npmjs.org/${encoded}/latest`;
   return new Promise((resolve, reject) => {
     const req = https.get(url, { timeout: timeoutMs }, (res) => {
@@ -29,6 +31,9 @@ function fetchLatestVersion(packageName: string, timeoutMs = 8000): Promise<stri
   });
 }
 
+// Intentionally avoids the `semver` npm package (YAGNI): comparing two
+// well-formed registry version strings needs only these 10 lines, and adding
+// a runtime dep solely for version comparison would bloat install footprint.
 function semverGt(a: string, b: string): boolean {
   const numParts = (v: string) => v.replace(/-.*$/, '').split('.').map((n) => Number.parseInt(n, 10));
   const [aMaj, aMin, aPat] = numParts(a);
@@ -62,6 +67,21 @@ export function registerUpgradeCheckCommand(program: Command): void {
       const upToDate = !semverGt(latestVersion, currentVersion);
       const currentMajor = Number.parseInt(currentVersion.split('.')[0], 10);
       const latestMajor = Number.parseInt(latestVersion.split('.')[0], 10);
+
+      if (latestVersion.includes('-')) {
+        const msg = `Latest registry version (${latestVersion}) is a prerelease — skipping update check.`;
+        if (isJsonMode()) {
+          printJson({
+            current: currentVersion, latest: latestVersion, upToDate: true,
+            updateAvailable: false, breakingChange: false, installCommand: null,
+            note: msg,
+          });
+        } else {
+          console.log(`${chalk.green('✓')} You are running the latest stable version (${currentVersion}). Registry latest (${latestVersion}) is a prerelease — skipping.`);
+        }
+        return;
+      }
+
       const result = {
         current: currentVersion,
         latest: latestVersion,

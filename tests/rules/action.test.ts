@@ -6,6 +6,7 @@ import {
   executeRuleAction,
   parseRuleCommand,
   resolveActionDevice,
+  extractDeviceIdFromAction,
 } from '../../src/rules/action.js';
 import type { Rule } from '../../src/rules/types.js';
 import { readAudit } from '../../src/utils/audit.js';
@@ -151,5 +152,27 @@ describe('executeRuleAction', () => {
     expect(result.dryRun).toBe(true);
     const entries = readAudit(auditFile);
     expect(entries[0].kind).toBe('rule-fire-dry');
+  });
+});
+
+describe('extractDeviceIdFromAction', () => {
+  it('returns action.device when present, ignoring the command string', () => {
+    expect(extractDeviceIdFromAction({ command: 'devices command OTHER turnOn', device: 'EXPLICIT' }))
+      .toBe('EXPLICIT');
+  });
+
+  it('extracts deviceId from command string when device field is absent', () => {
+    expect(extractDeviceIdFromAction({ command: 'devices command DEVICE123 turnOn' }))
+      .toBe('DEVICE123');
+  });
+
+  it('returns the <id> placeholder literal when command uses a placeholder', () => {
+    expect(extractDeviceIdFromAction({ command: 'devices command <id> turnOn' }))
+      .toBe('<id>');
+  });
+
+  it('returns null when command does not match the devices command pattern', () => {
+    expect(extractDeviceIdFromAction({ command: 'scenes run welcome' })).toBeNull();
+    expect(extractDeviceIdFromAction({ command: '' })).toBeNull();
   });
 });

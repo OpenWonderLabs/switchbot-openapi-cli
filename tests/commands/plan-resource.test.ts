@@ -10,6 +10,10 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { readAudit } from '../../src/utils/audit.js';
 
 // ── api client mock ─────────────────────────────────────────────────────────
 const apiMock = vi.hoisted(() => {
@@ -136,7 +140,12 @@ function makeApproved(plan: StoredPlan): PlanRecord {
 
 // ── tests ────────────────────────────────────────────────────────────────────
 describe('plan resource model', () => {
+  let tmp: string;
+  let auditFile: string;
+
   beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sbplan-resource-'));
+    auditFile = path.join(tmp, 'audit.log');
     planStore.store.clear();
     planStore.savePlanRecord.mockClear();
     planStore.loadPlanRecord.mockClear();
@@ -144,6 +153,7 @@ describe('plan resource model', () => {
     apiMock.__instance.post.mockReset();
     cacheMock.map.clear();
     flagsMock.dryRun = false;
+    flagsMock.getAuditLog.mockReturnValue(null);
   });
 
   // ── plan execute status machine ──────────────────────────────────────────
@@ -158,6 +168,20 @@ describe('plan resource model', () => {
       expect(updated?.status).toBe('executed');
       expect(updated?.executedAt).toBeDefined();
       expect(updated?.failedAt).toBeUndefined();
+    });
+
+    it('writes audit entries tagged with the approved planId', async () => {
+      flagsMock.getAuditLog.mockReturnValue(auditFile);
+      const record = makeApproved(simplePlan());
+      apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body: {} } });
+
+      await runCli(registerPlanCommand, ['plan', 'execute', record.planId, '--yes']);
+
+      const entries = readAudit(auditFile);
+      expect(entries).toHaveLength(1);
+      expect(entries[0].planId).toBe(record.planId);
+      expect(entries[0].deviceId).toBe('BOT1');
+      expect(entries[0].result).toBe('ok');
     });
 
     it('marks status=failed (not executed) when a step errors', async () => {

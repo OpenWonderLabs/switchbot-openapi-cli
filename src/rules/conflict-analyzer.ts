@@ -27,6 +27,7 @@ import type { Rule, Condition } from './types.js';
 import { isTimeBetween, isAllCondition, isAnyCondition, isNotCondition } from './types.js';
 import { parseMaxPerMs } from './throttle.js';
 import { isDestructiveCommand } from './destructive.js';
+import { extractDeviceIdFromAction } from './action.js';
 
 export type ConflictSeverity = 'error' | 'warning' | 'info';
 
@@ -60,15 +61,26 @@ const OPPOSING_PAIRS: Array<[string, string]> = [
   ['fanSpeedUp', 'fanSpeedDown'],
 ];
 
+/**
+ * MQTT events that fire on every device state push and can rapidly exhaust
+ * the daily API quota when a rule has no throttle.
+ *
+ * Conditional events like `motion.detected` are intentionally excluded —
+ * they fire discretely, not at continuous high frequency. Extend this set
+ * when new catch-all or near-continuous event types are added to the classifier.
+ */
+export const HIGH_FREQ_EVENTS: readonly string[] = ['device.shadow', '*'];
+
+/** Returns true when an MQTT event is known to fire at high frequency. */
+export function isHighFreqEvent(event: string): boolean {
+  return (HIGH_FREQ_EVENTS as readonly string[]).includes(event);
+}
+
 function commandsAreOpposing(a: string, b: string): boolean {
   for (const [x, y] of OPPOSING_PAIRS) {
     if ((a === x && b === y) || (a === y && b === x)) return true;
   }
   return false;
-}
-
-function extractDeviceFromAction(action: { command: string; device?: string }): string | null {
-  return action.device ?? null;
 }
 
 function extractCommandVerb(command: string): string {
@@ -127,8 +139,8 @@ export function analyzeConflicts(rules: Rule[], quietHours?: QuietHours | null):
 
       for (const actionA of a.then) {
         for (const actionB of b.then) {
-          const deviceA = extractDeviceFromAction(actionA);
-          const deviceB = extractDeviceFromAction(actionB);
+          const deviceA = extractDeviceIdFromAction(actionA);
+          const deviceB = extractDeviceIdFromAction(actionB);
           // Skip if devices can't be compared.
           if (!deviceA || !deviceB || deviceA !== deviceB) continue;
           const verbA = extractCommandVerb(actionA.command);
@@ -154,7 +166,7 @@ export function analyzeConflicts(rules: Rule[], quietHours?: QuietHours | null):
   for (const rule of active) {
     if (rule.when.source !== 'mqtt') continue;
     const event = (rule.when as { event: string }).event;
-    const isHighFreq = event === 'device.shadow' || event === '*';
+    const isHighFreq = isHighFreqEvent(event);
     if (!isHighFreq) continue;
     const cooldown = effectiveCooldownMs(rule);
     if (cooldown === null) {

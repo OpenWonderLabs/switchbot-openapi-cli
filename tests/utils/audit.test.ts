@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { writeAudit, readAudit, verifyAudit, AUDIT_VERSION } from '../../src/utils/audit.js';
+import { writeAudit, readAudit, verifyAudit, AUDIT_VERSION, DEFAULT_AUDIT_PATH } from '../../src/utils/audit.js';
 
 describe('audit log', () => {
   const originalArgv = process.argv;
@@ -31,6 +31,49 @@ describe('audit log', () => {
       result: 'ok',
     });
     expect(fs.existsSync(file)).toBe(false);
+  });
+
+  it('writeAudit writes to DEFAULT_AUDIT_PATH when planId is set and --audit-log flag is absent', () => {
+    const appendSpy = vi.spyOn(fs, 'appendFileSync').mockImplementation(() => {});
+    const existsSpy = vi.spyOn(fs, 'existsSync').mockReturnValue(true);
+    try {
+      writeAudit({
+        t: '2026-04-25T10:00:00.000Z',
+        kind: 'command',
+        deviceId: 'BOT1',
+        command: 'turnOn',
+        parameter: undefined,
+        commandType: 'command',
+        dryRun: false,
+        planId: 'plan-abc-123',
+      });
+      expect(appendSpy).toHaveBeenCalledOnce();
+      const calledPath = appendSpy.mock.calls[0][0] as string;
+      expect(calledPath).toBe(DEFAULT_AUDIT_PATH);
+      const written = JSON.parse((appendSpy.mock.calls[0][1] as string).trim());
+      expect(written.planId).toBe('plan-abc-123');
+    } finally {
+      appendSpy.mockRestore();
+      existsSpy.mockRestore();
+    }
+  });
+
+  it('writeAudit remains a no-op when planId is absent and --audit-log flag is not set', () => {
+    const appendSpy = vi.spyOn(fs, 'appendFileSync').mockImplementation(() => {});
+    try {
+      writeAudit({
+        t: '2026-04-25T10:00:00.000Z',
+        kind: 'command',
+        deviceId: 'BOT1',
+        command: 'turnOn',
+        parameter: undefined,
+        commandType: 'command',
+        dryRun: false,
+      });
+      expect(appendSpy).not.toHaveBeenCalled();
+    } finally {
+      appendSpy.mockRestore();
+    }
   });
 
   it('writeAudit appends JSONL when --audit-log <path> is set', () => {
