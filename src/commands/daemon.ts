@@ -100,6 +100,48 @@ function persistState(partial: Partial<DaemonState>): DaemonState {
   return next;
 }
 
+function readLastLines(filePath: string, n = 20): string {
+  try {
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const lines = content.split('\n');
+    return lines.slice(Math.max(0, lines.length - n)).join('\n').trim();
+  } catch {
+    return '';
+  }
+}
+
+interface LivenessProbeOpts {
+  child: { exitCode: number | null; killed: boolean; pid?: number };
+  delayMs: number;
+  /** When true: clearPidFile + persistState(failed) + exitWithError on death. */
+  fatal: boolean;
+  pidFile?: string;
+  logFile?: string;
+}
+
+async function probeLiveness(opts: LivenessProbeOpts): Promise<boolean> {
+  await new Promise<void>((resolve) => setTimeout(resolve, opts.delayMs));
+  const dead = opts.child.exitCode !== null || opts.child.killed;
+  if (!dead) return true;
+
+  if (opts.fatal) {
+    if (opts.pidFile) clearPidFile(opts.pidFile);
+    const exitCode = opts.child.exitCode ?? 'unknown';
+    const logSnippet = opts.logFile ? readLastLines(opts.logFile) : '';
+    const trailingLog = logSnippet ? `\n\nLast log lines:\n${logSnippet}` : '';
+    const logRef = opts.logFile ?? 'daemon log';
+    persistState({
+      status: 'failed', pid: null, failedAt: new Date().toISOString(),
+      failureReason: `Daemon exited immediately (code ${exitCode}). Check ${logRef}.`,
+    });
+    exitWithError({
+      code: 1, kind: 'runtime',
+      message: `Daemon process exited immediately (code ${exitCode}). Check ${logRef} for details.${trailingLog}`,
+    });
+  }
+  return false;
+}
+
 function renderHumanStatus(status: DaemonRuntimeStatus): void {
   if (status.status === 'running' && status.pid !== null) {
     console.log(`${chalk.green('●')} Daemon is running (pid ${status.pid}).`);
@@ -197,14 +239,10 @@ The daemon reads the same policy file as \`switchbot rules run\`.
       fs.closeSync(logFd);
 
       // Liveness probe: wait 300 ms then verify the child is still alive.
-      await new Promise<void>((resolve) => setTimeout(resolve, 300));
-      if (child.exitCode !== null || child.killed) {
-        clearPidFile(DAEMON_PID_FILE);
-        persistState({ status: 'failed', pid: null, failedAt: new Date().toISOString(),
-          failureReason: `Daemon exited immediately (code ${child.exitCode ?? 'unknown'}). Check ${DAEMON_LOG_FILE}.` });
-        exitWithError({ code: 1, kind: 'runtime',
-          message: `Daemon process exited immediately (code ${child.exitCode ?? 'unknown'}). Check ${DAEMON_LOG_FILE} for details.` });
-      }
+      await probeLiveness({
+        child, delayMs: 300, fatal: true,
+        pidFile: DAEMON_PID_FILE, logFile: DAEMON_LOG_FILE,
+      });
 
       const newPid = child.pid;
       if (!newPid) {
@@ -232,8 +270,8 @@ The daemon reads the same policy file as \`switchbot rules run\`.
         fs.closeSync(healthLogFd);
         if (healthChild.pid) {
           // Brief liveness probe for the health server process.
-          await new Promise<void>((resolve) => setTimeout(resolve, 200));
-          if (healthChild.exitCode === null && !healthChild.killed) {
+          const healthAlive = await probeLiveness({ child: healthChild, delayMs: 200, fatal: false });
+          if (healthAlive) {
             healthzPid = healthChild.pid;
             writePidFile(HEALTHZ_PID_FILE, healthzPid);
           }
