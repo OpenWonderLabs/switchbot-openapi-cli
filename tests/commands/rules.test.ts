@@ -542,4 +542,184 @@ describe('switchbot rules (commander surface)', () => {
       expect(body.data.lastFired).toBe('2026-04-25T08:00:00.000Z');
     });
   });
+
+  describe('rules conflicts', () => {
+    it('exits 0 and reports clean when no conflicts detected', async () => {
+      const p = path.join(tmpDir, 'clean.yaml');
+      fs.writeFileSync(p, v02Policy(sampleAutomation));
+      const { exitCode, stdout } = await runCli(['rules', 'conflicts', p]);
+      expect(exitCode).toBe(0);
+      expect(stdout.join(' ')).toMatch(/no conflicts detected/i);
+    });
+
+    it('exits 0 and emits findings when opposing-action pair exists (warnings, not errors)', async () => {
+      const conflict = v02Policy([
+        'automation:',
+        '  enabled: true',
+        '  rules:',
+        '    - name: r-on',
+        '      when: { source: mqtt, event: motion.detected }',
+        '      then:',
+        '        - { command: "devices command DEVICE-X turnOn", device: DEVICE-X }',
+        '    - name: r-off',
+        '      when: { source: mqtt, event: motion.detected }',
+        '      then:',
+        '        - { command: "devices command DEVICE-X turnOff", device: DEVICE-X }',
+        '',
+      ].join('\n'));
+      const p = path.join(tmpDir, 'conflict.yaml');
+      fs.writeFileSync(p, conflict);
+      const { exitCode, stdout } = await runCli(['--json', 'rules', 'conflicts', p]);
+      // Opposing actions are "warning" severity → clean:true → exit 0
+      expect(exitCode).toBe(0);
+      const body = JSON.parse(stdout[0]) as { data: { clean: boolean; findings: Array<{ code: string }> } };
+      expect(body.data.findings.length).toBeGreaterThan(0);
+      expect(body.data.findings.some((f) => f.code === 'opposing-actions')).toBe(true);
+    });
+
+    it('--json includes counts for warning findings and has clean:true when only warnings exist', async () => {
+      const twoRules = v02Policy([
+        'automation:',
+        '  enabled: true',
+        '  rules:',
+        '    - name: on',
+        '      when: { source: mqtt, event: motion.detected }',
+        '      then:',
+        '        - { command: "devices command DD turnOn", device: DD }',
+        '    - name: off',
+        '      when: { source: mqtt, event: motion.detected }',
+        '      then:',
+        '        - { command: "devices command DD turnOff", device: DD }',
+        '',
+      ].join('\n'));
+      const p = path.join(tmpDir, 'conflict2.yaml');
+      fs.writeFileSync(p, twoRules);
+      const { stdout } = await runCli(['--json', 'rules', 'conflicts', p]);
+      const body = JSON.parse(stdout[0]) as { data: { clean: boolean; counts: Record<string, number> } };
+      // Only warnings → clean:true (errors needed for clean:false)
+      expect(body.data.clean).toBe(true);
+      expect(body.data.counts.warning).toBeGreaterThan(0);
+      expect(body.data.counts.error).toBe(0);
+    });
+  });
+
+  describe('rules doctor', () => {
+    it('--json exits 0 with overall:true for a valid policy', async () => {
+      const p = path.join(tmpDir, 'ok.yaml');
+      fs.writeFileSync(p, v02Policy(sampleAutomation));
+      const { exitCode, stdout } = await runCli(['--json', 'rules', 'doctor', p]);
+      expect(exitCode).toBe(0);
+      const body = JSON.parse(stdout[0]) as { data: { overall: boolean } };
+      expect(body.data.overall).toBe(true);
+    });
+
+    it('--json exits 1 with overall:false for a policy with duplicate rule names (lint error)', async () => {
+      const bad = v02Policy([
+        'automation:',
+        '  enabled: true',
+        '  rules:',
+        '    - name: dup-name',
+        '      when: { source: mqtt, event: motion.detected }',
+        '      then:',
+        '        - { command: "devices command EE turnOn" }',
+        '    - name: dup-name',
+        '      when: { source: mqtt, event: motion.detected }',
+        '      then:',
+        '        - { command: "devices command FF turnOff" }',
+        '',
+      ].join('\n'));
+      const p = path.join(tmpDir, 'doctor-bad.yaml');
+      fs.writeFileSync(p, bad);
+      const { exitCode, stdout } = await runCli(['--json', 'rules', 'doctor', p]);
+      expect(exitCode).toBe(1);
+      const body = JSON.parse(stdout[0]) as { data: { overall: boolean } };
+      expect(body.data.overall).toBe(false);
+    });
+  });
+
+  describe('rules summary', () => {
+    function writeAudit(file: string, rows: unknown[]): void {
+      fs.writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+    }
+
+    it('prints "(no rule activity)" when the audit log is empty', async () => {
+      const f = path.join(tmpDir, 'audit-empty.log');
+      fs.writeFileSync(f, '');
+      const { stdout } = await runCli(['rules', 'summary', '--file', f]);
+      expect(stdout.join(' ')).toMatch(/no rule activity/i);
+    });
+
+    it('--json reports total count and summaries when entries exist', async () => {
+      const f = path.join(tmpDir, 'audit-sum.log');
+      const now = new Date().toISOString();
+      writeAudit(f, [
+        { t: now, kind: 'rule-fire', rule: { name: 'lights on', triggerSource: 'mqtt', fireId: 'f1' }, result: 'ok', deviceId: 'D1', command: 'turnOn', parameter: null, commandType: 'command', dryRun: false },
+        { t: now, kind: 'rule-fire', rule: { name: 'lights on', triggerSource: 'mqtt', fireId: 'f2' }, result: 'ok', deviceId: 'D1', command: 'turnOn', parameter: null, commandType: 'command', dryRun: false },
+        { t: now, kind: 'rule-fire', rule: { name: 'lights on', triggerSource: 'mqtt', fireId: 'f3' }, result: 'error', deviceId: 'D1', command: 'turnOn', parameter: null, commandType: 'command', dryRun: false },
+      ]);
+      const { exitCode, stdout } = await runCli(['--json', 'rules', 'summary', '--file', f]);
+      expect(exitCode).toBe(0);
+      const body = JSON.parse(stdout[0]) as { data: { total: number; summaries: Array<{ rule: string; fires: number; errors: number }> } };
+      expect(body.data.total).toBe(3);
+      const s = body.data.summaries.find((x) => x.rule === 'lights on');
+      expect(s).toBeDefined();
+      expect(s!.fires).toBe(3);
+      expect(s!.errors).toBe(1);
+    });
+
+    it('--rule filters to a single rule name', async () => {
+      const f = path.join(tmpDir, 'audit-filter.log');
+      const now = new Date().toISOString();
+      writeAudit(f, [
+        { t: now, kind: 'rule-fire', rule: { name: 'rule-A', triggerSource: 'mqtt', fireId: 'x1' }, result: 'ok', deviceId: 'D', command: 'turnOn', parameter: null, commandType: 'command', dryRun: false },
+        { t: now, kind: 'rule-fire', rule: { name: 'rule-B', triggerSource: 'mqtt', fireId: 'x2' }, result: 'ok', deviceId: 'D', command: 'turnOn', parameter: null, commandType: 'command', dryRun: false },
+      ]);
+      const { stdout } = await runCli(['--json', 'rules', 'summary', '--file', f, '--rule', 'rule-A']);
+      const body = JSON.parse(stdout[0]) as { data: { summaries: Array<{ rule: string }> } };
+      expect(body.data.summaries.every((s) => s.rule === 'rule-A')).toBe(true);
+    });
+  });
+
+  describe('rules last-fired', () => {
+    function writeAudit(file: string, rows: unknown[]): void {
+      fs.writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+    }
+
+    it('prints hint when no rule-fire entries exist', async () => {
+      const f = path.join(tmpDir, 'audit-empty2.log');
+      fs.writeFileSync(f, '');
+      const { stdout } = await runCli(['rules', 'last-fired', '--file', f]);
+      expect(stdout.join(' ')).toMatch(/no rule-fire entries/i);
+    });
+
+    it('--json returns entries in reverse chronological order', async () => {
+      const f = path.join(tmpDir, 'audit-lf.log');
+      const base = new Date('2026-04-25T10:00:00.000Z');
+      writeAudit(f, [1, 2, 3].map((i) => ({
+        t: new Date(base.getTime() + i * 1000).toISOString(),
+        kind: 'rule-fire',
+        rule: { name: 'night-light', triggerSource: 'mqtt', fireId: `f${i}` },
+        result: 'ok', deviceId: 'D1', command: 'turnOn', parameter: null, commandType: 'command', dryRun: false,
+      })));
+      const { exitCode, stdout } = await runCli(['--json', 'rules', 'last-fired', '--file', f]);
+      expect(exitCode).toBe(0);
+      const body = JSON.parse(stdout[0]) as { data: { count: number; entries: Array<{ kind: string }> } };
+      expect(body.data.count).toBe(3);
+      expect(body.data.entries[0].kind).toBe('rule-fire');
+    });
+
+    it('-n limits the number of results returned', async () => {
+      const f = path.join(tmpDir, 'audit-n.log');
+      const base = new Date('2026-04-25T12:00:00.000Z');
+      writeAudit(f, Array.from({ length: 15 }, (_, i) => ({
+        t: new Date(base.getTime() + i * 1000).toISOString(),
+        kind: 'rule-fire',
+        rule: { name: 'flood-rule', triggerSource: 'mqtt', fireId: `id${i}` },
+        result: 'ok', deviceId: 'D', command: 'turnOn', parameter: null, commandType: 'command', dryRun: false,
+      })));
+      const { stdout } = await runCli(['--json', 'rules', 'last-fired', '--file', f, '-n', '5']);
+      const body = JSON.parse(stdout[0]) as { data: { count: number } };
+      expect(body.data.count).toBe(5);
+    });
+  });
 });
