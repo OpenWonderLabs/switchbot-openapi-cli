@@ -723,3 +723,128 @@ describe('switchbot rules (commander surface)', () => {
     });
   });
 });
+
+describe('rules webhook-rotate-token', () => {
+  let tokenDir: string;
+
+  beforeEach(() => {
+    tokenDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sbwh-'));
+    vi.spyOn(os, 'homedir').mockReturnValue(tokenDir);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    fs.rmSync(tokenDir, { recursive: true, force: true });
+  });
+
+  it('creates a token file and prints the file path in human mode', async () => {
+    const { stdout } = await runCli(['rules', 'webhook-rotate-token']);
+    const tokenFile = path.join(tokenDir, '.switchbot', 'webhook-token');
+    expect(fs.existsSync(tokenFile)).toBe(true);
+    const tokenContent = fs.readFileSync(tokenFile, 'utf-8').trim();
+    expect(tokenContent.length).toBeGreaterThan(20);
+    expect(stdout.join(' ')).toMatch(/webhook bearer rotated/i);
+  });
+
+  it('--json reports status:rotated with filePath and tokenLength', async () => {
+    const { stdout } = await runCli(['--json', 'rules', 'webhook-rotate-token']);
+    const body = JSON.parse(stdout.join('')) as { data: { status: string; filePath: string; tokenLength: number } };
+    expect(body.data.status).toBe('rotated');
+    expect(typeof body.data.filePath).toBe('string');
+    expect(body.data.tokenLength).toBeGreaterThan(20);
+  });
+
+  it('produces a different token on each rotation', async () => {
+    const tokenFile = path.join(tokenDir, '.switchbot', 'webhook-token');
+    await runCli(['rules', 'webhook-rotate-token']);
+    const t1 = fs.readFileSync(tokenFile, 'utf-8').trim();
+    await runCli(['rules', 'webhook-rotate-token']);
+    const t2 = fs.readFileSync(tokenFile, 'utf-8').trim();
+    expect(t1).not.toBe(t2);
+  });
+});
+
+describe('rules webhook-show-token', () => {
+  let tokenDir: string;
+
+  beforeEach(() => {
+    tokenDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sbwht-'));
+    vi.spyOn(os, 'homedir').mockReturnValue(tokenDir);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    fs.rmSync(tokenDir, { recursive: true, force: true });
+  });
+
+  it('prints the token to stdout in human mode (creates if absent)', async () => {
+    const { stdout } = await runCli(['rules', 'webhook-show-token']);
+    expect(stdout.join('').trim().length).toBeGreaterThan(20);
+  });
+
+  it('returns the same token on repeated calls (stable, not rotating)', async () => {
+    const { stdout: s1 } = await runCli(['rules', 'webhook-show-token']);
+    const { stdout: s2 } = await runCli(['rules', 'webhook-show-token']);
+    expect(s1.join('').trim()).toBe(s2.join('').trim());
+  });
+
+  it('--json reports filePath and tokenLength', async () => {
+    const { stdout } = await runCli(['--json', 'rules', 'webhook-show-token']);
+    const body = JSON.parse(stdout.join('')) as { data: { filePath: string; tokenLength: number } };
+    expect(typeof body.data.filePath).toBe('string');
+    expect(body.data.tokenLength).toBeGreaterThan(20);
+  });
+});
+
+describe('rules suggest', () => {
+  it('exits with a Commander usage error when --intent is missing', async () => {
+    const program = makeProgram();
+    await expect(
+      program.parseAsync(['node', 'test', 'rules', 'suggest']),
+    ).rejects.toThrow();
+  });
+
+  it('outputs YAML to stdout when trigger can be inferred from intent', async () => {
+    const stdoutLines: string[] = [];
+    const writeSpy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      stdoutLines.push(String(chunk));
+      return true;
+    });
+    try {
+      await runCli(['rules', 'suggest', '--intent', 'turn on light when motion detected']);
+    } finally {
+      writeSpy.mockRestore();
+    }
+    const yaml = stdoutLines.join('');
+    expect(yaml).toContain('name:');
+    expect(yaml).toContain('when:');
+    expect(yaml).toContain('then:');
+  });
+
+  it('--json outputs structured rule + rule_yaml + warnings', async () => {
+    const { stdout } = await runCli(['--json', 'rules', 'suggest', '--intent', 'turn on lights at 8am every morning']);
+    const body = JSON.parse(stdout.join('')) as { data: { rule: Record<string, unknown>; rule_yaml: string; warnings: string[] } };
+    expect(body.data).toHaveProperty('rule');
+    expect(body.data).toHaveProperty('rule_yaml');
+    expect(Array.isArray(body.data.warnings)).toBe(true);
+    expect(body.data.rule.name).toBe('turn on lights at 8am every morning');
+  });
+
+  it('writes YAML to --out file instead of stdout', async () => {
+    const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sbsug-'));
+    const outFile = path.join(outDir, 'rule.yaml');
+    try {
+      const { stdout } = await runCli([
+        'rules', 'suggest',
+        '--intent', 'turn on fan when button pressed',
+        '--out', outFile,
+      ]);
+      expect(fs.existsSync(outFile)).toBe(true);
+      const content = fs.readFileSync(outFile, 'utf-8');
+      expect(content).toContain('name:');
+      expect(stdout.join(' ')).toMatch(/rule YAML written/i);
+    } finally {
+      fs.rmSync(outDir, { recursive: true, force: true });
+    }
+  });
+});
