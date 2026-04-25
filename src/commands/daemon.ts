@@ -11,6 +11,7 @@ import chalk from 'chalk';
 
 const DAEMON_PID_FILE = path.join(os.homedir(), '.switchbot', 'daemon.pid');
 const DAEMON_LOG_FILE = path.join(os.homedir(), '.switchbot', 'daemon.log');
+const HEALTHZ_PID_FILE = path.join(os.homedir(), '.switchbot', 'healthz.pid');
 
 function readDaemonPid(): number | null {
   return readPidFile(DAEMON_PID_FILE);
@@ -50,7 +51,8 @@ Use \`switchbot rules reload\` to hot-reload the policy without restarting.
     .description('Start the rules-engine daemon in the background.')
     .option('--policy <path>', 'Policy file path (default: auto-detected)', stringArg('--policy'))
     .option('--force', 'Restart even if the daemon appears to be running.')
-    .action((opts: { policy?: string; force?: boolean }) => {
+    .option('--healthz-port <n>', 'Also start a health HTTP server on this port (default: disabled).')
+    .action((opts: { policy?: string; force?: boolean; healthzPort?: string }) => {
       const { running, pid } = getDaemonStatus();
       if (running && !opts.force) {
         if (isJsonMode()) {
@@ -94,13 +96,38 @@ Use \`switchbot rules reload\` to hot-reload the policy without restarting.
       }
       writePidFile(DAEMON_PID_FILE, newPid);
 
+      // Optionally also start a health server alongside the daemon.
+      let healthzPid: number | null = null;
+      if (opts.healthzPort) {
+        const healthArgs = ['health', 'serve', '--port', opts.healthzPort];
+        const healthLogFd = fs.openSync(DAEMON_LOG_FILE, 'a');
+        const healthChild = spawn(process.execPath, [cliEntry, ...healthArgs], {
+          detached: true,
+          stdio: ['ignore', healthLogFd, healthLogFd],
+          env: { ...process.env },
+        });
+        healthChild.unref();
+        fs.closeSync(healthLogFd);
+        if (healthChild.pid) {
+          healthzPid = healthChild.pid;
+          writePidFile(HEALTHZ_PID_FILE, healthzPid);
+        }
+      }
+
       if (isJsonMode()) {
-        printJson({ status: 'started', pid: newPid, logFile: DAEMON_LOG_FILE, pidFile: DAEMON_PID_FILE });
+        printJson({
+          status: 'started', pid: newPid, logFile: DAEMON_LOG_FILE, pidFile: DAEMON_PID_FILE,
+          ...(healthzPid !== null ? { healthzPid, healthzPort: opts.healthzPort, healthzPidFile: HEALTHZ_PID_FILE } : {}),
+        });
       } else {
         console.log(`${chalk.green('✓')} Daemon started (pid ${newPid})`);
         console.log(`  Log:     ${DAEMON_LOG_FILE}`);
         console.log(`  PID:     ${DAEMON_PID_FILE}`);
         console.log(`  Reload:  switchbot rules reload`);
+        if (healthzPid !== null) {
+          console.log(`${chalk.green('✓')} Health server started (pid ${healthzPid}) on port ${opts.healthzPort}`);
+          console.log(`  http://127.0.0.1:${opts.healthzPort}/healthz`);
+        }
       }
     });
 
