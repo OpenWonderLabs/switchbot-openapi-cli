@@ -128,19 +128,16 @@ describe('capabilities', () => {
     expect(flags.some((f) => f.includes('--dry-run'))).toBe(true);
   });
 
-  it('catalog.roles includes lighting and security, typeCount > 10', async () => {
+  it('catalog is a pointer note with typeCount, not inline stats', async () => {
     const out = await runCapabilities();
     const cat = out.catalog as Record<string, unknown>;
-    expect((cat.roles as string[])).toContain('lighting');
-    expect((cat.roles as string[])).toContain('security');
+    expect(cat).toHaveProperty('note');
+    expect(cat.note as string).toContain('schema export');
     expect(cat.typeCount as number).toBeGreaterThan(10);
-  });
-
-  it('P11: catalog.safetyTiersInUse includes "read" and catalog.readOnlyQueryCount > 0', async () => {
-    const out = await runCapabilities();
-    const cat = out.catalog as Record<string, unknown>;
-    expect((cat.safetyTiersInUse as string[])).toContain('read');
-    expect((cat.readOnlyQueryCount as number)).toBeGreaterThan(0);
+    // Inline stats (roles, safetyTiersInUse, readOnlyQueryCount) are intentionally
+    // removed — they now live in `schema export --capabilities`.
+    expect(cat.roles).toBeUndefined();
+    expect(cat.safetyTiersInUse).toBeUndefined();
   });
 
   it('surfaces.mcp.tools includes send_command, account_overview, get_device_history and query_device_history', async () => {

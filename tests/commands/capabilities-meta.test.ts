@@ -98,4 +98,14 @@ describe('capabilities command — regression output tests', () => {
     expect(entry.mutating).toBe(false);
     expect(entry.consumesQuota).toBe(false);
   });
+
+  it('full output catalog is a pointer note referencing schema export', async () => {
+    const res = await runCli(registerCapabilitiesCommand, ['capabilities']);
+    expect(res.exitCode).toBeNull();
+    const parsed = JSON.parse(res.stdout.join('')) as { data: { catalog?: { note: string } } };
+    const catalog = parsed.data.catalog;
+    expect(catalog).toBeDefined();
+    expect(catalog).toHaveProperty('note');
+    expect(catalog!.note).toContain('schema export');
+  });
 });

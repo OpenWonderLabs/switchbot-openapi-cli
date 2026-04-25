@@ -411,17 +411,9 @@ export function registerCapabilitiesCommand(program: Command): void {
           Object.entries(COMMAND_META).map(([k, v]) => [k, { ...v, ...deriveRiskMeta(v) }])
         ),
         ...(globalFlags ? { globalFlags } : {}),
-        catalog: {
+        catalog: compact ? undefined : {
+          note: 'Device type catalog (commands, status fields, parameters) is available via `schema export`. Use `schema export --capabilities` for entries annotated with CLI safety metadata.',
           typeCount: catalog.length,
-          roles,
-          destructiveCommandCount: catalog.reduce(
-            (n, e) =>
-              n + e.commands.filter((c) => deriveSafetyTier(c, e) === 'destructive').length,
-            0,
-          ),
-          safetyTiersInUse: collectSafetyTiersInUse(catalog),
-          readOnlyTypeCount: catalog.filter((e) => e.readOnly).length,
-          readOnlyQueryCount: countStatusQueries(catalog),
         },
         resources: RESOURCE_CATALOG,
       };
