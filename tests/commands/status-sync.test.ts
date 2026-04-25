@@ -74,6 +74,40 @@ describe('status-sync command', () => {
     });
   });
 
+  describe('start', () => {
+    it('--json exits 0 and returns running state from startStatusSync', async () => {
+      managerMock.startStatusSync.mockReturnValue(RUNNING);
+      const res = await runCli(registerStatusSyncCommand, ['--json', 'status-sync', 'start']);
+      expect(res.exitCode).toBeNull();
+      const body = JSON.parse(res.stdout.join('')) as { data: StatusSyncStatus };
+      expect(body.data.running).toBe(true);
+      expect(body.data.pid).toBe(9876);
+      expect(managerMock.startStatusSync).toHaveBeenCalled();
+    });
+
+    it('human mode prints started message with pid', async () => {
+      managerMock.startStatusSync.mockReturnValue(RUNNING);
+      const res = await runCli(registerStatusSyncCommand, ['status-sync', 'start']);
+      expect(res.exitCode).toBeNull();
+      expect(res.stdout.join(' ')).toMatch(/started.*9876/i);
+    });
+  });
+
+  describe('run', () => {
+    it('calls runStatusSyncForeground and exits 0 when it resolves 0', async () => {
+      managerMock.runStatusSyncForeground.mockResolvedValue(0);
+      const res = await runCli(registerStatusSyncCommand, ['status-sync', 'run']);
+      expect(res.exitCode).toBeNull();
+      expect(managerMock.runStatusSyncForeground).toHaveBeenCalled();
+    });
+
+    it('exits with the code returned by runStatusSyncForeground when non-zero', async () => {
+      managerMock.runStatusSyncForeground.mockResolvedValue(1);
+      const res = await runCli(registerStatusSyncCommand, ['status-sync', 'run']);
+      expect(res.exitCode).toBe(1);
+    });
+  });
+
   describe('stop', () => {
     it('--json exits 0 with stopped:false when nothing is running', async () => {
       const res = await runCli(registerStatusSyncCommand, ['--json', 'status-sync', 'stop']);

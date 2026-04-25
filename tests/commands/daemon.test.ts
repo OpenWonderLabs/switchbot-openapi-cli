@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const fsMock = vi.hoisted(() => ({
   mkdirSync: vi.fn(),
@@ -175,6 +175,7 @@ describe('daemon stop', () => {
     daemonStateMock.readDaemonState.mockReset().mockReturnValue(null);
     daemonStateMock.writeDaemonState.mockClear();
   });
+  afterEach(() => { vi.useRealTimers(); });
 
   it('prints "No running daemon found" and exits 0 when no daemon is running', async () => {
     const res = await runCli(registerDaemonCommand, ['daemon', 'stop']);
@@ -250,6 +251,7 @@ describe('daemon reload', () => {
     pidFileMock.writeReloadSentinel.mockClear();
     pidFileMock.sighupSupported.mockReturnValue(false);
   });
+  afterEach(() => { vi.useRealTimers(); });
 
   it('exits 2 with usage error when no daemon is running', async () => {
     const res = await runCli(registerDaemonCommand, ['daemon', 'reload']);
