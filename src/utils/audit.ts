@@ -1,6 +1,9 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { getAuditLog } from './flags.js';
+
+export const DEFAULT_AUDIT_PATH = path.join(os.homedir(), '.switchbot', 'audit.log');
 
 /**
  * Bump when breaking changes to the audit line shape land.
@@ -61,7 +64,8 @@ function resolveAuditPath(): string | null {
 }
 
 export function writeAudit(entry: AuditEntry): void {
-  const file = resolveAuditPath();
+  let file = resolveAuditPath();
+  if (!file && entry.planId) file = DEFAULT_AUDIT_PATH;
   if (!file) return;
   const dir = path.dirname(file);
   try {
