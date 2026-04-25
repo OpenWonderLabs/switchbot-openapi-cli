@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { readAudit } from '../../src/utils/audit.js';
 
 const apiMock = vi.hoisted(() => {
   const instance = { get: vi.fn(), post: vi.fn() };
@@ -69,13 +70,16 @@ import { runCli } from '../helpers/cli.js';
 
 describe('plan command', () => {
   let tmp: string;
+  let auditFile: string;
 
   beforeEach(() => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sbplan-'));
+    auditFile = path.join(tmp, 'audit.log');
     apiMock.__instance.post.mockReset();
     cacheMock.map.clear();
     flagsMock.dryRun = false;
     flagsMock.getProfile.mockReturnValue(undefined);
+    flagsMock.getAuditLog.mockReturnValue(null);
   });
 
   function writePlan(obj: unknown): string {
@@ -269,6 +273,24 @@ describe('plan command', () => {
       const out = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join('')).data;
       expect(out.ran).toBe(true);
       expect(out.summary).toEqual({ total: 1, ok: 1, error: 0, skipped: 0 });
+    });
+
+    it('writes audit entries tagged with the generated planId', async () => {
+      flagsMock.getAuditLog.mockReturnValue(auditFile);
+      const file = writePlan({
+        version: '1.0',
+        steps: [{ type: 'command', deviceId: 'BOT1', command: 'turnOn' }],
+      });
+      apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body: {} } });
+
+      const res = await runCli(registerPlanCommand, ['--json', 'plan', 'run', file]);
+      const out = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join('')).data;
+      const entries = readAudit(auditFile);
+
+      expect(entries).toHaveLength(1);
+      expect(entries[0].deviceId).toBe('BOT1');
+      expect(entries[0].result).toBe('ok');
+      expect(entries[0].planId).toBe(out.planId);
     });
   });
 });
