@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isJsonMode, printJson, exitWithError } from '../utils/output.js';
-import { readPidFile, writePidFile, isPidAlive, getDefaultPidFilePaths, writeReloadSentinel, sighupSupported } from '../rules/pid-file.js';
+import { readPidFile, writePidFile, clearPidFile, isPidAlive, getDefaultPidFilePaths, writeReloadSentinel, sighupSupported } from '../rules/pid-file.js';
 import { stringArg } from '../utils/arg-parsers.js';
 import chalk from 'chalk';
 import {
@@ -149,7 +149,7 @@ The daemon reads the same policy file as \`switchbot rules run\`.
     .option('--policy <path>', 'Policy file path (default: auto-detected)', stringArg('--policy'))
     .option('--force', 'Restart even if the daemon appears to be running.')
     .option('--healthz-port <n>', 'Also start a health HTTP server on this port (default: disabled).')
-    .action((opts: { policy?: string; force?: boolean; healthzPort?: string }) => {
+    .action(async (opts: { policy?: string; force?: boolean; healthzPort?: string }) => {
       const current = getDaemonStatus();
       if (current.status === 'running' && !opts.force) {
         if (isJsonMode()) {
@@ -170,7 +170,7 @@ The daemon reads the same policy file as \`switchbot rules run\`.
       }
 
       const thisFile = fileURLToPath(import.meta.url);
-      const cliEntry = path.resolve(path.dirname(thisFile), 'index.js');
+      const cliEntry = path.resolve(path.dirname(thisFile), '..', 'index.js');
       const args = ['rules', 'run'];
       if (opts.policy) args.push(opts.policy);
 
@@ -195,6 +195,16 @@ The daemon reads the same policy file as \`switchbot rules run\`.
       });
       child.unref();
       fs.closeSync(logFd);
+
+      // Liveness probe: wait 300 ms then verify the child is still alive.
+      await new Promise<void>((resolve) => setTimeout(resolve, 300));
+      if (child.exitCode !== null || child.killed) {
+        clearPidFile(DAEMON_PID_FILE);
+        persistState({ status: 'failed', pid: null, failedAt: new Date().toISOString(),
+          failureReason: `Daemon exited immediately (code ${child.exitCode ?? 'unknown'}). Check ${DAEMON_LOG_FILE}.` });
+        exitWithError({ code: 1, kind: 'runtime',
+          message: `Daemon process exited immediately (code ${child.exitCode ?? 'unknown'}). Check ${DAEMON_LOG_FILE} for details.` });
+      }
 
       const newPid = child.pid;
       if (!newPid) {
@@ -221,8 +231,13 @@ The daemon reads the same policy file as \`switchbot rules run\`.
         healthChild.unref();
         fs.closeSync(healthLogFd);
         if (healthChild.pid) {
-          healthzPid = healthChild.pid;
-          writePidFile(HEALTHZ_PID_FILE, healthzPid);
+          // Brief liveness probe for the health server process.
+          await new Promise<void>((resolve) => setTimeout(resolve, 200));
+          if (healthChild.exitCode === null && !healthChild.killed) {
+            healthzPid = healthChild.pid;
+            writePidFile(HEALTHZ_PID_FILE, healthzPid);
+          }
+          // Non-fatal if health server dies — daemon itself is still running.
         }
       }
 
