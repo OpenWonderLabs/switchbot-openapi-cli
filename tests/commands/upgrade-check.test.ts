@@ -113,3 +113,59 @@ describe('upgrade-check action — prerelease guard', () => {
     expect(out).not.toMatch(/Update available/i);
   });
 });
+
+// ── happy path and network error ─────────────────────────────────────────────
+describe('upgrade-check action — version comparison', () => {
+  afterEach(() => {
+    httpsMock.get.mockReset();
+  });
+
+  it('--json: when up to date (registry returns same version), upToDate:true exits 0', async () => {
+    makeHttpsGet('3.1.1');
+    const { registerUpgradeCheckCommand } = await import('../../src/commands/upgrade-check.js');
+    const { runCli } = await import('../helpers/cli.js');
+
+    const res = await runCli(registerUpgradeCheckCommand, ['--json', 'upgrade-check']);
+    expect(res.exitCode).toBeNull();
+    const line = res.stdout.find((l) => l.trim().startsWith('{'));
+    const out = JSON.parse(line!) as Record<string, unknown>;
+    const data = (out.data ?? out) as Record<string, unknown>;
+    expect(data.upToDate).toBe(true);
+    expect(data.updateAvailable).toBe(false);
+    expect(data.installCommand).toBeNull();
+  });
+
+  it('--json: when newer version available, updateAvailable:true and exits 1', async () => {
+    makeHttpsGet('99.0.0');
+    const { registerUpgradeCheckCommand } = await import('../../src/commands/upgrade-check.js');
+    const { runCli } = await import('../helpers/cli.js');
+
+    const res = await runCli(registerUpgradeCheckCommand, ['--json', 'upgrade-check']);
+    // JSON mode returns early without calling process.exit(1) — that only happens in human mode
+    expect(res.exitCode).toBeNull();
+    const line = res.stdout.find((l) => l.trim().startsWith('{'));
+    const out = JSON.parse(line!) as Record<string, unknown>;
+    const data = (out.data ?? out) as Record<string, unknown>;
+    expect(data.updateAvailable).toBe(true);
+    expect(data.breakingChange).toBe(true);
+    expect(typeof data.installCommand).toBe('string');
+  });
+
+  it('--json: network error produces ok:false envelope and exits 1', async () => {
+    httpsMock.get.mockImplementation((_url: unknown, _opts: unknown, _cb: unknown) => {
+      const req = Object.assign(new EventEmitter(), { destroy: vi.fn() });
+      process.nextTick(() => req.emit('error', new Error('ECONNREFUSED')));
+      return req;
+    });
+    const { registerUpgradeCheckCommand } = await import('../../src/commands/upgrade-check.js');
+    const { runCli } = await import('../helpers/cli.js');
+
+    const res = await runCli(registerUpgradeCheckCommand, ['--json', 'upgrade-check']);
+    expect(res.exitCode).toBe(1);
+    const line = res.stdout.find((l) => l.trim().startsWith('{'));
+    const out = JSON.parse(line!) as Record<string, unknown>;
+    const data = (out.data ?? out) as Record<string, unknown>;
+    expect(data.ok).toBe(false);
+    expect(typeof data.error).toBe('string');
+  });
+});

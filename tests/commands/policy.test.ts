@@ -489,4 +489,55 @@ describe('switchbot policy (commander surface)', () => {
       expect(out.data.restored).toBe(policyFile);
     });
   });
+
+  // =====================================================================
+  // alias deviceId format (P1 regression guard)
+  // =====================================================================
+  describe('policy validate — alias deviceId format', () => {
+    let tmp: string;
+
+    beforeEach(() => {
+      tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sbpolicy-alias-'));
+    });
+
+    afterEach(() => {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    });
+
+    function writePolicy(deviceId: string): string {
+      const p = path.join(tmp, 'policy.yaml');
+      fs.writeFileSync(p, `version: "0.2"\naliases:\n  my device: ${deviceId}\n`);
+      return p;
+    }
+
+    it('accepts standard hyphenated IDs (01-202407090924-26354212)', () => {
+      const { exitCode } = runCli(['policy', 'validate', writePolicy('01-202407090924-26354212')]);
+      expect(exitCode).toBe(0);
+    });
+
+    it('accepts 12-digit hex MAC without hyphen (28372F4C9C4A)', () => {
+      const { exitCode } = runCli(['policy', 'validate', writePolicy('28372F4C9C4A')]);
+      expect(exitCode).toBe(0);
+    });
+
+    it('accepts lowercase hex MAC (b0e9fe51ef2e)', () => {
+      const { exitCode } = runCli(['policy', 'validate', writePolicy('b0e9fe51ef2e')]);
+      expect(exitCode).toBe(0);
+    });
+
+    it('accepts IoT suffix format (28372F4C9C4A-vzwa)', () => {
+      const { exitCode } = runCli(['policy', 'validate', writePolicy('28372F4C9C4A-vzwa')]);
+      expect(exitCode).toBe(0);
+    });
+
+    it('rejects single-char IDs', () => {
+      const { exitCode } = runCli(['policy', 'validate', writePolicy('A')]);
+      expect(exitCode).not.toBe(0);
+    });
+
+    it('rejects IDs longer than 64 chars', () => {
+      const { exitCode } = runCli(['policy', 'validate', writePolicy('A'.repeat(65))]);
+      expect(exitCode).not.toBe(0);
+    });
+  });
 });

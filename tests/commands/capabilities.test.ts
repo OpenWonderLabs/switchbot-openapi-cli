@@ -128,19 +128,16 @@ describe('capabilities', () => {
     expect(flags.some((f) => f.includes('--dry-run'))).toBe(true);
   });
 
-  it('catalog.roles includes lighting and security, typeCount > 10', async () => {
+  it('catalog is a pointer note with typeCount, not inline stats', async () => {
     const out = await runCapabilities();
     const cat = out.catalog as Record<string, unknown>;
-    expect((cat.roles as string[])).toContain('lighting');
-    expect((cat.roles as string[])).toContain('security');
+    expect(cat).toHaveProperty('note');
+    expect(cat.note as string).toContain('schema export');
     expect(cat.typeCount as number).toBeGreaterThan(10);
-  });
-
-  it('P11: catalog.safetyTiersInUse includes "read" and catalog.readOnlyQueryCount > 0', async () => {
-    const out = await runCapabilities();
-    const cat = out.catalog as Record<string, unknown>;
-    expect((cat.safetyTiersInUse as string[])).toContain('read');
-    expect((cat.readOnlyQueryCount as number)).toBeGreaterThan(0);
+    // Inline stats (roles, safetyTiersInUse, readOnlyQueryCount) are intentionally
+    // removed — they now live in `schema export --capabilities`.
+    expect(cat.roles).toBeUndefined();
+    expect(cat.safetyTiersInUse).toBeUndefined();
   });
 
   it('surfaces.mcp.tools includes send_command, account_overview, get_device_history and query_device_history', async () => {
@@ -283,5 +280,39 @@ describe('capabilities B3/B4', () => {
     expect(webhooks.endpoints.map((e) => e.verb).sort()).toEqual(['delete', 'query', 'setup', 'update']);
     const keys = resources.keys as Array<{ keyType: string }>;
     expect(keys.map((k) => k.keyType).sort()).toEqual(['disposable', 'permanent', 'timeLimit', 'urgent']);
+  });
+
+  it('commandMeta flat map includes derived risk fields on every entry', async () => {
+    const out = await runCapabilitiesWith([]);
+    const commandMeta = out.commandMeta as Record<string, Record<string, unknown>>;
+    expect(commandMeta).toBeDefined();
+    // Spot-check a known entry
+    const devList = commandMeta['devices list'];
+    expect(devList).toBeDefined();
+    expect(devList.agentSafetyTier).toBe('read');
+    expect(devList.mutating).toBe(false);
+    expect(devList.consumesQuota).toBe(true);
+    // Derived risk meta must be present
+    expect(devList.riskLevel).toBe('low');
+    expect(devList.requiresConfirmation).toBe(false);
+    expect(devList.recommendedMode).toBe('direct');
+    // All entries must have the derived fields
+    for (const [_key, entry] of Object.entries(commandMeta)) {
+      expect(entry).toHaveProperty('riskLevel');
+      expect(entry).toHaveProperty('requiresConfirmation');
+      expect(entry).toHaveProperty('recommendedMode');
+    }
+  });
+
+  it('--surface cli restricts surfaces block to cli only', async () => {
+    const out = await runCapabilitiesWith(['--surface', 'cli']);
+    const surfaces = out.surfaces as Record<string, unknown>;
+    expect(Object.keys(surfaces)).toEqual(['cli']);
+  });
+
+  it('--surface mqtt restricts surfaces block to mqtt only', async () => {
+    const out = await runCapabilitiesWith(['--surface', 'mqtt']);
+    const surfaces = out.surfaces as Record<string, unknown>;
+    expect(Object.keys(surfaces)).toEqual(['mqtt']);
   });
 });
