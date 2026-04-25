@@ -27,6 +27,7 @@ describe('doctor command', () => {
     // DEFAULT_POLICY_PATH is evaluated at module load time using the real homedir,
     // so mock the env var to keep tests isolated from the developer's real policy file.
     process.env.SWITCHBOT_POLICY_PATH = path.join(tmp, '.config', 'openclaw', 'switchbot', 'policy.yaml');
+    process.env.SHELL = '/bin/bash';
     // Default: execSync throws (simulates binary not on PATH / npm not available)
     vi.mocked(execSync).mockReset().mockImplementation(() => { throw new Error('not found'); });
   });
@@ -580,6 +581,8 @@ describe('doctor command', () => {
     expect(check.detail.binaryOnPath).toBe(false);
     expect(check.detail.resolvedPath).toBeNull();
     expect(typeof check.detail.fix).toBe('string');
+    expect(['bash', 'cmd']).toContain(check.detail.currentShell);
+    expect(check.detail.fix).toMatch(/\.bashrc|export PATH|set PATH|setx PATH/);
   });
 
   it('path check: detail includes npmBinDir when npm prefix succeeds', async () => {
@@ -592,6 +595,53 @@ describe('doctor command', () => {
     const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
     const check = payload.data.checks.find((c: { name: string }) => c.name === 'path');
     expect(check.detail.npmBinDir).toBeTruthy();
+  });
+
+  it('path check: emits PowerShell-specific fix hints when SHELL indicates pwsh', async () => {
+    process.env.SHELL = 'pwsh';
+    vi.mocked(execSync).mockImplementation((cmd: unknown) => {
+      const c = String(cmd);
+      if (c.includes('npm prefix')) return '/usr/local\n' as never;
+      throw new Error('not found');
+    });
+    const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--section', 'path']);
+    const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    const check = payload.data.checks.find((c: { name: string }) => c.name === 'path');
+    expect(check.detail.currentShell).toBe('powershell');
+    expect(check.detail.fix).toMatch(/\$env:Path/);
+  });
+
+  it('daemon and health checks appear in --list output', async () => {
+    const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--list']);
+    const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    const names = payload.data.checks.map((c: { name: string }) => c.name);
+    expect(names).toContain('daemon');
+    expect(names).toContain('health');
+  });
+
+  it('daemon check reads daemon.state.json and reports running metadata', async () => {
+    const sbDir = path.join(tmp, '.switchbot');
+    fs.mkdirSync(sbDir, { recursive: true });
+    fs.writeFileSync(path.join(sbDir, 'daemon.pid'), `${process.pid}\n`);
+    fs.writeFileSync(
+      path.join(sbDir, 'daemon.state.json'),
+      JSON.stringify({
+        status: 'running',
+        pid: process.pid,
+        logFile: path.join(sbDir, 'daemon.log'),
+        pidFile: path.join(sbDir, 'daemon.pid'),
+        stateFile: path.join(sbDir, 'daemon.state.json'),
+        startedAt: '2026-04-25T00:00:00.000Z',
+        healthzPort: 3210,
+      }),
+    );
+    const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--section', 'daemon']);
+    const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    const daemon = payload.data.checks.find((c: { name: string }) => c.name === 'daemon');
+    expect(daemon.status).toBe('ok');
+    expect(daemon.detail.present).toBe(true);
+    expect(daemon.detail.pid).toBe(process.pid);
+    expect(daemon.detail.healthConfigured).toBe(true);
   });
 
   describe('maturity score', () => {

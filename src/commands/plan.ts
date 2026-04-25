@@ -15,6 +15,7 @@ import {
   listPlanRecords,
   PLANS_DIR,
 } from '../lib/plan-store.js';
+import { allowsDirectDestructiveExecution, destructiveExecutionHint } from '../lib/destructive-mode.js';
 
 export interface PlanCommandStep {
   type: 'command';
@@ -44,6 +45,21 @@ export interface Plan {
   version: '1.0';
   description?: string;
   steps: PlanStep[];
+}
+
+function findDestructivePlanSteps(plan: Plan): Array<{ index: number; deviceId: string; command: string; commandType: 'command' | 'customize'; deviceType: string | null }> {
+  const destructive: Array<{ index: number; deviceId: string; command: string; commandType: 'command' | 'customize'; deviceType: string | null }> = [];
+  for (let i = 0; i < plan.steps.length; i++) {
+    const step = plan.steps[i];
+    if (step.type !== 'command') continue;
+    const resolvedDeviceId = resolveDeviceId(step.deviceId, step.deviceName);
+    const deviceType = getCachedDevice(resolvedDeviceId)?.type;
+    const commandType = step.commandType ?? 'command';
+    if (isDestructiveCommand(deviceType, step.command, commandType)) {
+      destructive.push({ index: i + 1, deviceId: resolvedDeviceId, command: step.command, commandType, deviceType: deviceType ?? null });
+    }
+  }
+  return destructive;
 }
 
 const PLAN_JSON_SCHEMA = {
@@ -373,7 +389,10 @@ Workflow:
   $ switchbot plan schema > plan.schema.json     # export the contract
   $ switchbot plan validate my-plan.json          # check shape without running
   $ switchbot --dry-run plan run my-plan.json     # preview (mutations skipped)
-  $ switchbot plan run my-plan.json --yes         # execute destructive steps
+  $ switchbot plan save my-plan.json              # store a reviewed plan
+  $ switchbot plan review <planId>
+  $ switchbot plan approve <planId>
+  $ switchbot plan execute <planId>
   $ cat plan.json | switchbot plan run -          # or stream via stdin
 `);
 
@@ -466,7 +485,7 @@ against the live API without executing any mutations.
 
   plan
     .command('run')
-    .description('Validate + execute a plan. Respects --dry-run; destructive steps require --yes')
+    .description('Validate + preview/execute a plan. Respects --dry-run; destructive steps require the reviewed plan flow by default')
     .argument('[file]', 'Path to plan.json, or "-" / omit to read stdin')
     .option('--yes', 'Authorize destructive commands (e.g. Smart Lock unlock, Garage open)')
     .option('--require-approval', 'Prompt for confirmation before each destructive step (TTY only; mutually exclusive with --json)')
@@ -497,6 +516,26 @@ against the live API without executing any mutations.
           process.exit(2);
         }
         const planId = randomUUID();
+        const destructiveSteps = findDestructivePlanSteps(v.plan);
+        if (options.yes && destructiveSteps.length > 0 && !allowsDirectDestructiveExecution()) {
+          exitWithError({
+            code: 2,
+            kind: 'guard',
+            message: `Direct destructive execution is disabled for plan run (${destructiveSteps.length} destructive step${destructiveSteps.length === 1 ? '' : 's'}).`,
+            hint: destructiveExecutionHint(),
+            context: {
+              planId,
+              destructiveSteps: destructiveSteps.map((step) => ({
+                step: step.index,
+                deviceId: step.deviceId,
+                deviceType: step.deviceType,
+                command: step.command,
+                commandType: step.commandType,
+              })),
+              requiredWorkflow: 'plan-approval',
+            },
+          });
+        }
         let out: PlanRunResult;
         try {
           out = await executePlanSteps(v.plan, planId, options);
@@ -630,7 +669,7 @@ against the live API without executing any mutations.
     .command('execute')
     .description('Execute a pre-approved plan. Only runs if status=approved; audit entries are tagged with planId.')
     .argument('<planId>', 'Plan UUID from "plan list" (must be in approved status)')
-    .option('--yes', 'Authorize destructive commands')
+    .option('--yes', 'Deprecated no-op: approved plans already authorize destructive steps')
     .option('--require-approval', 'Prompt for each destructive step (TTY only)')
     .option('--continue-on-error', 'Keep running after a failed step')
     .action(async (planId: string, options: { yes?: boolean; requireApproval?: boolean; continueOnError?: boolean }) => {
@@ -651,7 +690,7 @@ against the live API without executing any mutations.
       }
       let out: PlanRunResult;
       try {
-        out = await executePlanSteps(record.plan, planId, options);
+        out = await executePlanSteps(record.plan, planId, { ...options, yes: true });
       } catch (err) {
         handleError(err);
         return;

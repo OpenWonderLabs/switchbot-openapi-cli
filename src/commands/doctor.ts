@@ -20,6 +20,8 @@ import {
 import { validateLoadedPolicy } from '../policy/validate.js';
 import { selectCredentialStore } from '../credentials/keychain.js';
 import { getActiveProfile } from '../lib/request-context.js';
+import { readDaemonState } from '../lib/daemon-state.js';
+import { isPidAlive } from '../rules/pid-file.js';
 
 interface Check {
   name: string;
@@ -554,6 +556,42 @@ function checkNodeVersion(): Check {
   return { name: 'node', status: 'ok', detail: `Node ${process.versions.node}` };
 }
 
+type ShellFlavor = 'powershell' | 'cmd' | 'bash' | 'zsh' | 'fish' | 'unknown';
+
+function detectShellFlavor(): ShellFlavor {
+  const shell = (process.env.SHELL ?? '').toLowerCase();
+  const comspec = (process.env.COMSPEC ?? '').toLowerCase();
+  if (shell.includes('pwsh') || shell.includes('powershell')) return 'powershell';
+  if (comspec.includes('powershell') || comspec.includes('pwsh')) return 'powershell';
+  if (comspec.endsWith('cmd.exe')) return 'cmd';
+  if (shell.endsWith('/fish') || shell === 'fish') return 'fish';
+  if (shell.endsWith('/zsh') || shell === 'zsh') return 'zsh';
+  if (shell.endsWith('/bash') || shell === 'bash') return 'bash';
+  return process.platform === 'win32' ? 'powershell' : 'unknown';
+}
+
+function buildPathFix(shell: ShellFlavor, missingSegment: string | null, npmBinDir: string | null): string {
+  if (!npmBinDir) {
+    return process.platform === 'win32'
+      ? 'Run: npm prefix -g and add that directory to your PATH.'
+      : 'Run: npm prefix -g and add <prefix>/bin to your PATH.';
+  }
+  switch (shell) {
+    case 'powershell':
+      return `$env:Path = "${missingSegment};" + $env:Path  # persist via your PowerShell profile or System Properties`;
+    case 'cmd':
+      return `set PATH=${missingSegment};%PATH%  &&  setx PATH "${missingSegment};%PATH%"`;
+    case 'fish':
+      return `fish_add_path "${missingSegment}"`;
+    case 'zsh':
+      return `export PATH="${missingSegment}:$PATH"  # add to ~/.zshrc`;
+    case 'bash':
+      return `export PATH="${missingSegment}:$PATH"  # add to ~/.bashrc`;
+    default:
+      return `export PATH="${missingSegment}:$PATH"`;
+  }
+}
+
 function checkPathDiscoverability(): Check {
   // Detect whether the `switchbot` binary is reachable on PATH.
   // This catches the common "npm install -g worked but PATH not updated" failure.
@@ -603,10 +641,8 @@ function checkPathDiscoverability(): Check {
   const missingSegment = npmBinDir && !currentPath.split(path.delimiter).includes(npmBinDir)
     ? npmBinDir
     : null;
-
-  const shellFix = missingSegment
-    ? `export PATH="${missingSegment}:$PATH"  # add to ~/.bashrc, ~/.zshrc, or ~/.profile`
-    : 'Run: npm prefix -g  — then add <prefix>/bin to your PATH.';
+  const currentShell = detectShellFlavor();
+  const shellFix = buildPathFix(currentShell, missingSegment, npmBinDir);
 
   return {
     name: 'path',
@@ -616,11 +652,89 @@ function checkPathDiscoverability(): Check {
       resolvedPath: null,
       npmBinDir,
       missingPathSegment: missingSegment,
-      currentShell: process.env.SHELL ?? process.env.COMSPEC ?? 'unknown',
+      currentShell,
       fix: shellFix,
       message: `'switchbot' is not on PATH. ${shellFix}`,
     },
   };
+}
+
+function checkDaemon(): Check {
+  const state = readDaemonState();
+  if (!state) {
+    return {
+      name: 'daemon',
+      status: 'warn',
+      detail: {
+        present: false,
+        message: 'No daemon state file found. Start one with `switchbot daemon start` if you want long-running automation.',
+      },
+    };
+  }
+  const pid = state.pid;
+  const running = pid !== null && (pid === process.pid || isPidAlive(pid));
+  return {
+    name: 'daemon',
+    status: running ? 'ok' : 'warn',
+    detail: {
+      present: true,
+      status: running ? 'running' : state.status,
+      pid: running ? pid : null,
+      stateFile: state.stateFile,
+      pidFile: state.pidFile,
+      logFile: state.logFile,
+      startedAt: state.startedAt ?? null,
+      stoppedAt: state.stoppedAt ?? null,
+      lastReloadAt: state.lastReloadAt ?? null,
+      lastReloadStatus: state.lastReloadStatus ?? null,
+      healthConfigured: typeof state.healthzPort === 'number',
+      healthzPort: state.healthzPort ?? null,
+      message: running
+        ? 'daemon running'
+        : 'daemon not running; use `switchbot daemon start` for long-running automation',
+    },
+  };
+}
+
+async function checkHealthEndpoint(): Promise<Check> {
+  const state = readDaemonState();
+  if (!state || typeof state.healthzPort !== 'number') {
+    return {
+      name: 'health',
+      status: 'warn',
+      detail: {
+        present: false,
+        message: 'No health endpoint configured. Start the daemon with `--healthz-port <n>` to enable it.',
+      },
+    };
+  }
+  const url = `http://127.0.0.1:${state.healthzPort}/healthz`;
+  try {
+    const res = await fetch(url);
+    const body = await res.json() as { data?: { overall?: string } };
+    const overall = body?.data?.overall ?? 'unknown';
+    return {
+      name: 'health',
+      status: res.ok && overall !== 'down' ? 'ok' : 'warn',
+      detail: {
+        present: true,
+        url,
+        httpStatus: res.status,
+        overall,
+        message: res.ok ? `health endpoint reachable at ${url}` : `health endpoint returned HTTP ${res.status}`,
+      },
+    };
+  } catch (err) {
+    return {
+      name: 'health',
+      status: 'warn',
+      detail: {
+        present: true,
+        url,
+        message: `health endpoint probe failed: ${err instanceof Error ? err.message : String(err)}`,
+      },
+    };
+  }
 }
 
 function checkMqtt(): Check {
@@ -768,6 +882,8 @@ const CHECK_REGISTRY: CheckDef[] = [
   { name: 'mcp', description: 'MCP server instantiable + tool count', run: () => checkMcp() },
   { name: 'policy', description: 'policy.yaml present + schema-valid (if configured)', run: () => checkPolicy() },
   { name: 'audit', description: 'recent command errors (last 24h)', run: () => checkAudit() },
+  { name: 'daemon', description: 'daemon state file + runtime status', run: () => checkDaemon() },
+  { name: 'health', description: 'health endpoint availability (daemon --healthz-port)', run: () => checkHealthEndpoint() },
 ];
 
 interface FixResult {
@@ -831,7 +947,7 @@ interface DoctorCliOptions {
 export function registerDoctorCommand(program: Command): void {
   program
     .command('doctor')
-    .description('Self-check the SwitchBot CLI setup: credentials, catalog, cache, quota, MQTT, MCP')
+    .description('Self-check the SwitchBot CLI setup: credentials, catalog, cache, quota, MQTT, daemon, health, MCP')
     .option('--section <names>', 'Comma-separated list of checks to run (see --list for names)')
     .option('--list', 'Print the registered check names and exit 0 without running any check')
     .option('--fix', 'Apply safe, reversible remediations for failing checks (e.g. clear stale cache)')
@@ -846,6 +962,7 @@ Examples:
   $ switchbot --json doctor | jq '.checks[] | select(.status != "ok")'
   $ switchbot doctor --list
   $ switchbot doctor --section credentials,mcp --json
+  $ switchbot doctor --section daemon,health --json
   $ switchbot doctor --probe --json
   $ switchbot doctor --fix --yes --json
 `)

@@ -275,7 +275,7 @@ executes for you. Supported triggers: **MQTT** (device events),
 Supported conditions: `time_between` (quiet hours) and `device_state`
 (live API check with per-tick dedup). Every fire is recorded in
 `~/.switchbot/audit.log`. `rules run` is long-running; use
-`rules reload` to hot-reload policy without dropping listeners.
+`daemon start` / `daemon reload` for the managed background mode.
 
 ```bash
 # 1. Author rules under `automation.rules`. See examples/policies/automation.yaml
@@ -290,7 +290,7 @@ switchbot rules list --json | jq .         # structured summary
 switchbot rules run --dry-run --max-firings 5
 
 # 4. Edit policy.yaml in another shell, then hot-reload without restart.
-switchbot rules reload                     # SIGHUP on Unix, sentinel file on Windows
+switchbot daemon reload                    # managed daemon reload
 
 # 5. Review recorded fires.
 switchbot rules tail --follow              # stream rule-* audit lines
@@ -743,15 +743,18 @@ switchbot plan validate plan.json
 # Preview — mutations skipped, GETs still execute
 switchbot --dry-run plan run plan.json
 
-# Run — pass --yes to allow destructive steps
-switchbot plan run plan.json --yes
+# Save / review / approve / execute for destructive plans
+switchbot plan save plan.json
+switchbot plan review <planId>
+switchbot plan approve <planId>
+switchbot plan execute <planId>
 switchbot plan run plan.json --continue-on-error
 
 # Run with per-step TTY confirmation for destructive steps (human-in-the-loop)
 switchbot plan run plan.json --require-approval
 ```
 
-A plan file is a JSON document with `version`, `description`, and a `steps` array of `command`, `scene`, or `wait` steps. Steps execute sequentially; a failed step stops the run unless `--continue-on-error` is set. `--require-approval` prompts for each destructive step individually, letting you approve or reject without re-running the whole plan. See [`docs/agent-guide.md`](./docs/agent-guide.md) for the full schema and agent integration patterns.
+A plan file is a JSON document with `version`, `description`, and a `steps` array of `command`, `scene`, or `wait` steps. Steps execute sequentially; a failed step stops the run unless `--continue-on-error` is set. `plan run` is the preview/direct path, but destructive steps are blocked by default and should go through `plan save` → `plan review` → `plan approve` → `plan execute`. See [`docs/agent-guide.md`](./docs/agent-guide.md) for the full schema and agent integration patterns.
 
 ### `devices watch` — poll status
 

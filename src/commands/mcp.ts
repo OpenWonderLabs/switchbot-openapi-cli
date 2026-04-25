@@ -58,6 +58,7 @@ import { planMigration } from '../policy/migrate.js';
 import { suggestPlan } from './plan.js';
 import { suggestRule } from '../rules/suggest.js';
 import { addRuleToPolicyFile, AddRuleError } from '../policy/add-rule.js';
+import { allowsDirectDestructiveExecution, destructiveExecutionHint } from '../lib/destructive-mode.js';
 import { writeFileSync } from 'node:fs';
 import { readAudit, type AuditEntry } from '../utils/audit.js';
 import { parseDurationToMs } from '../utils/flags.js';
@@ -434,7 +435,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
     {
       title: 'Send a control command to a device',
       description:
-        'Execute a control command on a device (turnOn, setColor, startClean, unlock, openDoor, createKey, etc.). Destructive commands (Smart Lock unlock, Garage Door open, Keypad createKey/deleteKey) require confirm:true to proceed; otherwise rejected. Commands are validated offline against the device catalog. Use idempotencyKey to safely deduplicate retries within 60 seconds.',
+        'Execute a control command on a device (turnOn, setColor, startClean, unlock, openDoor, createKey, etc.). Destructive commands require confirm:true and are still blocked in the default safety profile; use the reviewed plan workflow unless an explicit dev profile allows direct execution. Commands are validated offline against the device catalog. Use idempotencyKey to safely deduplicate retries within 60 seconds.',
       _meta: { agentSafetyTier: 'action' },
       inputSchema: z.object({
         deviceId: z.string().describe('Device ID from list_devices'),
@@ -587,7 +588,26 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         typeName = physical ? physical.deviceType : ir!.remoteType;
       }
 
-      if (isDestructiveCommand(typeName, effectiveCommand, effectiveType) && !confirm) {
+      const destructive = isDestructiveCommand(typeName, effectiveCommand, effectiveType);
+      if (destructive && !allowsDirectDestructiveExecution()) {
+        const reason = getDestructiveReason(typeName, effectiveCommand, effectiveType);
+        return mcpError(
+          'guard', 3,
+          `Direct destructive execution is disabled for command "${effectiveCommand}" on device type "${typeName}".`,
+          {
+            hint: reason ? `${destructiveExecutionHint()} Reason: ${reason}` : destructiveExecutionHint(),
+            context: {
+              command: effectiveCommand,
+              deviceType: typeName,
+              directExecutionAllowed: false,
+              requiredWorkflow: 'plan-approval',
+              ...(reason ? { safetyReason: reason, destructiveReason: reason } : {}),
+            },
+          },
+        );
+      }
+
+      if (destructive && !confirm) {
         const reason = getDestructiveReason(typeName, effectiveCommand, effectiveType);
         const entry = typeName ? findCatalogEntry(typeName) : null;
         const spec =
@@ -663,7 +683,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         return apiErrorToMcpError(err);
       }
       const isIr = getCachedDevice(deviceId)?.category === 'ir';
-      const liveIsDestructive = isDestructiveCommand(typeName, effectiveCommand, effectiveType);
+      const liveIsDestructive = destructive;
       const riskProfile = buildRiskProfile(typeName, effectiveCommand, effectiveType, liveIsDestructive);
       const structured: {
         ok: true;
@@ -1528,7 +1548,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
     {
       title: 'Validate and execute a SwitchBot plan',
       description:
-        'Execute a Plan JSON object (version 1.0). Destructive command steps are skipped unless yes=true. ' +
+        'Execute a Plan JSON object (version 1.0). Destructive command steps are skipped unless yes=true, and the default safety profile still refuses direct destructive execution in favor of the reviewed plan workflow. ' +
         'Scene and wait steps run in order. Returns per-step results and a summary.',
       _meta: { agentSafetyTier: 'action' },
       inputSchema: z.object({
@@ -1575,6 +1595,38 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
 
       const continueOnError = continue_on_error === true;
       const allowDestructive = yes === true;
+      const destructiveSteps = validated.plan.steps
+        .map((step, index) => ({ step, index }))
+        .filter((entry): entry is { step: typeof validated.plan.steps[number] & { type: 'command' }; index: number } => entry.step.type === 'command')
+        .map(({ step, index }) => {
+          const resolvedDeviceId = resolveDeviceId(step.deviceId, step.deviceName);
+          const commandType = step.commandType ?? 'command';
+          const deviceType = getCachedDevice(resolvedDeviceId)?.type;
+          return {
+            index: index + 1,
+            deviceId: resolvedDeviceId,
+            command: step.command,
+            commandType,
+            deviceType: deviceType ?? null,
+            destructive: isDestructiveCommand(deviceType, step.command, commandType),
+          };
+        })
+        .filter((step) => step.destructive);
+      if (allowDestructive && destructiveSteps.length > 0 && !allowsDirectDestructiveExecution()) {
+        return mcpError('guard', 3, 'Direct destructive execution is disabled for plan_run.', {
+          hint: destructiveExecutionHint(),
+          context: {
+            destructiveSteps: destructiveSteps.map((step) => ({
+              step: step.index,
+              deviceId: step.deviceId,
+              deviceType: step.deviceType,
+              command: step.command,
+              commandType: step.commandType,
+            })),
+            requiredWorkflow: 'plan-approval',
+          },
+        });
+      }
 
       for (let i = 0; i < validated.plan.steps.length; i++) {
         const step = validated.plan.steps[i];

@@ -47,12 +47,12 @@ const AGENT_GUIDE = {
   riskLevels: {
     low: 'Read-only or non-mutating. Safe to call autonomously.',
     medium: 'Mutates state (action tier). Prefer `plan` workflow. Reversible.',
-    high: 'Destructive / hard-to-reverse. Must go through review-before-execute. Requires --yes or plan approval.',
+    high: 'Destructive / hard-to-reverse. Must go through review-before-execute. Direct --yes execution is reserved for explicit dev profiles.',
   },
   recommendedModes: {
     direct: 'May be called directly without a plan step.',
     plan: 'Prefer batching in a plan for traceability and dry-run support.',
-    'review-before-execute': 'Must be reviewed/approved before execution. Use `plan run --require-approval` or pass --yes interactively.',
+    'review-before-execute': 'Must be reviewed/approved before execution. Use `plan save`, `plan review`, `plan approve`, then `plan execute`.',
   },
   verifiability: {
     local: 'Result is fully verifiable from the CLI return value itself.',
@@ -95,55 +95,125 @@ function deriveRiskMeta(meta: CommandMeta): RiskMeta {
   };
 }
 
+function meta(
+  mutating: boolean,
+  consumesQuota: boolean,
+  idempotencySupported: boolean,
+  agentSafetyTier: AgentSafetyTier,
+  verifiability: Verifiability,
+  typicalLatencyMs: number,
+): CommandMeta {
+  return { mutating, consumesQuota, idempotencySupported, agentSafetyTier, verifiability, typicalLatencyMs };
+}
+
+const READ_LOCAL = meta(false, false, false, 'read', 'local', 20);
+const READ_REMOTE = meta(false, true, false, 'read', 'local', 500);
+const ACTION_LOCAL = meta(true, false, false, 'action', 'local', 20);
+const ACTION_REMOTE = meta(true, true, false, 'action', 'deviceDependent', 900);
+const ACTION_REMOTE_IDEMPOTENT = meta(true, true, true, 'action', 'deviceDependent', 900);
+const DESTRUCTIVE_LOCAL = meta(true, false, false, 'destructive', 'local', 20);
+const DESTRUCTIVE_REMOTE = meta(true, true, false, 'destructive', 'deviceDependent', 1200);
+const READ_NONE = meta(false, false, false, 'read', 'none', 50);
+
 const COMMAND_META: Record<string, CommandMeta> = {
-  // devices: reads
-  'devices list':     { mutating: false, consumesQuota: true,  idempotencySupported: false, agentSafetyTier: 'read',        verifiability: 'local',            typicalLatencyMs: 600 },
-  'devices status':   { mutating: false, consumesQuota: true,  idempotencySupported: false, agentSafetyTier: 'read',        verifiability: 'local',            typicalLatencyMs: 500 },
-  'devices describe': { mutating: false, consumesQuota: true,  idempotencySupported: false, agentSafetyTier: 'read',        verifiability: 'local',            typicalLatencyMs: 600 },
-  'devices types':    { mutating: false, consumesQuota: false, idempotencySupported: false, agentSafetyTier: 'read',        verifiability: 'local',            typicalLatencyMs: 20 },
-  'devices commands': { mutating: false, consumesQuota: false, idempotencySupported: false, agentSafetyTier: 'read',        verifiability: 'local',            typicalLatencyMs: 20 },
-  'devices watch':    { mutating: false, consumesQuota: true,  idempotencySupported: false, agentSafetyTier: 'read',        verifiability: 'local',            typicalLatencyMs: 500 },
-  // devices meta (local metadata — no quota, no API call)
-  'devices meta set':   { mutating: true,  consumesQuota: false, idempotencySupported: false, agentSafetyTier: 'action',    verifiability: 'local',            typicalLatencyMs: 5 },
-  'devices meta get':   { mutating: false, consumesQuota: false, idempotencySupported: false, agentSafetyTier: 'read',      verifiability: 'local',            typicalLatencyMs: 5 },
-  'devices meta list':  { mutating: false, consumesQuota: false, idempotencySupported: false, agentSafetyTier: 'read',      verifiability: 'local',            typicalLatencyMs: 5 },
-  'devices meta clear': { mutating: true,  consumesQuota: false, idempotencySupported: false, agentSafetyTier: 'action',    verifiability: 'local',            typicalLatencyMs: 5 },
-  // devices: actions
-  'devices command':  { mutating: true,  consumesQuota: true,  idempotencySupported: true,  agentSafetyTier: 'action',      verifiability: 'deviceDependent',  typicalLatencyMs: 800 },
-  'devices batch':    { mutating: true,  consumesQuota: true,  idempotencySupported: true,  agentSafetyTier: 'action',      verifiability: 'deviceDependent',  typicalLatencyMs: 1200 },
-  // scenes
-  'scenes list':      { mutating: false, consumesQuota: true,  idempotencySupported: false, agentSafetyTier: 'read',        verifiability: 'local',            typicalLatencyMs: 500 },
-  'scenes execute':   { mutating: true,  consumesQuota: true,  idempotencySupported: false, agentSafetyTier: 'action',      verifiability: 'deviceDependent',  typicalLatencyMs: 1500 },
-  'scenes describe':  { mutating: false, consumesQuota: true,  idempotencySupported: false, agentSafetyTier: 'read',        verifiability: 'local',            typicalLatencyMs: 500 },
-  // webhook
-  'webhook setup':    { mutating: true,  consumesQuota: true,  idempotencySupported: false, agentSafetyTier: 'action',      verifiability: 'local',            typicalLatencyMs: 500 },
-  'webhook query':    { mutating: false, consumesQuota: true,  idempotencySupported: false, agentSafetyTier: 'read',        verifiability: 'local',            typicalLatencyMs: 500 },
-  'webhook delete':   { mutating: true,  consumesQuota: true,  idempotencySupported: false, agentSafetyTier: 'destructive', verifiability: 'local',            typicalLatencyMs: 500 },
-  // quota
-  'quota status':     { mutating: false, consumesQuota: false, idempotencySupported: false, agentSafetyTier: 'read',        verifiability: 'local',            typicalLatencyMs: 10 },
-  'quota show':       { mutating: false, consumesQuota: false, idempotencySupported: false, agentSafetyTier: 'read',        verifiability: 'local',            typicalLatencyMs: 10 },
-  'quota reset':      { mutating: true,  consumesQuota: false, idempotencySupported: false, agentSafetyTier: 'action',      verifiability: 'local',            typicalLatencyMs: 10 },
-  // doctor / schema / capabilities / catalog / config / cache / events / history / plan
-  'doctor':           { mutating: false, consumesQuota: true,  idempotencySupported: false, agentSafetyTier: 'read',        verifiability: 'local',            typicalLatencyMs: 900 },
-  'schema export':    { mutating: false, consumesQuota: false, idempotencySupported: false, agentSafetyTier: 'read',        verifiability: 'local',            typicalLatencyMs: 20 },
-  'capabilities':     { mutating: false, consumesQuota: false, idempotencySupported: false, agentSafetyTier: 'read',        verifiability: 'local',            typicalLatencyMs: 15 },
-  'catalog':          { mutating: false, consumesQuota: false, idempotencySupported: false, agentSafetyTier: 'read',        verifiability: 'local',            typicalLatencyMs: 15 },
-  'config set-token': { mutating: true,  consumesQuota: false, idempotencySupported: false, agentSafetyTier: 'destructive', verifiability: 'local',            typicalLatencyMs: 5 },
-  'config show':      { mutating: false, consumesQuota: false, idempotencySupported: false, agentSafetyTier: 'read',        verifiability: 'local',            typicalLatencyMs: 5 },
-  'config list-profiles': { mutating: false, consumesQuota: false, idempotencySupported: false, agentSafetyTier: 'read',    verifiability: 'local',            typicalLatencyMs: 5 },
-  'cache status':     { mutating: false, consumesQuota: false, idempotencySupported: false, agentSafetyTier: 'read',        verifiability: 'local',            typicalLatencyMs: 5 },
-  'cache clear':      { mutating: true,  consumesQuota: false, idempotencySupported: false, agentSafetyTier: 'action',      verifiability: 'local',            typicalLatencyMs: 5 },
-  'events mqtt-tail': { mutating: false, consumesQuota: true,  idempotencySupported: false, agentSafetyTier: 'read',        verifiability: 'local',            typicalLatencyMs: 500 },
-  'history show':     { mutating: false, consumesQuota: false, idempotencySupported: false, agentSafetyTier: 'read',        verifiability: 'local',            typicalLatencyMs: 20 },
-  'history replay':   { mutating: true,  consumesQuota: true,  idempotencySupported: true,  agentSafetyTier: 'action',      verifiability: 'deviceDependent',  typicalLatencyMs: 1000 },
-  'history range':    { mutating: false, consumesQuota: false, idempotencySupported: false, agentSafetyTier: 'read',        verifiability: 'local',            typicalLatencyMs: 50 },
-  'history stats':    { mutating: false, consumesQuota: false, idempotencySupported: false, agentSafetyTier: 'read',        verifiability: 'local',            typicalLatencyMs: 20 },
-  'history aggregate': { mutating: false, consumesQuota: false, idempotencySupported: false, agentSafetyTier: 'read',        verifiability: 'local',            typicalLatencyMs: 80 },
-  'plan run':         { mutating: true,  consumesQuota: true,  idempotencySupported: true,  agentSafetyTier: 'action',      verifiability: 'deviceDependent',  typicalLatencyMs: 2000 },
-  'plan validate':    { mutating: false, consumesQuota: false, idempotencySupported: false, agentSafetyTier: 'read',        verifiability: 'local',            typicalLatencyMs: 10 },
-  'plan schema':      { mutating: false, consumesQuota: false, idempotencySupported: false, agentSafetyTier: 'read',        verifiability: 'local',            typicalLatencyMs: 10 },
-  'completion':       { mutating: false, consumesQuota: false, idempotencySupported: false, agentSafetyTier: 'read',        verifiability: 'local',            typicalLatencyMs: 5 },
-  'mcp serve':        { mutating: false, consumesQuota: false, idempotencySupported: false, agentSafetyTier: 'read',        verifiability: 'local',            typicalLatencyMs: 10 },
+  'agent-bootstrap': READ_LOCAL,
+  'auth keychain describe': READ_LOCAL,
+  'auth keychain get': READ_LOCAL,
+  'auth keychain set': DESTRUCTIVE_LOCAL,
+  'auth keychain delete': DESTRUCTIVE_LOCAL,
+  'auth keychain migrate': DESTRUCTIVE_LOCAL,
+  'cache show': READ_LOCAL,
+  'cache clear': ACTION_LOCAL,
+  'capabilities': READ_LOCAL,
+  'catalog path': READ_LOCAL,
+  'catalog show': READ_LOCAL,
+  'catalog search': READ_LOCAL,
+  'catalog diff': READ_LOCAL,
+  'catalog refresh': ACTION_LOCAL,
+  'completion': READ_LOCAL,
+  'config set-token': DESTRUCTIVE_LOCAL,
+  'config show': READ_LOCAL,
+  'config list-profiles': READ_LOCAL,
+  'config agent-profile': ACTION_LOCAL,
+  'daemon start': ACTION_LOCAL,
+  'daemon stop': ACTION_LOCAL,
+  'daemon status': READ_LOCAL,
+  'daemon reload': ACTION_LOCAL,
+  'devices list': READ_REMOTE,
+  'devices status': READ_REMOTE,
+  'devices command': ACTION_REMOTE_IDEMPOTENT,
+  'devices types': READ_LOCAL,
+  'devices commands': READ_LOCAL,
+  'devices describe': READ_REMOTE,
+  'devices batch': ACTION_REMOTE_IDEMPOTENT,
+  'devices watch': READ_REMOTE,
+  'devices explain': READ_LOCAL,
+  'devices expand': READ_LOCAL,
+  'devices meta set': ACTION_LOCAL,
+  'devices meta get': READ_LOCAL,
+  'devices meta list': READ_LOCAL,
+  'devices meta clear': ACTION_LOCAL,
+  'doctor': READ_LOCAL,
+  'events tail': READ_NONE,
+  'events mqtt-tail': READ_REMOTE,
+  'health check': READ_LOCAL,
+  'health serve': READ_LOCAL,
+  'history show': READ_LOCAL,
+  'history replay': ACTION_REMOTE_IDEMPOTENT,
+  'history range': READ_LOCAL,
+  'history stats': READ_LOCAL,
+  'history verify': READ_LOCAL,
+  'history aggregate': READ_LOCAL,
+  'install': ACTION_LOCAL,
+  'mcp serve': READ_LOCAL,
+  'plan schema': READ_LOCAL,
+  'plan validate': READ_LOCAL,
+  'plan suggest': READ_LOCAL,
+  'plan run': ACTION_REMOTE_IDEMPOTENT,
+  'plan save': ACTION_LOCAL,
+  'plan list': READ_LOCAL,
+  'plan review': READ_LOCAL,
+  'plan approve': DESTRUCTIVE_LOCAL,
+  'plan execute': DESTRUCTIVE_REMOTE,
+  'policy validate': READ_LOCAL,
+  'policy new': ACTION_LOCAL,
+  'policy migrate': ACTION_LOCAL,
+  'policy diff': READ_LOCAL,
+  'policy add-rule': ACTION_LOCAL,
+  'policy backup': READ_LOCAL,
+  'policy restore': DESTRUCTIVE_LOCAL,
+  'quota status': READ_LOCAL,
+  'quota reset': ACTION_LOCAL,
+  'rules suggest': READ_LOCAL,
+  'rules lint': READ_LOCAL,
+  'rules list': READ_LOCAL,
+  'rules run': ACTION_REMOTE,
+  'rules reload': ACTION_LOCAL,
+  'rules tail': READ_LOCAL,
+  'rules replay': READ_LOCAL,
+  'rules webhook-rotate-token': DESTRUCTIVE_LOCAL,
+  'rules webhook-show-token': DESTRUCTIVE_LOCAL,
+  'rules conflicts': READ_LOCAL,
+  'rules doctor': READ_LOCAL,
+  'rules summary': READ_LOCAL,
+  'rules last-fired': READ_LOCAL,
+  'schema export': READ_LOCAL,
+  'scenes list': READ_REMOTE,
+  'scenes execute': ACTION_REMOTE,
+  'scenes describe': READ_REMOTE,
+  'scenes validate': READ_REMOTE,
+  'scenes simulate': READ_REMOTE,
+  'scenes explain': READ_REMOTE,
+  'status-sync run': ACTION_REMOTE,
+  'status-sync start': ACTION_LOCAL,
+  'status-sync stop': ACTION_LOCAL,
+  'status-sync status': READ_LOCAL,
+  'uninstall': ACTION_LOCAL,
+  'upgrade-check': READ_REMOTE,
+  'webhook setup': ACTION_REMOTE,
+  'webhook query': READ_REMOTE,
+  'webhook update': ACTION_REMOTE,
+  'webhook delete': DESTRUCTIVE_REMOTE,
 };
 
 function metaFor(command: string): CommandMeta | null {
@@ -174,7 +244,7 @@ const IDEMPOTENCY_CONTRACT = {
   mcp: 'MCP send_command accepts the same idempotencyKey field with identical semantics.',
 };
 
-interface CompactLeaf {
+export interface CompactLeaf {
   name: string;
   mutating: boolean;
   consumesQuota: boolean;
@@ -189,26 +259,29 @@ interface CompactLeaf {
   recommendedMode: RecommendedMode;
 }
 
+function enumerateLeafNames(program: Command, prefix = ''): string[] {
+  const out: string[] = [];
+  for (const cmd of program.commands) {
+    const full = prefix ? `${prefix} ${cmd.name()}` : cmd.name();
+    if (cmd.commands.length === 0) out.push(full);
+    else out.push(...enumerateLeafNames(cmd, full));
+  }
+  return out;
+}
+
+function validateCommandMetaCoverage(program: Command): string[] {
+  const leaves = enumerateLeafNames(program);
+  return leaves.filter((leaf) => !COMMAND_META[leaf]).sort().map((leaf) => `missing:${leaf}`);
+}
+
 function enumerateLeaves(program: Command, prefix = ''): CompactLeaf[] {
   const out: CompactLeaf[] = [];
   for (const cmd of program.commands) {
     const full = prefix ? `${prefix} ${cmd.name()}` : cmd.name();
     if (cmd.commands.length === 0) {
       const meta = metaFor(full);
-      if (meta) {
-        out.push({ name: full, ...meta, ...deriveRiskMeta(meta) });
-      } else {
-        // Unknown leaf → default to read-safe with a warning flag so agents notice.
-        const defaultMeta: CommandMeta = {
-          mutating: false,
-          consumesQuota: false,
-          idempotencySupported: false,
-          agentSafetyTier: 'read',
-          verifiability: 'local',
-          typicalLatencyMs: 50,
-        };
-        out.push({ name: full, ...defaultMeta, ...deriveRiskMeta(defaultMeta) });
-      }
+      if (!meta) throw new Error(`capabilities metadata missing for leaf command "${full}"`);
+      out.push({ name: full, ...meta, ...deriveRiskMeta(meta) });
     } else {
       out.push(...enumerateLeaves(cmd, full));
     }
@@ -235,6 +308,10 @@ export function registerCapabilitiesCommand(program: Command): void {
     .option('--surface <s>', 'Restrict surfaces block to one of: cli, mcp, plan, mqtt, all (default: all)', enumArg('--surface', SURFACES))
     .option('--project <csv>', 'Project top-level fields (e.g. --project identity,commands,agentGuide)', stringArg('--project'))
     .action((opts: { minimal?: boolean; compact?: boolean; used?: boolean; surface?: string; project?: string }) => {
+      const coverageIssues = validateCommandMetaCoverage(program);
+      if (coverageIssues.length > 0) {
+        throw new Error(`capabilities metadata coverage error: ${coverageIssues.join(', ')}`);
+      }
       const compact = Boolean(opts.minimal || opts.compact);
       const catalog = getEffectiveCatalog();
       const leaves = enumerateLeaves(program);

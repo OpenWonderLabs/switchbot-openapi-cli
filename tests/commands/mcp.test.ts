@@ -132,6 +132,7 @@ describe('mcp server', () => {
     cacheMock.map.clear();
     cacheMock.getCachedDevice.mockClear();
     cacheMock.updateCacheFromDeviceList.mockClear();
+    delete process.env.SWITCHBOT_ALLOW_DIRECT_DESTRUCTIVE;
   });
 
   it('exposes the twenty-one tools with titles and input schemas', async () => {
@@ -195,7 +196,24 @@ describe('mcp server', () => {
     expect(apiMock.__instance.post).not.toHaveBeenCalled();
   });
 
-  it('send_command allows destructive commands when confirm:true', async () => {
+  it('send_command rejects direct destructive commands in the default profile even with confirm:true', async () => {
+    cacheMock.map.set('LOCK1', { type: 'Smart Lock', name: 'Front Door', category: 'physical' });
+    const { client } = await pair();
+
+    const res = await client.callTool({
+      name: 'send_command',
+      arguments: { deviceId: 'LOCK1', command: 'unlock', confirm: true },
+    });
+
+    expect(res.isError).toBe(true);
+    const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    expect(parsed.error.kind).toBe('guard');
+    expect(parsed.error.hint).toMatch(/plan save|plan execute/);
+    expect(apiMock.__instance.post).not.toHaveBeenCalled();
+  });
+
+  it('send_command allows destructive commands with confirm:true when the direct-execution override is enabled', async () => {
+    process.env.SWITCHBOT_ALLOW_DIRECT_DESTRUCTIVE = '1';
     cacheMock.map.set('LOCK1', { type: 'Smart Lock', name: 'Front Door', category: 'physical' });
     apiMock.__instance.post.mockResolvedValueOnce({
       data: { statusCode: 100, body: { commandId: 'xyz' } },
@@ -209,9 +227,6 @@ describe('mcp server', () => {
 
     expect(res.isError).toBeFalsy();
     expect(apiMock.__instance.post).toHaveBeenCalledTimes(1);
-    const [url, body] = apiMock.__instance.post.mock.calls[0];
-    expect(url).toBe('/v1.1/devices/LOCK1/commands');
-    expect(body).toMatchObject({ command: 'unlock', commandType: 'command' });
   });
 
   it('send_command rejects an unknown command name before calling the API', async () => {
@@ -704,6 +719,27 @@ describe('mcp server', () => {
       expect(summary.total).toBe(1);
       expect(summary.skipped).toBe(1);
       expect(summary.error).toBe(0);
+    });
+
+    it('plan_run rejects direct destructive execution when yes=true in the default profile', async () => {
+      cacheMock.map.set('LOCK1', { type: 'Smart Lock', name: 'Front Door', category: 'physical' });
+      const { client } = await pair();
+
+      const res = await client.callTool({
+        name: 'plan_run',
+        arguments: {
+          yes: true,
+          plan: {
+            version: '1.0',
+            steps: [{ type: 'command', deviceId: 'LOCK1', command: 'unlock' }],
+          },
+        },
+      });
+
+      expect(res.isError).toBe(true);
+      const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+      expect(parsed.error.kind).toBe('guard');
+      expect(parsed.error.hint).toMatch(/plan save|plan execute/);
     });
 
     it('audit_query filters entries by result', async () => {

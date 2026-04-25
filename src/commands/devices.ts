@@ -34,6 +34,7 @@ import { registerDevicesMetaCommand } from './device-meta.js';
 import { isDryRun } from '../utils/flags.js';
 import { DryRunSignal } from '../api/client.js';
 import { resolveField, resolveFieldList, listSupportedFieldInputs } from '../schema/field-aliases.js';
+import { allowsDirectDestructiveExecution, destructiveExecutionHint } from '../lib/destructive-mode.js';
 
 const EXPAND_HINTS: Record<string, { command: string; flags: string }> = {
   'Air Conditioner':  { command: 'setAll',      flags: '--temp 26 --mode cool --fan low --power on' },
@@ -383,7 +384,7 @@ Examples:
     .option('--name-category <cat>', 'Narrow --name by category: physical|ir', enumArg('--name-category', ['physical', 'ir'] as const))
     .option('--name-room <room>', 'Narrow --name by room name (substring match)', stringArg('--name-room'))
     .option('--type <commandType>', 'Command type: "command" for built-in commands (default), "customize" for user-defined IR buttons', enumArg('--type', COMMAND_TYPES), 'command')
-    .option('--yes', 'Confirm a destructive command (Smart Lock unlock, Garage open, …). --dry-run is always allowed without --yes.')
+    .option('--yes', 'Confirm a destructive command in an explicit dev profile. --dry-run is always allowed without --yes.')
     .option('--explain', 'Print a human-readable summary of what this command would do (risk level, device type, idempotency) then exit without executing.')
     .option('--allow-unknown-device', 'Allow targeting a deviceId that is not in the local cache. By default unknown IDs exit 2 so --dry-run is a reliable pre-flight gate; use this flag for scripted pass-through.')
     .option('--skip-param-validation', 'Skip client-side parameter validation (escape hatch — prefer fixing the argument over using this).')
@@ -422,8 +423,8 @@ Common errors:
 
 Safety:
   Destructive commands (Smart Lock unlock, Garage Door Opener turnOn/turnOff,
-  Keypad createKey/deleteKey, …) are blocked by default. Pass --yes to confirm,
-  or --dry-run to preview without sending.
+  Keypad createKey/deleteKey, …) are blocked by default. Use the reviewed plan
+  flow instead, or --dry-run to preview without sending.
 
 Examples:
   $ switchbot devices command ABC123 turnOn
@@ -431,7 +432,7 @@ Examples:
   $ switchbot devices command ABC123 setAll "26,1,3,on"
   $ switchbot devices command ABC123 startClean '{"action":"sweep","param":{"fanLevel":2,"times":1}}'
   $ switchbot devices command ABC123 "MyButton" --type customize
-  $ switchbot devices command <lockId> unlock --yes
+  $ switchbot devices command <lockId> unlock --dry-run
 `)
     .action(async (deviceIdArg: string | undefined, cmdArg: string | undefined, parameter: string | undefined, options: { name?: string; nameStrategy?: string; nameType?: string; nameCategory?: 'physical' | 'ir'; nameRoom?: string; type: string; yes?: boolean; explain?: boolean; allowUnknownDevice?: boolean; skipParamValidation?: boolean; idempotencyKey?: string }) => {
       // Declared outside try so the DryRunSignal catch branch can reference them.
@@ -571,33 +572,46 @@ Examples:
             console.log(`Parameter: ${parameter ?? '(none)'}`);
             console.log(`Risk level: ${riskLevel}`);
             if (reason) console.log(`Safety reason: ${reason}`);
-            if (isDestructive) {
-              console.log('Requires --yes or plan approval to execute.');
-            }
+            if (isDestructive) console.log(`Requires plan approval by default. ${destructiveExecutionHint()}`);
             console.log('(not executed — remove --explain to run)');
           }
           process.exit(0);
         }
 
-        if (
-          !options.yes &&
-          !isDryRun() &&
-          isDestructiveCommand(cachedForGuard?.type, cmd, options.type)
-        ) {
+        const destructive = isDestructiveCommand(cachedForGuard?.type, cmd, options.type);
+        if (!isDryRun() && destructive && !allowsDirectDestructiveExecution()) {
+          const typeLabel = cachedForGuard?.type ?? 'unknown';
+          const reason = getDestructiveReason(cachedForGuard?.type, cmd, options.type);
+          exitWithError({
+            kind: 'guard',
+            message: `Direct destructive execution is disabled for command "${cmd}" on ${typeLabel}.`,
+            hint: reason ? `${destructiveExecutionHint()} Reason: ${reason}` : destructiveExecutionHint(),
+            context: {
+              command: cmd,
+              deviceType: typeLabel,
+              deviceId,
+              directExecutionAllowed: false,
+              requiredWorkflow: 'plan-approval',
+              ...(reason ? { safetyReason: reason, destructiveReason: reason } : {}),
+            },
+          });
+        }
+
+        if (!options.yes && !isDryRun() && destructive) {
           const typeLabel = cachedForGuard?.type ?? 'unknown';
           const reason = getDestructiveReason(cachedForGuard?.type, cmd, options.type);
           exitWithError({
             kind: 'guard',
             message: `Refusing to run destructive command "${cmd}" on ${typeLabel} without --yes.`,
             hint: reason
-              ? `Re-run with --yes to confirm, or use 'plan run --require-approval' for interactive approval. Reason: ${reason}`
-              : "Re-run with --yes to confirm, use 'plan run --require-approval' for interactive approval, or --dry-run to preview without sending.",
+              ? `Re-run with --yes only from an explicit dev profile, or use the reviewed plan flow. Reason: ${reason}`
+              : `Re-run with --yes only from an explicit dev profile, use the reviewed plan flow, or --dry-run to preview without sending.`,
             context: { command: cmd, deviceType: typeLabel, deviceId, ...(reason ? { safetyReason: reason, destructiveReason: reason } : {}) },
           });
         }
 
         // Warn when --yes is given but the command is not destructive (no-op flag)
-        if (options.yes && !isDestructiveCommand(cachedForGuard?.type, cmd, options.type) && !isDryRun()) {
+        if (options.yes && !destructive && !isDryRun()) {
           console.error(`Note: --yes has no effect; "${cmd}" is not a destructive command.`);
         }
 
