@@ -31,7 +31,7 @@ import {
   type DeviceStatusFetcher,
 } from './matcher.js';
 import { ThrottleGate, parseMaxPerMs } from './throttle.js';
-import { executeRuleAction } from './action.js';
+import { executeRuleAction, parseRuleCommand } from './action.js';
 import { CronScheduler } from './cron-scheduler.js';
 import { WebhookListener, DEFAULT_WEBHOOK_PORT } from './webhook-listener.js';
 import {
@@ -556,6 +556,7 @@ export class RulesEngine {
         ? this.aliases[rule.when.device] ?? rule.when.device
         : undefined;
       if (!matchesMqttTrigger(rule.when, event, resolvedFilter)) continue;
+      this.stats.eventsProcessed++;
       await this.enqueue(() => this.dispatchRule(rule, event));
     }
   }
@@ -820,16 +821,17 @@ export class RulesEngine {
     // suppressIfAlreadyDesired: skip if device's live state already matches the command outcome.
     if (rule.suppressIfAlreadyDesired) {
       const firstAction = rule.then[0];
-      const cmd = firstAction?.command;
-      if ((cmd === 'turnOn' || cmd === 'turnOff') && (firstAction?.device || event.deviceId)) {
+      const parsed = firstAction ? parseRuleCommand(firstAction.command) : null;
+      const verb = parsed?.verb ?? firstAction?.command;
+      if ((verb === 'turnOn' || verb === 'turnOff') && (firstAction?.device || event.deviceId)) {
         const targetId = firstAction?.device ? (this.aliases[firstAction.device] ?? firstAction.device) : event.deviceId!;
         try {
           const deviceStatus = await fetchStatus(targetId);
           const powerState = deviceStatus['powerState'] as string | undefined;
-          if ((cmd === 'turnOn' && powerState === 'on') || (cmd === 'turnOff' && powerState === 'off')) {
+          if ((verb === 'turnOn' && powerState === 'on') || (verb === 'turnOff' && powerState === 'off')) {
             writeAudit({
               t: event.t.toISOString(), kind: 'rule-throttled',
-              deviceId: targetId, command: cmd,
+              deviceId: targetId, command: verb ?? '',
               parameter: null, commandType: 'command', dryRun: true, result: 'ok',
               rule: { name: rule.name, triggerSource: rule.when.source, matchedDevice: event.deviceId, fireId, reason: `suppressIfAlreadyDesired — powerState already "${powerState}"` },
             });

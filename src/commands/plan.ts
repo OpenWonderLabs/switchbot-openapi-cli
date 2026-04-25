@@ -530,13 +530,11 @@ against the live API without executing any mutations.
       }
       const v = validatePlan(raw);
       if (!v.ok) {
-        if (isJsonMode()) {
-          printJson({ saved: false, issues: v.issues });
-        } else {
-          console.error('✗ plan invalid:');
-          for (const i of v.issues) console.error(`  ${i.path}: ${i.message}`);
-        }
-        process.exit(2);
+        exitWithError({
+          code: 2, kind: 'usage',
+          message: `Plan is invalid (${v.issues.length} issue${v.issues.length > 1 ? 's' : ''})`,
+          context: { issues: v.issues },
+        });
       }
       const record = savePlanRecord(v.plan);
       if (isJsonMode()) {
@@ -660,17 +658,17 @@ against the live API without executing any mutations.
       }
       const { ok, error, skipped } = out.summary;
       const succeeded = error === 0 && skipped === 0;
+      const failureReason = succeeded ? undefined : [error > 0 ? `${error} error${error > 1 ? 's' : ''}` : null, skipped > 0 ? `${skipped} skipped` : null].filter(Boolean).join(', ');
       if (succeeded) {
         updatePlanRecord(planId, { status: 'executed', executedAt: new Date().toISOString() });
       } else {
-        const reason = [error > 0 ? `${error} error${error > 1 ? 's' : ''}` : null, skipped > 0 ? `${skipped} skipped` : null].filter(Boolean).join(', ');
-        updatePlanRecord(planId, { status: 'failed', failedAt: new Date().toISOString(), failureReason: reason });
+        updatePlanRecord(planId, { status: 'failed', failedAt: new Date().toISOString(), failureReason });
       }
       if (isJsonMode()) {
         printJson({ ran: true, planId, succeeded, ...out });
       } else {
         console.log(`\nsummary: ok=${ok} error=${error} skipped=${skipped} total=${out.summary.total}`);
-        if (!succeeded) console.error(`Plan marked as failed (${[error > 0 ? `${error} error${error > 1 ? 's' : ''}` : null, skipped > 0 ? `${skipped} skipped` : null].filter(Boolean).join(', ')}). Re-run after fixing to retry.`);
+        if (!succeeded) console.error(`Plan marked as failed (${failureReason}). Re-run after fixing to retry.`);
       }
       if (!succeeded) process.exit(1);
     });
