@@ -22,9 +22,6 @@ await build({
   // Keep heavy native-binding or large deps external; they stay in node_modules.
   external: [
     'node:*',
-    // commander uses CJS require('node:events') internally; its CJS-to-ESM
-    // interop in esbuild's shim breaks under Node 22. Keep it external.
-    'commander',
     // native binding deps
     'mqtt',
     'pino',
@@ -34,8 +31,20 @@ await build({
     '@modelcontextprotocol/sdk',
     // pure-JS but large — inline separately if needed
   ],
+  // Inject a createRequire-based require() so CJS packages bundled into the
+  // ESM output can call require('process'), require('events'), etc. (bare names
+  // without node: prefix) without hitting esbuild's __require2 "not supported" error.
+  inject: [path.join(root, 'scripts/cjs-shim.mjs')],
   banner: {
-    js: '#!/usr/bin/env node',
+    // The shebang must come first (Node.js requires it at byte 0).
+    // The `const require` line runs BEFORE esbuild's __require IIFE (which checks
+    // `typeof require !== "undefined"`), so CJS packages that call bare
+    // require('process') or require('node:events') get the real Node require().
+    js: [
+      '#!/usr/bin/env node',
+      'import { createRequire as __cjsReq } from "node:module";',
+      'const require = __cjsReq(import.meta.url);',
+    ].join('\n'),
   },
   logLevel: 'info',
 });

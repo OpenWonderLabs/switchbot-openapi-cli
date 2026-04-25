@@ -5,7 +5,8 @@ import { spawnSync, execSync } from 'node:child_process';
 
 // Build to a separate path so we don't overwrite the tsc dist/index.js
 // that other tests (install smoke, status-sync smoke) depend on.
-const bundleEntry = path.resolve('dist/bundle-test/index.js');
+// Must stay in dist/ (not a subdirectory) so require('../package.json') resolves correctly.
+const bundleEntry = path.resolve('dist/bundle-test.js');
 
 describe('esbuild production bundle', () => {
   beforeAll(() => {
@@ -31,16 +32,13 @@ describe('esbuild production bundle', () => {
     expect(result.stderr).toBe('');
   });
 
-  // TODO: esbuild inlines CJS packages (yaml, etc.) that use require('process')
-  // without the node: prefix; this breaks at runtime on Node 22. Fix tracked
-  // in a follow-up PR (externalize problematic CJS deps or switch to CJS output).
-  it.skip('--version exits 0 and outputs a valid semver', () => {
+  it('--version exits 0 and outputs a valid semver', () => {
     const result = spawnSync(process.execPath, [bundleEntry, '--version'], { encoding: 'utf-8' });
     expect(result.status, `--version exited ${result.status}:\n${result.stderr}`).toBe(0);
     expect(result.stdout.trim()).toMatch(/^\d+\.\d+\.\d+/);
   });
 
-  it.skip('--version matches package.json version', () => {
+  it('--version matches package.json version', () => {
     const pkgVersion = JSON.parse(fs.readFileSync(path.resolve('package.json'), 'utf-8')).version as string;
     const result = spawnSync(process.execPath, [bundleEntry, '--version'], { encoding: 'utf-8' });
     expect(result.stdout.trim(), `Bundle reports ${result.stdout.trim()} but package.json says ${pkgVersion}`).toBe(pkgVersion);
