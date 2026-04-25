@@ -93,3 +93,39 @@ describe('analyzeConflicts — quiet-hours gap detection', () => {
     expect(f?.hint).toContain('22:00');
   });
 });
+
+describe('analyzeConflicts — extractDeviceFromAction fallback', () => {
+  it('detects opposing actions when device is embedded in command string (no device: field)', () => {
+    const ruleOn: Rule = {
+      name: 'strip-on',
+      when: { source: 'cron', schedule: '0 8 * * *' },
+      then: [{ command: 'devices command DEVICE123 turnOn' }],
+    };
+    const ruleOff: Rule = {
+      name: 'strip-off',
+      when: { source: 'cron', schedule: '0 8 * * *' },
+      then: [{ command: 'devices command DEVICE123 turnOff' }],
+    };
+    const report = analyzeConflicts([ruleOn, ruleOff]);
+    const finding = report.findings.find((f) => f.code === 'opposing-actions');
+    expect(finding).toBeDefined();
+    expect(finding?.rules).toContain('strip-on');
+    expect(finding?.rules).toContain('strip-off');
+  });
+
+  it('does not flag opposing actions when command strings embed different device IDs', () => {
+    const ruleOn: Rule = {
+      name: 'on-device-a',
+      when: { source: 'cron', schedule: '0 8 * * *' },
+      then: [{ command: 'devices command DEVICE_A turnOn' }],
+    };
+    const ruleOff: Rule = {
+      name: 'off-device-b',
+      when: { source: 'cron', schedule: '0 8 * * *' },
+      then: [{ command: 'devices command DEVICE_B turnOff' }],
+    };
+    const report = analyzeConflicts([ruleOn, ruleOff]);
+    const finding = report.findings.find((f) => f.code === 'opposing-actions');
+    expect(finding).toBeUndefined();
+  });
+});

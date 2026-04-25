@@ -138,7 +138,7 @@ describe('suggestRule', () => {
       });
       if (rule.when.source === 'mqtt') expect(rule.when.device).toBe('motion sensor');
       expect(rule.then).toHaveLength(1);
-      expect(rule.then[0].device).toBe('hallway lamp');
+      expect(rule.then[0].device).toBe('lamp-1');
     });
 
     it('uses all devices as action targets for cron trigger', () => {

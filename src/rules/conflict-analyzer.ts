@@ -68,7 +68,9 @@ function commandsAreOpposing(a: string, b: string): boolean {
 }
 
 function extractDeviceFromAction(action: { command: string; device?: string }): string | null {
-  return action.device ?? null;
+  if (action.device) return action.device;
+  const m = /\bdevices\s+command\s+(\S+)/.exec(action.command ?? '');
+  return m ? m[1] : null;
 }
 
 function extractCommandVerb(command: string): string {
