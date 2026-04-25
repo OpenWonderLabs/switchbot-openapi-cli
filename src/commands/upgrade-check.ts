@@ -30,12 +30,14 @@ function fetchLatestVersion(packageName: string, timeoutMs = 8000): Promise<stri
 }
 
 function semverGt(a: string, b: string): boolean {
-  const parts = (v: string) => v.split('.').map((n) => Number.parseInt(n, 10));
-  const [aMaj, aMin, aPat] = parts(a);
-  const [bMaj, bMin, bPat] = parts(b);
+  const numParts = (v: string) => v.replace(/-.*$/, '').split('.').map((n) => Number.parseInt(n, 10));
+  const [aMaj, aMin, aPat] = numParts(a);
+  const [bMaj, bMin, bPat] = numParts(b);
   if (aMaj !== bMaj) return aMaj > bMaj;
   if (aMin !== bMin) return aMin > bMin;
-  return aPat > bPat;
+  if (aPat !== bPat) return aPat > bPat;
+  // Same numeric version: release (no prerelease) > prerelease
+  return !a.includes('-') && b.includes('-');
 }
 
 export function registerUpgradeCheckCommand(program: Command): void {
