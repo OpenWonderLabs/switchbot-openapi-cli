@@ -27,6 +27,7 @@ import type { Rule, Condition } from './types.js';
 import { isTimeBetween, isAllCondition, isAnyCondition, isNotCondition } from './types.js';
 import { parseMaxPerMs } from './throttle.js';
 import { isDestructiveCommand } from './destructive.js';
+import { extractDeviceIdFromAction } from './action.js';
 
 export type ConflictSeverity = 'error' | 'warning' | 'info';
 
@@ -65,12 +66,6 @@ function commandsAreOpposing(a: string, b: string): boolean {
     if ((a === x && b === y) || (a === y && b === x)) return true;
   }
   return false;
-}
-
-function extractDeviceFromAction(action: { command: string; device?: string }): string | null {
-  if (action.device) return action.device;
-  const m = /\bdevices\s+command\s+(\S+)/.exec(action.command ?? '');
-  return m ? m[1] : null;
 }
 
 function extractCommandVerb(command: string): string {
@@ -129,8 +124,8 @@ export function analyzeConflicts(rules: Rule[], quietHours?: QuietHours | null):
 
       for (const actionA of a.then) {
         for (const actionB of b.then) {
-          const deviceA = extractDeviceFromAction(actionA);
-          const deviceB = extractDeviceFromAction(actionB);
+          const deviceA = extractDeviceIdFromAction(actionA);
+          const deviceB = extractDeviceIdFromAction(actionB);
           // Skip if devices can't be compared.
           if (!deviceA || !deviceB || deviceA !== deviceB) continue;
           const verbA = extractCommandVerb(actionA.command);

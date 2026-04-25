@@ -252,3 +252,14 @@ export async function executeRuleAction(
     return { ok: false, error: msg, deviceId, verb: parsed.verb };
   }
 }
+
+/**
+ * Extract the raw deviceId from an action object without alias resolution.
+ * Prefers `action.device` over the deviceId embedded in the command string.
+ * Use resolveActionDevice() when alias resolution is needed.
+ */
+export function extractDeviceIdFromAction(action: { command: string; device?: string }): string | null {
+  if (action.device) return action.device;
+  const m = /\bdevices\s+command\s+(\S+)/.exec(action.command ?? '');
+  return m ? m[1] : null;
+}
