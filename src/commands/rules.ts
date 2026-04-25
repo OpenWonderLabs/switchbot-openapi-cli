@@ -14,7 +14,11 @@ import { validateLoadedPolicy } from '../policy/validate.js';
 import type { AutomationBlock, Rule } from '../rules/types.js';
 import { isWebhookTrigger } from '../rules/types.js';
 import { lintRules, RulesEngine, type LintResult } from '../rules/engine.js';
-import { analyzeConflicts, type ConflictReport } from '../rules/conflict-analyzer.js';
+import {
+  analyzeConflicts,
+  type ConflictReport,
+  type QuietHours,
+} from '../rules/conflict-analyzer.js';
 import { tryLoadConfig } from '../config.js';
 import { fetchMqttCredential } from '../mqtt/credential.js';
 import { SwitchBotMqttClient } from '../mqtt/client.js';
@@ -46,6 +50,7 @@ interface LoadedAutomation {
   automation: AutomationBlock | null;
   aliases: Record<string, string>;
   schemaVersion?: string;
+  quietHours: QuietHours | null;
 }
 
 function loadAutomation(policyPathFlag: string | undefined): LoadedAutomation | null {
@@ -92,7 +97,12 @@ function loadAutomation(policyPathFlag: string | undefined): LoadedAutomation | 
       if (typeof v === 'string') aliases[k] = v;
     }
   }
-  return { path, automation, aliases, schemaVersion: result.schemaVersion };
+  const rawQH = data.quiet_hours as { start?: unknown; end?: unknown } | null | undefined;
+  const quietHours: QuietHours | null =
+    rawQH && typeof rawQH.start === 'string' && typeof rawQH.end === 'string'
+      ? { start: rawQH.start, end: rawQH.end }
+      : null;
+  return { path, automation, aliases, schemaVersion: result.schemaVersion, quietHours };
 }
 
 function describeTrigger(rule: Rule): string {
@@ -686,7 +696,7 @@ function registerConflicts(rules: Command): void {
       const loaded = loadAutomation(pathArg);
       if (!loaded) return;
       const allRules = loaded.automation?.rules ?? [];
-      const report = analyzeConflicts(allRules);
+      const report = analyzeConflicts(allRules, loaded.quietHours);
       if (isJsonMode()) {
         printJson({
           policyPath: loaded.path,
@@ -709,7 +719,7 @@ function registerDoctor(rules: Command): void {
       if (!loaded) return;
       const allRules = loaded.automation?.rules ?? [];
       const lintResult = lintRules(loaded.automation);
-      const conflictReport = analyzeConflicts(allRules);
+      const conflictReport = analyzeConflicts(allRules, loaded.quietHours);
 
       const overall = lintResult.valid && conflictReport.clean;
 
@@ -804,6 +814,70 @@ function registerLastFired(rules: Command): void {
     });
 }
 
+function registerExplain(rules: Command): void {
+  rules
+    .command('explain <name> [path]')
+    .description('Show full detail for a named rule: trigger, conditions, actions, and last-fired time.')
+    .option('--file <path>', `Audit log path (default ${DEFAULT_AUDIT_PATH}).`)
+    .action((name: string, pathArg: string | undefined, opts: { file?: string }) => {
+      const loaded = loadAutomation(pathArg);
+      if (!loaded) return;
+      const allRules = loaded.automation?.rules ?? [];
+      const rule = allRules.find((r) => r.name === name);
+      if (!rule) {
+        exitWithError({
+          code: 1,
+          kind: 'usage',
+          message: `Rule "${name}" not found in policy.`,
+          extra: {
+            subKind: 'rule-not-found',
+            available: allRules.map((r) => r.name),
+          },
+        });
+        return;
+      }
+
+      const auditFile = opts.file ?? DEFAULT_AUDIT_PATH;
+      const entries = fs.existsSync(auditFile) ? readAudit(auditFile) : [];
+      const fires = filterRuleAudits(entries, { ruleName: name, kinds: ['rule-fire', 'rule-fire-dry'] });
+      const lastFired = fires.length > 0 ? fires[fires.length - 1].t : null;
+
+      const detail = {
+        name: rule.name,
+        enabled: rule.enabled !== false,
+        trigger: describeTrigger(rule),
+        conditions: rule.conditions ?? [],
+        actions: rule.then,
+        cooldown: rule.cooldown ?? rule.throttle?.max_per ?? null,
+        hysteresis: rule.hysteresis ?? rule.requires_stable_for ?? null,
+        maxFiringsPerHour: rule.maxFiringsPerHour ?? null,
+        suppressIfAlreadyDesired: rule.suppressIfAlreadyDesired ?? false,
+        dryRun: rule.dry_run === true,
+        lastFired,
+      };
+
+      if (isJsonMode()) {
+        printJson(detail);
+        return;
+      }
+
+      console.log(`name:                  ${detail.name}`);
+      console.log(`enabled:               ${detail.enabled}`);
+      console.log(`trigger:               ${detail.trigger}`);
+      console.log(`conditions:            ${detail.conditions.length === 0 ? '(none)' : JSON.stringify(detail.conditions)}`);
+      console.log(`actions:               ${detail.actions.length}`);
+      for (const a of detail.actions) {
+        console.log(`  - ${a.command}${a.device ? ` [${a.device}]` : ''}${a.on_error ? ` on_error=${a.on_error}` : ''}`);
+      }
+      if (detail.cooldown) console.log(`cooldown:              ${detail.cooldown}`);
+      if (detail.hysteresis) console.log(`hysteresis:            ${detail.hysteresis}`);
+      if (detail.maxFiringsPerHour !== null) console.log(`maxFiringsPerHour:     ${detail.maxFiringsPerHour}`);
+      if (detail.suppressIfAlreadyDesired) console.log(`suppressIfAlreadyDesired: true`);
+      if (detail.dryRun) console.log(`dry_run:               true`);
+      console.log(`last fired:            ${detail.lastFired ?? '(never)'}`);
+    });
+}
+
 export function registerRulesCommand(program: Command): void {
   const rules = program
     .command('rules')
@@ -818,6 +892,7 @@ Subcommands:
   suggest                   Generate a candidate rule YAML from intent (heuristic, no LLM).
   lint [path]               Static-check rule definitions; no MQTT, no API calls.
   list [path]               Print a human/JSON summary of each rule's trigger + actions.
+  explain <name>            Show full detail for a rule: trigger, conditions, actions, last-fired.
   run  [path]               Subscribe to MQTT (+ cron/webhook) and execute matching rules.
   reload                    Hot-reload the running engine's policy (SIGHUP on Unix,
                             pid-file sentinel on Windows).
@@ -844,6 +919,7 @@ Exit codes (lint):
   registerSuggest(rules);
   registerLint(rules);
   registerList(rules);
+  registerExplain(rules);
   registerRun(rules);
   registerReload(rules);
   registerTail(rules);

@@ -23,7 +23,8 @@
  * decide how to gate on them.
  */
 
-import type { Rule } from './types.js';
+import type { Rule, Condition } from './types.js';
+import { isTimeBetween, isAllCondition, isAnyCondition, isNotCondition } from './types.js';
 import { parseMaxPerMs } from './throttle.js';
 import { isDestructiveCommand } from './destructive.js';
 
@@ -86,7 +87,23 @@ function effectiveCooldownMs(rule: Rule): number | null {
   return null;
 }
 
-export function analyzeConflicts(rules: Rule[]): ConflictReport {
+function hasTimeBetweenGuard(conditions: Condition[] | null | undefined): boolean {
+  if (!conditions) return false;
+  for (const c of conditions) {
+    if (isTimeBetween(c)) return true;
+    if (isAllCondition(c) && hasTimeBetweenGuard(c.all)) return true;
+    if (isAnyCondition(c) && hasTimeBetweenGuard(c.any)) return true;
+    if (isNotCondition(c) && hasTimeBetweenGuard([c.not])) return true;
+  }
+  return false;
+}
+
+export interface QuietHours {
+  start: string;
+  end: string;
+}
+
+export function analyzeConflicts(rules: Rule[], quietHours?: QuietHours | null): ConflictReport {
   const findings: ConflictFinding[] = [];
   const active = rules.filter((r) => r.enabled !== false);
 
@@ -170,6 +187,24 @@ export function analyzeConflicts(rules: Rule[]): ConflictReport {
           message: `Rule "${rule.name}" then[${i}] contains destructive command "${verb}". The engine blocks this at runtime.`,
           rules: [rule.name],
           hint: 'Remove the destructive command or replace it with a non-destructive alternative.',
+        });
+      }
+    }
+  }
+
+  // 4. Event-driven rules with no time_between guard when quiet_hours is defined.
+  //    Cron rules fire on an explicit schedule so their overlap with quiet hours
+  //    requires schedule analysis — flag those separately when needed.
+  if (quietHours?.start && quietHours?.end) {
+    for (const rule of active) {
+      if (rule.when.source === 'cron') continue;
+      if (!hasTimeBetweenGuard(rule.conditions)) {
+        findings.push({
+          severity: 'warning',
+          code: 'no-quiet-hours-guard',
+          message: `Rule "${rule.name}" (${rule.when.source} trigger) has no time_between condition and may fire during quiet hours (${quietHours.start}–${quietHours.end}).`,
+          rules: [rule.name],
+          hint: `Add a conditions entry "{ time_between: ['${quietHours.end}', '${quietHours.start}'] }" to block this rule during quiet hours.`,
         });
       }
     }

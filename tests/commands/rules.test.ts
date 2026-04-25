@@ -458,4 +458,88 @@ describe('switchbot rules (commander surface)', () => {
       expect(stdout.join('\n')).toMatch(/no rules recorded/);
     });
   });
+
+  describe('rules explain', () => {
+    const explainPolicy = [
+      'automation:',
+      '  enabled: true',
+      '  rules:',
+      '    - name: motion on',
+      '      when:',
+      '        source: mqtt',
+      '        event: motion.detected',
+      '      conditions:',
+      '        - time_between: ["22:00", "07:00"]',
+      '      then:',
+      '        - command: "devices command LAMP turnOn"',
+      '          device: LAMP',
+      '      cooldown: "5m"',
+      '      maxFiringsPerHour: 6',
+      '      suppressIfAlreadyDesired: true',
+      'aliases:',
+      '  "LAMP": "AA-BB-CC-DD-EE-01"',
+      '',
+    ].join('\n');
+
+    it('prints human-readable detail for a known rule', async () => {
+      const p = path.join(tmpDir, 'policy.yaml');
+      fs.writeFileSync(p, v02Policy(explainPolicy), 'utf-8');
+      const { stdout, exitCode } = await runCli(['rules', 'explain', 'motion on', p]);
+      expect(exitCode).toBe(0);
+      const out = stdout.join('\n');
+      expect(out).toContain('motion on');
+      expect(out).toContain('mqtt:motion.detected');
+      expect(out).toContain('5m');
+      expect(out).toContain('6');
+      expect(out).toContain('suppressIfAlreadyDesired');
+      expect(out).toContain('(never)');
+    });
+
+    it('emits a JSON envelope with all fields', async () => {
+      const p = path.join(tmpDir, 'policy.yaml');
+      fs.writeFileSync(p, v02Policy(explainPolicy), 'utf-8');
+      const { stdout, exitCode } = await runCli(['--json', 'rules', 'explain', 'motion on', p]);
+      expect(exitCode).toBe(0);
+      const body = JSON.parse(stdout[0]) as { data: Record<string, unknown> };
+      const d = body.data;
+      expect(d.name).toBe('motion on');
+      expect(d.enabled).toBe(true);
+      expect(d.trigger).toBe('mqtt:motion.detected');
+      expect(d.cooldown).toBe('5m');
+      expect(d.maxFiringsPerHour).toBe(6);
+      expect(d.suppressIfAlreadyDesired).toBe(true);
+      expect(d.lastFired).toBeNull();
+    });
+
+    it('exits 1 with usage error when rule name is not found', async () => {
+      const p = path.join(tmpDir, 'policy.yaml');
+      fs.writeFileSync(p, v02Policy(explainPolicy), 'utf-8');
+      const { exitCode } = await runCli(['rules', 'explain', 'no-such-rule', p]);
+      expect(exitCode).toBe(1);
+    });
+
+    it('reflects last-fired time from audit log', async () => {
+      const p = path.join(tmpDir, 'policy.yaml');
+      const auditFile = path.join(tmpDir, 'audit.log');
+      fs.writeFileSync(p, v02Policy(explainPolicy), 'utf-8');
+      const entry = {
+        t: '2026-04-25T08:00:00.000Z',
+        kind: 'rule-fire',
+        deviceId: 'LAMP',
+        command: 'turnOn',
+        parameter: null,
+        commandType: 'command',
+        dryRun: false,
+        result: 'ok',
+        rule: { name: 'motion on', triggerSource: 'mqtt', fireId: 'f-1' },
+      };
+      fs.writeFileSync(auditFile, JSON.stringify(entry) + '\n');
+      const { stdout, exitCode } = await runCli([
+        '--json', 'rules', 'explain', 'motion on', '--file', auditFile, p,
+      ]);
+      expect(exitCode).toBe(0);
+      const body = JSON.parse(stdout[0]) as { data: Record<string, unknown> };
+      expect(body.data.lastFired).toBe('2026-04-25T08:00:00.000Z');
+    });
+  });
 });

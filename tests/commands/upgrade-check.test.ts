@@ -36,3 +36,24 @@ describe('semverGt (upgrade-check)', () => {
     expect(semverGt('4.0.0', '3.99.99')).toBe(true);
   });
 });
+
+describe('breakingChange detection (upgrade-check)', () => {
+  function majorOf(v: string): number {
+    return Number.parseInt(v.split('.')[0], 10);
+  }
+  function isBreaking(latest: string, current: string): boolean {
+    return majorOf(latest) > majorOf(current);
+  }
+
+  it('same major → no breaking change', () => {
+    expect(isBreaking('3.5.0', '3.2.1')).toBe(false);
+  });
+
+  it('major bump → breaking change', () => {
+    expect(isBreaking('4.0.0', '3.99.9')).toBe(true);
+  });
+
+  it('older latest → no breaking change', () => {
+    expect(isBreaking('2.0.0', '3.0.0')).toBe(false);
+  });
+});

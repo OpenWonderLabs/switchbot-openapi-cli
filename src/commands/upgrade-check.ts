@@ -60,11 +60,14 @@ export function registerUpgradeCheckCommand(program: Command): void {
       }
 
       const upToDate = !semverGt(latestVersion, currentVersion);
+      const currentMajor = Number.parseInt(currentVersion.split('.')[0], 10);
+      const latestMajor = Number.parseInt(latestVersion.split('.')[0], 10);
       const result = {
         current: currentVersion,
         latest: latestVersion,
         upToDate,
         updateAvailable: !upToDate,
+        breakingChange: latestMajor > currentMajor,
         installCommand: upToDate ? null : `npm install -g ${pkgName}@${latestVersion}`,
       };
 
