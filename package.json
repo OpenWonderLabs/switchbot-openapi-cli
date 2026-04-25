@@ -37,7 +37,7 @@
   },
   "scripts": {
     "build": "tsc && node scripts/copy-assets.mjs",
-    "build:prod": "tsc -p tsconfig.build.json && node scripts/copy-assets.mjs",
+    "build:prod": "node scripts/bundle.mjs && node scripts/copy-assets.mjs",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "dev": "tsx src/index.ts",
     "lint:md": "markdownlint \"**/*.md\"",
@@ -69,6 +69,7 @@
     "@types/node": "^22.10.7",
     "@types/uuid": "^10.0.0",
     "@vitest/coverage-v8": "^2.1.9",
+    "esbuild": "^0.28.0",
     "markdownlint-cli": "^0.48.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
