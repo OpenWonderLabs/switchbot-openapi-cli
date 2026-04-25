@@ -6,6 +6,7 @@ import path from 'node:path';
 import { Command } from 'commander';
 import { registerAgentBootstrapCommand } from '../../src/commands/agent-bootstrap.js';
 import { resetListCache } from '../../src/devices/cache.js';
+import { runCli } from '../helpers/cli.js';
 
 async function captureJson(fn: () => void | Promise<void>): Promise<unknown> {
   const lines: string[] = [];
@@ -223,5 +224,39 @@ describe('agent-bootstrap', () => {
     } finally {
       delete process.env.SWITCHBOT_POLICY_PATH;
     }
+  });
+
+  // =====================================================================
+  // --sections flag (P1)
+  // =====================================================================
+  describe('agent-bootstrap --sections', () => {
+    it('restricts output to the requested top-level keys', async () => {
+      const res = await runCli(registerAgentBootstrapCommand, [
+        'agent-bootstrap', '--sections', 'identity,cliVersion',
+      ]);
+      expect(res.exitCode).toBeNull();
+      const out = JSON.parse(res.stdout.join('')) as { data: Record<string, unknown> };
+      const keys = Object.keys(out.data);
+      expect(keys).toContain('identity');
+      expect(keys).toContain('cliVersion');
+      expect(keys).not.toContain('catalog');
+      expect(keys).not.toContain('hints');
+      expect(keys).not.toContain('quota');
+    });
+
+    it('includes all keys when --sections is not provided', async () => {
+      const res = await runCli(registerAgentBootstrapCommand, ['agent-bootstrap', '--compact']);
+      const out = JSON.parse(res.stdout.join('')) as { data: Record<string, unknown> };
+      expect(Object.keys(out.data)).toContain('catalog');
+      expect(Object.keys(out.data)).toContain('hints');
+    });
+
+    it('exits 2 and prints hint when an unknown section name is requested', async () => {
+      const res = await runCli(registerAgentBootstrapCommand, [
+        'agent-bootstrap', '--sections', 'identity,doesNotExist',
+      ]);
+      expect(res.exitCode).toBe(2);
+      expect(res.stderr.join('')).toMatch(/unknown section.*doesNotExist/i);
+    });
   });
 });

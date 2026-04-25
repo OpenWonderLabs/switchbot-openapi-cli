@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { printJson } from '../utils/output.js';
+import { printJson, exitWithError } from '../utils/output.js';
 import { loadCache } from '../devices/cache.js';
 import {
   getEffectiveCatalog,
@@ -103,6 +103,7 @@ async function readCredentialsBackend(): Promise<CredentialsBackend> {
 
 interface BootstrapOptions {
   compact?: boolean;
+  sections?: string;
 }
 
 export function registerAgentBootstrapCommand(program: Command): void {
@@ -114,6 +115,10 @@ export function registerAgentBootstrapCommand(program: Command): void {
     .option(
       '--compact',
       'Emit an even smaller payload by dropping catalog descriptions and non-essential fields (target: <20 KB).',
+    )
+    .option(
+      '--sections <csv>',
+      'Comma-separated top-level sections to include (e.g. identity,devices,catalog). Omit for all sections.',
     )
     .addHelpText(
       'after',
@@ -226,6 +231,27 @@ Examples:
           : [],
       };
 
-      printJson(payload);
+      const VALID_SECTIONS = new Set([
+        'schemaVersion', 'generatedAt', 'cliVersion', 'identity', 'quickReference',
+        'safetyTiers', 'nameStrategies', 'profile', 'quota', 'policyStatus',
+        'credentialsBackend', 'devices', 'catalog', 'hints',
+      ]);
+
+      let finalPayload: Record<string, unknown> = payload as Record<string, unknown>;
+      if (opts.sections) {
+        const requested = opts.sections.split(',').map((s) => s.trim()).filter(Boolean);
+        const unknown = requested.filter((s) => !VALID_SECTIONS.has(s));
+        if (unknown.length > 0) {
+          exitWithError({
+            code: 2,
+            kind: 'usage',
+            message: `Unknown section(s): ${unknown.join(', ')}. Valid sections: ${[...VALID_SECTIONS].join(', ')}.`,
+          });
+        }
+        finalPayload = Object.fromEntries(
+          Object.entries(finalPayload).filter(([k]) => requested.includes(k)),
+        );
+      }
+      printJson(finalPayload);
     });
 }
