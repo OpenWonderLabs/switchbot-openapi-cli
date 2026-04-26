@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { expectStreamHeaderShape } from '../helpers/contracts.js';
+import {
+  expectStreamHeaderShape,
+  expectStreamJsonEnvelopeShape,
+  expectStreamJsonEnvelopeContainingKeys,
+} from '../helpers/contracts.js';
 
 const apiMock = vi.hoisted(() => {
   const instance = { get: vi.fn(), post: vi.fn() };
@@ -135,8 +139,14 @@ describe('devices watch', () => {
     const lines = res.stdout.filter((l) => l.trim().startsWith('{'));
     // P7: first line is the stream header; event is on the second line.
     expect(lines.length).toBe(2);
-    expect(JSON.parse(lines[0]).stream).toBe(true);
-    const ev = JSON.parse(lines[1]).data;
+    expectStreamHeaderShape(JSON.parse(lines[0]) as Record<string, unknown>, 'tick', 'poll');
+    const ev = expectStreamJsonEnvelopeShape(JSON.parse(lines[1]) as Record<string, unknown>, [
+      't',
+      'tick',
+      'deviceId',
+      'type',
+      'changed',
+    ]);
     expect(ev.deviceId).toBe('BOT1');
     expect(ev.type).toBe('Bot');
     expect(ev.tick).toBe(1);
@@ -158,7 +168,14 @@ describe('devices watch', () => {
     expect(res.exitCode).toBeNull();
     const lines = res.stdout.filter((l) => l.trim().startsWith('{'));
     expect(lines.length).toBe(2);
-    const ev = JSON.parse(lines[1]).data;
+    const ev = expectStreamJsonEnvelopeShape(JSON.parse(lines[1]) as Record<string, unknown>, [
+      't',
+      'tick',
+      'deviceId',
+      'type',
+      'changed',
+      'snapshot',
+    ]);
     expect(ev.snapshot).toEqual({ power: 'on', battery: 90 });
     expect(ev.changed).toEqual({});
   });
@@ -175,7 +192,13 @@ describe('devices watch', () => {
 
     expect(res.exitCode).toBeNull();
     const lines = res.stdout.filter((l) => l.trim().startsWith('{'));
-    const ev = JSON.parse(lines[1]).data;
+    const ev = expectStreamJsonEnvelopeShape(JSON.parse(lines[1]) as Record<string, unknown>, [
+      't',
+      'tick',
+      'deviceId',
+      'type',
+      'changed',
+    ]);
     expect(ev.snapshot).toBeUndefined();
     expect(ev.changed.power).toEqual({ from: null, to: 'on' });
   });
@@ -397,10 +420,40 @@ describe('devices watch', () => {
     ]);
 
     const lines = res.stdout.filter((l) => l.trim().startsWith('{'));
-    const event = JSON.parse(lines[1]) as { schemaVersion: string; data: Record<string, unknown> };
-    expect(event.schemaVersion).toBe('1.1');
-    expect(Object.keys(event)).toEqual(['schemaVersion', 'data']);
-    expect(Object.keys(event.data)).toEqual(['t', 'tick', 'deviceId', 'type', 'changed', 'snapshot']);
+    expectStreamJsonEnvelopeShape(JSON.parse(lines[1]) as Record<string, unknown>, [
+      't',
+      'tick',
+      'deviceId',
+      'type',
+      'changed',
+      'snapshot',
+    ]);
+  });
+
+  it('P7: watch JSONL unchanged ticks keep the same envelope under --include-unchanged', async () => {
+    cacheMock.map.set('BOT1', { type: 'Bot', name: 'K', category: 'physical' });
+    apiMock.__instance.get
+      .mockResolvedValueOnce({ data: { statusCode: 100, body: { power: 'on' } } })
+      .mockResolvedValueOnce({ data: { statusCode: 100, body: { power: 'on' } } });
+
+    const res = await runCli(registerDevicesCommand, [
+      '--json', 'devices', 'watch', 'BOT1', '--interval', '1s', '--max', '2', '--include-unchanged',
+    ]);
+
+    const records = res.stdout
+      .filter((l) => l.trim().startsWith('{'))
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+      .filter((r) => r.stream !== true);
+    expect(records).toHaveLength(2);
+    const second = expectStreamJsonEnvelopeContainingKeys(records[1], [
+      't',
+      'tick',
+      'deviceId',
+      'type',
+      'changed',
+    ]);
+    expect(second.tick).toBe(2);
+    expect(second.changed).toEqual({});
   });
 
   it('P7: does NOT emit the stream header in non-JSON mode', async () => {

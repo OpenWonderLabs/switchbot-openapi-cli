@@ -31,3 +31,25 @@ export function expectStreamHeaderShape(
   expect(header.cadence).toBe(cadence);
   expect(Object.keys(header)).toEqual(['schemaVersion', 'stream', 'eventKind', 'cadence']);
 }
+
+export function expectStreamJsonEnvelopeShape(
+  payload: Record<string, unknown>,
+  dataKeys: string[],
+): Record<string, unknown> {
+  expect(Object.keys(payload)).toEqual(['schemaVersion', 'data']);
+  expect(payload.schemaVersion).toBe('1.1');
+  const data = payload.data as Record<string, unknown>;
+  expect(Object.keys(data)).toEqual(dataKeys);
+  return data;
+}
+
+export function expectStreamJsonEnvelopeContainingKeys(
+  payload: Record<string, unknown>,
+  requiredDataKeys: string[],
+): Record<string, unknown> {
+  expect(Object.keys(payload)).toEqual(['schemaVersion', 'data']);
+  expect(payload.schemaVersion).toBe('1.1');
+  const data = payload.data as Record<string, unknown>;
+  expect(Object.keys(data)).toEqual(expect.arrayContaining(requiredDataKeys));
+  return data;
+}

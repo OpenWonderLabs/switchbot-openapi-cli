@@ -7,6 +7,7 @@ import { Command } from 'commander';
 import { registerAgentBootstrapCommand } from '../../src/commands/agent-bootstrap.js';
 import { resetListCache } from '../../src/devices/cache.js';
 import { runCli } from '../helpers/cli.js';
+import { expectJsonEnvelopeContainingKeys } from '../helpers/contracts.js';
 
 async function captureJson(fn: () => void | Promise<void>): Promise<unknown> {
   const lines: string[] = [];
@@ -61,9 +62,25 @@ describe('agent-bootstrap', () => {
     registerAgentBootstrapCommand(program);
     const payload = await captureJson(async () => {
       await program.parseAsync(['node', 'cli', 'agent-bootstrap', '--compact']);
-    }) as { schemaVersion?: string; data?: Record<string, unknown> };
+    }) as Record<string, unknown>;
+    const data = expectJsonEnvelopeContainingKeys(payload, [
+      'schemaVersion',
+      'generatedAt',
+      'cliVersion',
+      'identity',
+      'quickReference',
+      'safetyTiers',
+      'nameStrategies',
+      'profile',
+      'quota',
+      'policyStatus',
+      'credentialsBackend',
+      'devices',
+      'catalog',
+      'hints',
+    ]);
     expect(payload.schemaVersion).toBeDefined();
-    const data = payload.data as Record<string, unknown>;
+    expect(typeof data.schemaVersion).toBe('string');
     expect(data.identity).toBeDefined();
     const identity = data.identity as Record<string, unknown>;
     expect(identity.product).toBe('SwitchBot');

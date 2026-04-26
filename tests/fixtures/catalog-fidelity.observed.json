@@ -23,5 +23,20 @@
     "type": "Hub 3",
     "role": "hub",
     "statusFields": ["version", "temperature", "humidity", "lightLevel"]
+  },
+  {
+    "type": "AI Hub",
+    "role": "hub",
+    "statusFields": ["version"]
+  },
+  {
+    "type": "Contact Sensor",
+    "role": "sensor",
+    "statusFields": ["battery", "version", "moveDetected", "openState", "brightness"]
+  },
+  {
+    "type": "Wallet Finder Card",
+    "role": "sensor",
+    "statusFields": ["battery", "version"]
   }
 ]

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { StatusSyncStatus, StopStatusSyncResult } from '../../src/status-sync/manager.js';
+import { expectJsonEnvelopeShape } from '../helpers/contracts.js';
 
 const managerMock = vi.hoisted(() => ({
   getStatusSyncStatus: vi.fn<[], StatusSyncStatus>(),
@@ -53,18 +54,48 @@ describe('status-sync command', () => {
     it('--json exits 0 with running:false when not running', async () => {
       const res = await runCli(registerStatusSyncCommand, ['--json', 'status-sync', 'status']);
       expect(res.exitCode).toBeNull();
-      const body = JSON.parse(res.stdout.join('')) as { data: StatusSyncStatus };
-      expect(body.data.running).toBe(false);
-      expect(body.data.pid).toBeNull();
+      const body = JSON.parse(res.stdout.join('')) as Record<string, unknown>;
+      const data = expectJsonEnvelopeShape(body, [
+        'running',
+        'pid',
+        'startedAt',
+        'stateDir',
+        'stateFile',
+        'stdoutLog',
+        'stderrLog',
+        'command',
+        'openclawUrl',
+        'openclawModel',
+        'topic',
+        'configPath',
+        'profile',
+      ]) as StatusSyncStatus;
+      expect(data.running).toBe(false);
+      expect(data.pid).toBeNull();
     });
 
     it('--json exits 0 with running:true and pid when running', async () => {
       managerMock.getStatusSyncStatus.mockReturnValue(RUNNING);
       const res = await runCli(registerStatusSyncCommand, ['--json', 'status-sync', 'status']);
       expect(res.exitCode).toBeNull();
-      const body = JSON.parse(res.stdout.join('')) as { data: StatusSyncStatus };
-      expect(body.data.running).toBe(true);
-      expect(body.data.pid).toBe(9876);
+      const body = JSON.parse(res.stdout.join('')) as Record<string, unknown>;
+      const data = expectJsonEnvelopeShape(body, [
+        'running',
+        'pid',
+        'startedAt',
+        'stateDir',
+        'stateFile',
+        'stdoutLog',
+        'stderrLog',
+        'command',
+        'openclawUrl',
+        'openclawModel',
+        'topic',
+        'configPath',
+        'profile',
+      ]) as StatusSyncStatus;
+      expect(data.running).toBe(true);
+      expect(data.pid).toBe(9876);
     });
 
     it('human mode prints "not running" when not running', async () => {
@@ -79,9 +110,24 @@ describe('status-sync command', () => {
       managerMock.startStatusSync.mockReturnValue(RUNNING);
       const res = await runCli(registerStatusSyncCommand, ['--json', 'status-sync', 'start']);
       expect(res.exitCode).toBeNull();
-      const body = JSON.parse(res.stdout.join('')) as { data: StatusSyncStatus };
-      expect(body.data.running).toBe(true);
-      expect(body.data.pid).toBe(9876);
+      const body = JSON.parse(res.stdout.join('')) as Record<string, unknown>;
+      const data = expectJsonEnvelopeShape(body, [
+        'running',
+        'pid',
+        'startedAt',
+        'stateDir',
+        'stateFile',
+        'stdoutLog',
+        'stderrLog',
+        'command',
+        'openclawUrl',
+        'openclawModel',
+        'topic',
+        'configPath',
+        'profile',
+      ]) as StatusSyncStatus;
+      expect(data.running).toBe(true);
+      expect(data.pid).toBe(9876);
       expect(managerMock.startStatusSync).toHaveBeenCalled();
     });
 
@@ -112,9 +158,10 @@ describe('status-sync command', () => {
     it('--json exits 0 with stopped:false when nothing is running', async () => {
       const res = await runCli(registerStatusSyncCommand, ['--json', 'status-sync', 'stop']);
       expect(res.exitCode).toBeNull();
-      const body = JSON.parse(res.stdout.join('')) as { data: StopStatusSyncResult };
-      expect(body.data.stopped).toBe(false);
-      expect(body.data.pid).toBeNull();
+      const body = JSON.parse(res.stdout.join('')) as Record<string, unknown>;
+      const data = expectJsonEnvelopeShape(body, ['stopped', 'stale', 'pid', 'status']) as StopStatusSyncResult;
+      expect(data.stopped).toBe(false);
+      expect(data.pid).toBeNull();
     });
 
     it('human mode prints "not running" when nothing to stop', async () => {
@@ -129,9 +176,10 @@ describe('status-sync command', () => {
       });
       const res = await runCli(registerStatusSyncCommand, ['--json', 'status-sync', 'stop']);
       expect(res.exitCode).toBeNull();
-      const body = JSON.parse(res.stdout.join('')) as { data: StopStatusSyncResult };
-      expect(body.data.stopped).toBe(true);
-      expect(body.data.pid).toBe(9876);
+      const body = JSON.parse(res.stdout.join('')) as Record<string, unknown>;
+      const data = expectJsonEnvelopeShape(body, ['stopped', 'stale', 'pid', 'status']) as StopStatusSyncResult;
+      expect(data.stopped).toBe(true);
+      expect(data.pid).toBe(9876);
     });
   });
 });

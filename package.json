@@ -48,6 +48,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:release-smoke": "npm test -- tests/commands/policy.test.ts tests/commands/devices.test.ts tests/commands/explain.test.ts tests/commands/doctor.test.ts tests/commands/mcp.test.ts tests/commands/health-check.test.ts tests/commands/quota.test.ts tests/commands/status-sync.test.ts tests/status-sync/smoke.test.ts tests/commands/watch.test.ts tests/commands/events.test.ts tests/devices/catalog-fidelity.test.ts tests/commands/schema.test.ts",
     "verify:pre-commit": "npm run build && npm test -- tests/version.test.ts",
     "verify:pre-push": "npm run build && npm test -- tests/version.test.ts && npm run smoke:pack-install",
     "prepublishOnly": "npm test && npm run build && npm run smoke:pack-install"

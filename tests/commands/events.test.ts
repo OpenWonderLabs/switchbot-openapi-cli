@@ -9,7 +9,11 @@ import { startReceiver, registerEventsCommand } from '../../src/commands/events.
 import type { FilterClause } from '../../src/utils/filter.js';
 import { deviceHistoryStore } from '../../src/mcp/device-history.js';
 import { runCli } from '../helpers/cli.js';
-import { expectStreamHeaderShape } from '../helpers/contracts.js';
+import {
+  expectStreamHeaderShape,
+  expectStreamJsonEnvelopeContainingKeys,
+  expectStreamJsonEnvelopeShape,
+} from '../helpers/contracts.js';
 
 // ---------------------------------------------------------------------------
 // Shared mock state for SwitchBotMqttClient — hoisted so the factory can use it
@@ -377,9 +381,18 @@ describe('events mqtt-tail', () => {
         (typeof j.data?.type !== 'string' || !j.data.type.startsWith('__')),
     );
     expect(events).toHaveLength(1);
-    expect(events[0].schemaVersion).toBe('1.1');
-    expect(events[0].data!.payloadVersion).toBe('1');
-    expect(events[0].data!.topic).toBe('test/topic');
+    const data = expectStreamJsonEnvelopeContainingKeys(events[0] as Record<string, unknown>, [
+      'payloadVersion',
+      'source',
+      'kind',
+      't',
+      'eventId',
+      'deviceId',
+      'topic',
+      'payload',
+    ]);
+    expect(data.payloadVersion).toBe('1');
+    expect(data.topic).toBe('test/topic');
   });
 
   it('exits 2 when --max is not a positive integer', async () => {
@@ -446,10 +459,14 @@ describe('events mqtt-tail', () => {
       );
     const sessionStart = jsonLines.find((j) => j.data?.type === '__session_start');
     expect(sessionStart).toBeDefined();
-    expect(sessionStart!.data!.payloadVersion).toBe('1');
-    expect(sessionStart!.data!.state).toBe('connecting');
-    expect(typeof sessionStart!.data!.at).toBe('string');
-    expect(typeof sessionStart!.data!.eventId).toBe('string');
+    const sessionData = expectStreamJsonEnvelopeContainingKeys(
+      sessionStart as Record<string, unknown>,
+      ['payloadVersion', 'source', 'kind', 'controlKind', 't', 'eventId', 'state', 'type', 'at'],
+    );
+    expect(sessionData.payloadVersion).toBe('1');
+    expect(sessionData.state).toBe('connecting');
+    expect(typeof sessionData.at).toBe('string');
+    expect(typeof sessionData.eventId).toBe('string');
     // P7: the very first JSON line under --json is the stream header;
     // __session_start is now the second line but still precedes any
     // broker activity so consumers still learn we're "connecting".
@@ -538,11 +555,36 @@ describe('events mqtt-tail', () => {
       .map((l) => JSON.parse(l))
       .filter((r) => !r.stream);
     expect(records.length).toBeGreaterThan(0);
-    expect(Object.keys(records[0])).toEqual(['schemaVersion', 'data']);
-    expect(records[0].schemaVersion).toBe('1.1');
-    expect(records[0].data.payloadVersion).toBe('1');
-    expect(records[0].data.source).toBe('mqtt');
-    expect(records[0].data.kind).toBeDefined();
+    const data = expectStreamJsonEnvelopeContainingKeys(records[0] as Record<string, unknown>, [
+      'payloadVersion',
+      'source',
+      'kind',
+      't',
+      'eventId',
+    ]);
+    expect(data.payloadVersion).toBe('1');
+    expect(data.source).toBe('mqtt');
+    expect(data.kind).toBeDefined();
+  });
+
+  it('P7: mqtt-tail JSON event records keep the exact event envelope for real broker messages', async () => {
+    mqttMock.connectShouldFireMessage = true;
+    const res = await runCli(registerEventsCommand, ['--json', 'events', 'mqtt-tail', '--max', '1']);
+    const eventRecord = res.stdout
+      .filter((l) => l.trim().startsWith('{'))
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+      .find((r) => r.stream !== true && (r.data as Record<string, unknown> | undefined)?.kind === 'event');
+    expect(eventRecord).toBeDefined();
+    expectStreamJsonEnvelopeShape(eventRecord!, [
+      'payloadVersion',
+      'source',
+      'kind',
+      't',
+      'eventId',
+      'deviceId',
+      'topic',
+      'payload',
+    ]);
   });
 });
 

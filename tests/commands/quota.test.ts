@@ -4,6 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { registerQuotaCommand } from '../../src/commands/quota.js';
 import { runCli } from '../helpers/cli.js';
+import { expectJsonEnvelopeShape } from '../helpers/contracts.js';
 
 let tmpRoot: string;
 
@@ -47,11 +48,20 @@ describe('quota command', () => {
     await seedQuota();
     const result = await runCli(registerQuotaCommand, ['--json', 'quota', 'status']);
     expect(result.exitCode).toBeNull();
-    const parsed = JSON.parse(result.stdout[0]);
-    expect(parsed.data.today.total).toBe(3);
-    expect(parsed.data.today.remaining).toBe(10_000 - 3);
-    expect(parsed.data.today.dailyLimit).toBe(10_000);
-    expect(parsed.data.today.endpoints['GET /v1.1/devices']).toBe(2);
+    const parsed = JSON.parse(result.stdout[0]) as Record<string, unknown>;
+    const data = expectJsonEnvelopeShape(parsed, ['today', 'history']) as {
+      today: {
+        total: number;
+        remaining: number;
+        dailyLimit: number;
+        endpoints: Record<string, number>;
+      };
+      history: Record<string, unknown>;
+    };
+    expect(data.today.total).toBe(3);
+    expect(data.today.remaining).toBe(10_000 - 3);
+    expect(data.today.dailyLimit).toBe(10_000);
+    expect(data.today.endpoints['GET /v1.1/devices']).toBe(2);
   });
 
   it('status says "no requests recorded yet" with an empty counter', async () => {
