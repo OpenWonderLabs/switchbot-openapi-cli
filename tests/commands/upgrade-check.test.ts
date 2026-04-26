@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { findBreakingChangeBetween } from '../../src/version-notes.js';
+import { expectJsonEnvelopeContainingKeys } from '../helpers/contracts.js';
 
 // ── https mock (for action-level tests) ─────────────────────────────────────
 const httpsMock = vi.hoisted(() => {
@@ -102,7 +103,7 @@ describe('upgrade-check action — prerelease guard', () => {
     const line = res.stdout.find((l) => l.trim().startsWith('{'));
     expect(line).toBeDefined();
     const out = JSON.parse(line!) as Record<string, unknown>;
-    const data = (out.data ?? out) as Record<string, unknown>;
+    const data = expectJsonEnvelopeContainingKeys(out, ['current', 'latest', 'upToDate', 'updateAvailable', 'installCommand', 'note']);
     expect(data.upToDate).toBe(true);
     expect(data.updateAvailable).toBe(false);
     expect(data.installCommand).toBeNull();
@@ -137,7 +138,7 @@ describe('upgrade-check action — version comparison', () => {
     expect(res.exitCode).toBeNull();
     const line = res.stdout.find((l) => l.trim().startsWith('{'));
     const out = JSON.parse(line!) as Record<string, unknown>;
-    const data = (out.data ?? out) as Record<string, unknown>;
+    const data = expectJsonEnvelopeContainingKeys(out, ['current', 'latest', 'upToDate', 'updateAvailable', 'installCommand']);
     expect(data.upToDate).toBe(true);
     expect(data.updateAvailable).toBe(false);
     expect(data.installCommand).toBeNull();
@@ -153,7 +154,7 @@ describe('upgrade-check action — version comparison', () => {
     expect(res.exitCode).toBeNull();
     const line = res.stdout.find((l) => l.trim().startsWith('{'));
     const out = JSON.parse(line!) as Record<string, unknown>;
-    const data = (out.data ?? out) as Record<string, unknown>;
+    const data = expectJsonEnvelopeContainingKeys(out, ['current', 'latest', 'updateAvailable', 'breakingChange', 'installCommand']);
     expect(data.updateAvailable).toBe(true);
     expect(data.breakingChange).toBe(true);
     expect(typeof data.installCommand).toBe('string');
@@ -173,7 +174,7 @@ describe('upgrade-check action — version comparison', () => {
     expect(res.exitCode).toBe(1);
     const line = res.stdout.find((l) => l.trim().startsWith('{'));
     const out = JSON.parse(line!) as Record<string, unknown>;
-    const data = (out.data ?? out) as Record<string, unknown>;
+    const data = expectJsonEnvelopeContainingKeys(out, ['ok', 'error', 'current']);
     expect(data.ok).toBe(false);
     expect(typeof data.error).toBe('string');
   });

@@ -20,6 +20,12 @@ export function expectJsonEnvelopeContainingKeys(
   return data;
 }
 
+export function expectJsonArrayEnvelope(payload: Record<string, unknown>): unknown[] {
+  expect(Object.keys(payload)).toEqual(['schemaVersion', 'data']);
+  expect(Array.isArray(payload.data)).toBe(true);
+  return payload.data as unknown[];
+}
+
 export function expectStreamHeaderShape(
   header: Record<string, unknown>,
   eventKind: 'tick' | 'event',

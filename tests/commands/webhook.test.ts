@@ -26,6 +26,7 @@ vi.mock('../../src/api/client.js', () => ({
 
 import { registerWebhookCommand } from '../../src/commands/webhook.js';
 import { runCli } from '../helpers/cli.js';
+import { expectJsonArrayEnvelope, expectJsonEnvelopeContainingKeys } from '../helpers/contracts.js';
 
 const URL_A = 'https://example.com/a';
 const URL_B = 'https://example.com/b';
@@ -98,7 +99,9 @@ describe('webhook command', () => {
     it('in --json mode, outputs raw body', async () => {
       apiMock.__instance.post.mockResolvedValue({ data: { body: { urls: [URL_A] } } });
       const res = await runCli(registerWebhookCommand, ['webhook', 'query', '--json']);
-      expect(res.stdout.join('\n')).toContain('"urls"');
+      const out = JSON.parse(res.stdout.join('\n')) as Record<string, unknown>;
+      const data = expectJsonEnvelopeContainingKeys(out, ['urls']) as { urls: string[] };
+      expect(data.urls).toEqual([URL_A]);
     });
 
     it('exits 1 when the API throws', async () => {
@@ -153,7 +156,9 @@ describe('webhook command', () => {
         data: { body: [{ url: URL_A, enable: true, deviceList: 'ALL', createTime: 1, lastUpdateTime: 2 }] },
       });
       const res = await runCli(registerWebhookCommand, ['webhook', 'query', '--json', '--details', URL_A]);
-      expect(res.stdout.join('\n')).toContain(`"url": "${URL_A}"`);
+      const out = JSON.parse(res.stdout.join('\n')) as Record<string, unknown>;
+      const data = expectJsonArrayEnvelope(out) as Array<{ url: string }>;
+      expect(data[0].url).toBe(URL_A);
     });
   });
 

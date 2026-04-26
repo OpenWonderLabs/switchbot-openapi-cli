@@ -24,6 +24,7 @@ vi.mock('../../src/api/client.js', () => ({
 import { registerDevicesCommand } from '../../src/commands/devices.js';
 import { runCli } from '../helpers/cli.js';
 import { updateCacheFromDeviceList, resetListCache } from '../../src/devices/cache.js';
+import { expectJsonEnvelopeContainingKeys } from '../helpers/contracts.js';
 
 const AC_ID = 'AC-001';
 const CURTAIN_ID = 'CURTAIN-001';
@@ -197,8 +198,9 @@ describe('devices expand', () => {
       'devices', 'expand', AC_ID, 'setAll',
       '--temp', '26', '--mode', 'cool', '--fan', 'low', '--power', 'on', '--json',
     ]);
-    const out = JSON.parse(res.stdout.join('\n'));
-    expect(out.data.subKind).toBe('ir-no-feedback');
+    const out = JSON.parse(res.stdout.join('\n')) as Record<string, unknown>;
+    const data = expectJsonEnvelopeContainingKeys(out, ['ok', 'deviceId', 'command', 'parameter', 'subKind']);
+    expect(data.subKind).toBe('ir-no-feedback');
   });
 
   it('rejects unsupported command', async () => {

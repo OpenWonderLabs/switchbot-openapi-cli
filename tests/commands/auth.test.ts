@@ -10,6 +10,7 @@ import path from 'node:path';
 
 import { Command } from 'commander';
 import { registerAuthCommand } from '../../src/commands/auth.js';
+import { expectJsonEnvelopeShape } from '../helpers/contracts.js';
 
 const selectMock = vi.fn();
 
@@ -105,9 +106,10 @@ describe('auth keychain describe', () => {
     selectMock.mockResolvedValue(makeStore({ name: 'file', writable: true }));
     const res = await runCli(['--json', 'auth', 'keychain', 'describe']);
     expect(res.exitCode).toBe(0);
-    const parsed = JSON.parse(res.stdout[0]);
-    expect(parsed.data.tag).toBe('file');
-    expect(parsed.data.writable).toBe(true);
+    const parsed = JSON.parse(res.stdout[0]) as Record<string, unknown>;
+    const data = expectJsonEnvelopeShape(parsed, ['backend', 'tag', 'writable']);
+    expect(data.tag).toBe('file');
+    expect(data.writable).toBe(true);
   });
 });
 
@@ -135,11 +137,22 @@ describe('auth keychain get', () => {
     selectMock.mockResolvedValue(makeStore({ getResult: { token: 'tok-1234', secret: 'sec-abcd' } }));
     const res = await runCli(['--json', 'auth', 'keychain', 'get']);
     expect(res.exitCode).toBe(0);
-    const parsed = JSON.parse(res.stdout[0]);
-    expect(parsed.data.present).toBe(true);
-    expect(parsed.data.token.length).toBe('tok-1234'.length);
-    expect(parsed.data.token).not.toHaveProperty('raw');
-    expect(parsed.data.token.masked).not.toBe('tok-1234');
+    const parsed = JSON.parse(res.stdout[0]) as Record<string, unknown>;
+    const data = expectJsonEnvelopeShape(parsed, [
+      'profile',
+      'backend',
+      'present',
+      'token',
+      'secret',
+    ]) as {
+      present: boolean;
+      token: { length: number; masked: string; raw?: string };
+      secret: { length: number; masked: string };
+    };
+    expect(data.present).toBe(true);
+    expect(data.token.length).toBe('tok-1234'.length);
+    expect(data.token).not.toHaveProperty('raw');
+    expect(data.token.masked).not.toBe('tok-1234');
   });
 });
 
@@ -183,6 +196,20 @@ describe('auth keychain set', () => {
     const res = await runCli(['auth', 'keychain', 'set', '--stdin-file', path.join(tmpDir, 'doesntmatter.json')]);
     expect(res.exitCode).toBe(1);
   });
+
+  it('returns written:true under --json', async () => {
+    const store = makeStore({ writable: true });
+    selectMock.mockResolvedValue(store);
+
+    const file = path.join(tmpDir, 'creds.json');
+    fs.writeFileSync(file, JSON.stringify({ token: 't-from-file', secret: 's-from-file' }));
+
+    const res = await runCli(['--json', 'auth', 'keychain', 'set', '--stdin-file', file]);
+    expect(res.exitCode).toBe(0);
+    const parsed = JSON.parse(res.stdout[0]) as Record<string, unknown>;
+    const data = expectJsonEnvelopeShape(parsed, ['profile', 'backend', 'written']);
+    expect(data.written).toBe(true);
+  });
 });
 
 describe('auth keychain delete', () => {
@@ -201,8 +228,9 @@ describe('auth keychain delete', () => {
 
     const res = await runCli(['--json', 'auth', 'keychain', 'delete', '--yes']);
     expect(res.exitCode).toBe(0);
-    const parsed = JSON.parse(res.stdout[0]);
-    expect(parsed.data.deleted).toBe(true);
+    const parsed = JSON.parse(res.stdout[0]) as Record<string, unknown>;
+    const data = expectJsonEnvelopeShape(parsed, ['profile', 'backend', 'deleted']);
+    expect(data.deleted).toBe(true);
   });
 });
 
@@ -285,5 +313,29 @@ describe('auth keychain migrate', () => {
 
     const res = await runCli(['auth', 'keychain', 'migrate']);
     expect(res.exitCode).toBe(1);
+  });
+
+  it('returns migration cleanup details under --json', async () => {
+    const store = makeStore({ writable: true });
+    selectMock.mockResolvedValue(store);
+
+    const file = path.join(tmpHome, '.switchbot', 'config.json');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ token: 't-src', secret: 's-src' }));
+
+    const res = await runCli(['--json', 'auth', 'keychain', 'migrate', '--delete-file']);
+    expect(res.exitCode).toBe(0);
+    const parsed = JSON.parse(res.stdout[0]) as Record<string, unknown>;
+    const data = expectJsonEnvelopeShape(parsed, [
+      'profile',
+      'backend',
+      'migrated',
+      'sourceFile',
+      'sourceDeleted',
+      'sourceScrubbed',
+    ]);
+    expect(data.migrated).toBe(true);
+    expect(data.sourceDeleted).toBe(true);
+    expect(data.sourceScrubbed).toBe(false);
   });
 });

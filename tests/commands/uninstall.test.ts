@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { expectJsonEnvelopeContainingKeys } from '../helpers/contracts.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLI = path.resolve(__dirname, '..', '..', 'dist', 'index.js');
@@ -35,10 +36,15 @@ describe('switchbot uninstall (dry-run smoke)', () => {
   it('--dry-run --json emits a structured plan including skill link for claude-code', () => {
     const { code, stdout } = runCli(['--dry-run', '--json', 'uninstall', '--agent', 'claude-code']);
     expect(code).toBe(0);
-    const parsed = JSON.parse(stdout);
-    expect(parsed.data.dryRun).toBe(true);
-    expect(parsed.data.agent).toBe('claude-code');
-    const actions = parsed.data.plan.map((p: { action: string }) => p.action);
+    const parsed = JSON.parse(stdout) as Record<string, unknown>;
+    const data = expectJsonEnvelopeContainingKeys(parsed, ['dryRun', 'agent', 'plan']) as {
+      dryRun: boolean;
+      agent: string;
+      plan: Array<{ action: string }>;
+    };
+    expect(data.dryRun).toBe(true);
+    expect(data.agent).toBe('claude-code');
+    const actions = data.plan.map((p) => p.action);
     expect(actions).toContain('remove-skill-link');
     expect(actions).toContain('remove-credentials');
     expect(actions).toContain('remove-policy');
@@ -47,8 +53,11 @@ describe('switchbot uninstall (dry-run smoke)', () => {
   it('--dry-run --json for agent=none omits the skill link action', () => {
     const { code, stdout } = runCli(['--dry-run', '--json', 'uninstall', '--agent', 'none']);
     expect(code).toBe(0);
-    const parsed = JSON.parse(stdout);
-    const actions = parsed.data.plan.map((p: { action: string }) => p.action);
+    const parsed = JSON.parse(stdout) as Record<string, unknown>;
+    const data = expectJsonEnvelopeContainingKeys(parsed, ['dryRun', 'agent', 'plan']) as {
+      plan: Array<{ action: string }>;
+    };
+    const actions = data.plan.map((p) => p.action);
     expect(actions).not.toContain('remove-skill-link');
     expect(actions).toEqual(['remove-credentials', 'remove-policy']);
   });

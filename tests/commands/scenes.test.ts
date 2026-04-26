@@ -26,6 +26,7 @@ vi.mock('../../src/api/client.js', () => ({
 
 import { registerScenesCommand } from '../../src/commands/scenes.js';
 import { runCli } from '../helpers/cli.js';
+import { expectJsonArrayEnvelope, expectJsonEnvelopeContainingKeys } from '../helpers/contracts.js';
 
 describe('scenes command', () => {
   beforeEach(() => {
@@ -59,9 +60,10 @@ describe('scenes command', () => {
         data: { body: [{ sceneId: 'S1', sceneName: 'Hi' }] },
       });
       const res = await runCli(registerScenesCommand, ['scenes', 'list', '--json']);
-      const out = res.stdout.join('\n');
-      expect(out).toContain('"sceneId"');
-      expect(out).toContain('"sceneName"');
+      const out = JSON.parse(res.stdout.join('\n')) as Record<string, unknown>;
+      const data = expectJsonArrayEnvelope(out) as Array<{ sceneId: string; sceneName: string }>;
+      expect(data[0].sceneId).toBe('S1');
+      expect(data[0].sceneName).toBe('Hi');
     });
 
     it('prints "No scenes found" when the list is empty', async () => {
@@ -200,12 +202,12 @@ describe('scenes command', () => {
       });
       const res = await runCli(registerScenesCommand, ['scenes', 'describe', 'S1', '--json']);
       expect(res.exitCode).toBeNull();
-      const out = res.stdout.join('\n');
-      const parsed = JSON.parse(out);
-      expect(parsed.data.sceneId).toBe('S1');
-      expect(parsed.data.sceneName).toBe('Good Morning');
-      expect(parsed.data.stepCount).toBeNull();
-      expect(parsed.data.note).toMatch(/does not expose scene steps/);
+      const parsed = JSON.parse(res.stdout.join('\n')) as Record<string, unknown>;
+      const data = expectJsonEnvelopeContainingKeys(parsed, ['sceneId', 'sceneName', 'stepCount', 'note']);
+      expect(data.sceneId).toBe('S1');
+      expect(data.sceneName).toBe('Good Morning');
+      expect(data.stepCount).toBeNull();
+      expect(String(data.note)).toMatch(/does not expose scene steps/);
     });
 
     it('exits 2 with scene_not_found when sceneId is unknown', async () => {
@@ -272,11 +274,12 @@ describe('scenes command', () => {
       const res = await runCli(registerScenesCommand, ['--json', 'scenes', 'explain', 'S1']);
       expect(res.exitCode).not.toBe(2);
       const out = JSON.parse(res.stdout.find((l) => l.trim().startsWith('{'))!) as Record<string, unknown>;
-      expect((out.data as Record<string, unknown>).sceneId).toBe('S1');
-      expect((out.data as Record<string, unknown>).sceneName).toBe('Good Morning');
-      expect((out.data as Record<string, unknown>).riskLevel).toBe('low');
-      expect((out.data as Record<string, unknown>).toExecute).toBe('switchbot scenes execute S1');
-      expect((out.data as Record<string, unknown>).idempotent).toBeNull();
+      const data = expectJsonEnvelopeContainingKeys(out, ['sceneId', 'sceneName', 'riskLevel', 'toExecute', 'idempotent']);
+      expect(data.sceneId).toBe('S1');
+      expect(data.sceneName).toBe('Good Morning');
+      expect(data.riskLevel).toBe('low');
+      expect(data.toExecute).toBe('switchbot scenes execute S1');
+      expect(data.idempotent).toBeNull();
     });
 
     it('plaintext output includes key explanation fields', async () => {
@@ -315,9 +318,10 @@ describe('scenes command', () => {
       mockScenes();
       const res = await runCli(registerScenesCommand, ['--json', 'scenes', 'validate', 'V1', 'V2']);
       expect(res.exitCode).toBeNull();
-      const body = JSON.parse(res.stdout.join('')) as { data: { ok: boolean; results: unknown[] } };
-      expect(body.data.ok).toBe(true);
-      expect(body.data.results).toHaveLength(2);
+      const body = JSON.parse(res.stdout.join('')) as Record<string, unknown>;
+      const data = expectJsonEnvelopeContainingKeys(body, ['ok', 'results']) as { ok: boolean; results: unknown[] };
+      expect(data.ok).toBe(true);
+      expect(data.results).toHaveLength(2);
     });
 
     it('--json exits 1 with ok:false when a supplied ID does not exist', async () => {
@@ -361,11 +365,12 @@ describe('scenes command', () => {
       mockScenes();
       const res = await runCli(registerScenesCommand, ['--json', 'scenes', 'simulate', 'SIM1']);
       expect(res.exitCode).toBeNull();
-      const body = JSON.parse(res.stdout.join('')) as { data: Record<string, unknown> };
-      expect(body.data.simulated).toBe(true);
-      expect(body.data.sceneId).toBe('SIM1');
-      expect(body.data.sceneName).toBe('Good Night');
-      const wouldSend = body.data.wouldSend as Record<string, string>;
+      const body = JSON.parse(res.stdout.join('')) as Record<string, unknown>;
+      const data = expectJsonEnvelopeContainingKeys(body, ['simulated', 'sceneId', 'sceneName', 'wouldSend']) as Record<string, unknown>;
+      expect(data.simulated).toBe(true);
+      expect(data.sceneId).toBe('SIM1');
+      expect(data.sceneName).toBe('Good Night');
+      const wouldSend = data.wouldSend as Record<string, string>;
       expect(wouldSend.method).toBe('POST');
       expect(wouldSend.url).toContain('SIM1');
     });

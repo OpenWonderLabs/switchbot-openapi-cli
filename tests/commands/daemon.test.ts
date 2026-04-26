@@ -42,6 +42,7 @@ vi.mock('../../src/lib/daemon-state.js', () => daemonStateMock);
 
 import { registerDaemonCommand } from '../../src/commands/daemon.js';
 import { runCli } from '../helpers/cli.js';
+import { expectJsonEnvelopeContainingKeys } from '../helpers/contracts.js';
 
 describe('daemon command', () => {
   beforeEach(() => {
@@ -216,9 +217,10 @@ describe('daemon status', () => {
   it('--json reports status:stopped when no daemon is running', async () => {
     const res = await runCli(registerDaemonCommand, ['--json', 'daemon', 'status']);
     expect(res.exitCode).toBeNull();
-    const body = JSON.parse(res.stdout.join('')) as { data: { status: string; pid: unknown } };
-    expect(body.data.status).toBe('stopped');
-    expect(body.data.pid).toBeNull();
+    const body = JSON.parse(res.stdout.join('')) as Record<string, unknown>;
+    const data = expectJsonEnvelopeContainingKeys(body, ['status', 'pid']) as { status: string; pid: unknown };
+    expect(data.status).toBe('stopped');
+    expect(data.pid).toBeNull();
   });
 
   it('--json reports status:running with correct pid when daemon is alive', async () => {
@@ -229,9 +231,10 @@ describe('daemon status', () => {
 
     const res = await runCli(registerDaemonCommand, ['--json', 'daemon', 'status']);
     expect(res.exitCode).toBeNull();
-    const body = JSON.parse(res.stdout.join('')) as { data: { status: string; pid: number } };
-    expect(body.data.status).toBe('running');
-    expect(body.data.pid).toBe(9999);
+    const body = JSON.parse(res.stdout.join('')) as Record<string, unknown>;
+    const data = expectJsonEnvelopeContainingKeys(body, ['status', 'pid']) as { status: string; pid: number };
+    expect(data.status).toBe('running');
+    expect(data.pid).toBe(9999);
   });
 
   it('human output prints "not running" when stopped', async () => {

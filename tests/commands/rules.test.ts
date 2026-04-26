@@ -14,6 +14,7 @@ import path from 'node:path';
 
 import { Command } from 'commander';
 import { registerRulesCommand } from '../../src/commands/rules.js';
+import { expectJsonEnvelopeContainingKeys } from '../helpers/contracts.js';
 
 function makeProgram(): Command {
   const program = new Command();
@@ -85,7 +86,7 @@ const sampleAutomation = [
   '        max_per: "10m"',
   '      dry_run: true',
   'aliases:',
-  '  "hallway lamp": "AA-BB-CC-DD-EE-FF"',
+  '  "hallway lamp": "28372F4C9C4A"',
   '',
 ].join('\n');
 
@@ -163,7 +164,7 @@ describe('switchbot rules (commander surface)', () => {
         '        - command: "devices command <id> turnOff"',
         '          device: hallway lamp',
         'aliases:',
-        '  "hallway lamp": "AA-BB-CC-DD-EE-FF"',
+        '  "hallway lamp": "28372F4C9C4A"',
         '',
       ].join('\n');
       const p = path.join(tmpDir, 'policy.yaml');
@@ -178,12 +179,13 @@ describe('switchbot rules (commander surface)', () => {
       fs.writeFileSync(p, v02Policy(sampleAutomation), 'utf-8');
       const { stdout, exitCode } = await runCli(['--json', 'rules', 'lint', p]);
       expect(exitCode).toBe(0);
-      const parsed = JSON.parse(stdout[0]) as {
-        schemaVersion: string;
-        data: { valid: boolean; rules: Array<{ name: string; status: string }> };
+      const parsed = JSON.parse(stdout[0]) as Record<string, unknown>;
+      const data = expectJsonEnvelopeContainingKeys(parsed, ['valid', 'rules']) as {
+        valid: boolean;
+        rules: Array<{ name: string; status: string }>;
       };
-      expect(parsed.data.valid).toBe(true);
-      expect(parsed.data.rules[0].status).toBe('ok');
+      expect(data.valid).toBe(true);
+      expect(data.rules[0].status).toBe('ok');
     });
 
     it('exits 2 when the policy file is missing', async () => {
@@ -218,12 +220,13 @@ describe('switchbot rules (commander surface)', () => {
       fs.writeFileSync(p, v02Policy(sampleAutomation), 'utf-8');
       const { stdout, exitCode } = await runCli(['--json', 'rules', 'list', p]);
       expect(exitCode).toBe(0);
-      const parsed = JSON.parse(stdout[0]) as {
-        data: { rules: Array<{ name: string; trigger: string; dry_run: boolean; throttle: string | null }> };
+      const parsed = JSON.parse(stdout[0]) as Record<string, unknown>;
+      const data = expectJsonEnvelopeContainingKeys(parsed, ['automationEnabled', 'rules']) as {
+        rules: Array<{ name: string; trigger: string; dry_run: boolean; throttle: string | null }>;
       };
-      expect(parsed.data.rules).toHaveLength(1);
-      expect(parsed.data.rules[0].dry_run).toBe(true);
-      expect(parsed.data.rules[0].throttle).toBe('10m');
+      expect(data.rules).toHaveLength(1);
+      expect(data.rules[0].dry_run).toBe(true);
+      expect(data.rules[0].throttle).toBe('10m');
     });
   });
 
@@ -477,7 +480,7 @@ describe('switchbot rules (commander surface)', () => {
       '      maxFiringsPerHour: 6',
       '      suppressIfAlreadyDesired: true',
       'aliases:',
-      '  "LAMP": "AA-BB-CC-DD-EE-01"',
+      '  "LAMP": "28372F4C9C4B"',
       '',
     ].join('\n');
 
@@ -560,11 +563,11 @@ describe('switchbot rules (commander surface)', () => {
         '    - name: r-on',
         '      when: { source: mqtt, event: motion.detected }',
         '      then:',
-        '        - { command: "devices command DEVICE-X turnOn", device: DEVICE-X }',
+        '        - { command: "devices command 28372F4C9C4C turnOn", device: 28372F4C9C4C }',
         '    - name: r-off',
         '      when: { source: mqtt, event: motion.detected }',
         '      then:',
-        '        - { command: "devices command DEVICE-X turnOff", device: DEVICE-X }',
+        '        - { command: "devices command 28372F4C9C4C turnOff", device: 28372F4C9C4C }',
         '',
       ].join('\n'));
       const p = path.join(tmpDir, 'conflict.yaml');
@@ -585,11 +588,11 @@ describe('switchbot rules (commander surface)', () => {
         '    - name: on',
         '      when: { source: mqtt, event: motion.detected }',
         '      then:',
-        '        - { command: "devices command DD turnOn", device: DD }',
+        '        - { command: "devices command 28372F4C9C4D turnOn", device: 28372F4C9C4D }',
         '    - name: off',
         '      when: { source: mqtt, event: motion.detected }',
         '      then:',
-        '        - { command: "devices command DD turnOff", device: DD }',
+        '        - { command: "devices command 28372F4C9C4D turnOff", device: 28372F4C9C4D }',
         '',
       ].join('\n'));
       const p = path.join(tmpDir, 'conflict2.yaml');
@@ -609,8 +612,9 @@ describe('switchbot rules (commander surface)', () => {
       fs.writeFileSync(p, v02Policy(sampleAutomation));
       const { exitCode, stdout } = await runCli(['--json', 'rules', 'doctor', p]);
       expect(exitCode).toBe(0);
-      const body = JSON.parse(stdout[0]) as { data: { overall: boolean } };
-      expect(body.data.overall).toBe(true);
+      const body = JSON.parse(stdout[0]) as Record<string, unknown>;
+      const data = expectJsonEnvelopeContainingKeys(body, ['overall', 'lint', 'conflicts']) as { overall: boolean };
+      expect(data.overall).toBe(true);
     });
 
     it('--json exits 1 with overall:false for a policy with duplicate rule names (lint error)', async () => {
@@ -621,19 +625,20 @@ describe('switchbot rules (commander surface)', () => {
         '    - name: dup-name',
         '      when: { source: mqtt, event: motion.detected }',
         '      then:',
-        '        - { command: "devices command EE turnOn" }',
+        '        - { command: "devices command 28372F4C9C4E turnOn" }',
         '    - name: dup-name',
         '      when: { source: mqtt, event: motion.detected }',
         '      then:',
-        '        - { command: "devices command FF turnOff" }',
+        '        - { command: "devices command 28372F4C9C4F turnOff" }',
         '',
       ].join('\n'));
       const p = path.join(tmpDir, 'doctor-bad.yaml');
       fs.writeFileSync(p, bad);
       const { exitCode, stdout } = await runCli(['--json', 'rules', 'doctor', p]);
       expect(exitCode).toBe(1);
-      const body = JSON.parse(stdout[0]) as { data: { overall: boolean } };
-      expect(body.data.overall).toBe(false);
+      const body = JSON.parse(stdout[0]) as Record<string, unknown>;
+      const data = expectJsonEnvelopeContainingKeys(body, ['overall', 'lint', 'conflicts']) as { overall: boolean };
+      expect(data.overall).toBe(false);
     });
   });
 
@@ -799,9 +804,14 @@ describe('rules webhook-show-token', () => {
 describe('rules suggest', () => {
   it('exits with a Commander usage error when --intent is missing', async () => {
     const program = makeProgram();
-    await expect(
-      program.parseAsync(['node', 'test', 'rules', 'suggest']),
-    ).rejects.toThrow();
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation((() => true) as never);
+    try {
+      await expect(
+        program.parseAsync(['node', 'test', 'rules', 'suggest']),
+      ).rejects.toThrow();
+    } finally {
+      stderrSpy.mockRestore();
+    }
   });
 
   it('outputs YAML to stdout when trigger can be inferred from intent', async () => {

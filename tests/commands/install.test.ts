@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { expectJsonEnvelopeContainingKeys } from '../helpers/contracts.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLI = path.resolve(__dirname, '..', '..', 'dist', 'index.js');
@@ -46,11 +47,16 @@ describe('switchbot install (dry-run smoke)', () => {
   it('--dry-run --json emits a structured preview', () => {
     const { code, stdout } = runCli(['install', '--dry-run', '--json', '--agent', 'none']);
     expect(code).toBe(0);
-    const parsed = JSON.parse(stdout);
-    expect(parsed.data.dryRun).toBe(true);
-    expect(parsed.data.agent).toBe('none');
-    expect(parsed.data.steps).toHaveLength(4);
-    expect(parsed.data.steps.map((s: { name: string }) => s.name)).toEqual([
+    const parsed = JSON.parse(stdout) as Record<string, unknown>;
+    const data = expectJsonEnvelopeContainingKeys(parsed, ['dryRun', 'agent', 'steps']) as {
+      dryRun: boolean;
+      agent: string;
+      steps: Array<{ name: string }>;
+    };
+    expect(data.dryRun).toBe(true);
+    expect(data.agent).toBe('none');
+    expect(data.steps).toHaveLength(4);
+    expect(data.steps.map((s) => s.name)).toEqual([
       'prompt-credentials',
       'write-keychain',
       'scaffold-policy',
@@ -110,9 +116,13 @@ describe('switchbot install (dry-run smoke)', () => {
     fs.rmSync(fakeHome, { recursive: true, force: true });
 
     expect(code).toBe(2);
-    const parsed = JSON.parse(stdout);
-    expect(parsed.data.stage).toBe('preflight');
-    const failedNames = parsed.data.preflight.checks
+    const parsed = JSON.parse(stdout) as Record<string, unknown>;
+    const data = expectJsonEnvelopeContainingKeys(parsed, ['ok', 'stage', 'preflight']) as {
+      stage: string;
+      preflight: { checks: Array<{ status: string; name: string }> };
+    };
+    expect(data.stage).toBe('preflight');
+    const failedNames = data.preflight.checks
       .filter((c: { status: string }) => c.status === 'fail')
       .map((c: { name: string }) => c.name);
     expect(failedNames).toContain('agent-skills-dir');

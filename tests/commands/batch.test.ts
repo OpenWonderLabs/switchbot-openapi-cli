@@ -78,6 +78,7 @@ vi.mock('../../src/utils/flags.js', () => flagsMock);
 
 import { registerDevicesCommand } from '../../src/commands/devices.js';
 import { runCli } from '../helpers/cli.js';
+import { expectJsonEnvelopeContainingKeys } from '../helpers/contracts.js';
 
 const DEVICE_LIST_BODY = {
   deviceList: [
@@ -158,11 +159,14 @@ describe('devices batch', () => {
 
     expect(result.exitCode).toBeNull();
     expect(apiMock.__instance.post).toHaveBeenCalledTimes(2);
-    const parsed = JSON.parse(result.stdout[0]);
-    expect(parsed.schemaVersion).toBe('1.1');
-    expect(parsed.data.summary.ok).toBe(2);
-    expect(parsed.data.summary.failed).toBe(0);
-    expect(parsed.data.succeeded.map((s: { deviceId: string }) => s.deviceId).sort()).toEqual(['BOT1', 'BOT2']);
+    const parsed = JSON.parse(result.stdout[0]) as Record<string, unknown>;
+    const data = expectJsonEnvelopeContainingKeys(parsed, ['summary', 'succeeded', 'failed']) as {
+      summary: { ok: number; failed: number };
+      succeeded: Array<{ deviceId: string }>;
+    };
+    expect(data.summary.ok).toBe(2);
+    expect(data.summary.failed).toBe(0);
+    expect(data.succeeded.map((s) => s.deviceId).sort()).toEqual(['BOT1', 'BOT2']);
   });
 
   it('dispatches by --ids (intersected with --filter when both are set)', async () => {
@@ -183,8 +187,9 @@ describe('devices batch', () => {
     expect(result.exitCode).toBeNull();
     // Only BOT1 and BOT2 pass the filter — LOCK1 is excluded.
     expect(apiMock.__instance.post).toHaveBeenCalledTimes(2);
-    const parsed = JSON.parse(result.stdout[0]);
-    expect(parsed.data.summary.total).toBe(2);
+    const parsed = JSON.parse(result.stdout[0]) as Record<string, unknown>;
+    const data = expectJsonEnvelopeContainingKeys(parsed, ['summary']) as { summary: { total: number } };
+    expect(data.summary.total).toBe(2);
   });
 
   it('uses cached type info for --ids without fetching the device list', async () => {
@@ -224,11 +229,15 @@ describe('devices batch', () => {
     ]);
 
     expect(result.exitCode).toBe(1);
-    const parsed = JSON.parse(result.stdout[0]);
-    expect(parsed.data.summary.ok).toBe(1);
-    expect(parsed.data.summary.failed).toBe(1);
-    expect(parsed.data.failed[0].deviceId).toBe('BOT2');
-    expect(parsed.data.failed[0].error.message).toMatch(/timeout/);
+    const parsed = JSON.parse(result.stdout[0]) as Record<string, unknown>;
+    const data = expectJsonEnvelopeContainingKeys(parsed, ['summary', 'failed']) as {
+      summary: { ok: number; failed: number };
+      failed: Array<{ deviceId: string; error: { message: string } }>;
+    };
+    expect(data.summary.ok).toBe(1);
+    expect(data.summary.failed).toBe(1);
+    expect(data.failed[0].deviceId).toBe('BOT2');
+    expect(data.failed[0].error.message).toMatch(/timeout/);
   });
 
   it('refuses destructive commands without --yes', async () => {
