@@ -10,6 +10,8 @@ import {
   isSupportedPolicySchemaVersion,
   type PolicySchemaVersion,
 } from './schema.js';
+import { getEffectiveCatalog } from '../devices/catalog.js';
+import { parseRuleCommand } from '../rules/action.js';
 import { destructiveVerbOf, DESTRUCTIVE_COMMANDS } from '../rules/destructive.js';
 
 const require = createRequire(import.meta.url);
@@ -32,7 +34,7 @@ export interface PolicyValidationError {
 export interface PolicyValidationResult {
   policyPath: string;
   schemaVersion: PolicySchemaVersion;
-  validationScope: 'schema+local-guards';
+  validationScope: 'schema+offline-semantics';
   limitations: string[];
   valid: boolean;
   errors: PolicyValidationError[];
@@ -40,8 +42,11 @@ export interface PolicyValidationResult {
 
 const POLICY_VALIDATION_LIMITATIONS = [
   'Does not resolve aliases against the live device inventory.',
-  'Does not verify that rule command strings are valid for a real device type.',
+  'Does not verify commands against the real target device, live capabilities, or current firmware.',
 ] as const;
+
+const HEX_MAC_DEVICE_ID_RE = /^[A-Fa-f0-9]{12}(?:-[A-Za-z0-9]{2,16})?$/;
+const HYPHENATED_DEVICE_ID_RE = /^[A-Za-z0-9]{2,32}(?:-[A-Za-z0-9]{2,32}){1,4}$/;
 
 interface CompiledValidator {
   ajv: Ajv2020Type;
@@ -97,6 +102,18 @@ function getKeyNodeAt(doc: Document.Parsed, parentSegments: string[], key: strin
   if (!parent || !isMap(parent)) return null;
   const pair = parent.items.find((p) => isScalar(p.key) && String((p.key as { value: unknown }).value) === key);
   return (pair?.key as Node | undefined) ?? null;
+}
+
+function locateInstancePath(
+  doc: Document.Parsed,
+  lineCounter: LineCounter,
+  instancePath: string,
+): { line?: number; col?: number } {
+  const node = getNodeAt(doc, instancePathToSegments(instancePath));
+  const range = (node as { range?: [number, number, number] } | null)?.range;
+  if (!range) return {};
+  const pos = lineCounter.linePos(range[0]);
+  return { line: pos.line, col: pos.col };
 }
 
 function locateError(doc: Document.Parsed, lineCounter: LineCounter, err: ErrorObject): { line?: number; col?: number } {
@@ -193,7 +210,7 @@ function unsupportedVersionResult(loaded: LoadedPolicy, declared: string): Polic
   return {
     policyPath: loaded.path,
     schemaVersion: CURRENT_POLICY_SCHEMA_VERSION,
-    validationScope: 'schema+local-guards',
+    validationScope: 'schema+offline-semantics',
     limitations: [...POLICY_VALIDATION_LIMITATIONS],
     valid: false,
     errors: [
@@ -208,6 +225,29 @@ function unsupportedVersionResult(loaded: LoadedPolicy, declared: string): Polic
       },
     ],
   };
+}
+
+function escapeJsonPointerSegment(segment: string): string {
+  return segment.replace(/~/g, '~0').replace(/\//g, '~1');
+}
+
+function isPlausibleDeviceId(value: string): boolean {
+  return HEX_MAC_DEVICE_ID_RE.test(value) || HYPHENATED_DEVICE_ID_RE.test(value);
+}
+
+function hasErrorAtPath(errors: PolicyValidationError[], path: string): boolean {
+  return errors.some((err) => err.path === path);
+}
+
+function resolvePolicyDeviceRef(
+  raw: string | undefined,
+  aliases: Record<string, string>,
+): { ok: boolean; reason?: string } {
+  if (!raw) return { ok: false, reason: 'missing-device' };
+  if (raw === '<id>') return { ok: false, reason: 'missing-device' };
+  if (Object.hasOwn(aliases, raw)) return { ok: true };
+  if (isPlausibleDeviceId(raw)) return { ok: true };
+  return { ok: false, reason: 'unknown-device-ref' };
 }
 
 /**
@@ -264,6 +304,140 @@ function collectDestructiveRuleErrors(loaded: LoadedPolicy): PolicyValidationErr
   return out;
 }
 
+function collectOfflineSemanticErrors(
+  loaded: LoadedPolicy,
+  existingErrors: PolicyValidationError[],
+): PolicyValidationError[] {
+  const data = loaded.data as
+    | {
+        aliases?: Record<string, string>;
+        automation?: {
+          rules?: Array<{
+            name?: string;
+            then?: Array<{ command?: string; device?: string }>;
+          }>;
+        };
+      }
+    | null
+    | undefined;
+
+  const out: PolicyValidationError[] = [];
+  const aliases =
+    data?.aliases && typeof data.aliases === 'object'
+      ? Object.fromEntries(
+          Object.entries(data.aliases).filter(
+            (entry): entry is [string, string] => typeof entry[0] === 'string' && typeof entry[1] === 'string',
+          ),
+        )
+      : {};
+
+  for (const [aliasName, deviceId] of Object.entries(aliases)) {
+    const path = `/aliases/${escapeJsonPointerSegment(aliasName)}`;
+    if (hasErrorAtPath(existingErrors, path)) continue;
+    if (isPlausibleDeviceId(deviceId)) continue;
+    const { line, col } = locateInstancePath(loaded.doc, loaded.lineCounter, path);
+    out.push({
+      path,
+      line,
+      col,
+      keyword: 'alias-device-id',
+      message: `alias "${aliasName}" does not point to a plausible SwitchBot deviceId`,
+      hint: 'use a deviceId from `switchbot devices list --format=tsv`, e.g. 01-202407090924-26354212 or 28372F4C9C4A',
+      schemaPath: '#/properties/aliases',
+    });
+  }
+
+  const knownDeviceCommands = new Set(
+    getEffectiveCatalog()
+      .flatMap((entry) => entry.commands)
+      .filter((spec) => spec.commandType !== 'customize')
+      .map((spec) => spec.command),
+  );
+
+  const rules = data?.automation?.rules;
+  if (!Array.isArray(rules)) return out;
+
+  for (let ri = 0; ri < rules.length; ri++) {
+    const rule = rules[ri];
+    const actions = Array.isArray(rule?.then) ? rule.then : [];
+    for (let ai = 0; ai < actions.length; ai++) {
+      const action = actions[ai];
+      const cmd = action?.command;
+      if (typeof cmd !== 'string') continue;
+      const ruleName = typeof rule?.name === 'string' ? rule.name : `#${ri}`;
+      const commandPath = `/automation/rules/${ri}/then/${ai}/command`;
+      const devicePath = `/automation/rules/${ri}/then/${ai}/device`;
+
+      const parsed = parseRuleCommand(cmd);
+      if (!parsed) {
+        const { line, col } = locateInstancePath(loaded.doc, loaded.lineCounter, commandPath);
+        out.push({
+          path: commandPath,
+          line,
+          col,
+          keyword: 'rule-unparseable-command',
+          message: `rule "${ruleName}" action #${ai} must use \`devices command <id> <verb> [parameter...]\``,
+          hint: 'automation rules currently support only `devices command ...` actions; scenes/webhooks/other subcommands are not executable here',
+          schemaPath: '#/properties/automation/properties/rules/items/properties/then/items/properties/command',
+        });
+        continue;
+      }
+
+      if (!knownDeviceCommands.has(parsed.verb)) {
+        const { line, col } = locateInstancePath(loaded.doc, loaded.lineCounter, commandPath);
+        out.push({
+          path: commandPath,
+          line,
+          col,
+          keyword: 'rule-unknown-command',
+          message: `rule "${ruleName}" action #${ai} uses unknown device command "${parsed.verb}"`,
+          hint: 'check `switchbot devices commands <type>` for valid verbs; this validator only checks offline catalog verbs, not the real target device',
+          schemaPath: '#/properties/automation/properties/rules/items/properties/then/items/properties/command',
+        });
+      }
+
+      if (typeof action?.device === 'string') {
+        const resolved = resolvePolicyDeviceRef(action.device, aliases);
+        if (!resolved.ok) {
+          const { line, col } = locateInstancePath(loaded.doc, loaded.lineCounter, devicePath);
+          out.push({
+            path: devicePath,
+            line,
+            col,
+            keyword: resolved.reason ?? 'unknown-device-ref',
+            message: `rule "${ruleName}" action #${ai} references unknown device "${action.device}"`,
+            hint: 'set `device:` to a declared alias or a plausible deviceId',
+            schemaPath: '#/properties/automation/properties/rules/items/properties/then/items/properties/device',
+          });
+        }
+        continue;
+      }
+
+      const resolved = resolvePolicyDeviceRef(parsed.deviceIdSlot ?? undefined, aliases);
+      if (!resolved.ok) {
+        const { line, col } = locateInstancePath(loaded.doc, loaded.lineCounter, commandPath);
+        out.push({
+          path: commandPath,
+          line,
+          col,
+          keyword: resolved.reason ?? 'missing-device',
+          message:
+            resolved.reason === 'missing-device'
+              ? `rule "${ruleName}" action #${ai} uses \`<id>\` but does not provide \`device:\``
+              : `rule "${ruleName}" action #${ai} references unknown device "${parsed.deviceIdSlot}"`,
+          hint:
+            resolved.reason === 'missing-device'
+              ? 'either replace `<id>` with a deviceId/alias or add `device: <alias-or-deviceId>` to the action'
+              : 'use a declared alias or a plausible deviceId in the command slot',
+          schemaPath: '#/properties/automation/properties/rules/items/properties/then/items/properties/command',
+        });
+      }
+    }
+  }
+
+  return out;
+}
+
 export function validateLoadedPolicy(loaded: LoadedPolicy): PolicyValidationResult {
   const declared = readDeclaredVersion(loaded.data);
 
@@ -301,6 +475,7 @@ export function validateLoadedPolicy(loaded: LoadedPolicy): PolicyValidationResu
   if (version === '0.2') {
     const ruleErrors = collectDestructiveRuleErrors(loaded);
     errors.push(...ruleErrors);
+    errors.push(...collectOfflineSemanticErrors(loaded, errors));
   }
 
   const valid = ok === true && errors.length === 0;
@@ -308,7 +483,7 @@ export function validateLoadedPolicy(loaded: LoadedPolicy): PolicyValidationResu
   return {
     policyPath: loaded.path,
     schemaVersion: version,
-    validationScope: 'schema+local-guards',
+    validationScope: 'schema+offline-semantics',
     limitations: [...POLICY_VALIDATION_LIMITATIONS],
     valid,
     errors,

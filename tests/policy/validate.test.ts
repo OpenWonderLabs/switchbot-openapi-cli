@@ -426,4 +426,115 @@ describe('policy validator (v0.2)', () => {
     const result = validateLoadedPolicy(loaded);
     expect(result.valid, JSON.stringify(result.errors)).toBe(true);
   });
+
+  it('rejects alias targets that do not look like SwitchBot deviceIds', () => {
+    const loaded = writeAndLoad(
+      tmpDir,
+      [
+        'version: "0.2"',
+        'aliases:',
+        '  lamp: abc_def',
+        '',
+      ].join('\n'),
+    );
+    const result = validateLoadedPolicy(loaded);
+    expect(result.valid).toBe(false);
+    const err = result.errors.find((e) => e.keyword === 'alias-device-id');
+    expect(err).toBeDefined();
+    expect(err!.path).toBe('/aliases/lamp');
+  });
+
+  it('rejects unparseable automation command strings before runtime', () => {
+    const loaded = writeAndLoad(
+      tmpDir,
+      [
+        'version: "0.2"',
+        'automation:',
+        '  rules:',
+        '    - name: "bad shape"',
+        '      when:',
+        '        source: mqtt',
+        '        event: x.y',
+        '      then:',
+        '        - command: "scenes run bedtime"',
+        '',
+      ].join('\n'),
+    );
+    const result = validateLoadedPolicy(loaded);
+    expect(result.valid).toBe(false);
+    const err = result.errors.find((e) => e.keyword === 'rule-unparseable-command');
+    expect(err).toBeDefined();
+    expect(err!.path).toBe('/automation/rules/0/then/0/command');
+  });
+
+  it('rejects unknown device verbs even when the command shape parses', () => {
+    const loaded = writeAndLoad(
+      tmpDir,
+      [
+        'version: "0.2"',
+        'aliases:',
+        '  hall-light: 01-202407090924-26354212',
+        'automation:',
+        '  rules:',
+        '    - name: "bad verb"',
+        '      when:',
+        '        source: mqtt',
+        '        event: x.y',
+        '      then:',
+        '        - command: "devices command <id> frobnicate"',
+        '          device: hall-light',
+        '',
+      ].join('\n'),
+    );
+    const result = validateLoadedPolicy(loaded);
+    expect(result.valid).toBe(false);
+    const err = result.errors.find((e) => e.keyword === 'rule-unknown-command');
+    expect(err).toBeDefined();
+    expect(err!.path).toBe('/automation/rules/0/then/0/command');
+  });
+
+  it('rejects <id> placeholders that omit device resolution', () => {
+    const loaded = writeAndLoad(
+      tmpDir,
+      [
+        'version: "0.2"',
+        'automation:',
+        '  rules:',
+        '    - name: "missing device"',
+        '      when:',
+        '        source: mqtt',
+        '        event: x.y',
+        '      then:',
+        '        - command: "devices command <id> turnOn"',
+        '',
+      ].join('\n'),
+    );
+    const result = validateLoadedPolicy(loaded);
+    expect(result.valid).toBe(false);
+    const err = result.errors.find((e) => e.keyword === 'missing-device');
+    expect(err).toBeDefined();
+    expect(err!.path).toBe('/automation/rules/0/then/0/command');
+  });
+
+  it('accepts alias references embedded directly in the command slot', () => {
+    const loaded = writeAndLoad(
+      tmpDir,
+      [
+        'version: "0.2"',
+        'aliases:',
+        '  hall-light: 01-202407090924-26354212',
+        'automation:',
+        '  rules:',
+        '    - name: "slot alias"',
+        '      when:',
+        '        source: mqtt',
+        '        event: x.y',
+        '      then:',
+        '        - command: "devices command hall-light turnOn"',
+        '',
+      ].join('\n'),
+    );
+    const result = validateLoadedPolicy(loaded);
+    expect(result.valid, JSON.stringify(result.errors)).toBe(true);
+  });
 });

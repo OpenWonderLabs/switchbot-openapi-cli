@@ -137,6 +137,16 @@ describe('mcp server', () => {
     expect(out.data.resources.some((r: { uri: string }) => r.uri === 'switchbot://events')).toBe(true);
   });
 
+  it('mcp list-tools --json is an alias of mcp tools', async () => {
+    const res = await runCli(registerMcpCommand, ['--json', 'mcp', 'list-tools']);
+    expect(res.exitCode).toBeNull();
+    const out = JSON.parse(res.stdout.join('\n'));
+    expect(Array.isArray(out.data.tools)).toBe(true);
+    expect(out.data.tools.some((t: { name: string }) => t.name === 'list_devices')).toBe(true);
+    expect(Array.isArray(out.data.resources)).toBe(true);
+    expect(out.data.resources.some((r: { uri: string }) => r.uri === 'switchbot://events')).toBe(true);
+  });
+
   beforeEach(() => {
     apiMock.__instance.get.mockReset();
     apiMock.__instance.post.mockReset();
@@ -871,7 +881,7 @@ describe('mcp server', () => {
       expect(sc.present).toBe(false);
       expect(sc.valid).toBeNull();
       expect(sc.policyPath).toBe(missing);
-      expect(sc.validationScope).toBe('schema+local-guards');
+      expect(sc.validationScope).toBe('schema+offline-semantics');
       expect(Array.isArray(sc.limitations)).toBe(true);
     });
 
@@ -887,7 +897,7 @@ describe('mcp server', () => {
       const sc = (res as { structuredContent?: Record<string, unknown> }).structuredContent!;
       expect(sc.present).toBe(true);
       expect(sc.valid).toBe(false);
-      expect(sc.validationScope).toBe('schema+local-guards');
+      expect(sc.validationScope).toBe('schema+offline-semantics');
       const errors = sc.errors as Array<{ keyword: string }>;
       expect(Array.isArray(errors)).toBe(true);
       expect(errors.some((e) => e.keyword === 'unsupported-version')).toBe(true);

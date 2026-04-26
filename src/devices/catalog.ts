@@ -525,7 +525,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     readOnly: true,
     aliases: ['Meter Plus', 'MeterPro', 'MeterPro(CO2)', 'WoIOSensor'],
     commands: [],
-    statusFields: ['temperature', 'humidity', 'CO2', 'battery', 'version'],
+    statusFields: ['temperature', 'humidity', 'battery', 'version'],
   },
   {
     type: 'Motion Sensor',
@@ -599,7 +599,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     role: 'climate',
     readOnly: true,
     commands: [],
-    statusFields: ['temperature', 'humidity', 'version'],
+    statusFields: ['battery', 'brightness', 'moveDetected', 'humidity', 'temperature', 'version'],
   },
   {
     type: 'Wallet Finder Card',

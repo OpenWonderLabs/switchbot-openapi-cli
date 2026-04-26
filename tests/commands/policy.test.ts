@@ -127,6 +127,14 @@ describe('switchbot policy (commander surface)', () => {
       expect(parsed.error.code).toBe(5);
       expect(parsed.error.kind).toBe('exists');
     });
+
+    it('accepts --output as an alias of the positional path', () => {
+      const p = path.join(tmpDir, 'out-policy.yaml');
+      const { exitCode } = runCli(['policy', 'new', '--output', p]);
+      expect(exitCode).toBe(0);
+      expect(fs.existsSync(p)).toBe(true);
+      expect(fs.readFileSync(p, 'utf-8')).toMatch(/version: "0\.2"/);
+    });
   });
 
   describe('policy validate', () => {
@@ -152,7 +160,7 @@ describe('switchbot policy (commander surface)', () => {
       expect(exitCode).toBe(0);
       const out = stdout.join('\n');
       expect(out).toMatch(/is valid \(schema v0\.2\)/);
-      expect(out).toMatch(/Validation scope: schema \+ local safety guards only\./);
+      expect(out).toMatch(/Validation scope: schema \+ offline semantics \+ local safety guards\./);
       expect(out).toMatch(/Not checked: alias targets against live devices/);
     });
 
@@ -197,7 +205,7 @@ describe('switchbot policy (commander surface)', () => {
       expect(parsed.data.valid).toBe(true);
       expect(parsed.data.errors).toEqual([]);
       expect(parsed.data.schemaVersion).toBe('0.2');
-      expect(parsed.data.validationScope).toBe('schema+local-guards');
+      expect(parsed.data.validationScope).toBe('schema+offline-semantics');
       expect(parsed.data.limitations.length).toBeGreaterThan(0);
     });
 

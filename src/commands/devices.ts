@@ -1019,6 +1019,7 @@ function renderCatalogEntry(entry: DeviceCatalogEntry): void {
   if (entry.statusFields && entry.statusFields.length > 0) {
     console.log('\nStatus fields (from "devices status"):');
     console.log('  ' + entry.statusFields.join(', '));
+    console.log('  Note: statusFields are advisory; actual fields can vary by firmware and device variant.');
   }
 
   const expandHint = EXPAND_HINTS[entry.type];

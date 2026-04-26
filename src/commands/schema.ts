@@ -235,6 +235,8 @@ export function registerSchemaCommand(program: Command): void {
 Output is always JSON (this command ignores --format). The output is a
 catalog export — not a formal JSON Schema standard document — suitable for
 pre-baking LLM prompts or regenerating docs when the catalog changes.
+\`statusFields\` are advisory offline hints; actual live status can differ by
+firmware and device variant.
 
 Size tips:
   --compact --used          Smallest realistic payload for a given account

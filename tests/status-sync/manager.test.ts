@@ -23,6 +23,7 @@ const childProcessMock = vi.hoisted(() => ({
 const tryLoadConfigMock = vi.hoisted(() => vi.fn());
 const getActiveProfileMock = vi.hoisted(() => vi.fn());
 const getConfigPathMock = vi.hoisted(() => vi.fn());
+const fetchMqttCredentialMock = vi.hoisted(() => vi.fn());
 
 vi.mock('node:fs', () => ({ default: fsMock, ...fsMock }));
 vi.mock('node:os', () => ({ default: osMock, ...osMock }));
@@ -30,10 +31,14 @@ vi.mock('node:child_process', () => ({ ...childProcessMock }));
 vi.mock('../../src/config.js', () => ({ tryLoadConfig: (...args: unknown[]) => tryLoadConfigMock(...args) }));
 vi.mock('../../src/lib/request-context.js', () => ({ getActiveProfile: (...args: unknown[]) => getActiveProfileMock(...args) }));
 vi.mock('../../src/utils/flags.js', () => ({ getConfigPath: (...args: unknown[]) => getConfigPathMock(...args) }));
+vi.mock('../../src/mqtt/credential.js', () => ({
+  fetchMqttCredential: (...args: unknown[]) => fetchMqttCredentialMock(...args),
+}));
 
 import {
   buildStatusSyncChildArgs,
   getStatusSyncStatus,
+  probeStatusSyncStart,
   resolveStatusSyncPaths,
   startStatusSync,
 } from '../../src/status-sync/manager.js';
@@ -41,11 +46,13 @@ import {
 describe('status-sync manager', () => {
   const originalArgv = process.argv;
   const originalKill = process.kill;
+  const originalFetch = globalThis.fetch;
   const killSpy = vi.fn();
   (process as unknown as { kill: typeof process.kill }).kill = killSpy as unknown as typeof process.kill;
 
   afterAll(() => {
     (process as unknown as { kill: typeof process.kill }).kill = originalKill;
+    globalThis.fetch = originalFetch;
   });
 
   beforeEach(() => {
@@ -62,6 +69,7 @@ describe('status-sync manager', () => {
     tryLoadConfigMock.mockReset();
     getActiveProfileMock.mockReset();
     getConfigPathMock.mockReset();
+    fetchMqttCredentialMock.mockReset();
     killSpy.mockReset();
     delete process.env.OPENCLAW_TOKEN;
     delete process.env.OPENCLAW_MODEL;
@@ -71,6 +79,15 @@ describe('status-sync manager', () => {
     tryLoadConfigMock.mockReturnValue({ token: 'token', secret: 'secret' });
     childProcessMock.spawn.mockReturnValue({ pid: 4321, unref: vi.fn() });
     childProcessMock.spawnSync.mockReturnValue({ status: 0 });
+    fetchMqttCredentialMock.mockResolvedValue({
+      brokerUrl: 'mqtts://broker.example',
+      region: 'us-east-1',
+      clientId: 'client-1',
+      topics: { status: 'topic/status' },
+      qos: 1,
+      tls: { enabled: true, caBase64: 'ca', certBase64: 'cert', keyBase64: 'key' },
+    });
+    globalThis.fetch = vi.fn().mockResolvedValue({ status: 401, ok: false }) as typeof fetch;
   });
 
   afterEach(() => {
@@ -234,6 +251,50 @@ describe('status-sync manager', () => {
       /must use http:\/\/ or https:\/\//,
     );
     expect(childProcessMock.spawn).not.toHaveBeenCalled();
+  });
+
+  it('probes MQTT credentials and OpenClaw reachability when requested', async () => {
+    process.env.OPENCLAW_TOKEN = 'env-token';
+    process.env.OPENCLAW_MODEL = 'env-model';
+
+    const result = await probeStatusSyncStart({});
+
+    expect(fetchMqttCredentialMock).toHaveBeenCalledWith('token', 'secret');
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'http://localhost:18789',
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer env-token',
+          'X-OpenClaw-Model': 'env-model',
+        }),
+      }),
+    );
+    expect(result).toEqual({
+      openclawUrl: 'http://localhost:18789',
+      mqttBrokerUrl: 'mqtts://broker.example',
+      mqttRegion: 'us-east-1',
+    });
+  });
+
+  it('turns MQTT credential probe failures into a usage error', async () => {
+    process.env.OPENCLAW_TOKEN = 'env-token';
+    process.env.OPENCLAW_MODEL = 'env-model';
+    fetchMqttCredentialMock.mockRejectedValue(new Error('HTTP 401 Unauthorized'));
+
+    await expect(probeStatusSyncStart({})).rejects.toThrow(
+      /SwitchBot MQTT credential probe failed[\s\S]*HTTP 401 Unauthorized/,
+    );
+  });
+
+  it('turns OpenClaw probe failures into a usage error', async () => {
+    process.env.OPENCLAW_TOKEN = 'env-token';
+    process.env.OPENCLAW_MODEL = 'env-model';
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error('connect ECONNREFUSED')) as typeof fetch;
+
+    await expect(probeStatusSyncStart({})).rejects.toThrow(
+      /OpenClaw probe failed[\s\S]*ECONNREFUSED/,
+    );
   });
 });
 

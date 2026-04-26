@@ -97,6 +97,23 @@ describe('schema export', () => {
       expect((t.description as string).length, `${t.type} description is empty`).toBeGreaterThan(0);
     }
   });
+
+  it('exports corrected advisory statusFields for Meter and Home Climate Panel', async () => {
+    const res = await runCli(registerSchemaCommand, ['schema', 'export']);
+    const parsed = JSON.parse(res.stdout.join('')).data;
+    const meter = parsed.types.find((t: { type: string }) => t.type === 'Meter');
+    const panel = parsed.types.find((t: { type: string }) => t.type === 'Home Climate Panel');
+    expect(meter.statusFields).not.toContain('CO2');
+    expect(meter.statusFields).toEqual(['temperature', 'humidity', 'battery', 'version']);
+    expect(panel.statusFields).toEqual([
+      'battery',
+      'brightness',
+      'moveDetected',
+      'humidity',
+      'temperature',
+      'version',
+    ]);
+  });
 });
 
 describe('schema export B3 slim flags', () => {

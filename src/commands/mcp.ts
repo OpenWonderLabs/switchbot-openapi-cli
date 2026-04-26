@@ -1113,8 +1113,8 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
     {
       title: 'Validate a policy.yaml file',
       description:
-        'Check a policy file against the embedded JSON Schema plus local safety guards. ' +
-        'Does not resolve aliases against the live device inventory or verify rule commands against real device capabilities. ' +
+        'Check a policy file against the embedded JSON Schema, offline command/device semantics, and local safety guards. ' +
+        'Does not resolve aliases against the live device inventory or verify commands against the real target device, live capabilities, or current firmware. ' +
         'When no path is given, reads the resolved default (${SWITCHBOT_POLICY_PATH} or ~/.config/openclaw/switchbot/policy.yaml). ' +
         'Use before relying on aliases/quiet_hours/confirmations so the agent never acts on a broken policy.',
       _meta: { agentSafetyTier: 'read' },
@@ -1162,10 +1162,10 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
           const structured = {
             policyPath,
             schemaVersion: CURRENT_POLICY_SCHEMA_VERSION,
-            validationScope: 'schema+local-guards' as const,
+            validationScope: 'schema+offline-semantics' as const,
             limitations: [
               'Does not resolve aliases against the live device inventory.',
-              'Does not verify that rule command strings are valid for a real device type.',
+              'Does not verify commands against the real target device, live capabilities, or current firmware.',
             ],
             present: false,
             valid: null,
@@ -1180,10 +1180,10 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
           const structured = {
             policyPath,
             schemaVersion: CURRENT_POLICY_SCHEMA_VERSION,
-            validationScope: 'schema+local-guards' as const,
+            validationScope: 'schema+offline-semantics' as const,
             limitations: [
               'Does not resolve aliases against the live device inventory.',
-              'Does not verify that rule command strings are valid for a real device type.',
+              'Does not verify commands against the real target device, live capabilities, or current firmware.',
             ],
             present: true,
             valid: false,
@@ -1982,6 +1982,26 @@ function listRegisteredResources(): string[] {
   return ['switchbot://events'];
 }
 
+function printMcpToolDirectory(): void {
+  const server = createSwitchBotMcpServer();
+  const tools = listRegisteredTools(server).map((name) => ({ name }));
+  const resources = listRegisteredResources().map((uri) => ({ uri }));
+  if (isJsonMode()) {
+    printJson({ tools, resources });
+    return;
+  }
+  console.log('Tools:');
+  for (const tool of tools) {
+    console.log(`  ${tool.name}`);
+  }
+  console.log('');
+  console.log('Resources:');
+  for (const resource of resources) {
+    console.log(`  ${resource.uri}`);
+  }
+  console.log(`\nTotal: ${tools.length} tool(s), ${resources.length} resource(s)`);
+}
+
 export function registerMcpCommand(program: Command): void {
   const mcp = program
     .command('mcp')
@@ -2037,25 +2057,12 @@ Inspect locally:
   mcp
     .command('tools')
     .description('Print the registered MCP tools in human or JSON form')
-    .action(() => {
-      const server = createSwitchBotMcpServer();
-      const tools = listRegisteredTools(server).map((name) => ({ name }));
-      const resources = listRegisteredResources().map((uri) => ({ uri }));
-      if (isJsonMode()) {
-        printJson({ tools, resources });
-        return;
-      }
-      console.log('Tools:');
-      for (const tool of tools) {
-        console.log(`  ${tool.name}`);
-      }
-      console.log('');
-      console.log('Resources:');
-      for (const resource of resources) {
-        console.log(`  ${resource.uri}`);
-      }
-      console.log(`\nTotal: ${tools.length} tool(s), ${resources.length} resource(s)`);
-    });
+    .action(() => printMcpToolDirectory());
+
+  mcp
+    .command('list-tools')
+    .description('Alias of `mcp tools`')
+    .action(() => printMcpToolDirectory());
 
   mcp
     .command('serve')

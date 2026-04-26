@@ -1860,6 +1860,53 @@ describe('devices command', () => {
       ).toBeUndefined();
     });
 
+    it('--json for Meter does not over-promise CO2 in advisory statusFields', async () => {
+      const meterBody = {
+        deviceList: [{
+          deviceId: 'METER-1',
+          deviceName: 'Bedroom Meter',
+          deviceType: 'Meter',
+          hubDeviceId: 'HUB-1',
+          enableCloudService: true,
+        }],
+        infraredRemoteList: [],
+      };
+      apiMock.__instance.get.mockResolvedValue({ data: { body: meterBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'describe', 'METER-1', '--json']);
+      const parsed = JSON.parse(res.stdout.join('\n'));
+      expect(parsed.data.capabilities.statusFields).toEqual([
+        'temperature',
+        'humidity',
+        'battery',
+        'version',
+      ]);
+      expect(parsed.data.capabilities.statusFields).not.toContain('CO2');
+    });
+
+    it('--json for Home Climate Panel includes the fuller advisory statusFields set', async () => {
+      const panelBody = {
+        deviceList: [{
+          deviceId: 'CLIMATE-1',
+          deviceName: 'Hall Panel',
+          deviceType: 'Home Climate Panel',
+          hubDeviceId: 'HUB-1',
+          enableCloudService: true,
+        }],
+        infraredRemoteList: [],
+      };
+      apiMock.__instance.get.mockResolvedValue({ data: { body: panelBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'describe', 'CLIMATE-1', '--json']);
+      const parsed = JSON.parse(res.stdout.join('\n'));
+      expect(parsed.data.capabilities.statusFields).toEqual([
+        'battery',
+        'brightness',
+        'moveDetected',
+        'humidity',
+        'temperature',
+        'version',
+      ]);
+    });
+
     it('human output marks destructive commands in the command table', async () => {
       const lockBody = {
         deviceList: [{

@@ -59,6 +59,13 @@ export interface StartStatusSyncOptions {
   topic?: string;
   stateDir?: string;
   force?: boolean;
+  probe?: boolean;
+}
+
+export interface StatusSyncProbeResult {
+  openclawUrl: string;
+  mqttBrokerUrl: string;
+  mqttRegion: string;
 }
 
 export interface StatusSyncStatusOptions {
@@ -137,6 +144,61 @@ function resolveStatusSyncRuntime(options: {
     openclawToken,
     openclawModel,
     ...(options.topic ? { topic: options.topic } : {}),
+  };
+}
+
+export async function probeStatusSyncStart(
+  options: Pick<StartStatusSyncOptions, 'openclawUrl' | 'openclawToken' | 'openclawModel' | 'topic'> = {},
+): Promise<StatusSyncProbeResult> {
+  const runtime = resolveStatusSyncRuntime(options);
+  const config = tryLoadConfig();
+  if (!config) {
+    throw new UsageError(
+      'No credentials found. Run \'switchbot config set-token\' or set SWITCHBOT_TOKEN and SWITCHBOT_SECRET.',
+    );
+  }
+
+  const { fetchMqttCredential } = await import('../mqtt/credential.js');
+
+  let mqttBrokerUrl = '';
+  let mqttRegion = '';
+  try {
+    const cred = await fetchMqttCredential(config.token, config.secret);
+    mqttBrokerUrl = cred.brokerUrl;
+    mqttRegion = cred.region;
+  } catch (err) {
+    throw new UsageError(
+      [
+        'SwitchBot MQTT credential probe failed.',
+        `Reason: ${err instanceof Error ? err.message : String(err)}`,
+        'Verify SWITCHBOT_TOKEN / SWITCHBOT_SECRET first, then re-run `switchbot status-sync start --probe`.',
+      ].join('\n'),
+    );
+  }
+
+  try {
+    await fetch(runtime.openclawUrl, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${runtime.openclawToken}`,
+        'X-OpenClaw-Model': runtime.openclawModel,
+      },
+      signal: AbortSignal.timeout(5000),
+    });
+  } catch (err) {
+    throw new UsageError(
+      [
+        `OpenClaw probe failed for ${runtime.openclawUrl}.`,
+        `Reason: ${err instanceof Error ? err.message : String(err)}`,
+        'Check URL reachability, TLS/certificate trust, and whether the OpenClaw server is listening.',
+      ].join('\n'),
+    );
+  }
+
+  return {
+    openclawUrl: runtime.openclawUrl,
+    mqttBrokerUrl,
+    mqttRegion,
   };
 }
 

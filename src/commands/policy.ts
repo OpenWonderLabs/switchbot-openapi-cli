@@ -184,17 +184,18 @@ Examples:
         }),
       );
       console.log('');
-      console.log('Validation scope: schema + local safety guards only.');
-      console.log('Not checked: alias targets against live devices; rule commands against real device capabilities.');
+      console.log('Validation scope: schema + offline semantics + local safety guards.');
+      console.log('Not checked: alias targets against live devices; command support on the real target device, live capabilities, or current firmware.');
       process.exit(result.valid ? 0 : 1);
     });
 
   policy
     .command('new [path]')
     .description('Write a starter policy.yaml (fails if the file exists unless --force)')
+    .option('-o, --output <path>', 'write the starter policy to this path (alias of positional [path])')
     .option('-f, --force', 'overwrite an existing policy file')
-    .action((pathArg: string | undefined, opts: { force?: boolean }) => {
-      const policyPath = resolvePolicyPath({ flag: pathArg });
+    .action((pathArg: string | undefined, opts: { force?: boolean; output?: string }) => {
+      const policyPath = resolvePolicyPath({ flag: opts.output ?? pathArg });
       const force = opts.force === true;
 
       let result: ScaffoldPolicyResult;
