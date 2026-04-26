@@ -69,10 +69,10 @@ import { diffPolicyValues } from '../policy/diff.js';
 
 const LATEST_SUPPORTED_VERSION: PolicySchemaVersion =
   SUPPORTED_POLICY_SCHEMA_VERSIONS[SUPPORTED_POLICY_SCHEMA_VERSIONS.length - 1];
-import { fileURLToPath } from 'node:url';
 import { dirname as pathDirname, join as pathJoin } from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
+import { readPolicyExampleYaml } from '../embedded-assets.js';
 
 /**
  * Factory — build an McpServer with the six SwitchBot tools registered.
@@ -1221,8 +1221,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
           context: { policyPath },
         });
       }
-      const templateUrl = new URL('../policy/examples/policy.example.yaml', import.meta.url);
-      const template = fs.readFileSync(fileURLToPath(templateUrl), 'utf-8');
+      const template = readPolicyExampleYaml();
       fs.mkdirSync(pathDirname(policyPath), { recursive: true });
       fs.writeFileSync(policyPath, template, { encoding: 'utf-8' });
       const structured = {

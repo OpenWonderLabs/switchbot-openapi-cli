@@ -565,6 +565,44 @@ describe('devices batch', () => {
     expect(parsed.data.skipped).toBeUndefined();
   });
 
+  it('--skip-offline --dry-run human output separates "Planned (dry-run)" from "Skipped (offline)"', async () => {
+    flagsMock.dryRun = true;
+    cacheMock.map.set('BOT1', { type: 'Bot', name: 'Kitchen', category: 'physical' });
+    cacheMock.map.set('BOT2', { type: 'Bot', name: 'Office', category: 'physical' });
+    cacheMock.statusMap.set('BOT2', {
+      fetchedAt: new Date().toISOString(),
+      body: { onlineStatus: 'offline', power: 'off' },
+    });
+    // In dry-run, the axios interceptor throws DryRunSignal before any real
+    // request goes out; simulate that here so the inner loop records the
+    // dry-run outcome for BOT1 (BOT2 is filtered out by --skip-offline).
+    apiMock.__instance.post.mockImplementation(async () => {
+      throw new apiMock.DryRunSignal('POST', '/v1.1/devices/BOT1/commands');
+    });
+
+    const result = await runCli(registerDevicesCommand, [
+      'devices',
+      'batch',
+      'turnOn',
+      '--ids',
+      'BOT1,BOT2',
+      '--skip-offline',
+    ]);
+
+    expect(result.exitCode).toBeNull();
+    // Only BOT1 reaches the post path; BOT2 was pre-filtered.
+    expect(apiMock.__instance.post).toHaveBeenCalledTimes(1);
+    const out = result.stdout.join('\n');
+    expect(out).toContain('Planned (dry-run): 1 device(s)');
+    expect(out).toContain('- BOT1');
+    expect(out).toContain('Skipped (offline): 1 device(s)');
+    expect(out).toContain('- BOT2');
+    // BOT2 must never show up in a dry-run POST log.
+    expect(out).not.toMatch(/Would POST.*BOT2/);
+    // Summary line now includes both "planned" and "skipped_offline" counts.
+    expect(out).toMatch(/Summary:.*1 planned.*1 skipped_offline/);
+  });
+
   it('bug28: batch over IR devices attaches subKind + verification and sets summary.unverifiableCount', async () => {
     cacheMock.map.set('IR1', { type: 'Air Conditioner', name: 'Living Room AC', category: 'ir' });
     cacheMock.map.set('IR2', { type: 'Air Conditioner', name: 'Bedroom AC', category: 'ir' });

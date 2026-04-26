@@ -7,6 +7,52 @@ All notable changes to `@switchbot/openapi-cli` are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.0] - 2026-04-26
+
+### Fixed — P0 bundled-asset loader
+
+- `switchbot policy new`, `switchbot policy validate`, and the MCP `policy_new`
+  tool no longer fail at runtime when installed from the packed tarball. Under
+  esbuild bundling, `import.meta.url` points at `dist/index.js` instead of the
+  original source file, so the three call-sites that loaded embedded assets via
+  `new URL('<relative>', import.meta.url)` resolved to non-existent paths
+  (`dist/schema/v0.2.json` instead of `dist/policy/schema/v0.2.json`, etc.).
+  Fix: a new top-level `src/embedded-assets.ts` module, positioned at the
+  source-tree counterpart of `dist/index.js`, now owns the two asset-loading
+  functions (`readPolicySchemaJson`, `readPolicyExampleYaml`). Because
+  `embedded-assets.ts` and the bundle entry sit at the same relative depth,
+  `./policy/schema/...` and `./policy/examples/...` resolve identically under
+  tsx (dev) and under the bundle (prod) — no runtime fallback needed. All
+  three call-sites (`src/policy/schema.ts`, `src/commands/policy.ts`,
+  `src/commands/mcp.ts`) now route through those two helpers.
+- `scripts/smoke-pack-install.mjs` now exercises the loader paths end-to-end
+  against the installed tarball — in addition to the existing `--version`
+  check, it runs `switchbot policy new <tmp>/policy.yaml` (asserts the template
+  was written) and `switchbot policy validate <path> --json` (asserts the
+  schema loads and validates). The exact bug class that slipped through 3.2.2
+  would now fail the smoke before publish.
+
+### Changed — UX polish
+
+- `switchbot catalog search <keyword>` now ranks hits in three tiers: exact
+  type / exact alias matches first, role and command-name matches next,
+  alias-substring-only matches last. Alias-only rows are explicitly labelled
+  `alias-only` in the `matched_on` column (renamed from `matched`). A new
+  `--strict` flag restricts hits to type-name matches only and prints a
+  "(strict mode — try without --strict)" hint when nothing matches.
+- `switchbot status-sync start` now prints a multi-line hint when
+  `OPENCLAW_TOKEN` or `OPENCLAW_MODEL` is missing — it names the flag, the env
+  var, a short pointer to the admin-issued token, and the recommended verify
+  step (`switchbot status-sync status`).
+- `switchbot devices batch ... --skip-offline --dry-run` now separates
+  "Planned (dry-run)" from "Skipped (offline)" in the human-readable output and
+  the summary line reports `planned=N, skipped_offline=M` alongside existing
+  totals. No `[dry-run] Would POST ...` line is emitted for offline-skipped
+  devices (JSON mode already separated these keys; no schema change).
+- `switchbot devices watch --help` clarifies that the default output is a
+  human-readable table and that `--json` is the agent-friendly JSON-Lines form,
+  with the seed-tick (`"from": null`) note surfaced near the top.
+
 ## [3.2.2] - 2026-04-26
 
 ### Changed — release pipeline

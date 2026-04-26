@@ -79,12 +79,30 @@ function resolveStatusSyncRuntime(options: {
 
   const openclawToken = options.openclawToken ?? process.env.OPENCLAW_TOKEN;
   if (!openclawToken) {
-    throw new UsageError('--openclaw-token is required or set OPENCLAW_TOKEN in the environment.');
+    throw new UsageError(
+      [
+        'OpenClaw token missing. Provide one of:',
+        '  1. --openclaw-token <token>',
+        '  2. OPENCLAW_TOKEN=<token> in the environment',
+        '',
+        'The token is issued by your OpenClaw server admin (same token you use for `events mqtt-tail --sink openclaw`).',
+        'After setting it, re-run the command and verify with `switchbot status-sync status`.',
+      ].join('\n'),
+    );
   }
 
   const openclawModel = options.openclawModel ?? process.env.OPENCLAW_MODEL;
   if (!openclawModel) {
-    throw new UsageError('--openclaw-model is required or set OPENCLAW_MODEL in the environment.');
+    throw new UsageError(
+      [
+        'OpenClaw model missing. Provide one of:',
+        '  1. --openclaw-model <model>',
+        '  2. OPENCLAW_MODEL=<model> in the environment',
+        '',
+        'The model name maps this CLI to a registered agent/device on the OpenClaw side.',
+        'After setting it, re-run the command and verify with `switchbot status-sync status`.',
+      ].join('\n'),
+    );
   }
 
   return {

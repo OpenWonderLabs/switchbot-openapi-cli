@@ -128,9 +128,13 @@ jobs:
           fi
 
   pack-install-smoke:
-    name: Packed install smoke (esbuild — matches publish)
-    runs-on: ubuntu-latest
+    name: Packed install smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -139,7 +143,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
-      - name: npm pack -> npm install tarball -> switchbot --version
+      - name: npm pack -> npm install tarball -> switchbot --version / policy new / policy validate
         run: npm run smoke:pack-install
 
   policy-schema-sync:

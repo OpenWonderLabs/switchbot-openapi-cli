@@ -346,4 +346,18 @@ describe('devices watch', () => {
     const jsonLines = res.stdout.filter((l) => l.trim().startsWith('{'));
     expect(jsonLines.length).toBe(0);
   });
+
+  it('--help clarifies default format and calls out --json as agent-friendly', async () => {
+    const res = await runCli(registerDevicesCommand, ['devices', 'watch', '--help']);
+    const out = [...res.stdout, ...res.stderr].join('\n');
+    // Help clarifies default (human table) and the agent form (JSONL with --json).
+    expect(out).toMatch(/human-readable table/);
+    expect(out).toMatch(/--json/);
+    expect(out).toMatch(/JSON-Lines/);
+    // Seed-tick note is present in help.
+    expect(out).toMatch(/seed tick/i);
+    expect(out).toMatch(/"from": null/);
+    // Example block explicitly labels the --json form as agent-friendly.
+    expect(out).toMatch(/agent-friendly/i);
+  });
 });

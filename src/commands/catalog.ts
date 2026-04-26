@@ -170,41 +170,79 @@ Examples:
     .command('search')
     .description('Fuzzy search the effective catalog by type name, alias, role, or command name')
     .argument('<keyword>', 'Substring to match (case-insensitive) against type, alias, role, or command')
-    .action((keyword: string) => {
+    .option('--strict', 'Only return entries whose type name matches (skip alias/role/command fallbacks)')
+    .action((keyword: string, options: { strict?: boolean }) => {
       try {
         const q = keyword.toLowerCase();
         const entries = getEffectiveCatalog();
-        const hits = entries.filter((e) => {
-          if (e.type.toLowerCase().includes(q)) return true;
-          if ((e.role ?? '').toLowerCase().includes(q)) return true;
-          if ((e.aliases ?? []).some((a) => a.toLowerCase().includes(q))) return true;
-          if (e.commands.some((c) => c.command.toLowerCase().includes(q))) return true;
-          return false;
-        });
-        if (isJsonMode()) {
-          printJson({ query: keyword, matches: hits });
-          return;
-        }
-        if (hits.length === 0) {
-          console.log(`No catalog entries match "${keyword}".`);
-          return;
-        }
-        const fmt = resolveFormat();
-        const headers = ['type', 'category', 'role', 'matched'];
-        const rows = hits.map((e) => {
+        const strict = options.strict === true;
+
+        type Hit = {
+          entry: DeviceCatalogEntry;
+          tier: 0 | 1 | 2;
+          matched: string[];
+        };
+
+        const hits: Hit[] = [];
+        for (const e of entries) {
           const matched: string[] = [];
-          if (e.type.toLowerCase().includes(q)) matched.push('type');
-          if ((e.aliases ?? []).some((a) => a.toLowerCase().includes(q))) matched.push('alias');
-          if ((e.role ?? '').toLowerCase().includes(q)) matched.push('role');
+          const typeHit = e.type.toLowerCase().includes(q);
+          const aliasExact = (e.aliases ?? []).some((a) => a.toLowerCase() === q);
+          const aliasSubstr = (e.aliases ?? []).some((a) => a.toLowerCase().includes(q) && a.toLowerCase() !== q);
+          const roleHit = (e.role ?? '').toLowerCase().includes(q);
           const cmdMatches = e.commands
             .filter((c) => c.command.toLowerCase().includes(q))
             .map((c) => c.command);
+
+          if (typeHit) matched.push('type');
+          if (aliasExact) matched.push('alias');
+          else if (aliasSubstr) matched.push('alias-only');
+          if (roleHit) matched.push('role');
           if (cmdMatches.length > 0) matched.push(`commands[${cmdMatches.join(',')}]`);
-          return [e.type, e.category, e.role ?? '—', matched.join(', ') || '—'];
-        });
+
+          if (strict) {
+            if (!typeHit) continue;
+          } else if (matched.length === 0) {
+            continue;
+          }
+
+          // Tier 0: type match or exact alias match.
+          // Tier 1: role or command-name match.
+          // Tier 2: alias-substring only (catch-all fallback).
+          let tier: 0 | 1 | 2;
+          if (typeHit || aliasExact) tier = 0;
+          else if (roleHit || cmdMatches.length > 0) tier = 1;
+          else tier = 2;
+
+          hits.push({ entry: e, tier, matched });
+        }
+
+        hits.sort((a, b) => a.tier - b.tier);
+
+        if (isJsonMode()) {
+          printJson({
+            query: keyword,
+            strict,
+            matches: hits.map((h) => ({ ...h.entry, _matchedOn: h.matched, _tier: h.tier })),
+          });
+          return;
+        }
+        if (hits.length === 0) {
+          const suffix = strict ? ' (strict mode — try without --strict)' : '';
+          console.log(`No catalog entries match "${keyword}"${suffix}.`);
+          return;
+        }
+        const fmt = resolveFormat();
+        const headers = ['type', 'category', 'role', 'matched_on'];
+        const rows = hits.map((h) => [
+          h.entry.type,
+          h.entry.category,
+          h.entry.role ?? '—',
+          h.matched.join(', ') || '—',
+        ]);
         renderRows(headers, rows, fmt, resolveFields());
         if (fmt === 'table') {
-          console.log(`\n${hits.length} match${hits.length === 1 ? '' : 'es'} for "${keyword}"`);
+          console.log(`\n${hits.length} match${hits.length === 1 ? '' : 'es'} for "${keyword}"${strict ? ' (strict)' : ''}`);
         }
       } catch (error) {
         handleError(error);
