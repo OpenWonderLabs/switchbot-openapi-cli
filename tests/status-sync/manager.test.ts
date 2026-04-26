@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const fsMock = vi.hoisted(() => ({
   existsSync: vi.fn(),
@@ -40,7 +40,13 @@ import {
 
 describe('status-sync manager', () => {
   const originalArgv = process.argv;
-  const killSpy = vi.spyOn(process, 'kill');
+  const originalKill = process.kill;
+  const killSpy = vi.fn();
+  (process as unknown as { kill: typeof process.kill }).kill = killSpy as unknown as typeof process.kill;
+
+  afterAll(() => {
+    (process as unknown as { kill: typeof process.kill }).kill = originalKill;
+  });
 
   beforeEach(() => {
     process.argv = ['node', '/repo/dist/index.js'];
