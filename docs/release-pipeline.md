@@ -3,66 +3,87 @@
 This document describes how `@switchbot/openapi-cli` goes from commit to npm
 registry, and the invariants that keep the published artifact safe.
 
-## Single publish source: esbuild
+## Single publish source
 
-The published artifact is **always** the esbuild bundle (`npm run build:prod`).
-`npm publish` triggers `prepublishOnly`, which unconditionally runs
-`npm test && npm run clean && npm run build:prod && node dist/index.js --version`
-right before uploading the tarball — so the bundle is the only thing that can
-ship.
+There is exactly one way to produce the release artifact:
 
-| Script | Tool | Output shape | Role |
+```
+npm run build          →  node scripts/build.mjs
+```
+
+Every script on the release path — `prepublishOnly`, `verify:pre-commit`,
+`verify:pre-push`, `publish.yml`, `ci.yml/bundle-smoke`, `ci.yml/pack-install-smoke` —
+calls `npm run build` by name. No job re-implements any of the steps, and no
+other script writes to `dist/`.
+
+### The five stages of `scripts/build.mjs`
+
+| # | Stage | Script | Responsibility |
 |---|---|---|---|
-| `npm run build:prod` | `esbuild` | Single-file `dist/index.js`, deps inlined | **Publish source** — what ships to npm |
-| `npm run build` | `tsc` | Per-file `dist/*.js` mirroring `src/` | Local dev only — type check, source maps, fast iteration |
+| 1 | clean          | inline                       | remove `dist/` so nothing stale leaks into the tarball |
+| 2 | typecheck      | `tsc --noEmit`               | all types must compile before we bundle |
+| 3 | bundle         | `scripts/bundle.mjs`         | esbuild produces the single-file `dist/index.js` (shebang via `banner.js`) |
+| 4 | copy-assets    | `scripts/copy-assets.mjs`    | copy `src/policy/{schema,examples}` → `dist/policy/...` |
+| 5 | ensure-binary  | `scripts/ensure-binary.mjs`  | assert the shebang is present and `chmod 0755` on `dist/index.js` |
 
-Both builders end by running `scripts/copy-assets.mjs`, which:
+Each stage does exactly one thing. First non-zero exit aborts the build.
 
-1. Copies policy JSON Schema assets into `dist/policy/`.
-2. Injects `#!/usr/bin/env node` into `dist/index.js` if missing.
-3. Sets `0o755` on `dist/index.js` (best-effort on filesystems that ignore POSIX modes).
+### Why `ensure-binary.mjs` is a guard, not a repair
 
-Steps 2 and 3 make the file directly executable through the `switchbot` bin
-entry. `tests/version.test.ts` contains a regression guard that fails the suite
-if the shebang goes missing.
+The shebang (`#!/usr/bin/env node`) is injected at bundle time by
+`scripts/bundle.mjs` via the esbuild `banner.js` option. `ensure-binary.mjs`
+re-reads `dist/index.js` and **verifies** that the first bytes are the
+expected shebang — if not, it exits non-zero with a pointer to the banner
+config.
 
-`npm pack` follows `"files": ["dist", "README.md", "LICENSE"]` in `package.json`,
-so whatever ends up in `dist/` when `npm pack` runs is what ships.
+Previously, `copy-assets.mjs` silently **repaired** a missing shebang by
+prepending it at the end of the build. That masked the root cause (a
+change to the banner config would not surface at build time). The current
+split is:
+
+- `bundle.mjs` — *produces* the shebang via banner.
+- `ensure-binary.mjs` — *asserts* the shebang exists. Never patches.
+
+If anything ever drops the banner line, `npm run build` fails loudly at
+stage 5 with a message pointing to `scripts/bundle.mjs`.
+
+`npm pack` follows `"files": ["dist", "README.md", "LICENSE"]` in
+`package.json`, so whatever ends up in `dist/` after stage 5 is what ships.
 
 ## Gates before `npm publish`
 
 ```
 git commit ──▶ pre-commit hook ─── verify:pre-commit
-                                   (build:prod + tests/version.test.ts)
+                                   (npm run build + tests/version.test.ts)
 
 git push   ──▶ pre-push hook  ──── verify:pre-push
-                                   (build:prod + version test +
+                                   (npm run build + version test +
                                     smoke:pack-install)
 
 open PR    ──▶ ci.yml ──────────── docs-lint
-                                   test matrix (Node 18/20/22, tsc)
-                                   bundle-smoke (Node 18/20/22, esbuild)
+                                   test matrix (Node 18/20/22)
+                                   bundle-smoke (Node 18/20/22)
                                    offline-smoke (size budgets)
-                                   pack-install-smoke  (esbuild, matches publish)
+                                   pack-install-smoke (matches publish)
                                    policy-schema-sync
 
 merge PR   ──▶ main
 
 release    ──▶ publish.yml ─────── 1. npm ci
-                                   2. npm run build:prod     (esbuild)
+                                   2. npm run build
                                    3. npm test
                                    4. tag == package.json version
                                    5. npm run smoke:pack-install  ◀── last gate
                                    6. npm publish --tag next
-                                      └── prepublishOnly: clean + build:prod + --version
-                                          (same builder as step 2 — no artifact swap)
+                                      └── prepublishOnly: test + build + smoke
+                                          (same commands as steps 2-5 — no drift)
 ```
 
-Because step 2 and `prepublishOnly` use the same `build:prod` script, the
-tarball that `smoke:pack-install` validates in step 5 is byte-identical to the
+Because step 2 and `prepublishOnly` both call `npm run build`, the tarball
+validated by `smoke:pack-install` in step 5 is byte-identical to the
 tarball `npm publish` uploads in step 6. No artifact swap happens in between.
 
-The critical pre-publish gate is step 5 of `publish.yml`. It runs
+The critical pre-publish gate is step 5. It runs
 `scripts/smoke-pack-install.mjs`, which:
 
 - Runs `npm pack` on the freshly-built tarball.
@@ -97,37 +118,46 @@ place.
 
 Changes to the release pipeline must preserve these invariants:
 
-1. **One publish source — always the esbuild bundle.** `publish.yml` step 2
-   must run `npm run build:prod`, and `prepublishOnly` must also run
-   `build:prod`. If these two ever diverge, the smoke test will validate a
-   different artifact than what actually ships.
+1. **One command produces the release artifact.** `npm run build` is the
+   only path that writes `dist/` for publish. `publish.yml`, `prepublishOnly`,
+   `verify:pre-push`, and both `bundle-smoke` + `pack-install-smoke` jobs must
+   all call it by name — never re-implement steps.
 
-2. **`publish.yml` must run `smoke:pack-install` before `npm publish`.** If
+2. **One artifact is smoked.** `smoke:pack-install` always runs against the
+   `dist/` that `npm run build` just produced. No other script writes to
+   `dist/` between the build and the smoke.
+
+3. **One failure mode per script.** `copy-assets.mjs` can fail because an
+   asset is missing. `ensure-binary.mjs` can fail because the shebang is
+   missing or the output is absent. No script silently repairs the output of
+   another.
+
+4. **`prepublishOnly` and `publish.yml` do not drift.** Both run
+   `npm test && npm run build && npm run smoke:pack-install`. Any edit that
+   changes one must change the other in the same commit.
+
+5. **`publish.yml` must run `smoke:pack-install` before `npm publish`.** If
    this gate is removed or skipped, a broken tarball can reach the registry.
 
-3. **Auto-deprecate must never fire on `live_smoke` failure.** Live smoke
-   depends on real SwitchBot API availability and valid credentials; a transient
-   outage should not deprecate a working package. Only `install_package` and
-   `offline_smoke` failures justify an automatic deprecation.
+6. **Auto-deprecate must never fire on `live_smoke` failure.** Live smoke
+   depends on real SwitchBot API availability and valid credentials; a
+   transient outage should not deprecate a working package. Only
+   `install_package` and `offline_smoke` failures justify an automatic
+   deprecation.
 
-4. **`copy-assets.mjs` must run on every build path.** Both `build` and
-   `build:prod` chain into it. It is the single place where the shebang and
-   exec bit are enforced. Moving that logic elsewhere — or adding a third build
-   path that skips it — will break npm bin execution.
-
-5. **`bundle-smoke` must stay blocking and matrixed.** Because the bundle is
+7. **`bundle-smoke` must stay blocking and matrixed.** Because the bundle is
    the publish source, it has to start cleanly on every Node version the
-   package supports (`engines.node >= 18`). The job runs `build:prod + node
-   --check + --version + bundle size test` on Node 18/20/22. Adding a new
-   supported Node version means adding it to the matrix; making the job
-   advisory again means end-users on some supported Node version can install a
-   broken CLI without CI catching it.
+   package supports (`engines.node >= 18`). The job runs `npm run build +
+   shebang count + node --check + --version + bundle size test` on Node
+   18/20/22. Adding a new supported Node version means adding it to the
+   matrix; making the job advisory again means end-users on some supported
+   Node version can install a broken CLI without CI catching it.
 
 ## Related tests
 
-- `tests/version.test.ts` — asserts shebang presence and `--version` parity with
-  `package.json`.
-- `tests/build/` — esbuild bundle guards (shebang count, `node --check`, size
-  budget).
-- `scripts/smoke-pack-install.mjs` — the end-to-end install smoke used by both
-  the `pre-push` hook and the CI / publish workflows.
+- `tests/version.test.ts` — asserts shebang presence and `--version` parity
+  with `package.json`.
+- `tests/build/` — esbuild bundle guards (shebang count, `node --check`,
+  size budget).
+- `scripts/smoke-pack-install.mjs` — the end-to-end install smoke used by
+  both the `pre-push` hook and the CI / publish workflows.

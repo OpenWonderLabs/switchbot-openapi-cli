@@ -7,6 +7,27 @@ All notable changes to `@switchbot/openapi-cli` are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed — release pipeline
+
+- Release pipeline unified: `npm run build` is now the single source for the
+  published tarball. It runs a 5-stage `scripts/build.mjs` orchestrator
+  (clean → typecheck → bundle → copy-assets → ensure-binary). `prepublishOnly`,
+  `verify:pre-commit`, `verify:pre-push`, `publish.yml`, and the `bundle-smoke`
+  / `pack-install-smoke` CI jobs all call `npm run build` by name — no job
+  re-implements the build steps and no other script writes to `dist/`.
+- Removed `npm run build:prod` and `npm run clean` — both are folded into
+  `scripts/build.mjs`.
+- Added `npm run typecheck` (`tsc --noEmit`) as the local "does it still
+  compile?" escape hatch.
+- Split `scripts/copy-assets.mjs` responsibility into two scripts with one
+  failure mode each: `copy-assets.mjs` only copies policy assets, and the
+  new `scripts/ensure-binary.mjs` asserts the shebang is present on
+  `dist/index.js` and `chmod 0755`s it. `ensure-binary.mjs` is a regression
+  guard — it fails loudly if the esbuild banner drops the shebang, rather
+  than silently repairing it the way `copy-assets.mjs` used to.
+
 ## [3.2.1] - 2026-04-25
 
 ### Added — plan resource model, MCP risk profiles, rules safety primitives

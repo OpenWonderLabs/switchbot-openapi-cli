@@ -59,7 +59,7 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: npm
       - run: npm ci
-      - run: npm run build:prod
+      - run: npm run build
       - name: Shebang count must be exactly 1
         run: |
           COUNT=$(grep -c "#!/usr/bin/env node" dist/index.js)
@@ -138,7 +138,7 @@ jobs:
           node-version: 20.x
           cache: npm
       - run: npm ci
-      - run: npm run build:prod
+      - run: npm run build
       - name: npm pack -> npm install tarball -> switchbot --version
         run: npm run smoke:pack-install
 
