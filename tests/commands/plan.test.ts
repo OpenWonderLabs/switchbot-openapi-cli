@@ -272,7 +272,25 @@ describe('plan command', () => {
       const res = await runCli(registerPlanCommand, ['--json', 'plan', 'run', file]);
       const out = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join('')).data;
       expect(out.ran).toBe(true);
-      expect(out.summary).toEqual({ total: 1, ok: 1, error: 0, skipped: 0 });
+      expect(out.summary).toEqual({ total: 1, ok: 1, error: 0, skipped: 0, dryRun: 0 });
+    });
+
+    it('--dry-run reports command steps with status=dry-run instead of ok', async () => {
+      flagsMock.dryRun = true;
+      const file = writePlan({
+        version: '1.0',
+        steps: [{ type: 'command', deviceId: 'BOT1', command: 'turnOn' }],
+      });
+      apiMock.__instance.post.mockImplementation(async () => {
+        throw new apiMock.DryRunSignal('POST', '/v1.1/devices/BOT1/commands');
+      });
+
+      const res = await runCli(registerPlanCommand, ['--json', '--dry-run', 'plan', 'run', file]);
+      const out = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join('')).data;
+
+      expect(out.ran).toBe(true);
+      expect(out.summary).toEqual({ total: 1, ok: 0, error: 0, skipped: 0, dryRun: 1 });
+      expect(out.results[0].status).toBe('dry-run');
     });
 
     it('writes audit entries tagged with the generated planId', async () => {
@@ -291,6 +309,16 @@ describe('plan command', () => {
       expect(entries[0].deviceId).toBe('BOT1');
       expect(entries[0].result).toBe('ok');
       expect(entries[0].planId).toBe(out.planId);
+    });
+  });
+
+  describe('plan suggest', () => {
+    it('exits 2 for unsupported Chinese command intent instead of defaulting to turnOn', async () => {
+      const res = await runCli(registerPlanCommand, [
+        'plan', 'suggest', '--intent', '关掉所有灯', '--device', 'BOT1',
+      ]);
+      expect(res.exitCode).toBe(2);
+      expect(res.stderr.join('\n')).toMatch(/cannot safely infer/i);
     });
   });
 });

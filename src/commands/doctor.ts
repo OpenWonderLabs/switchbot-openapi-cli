@@ -355,7 +355,7 @@ interface AuditRecord {
   kind?: string;
   deviceId?: string;
   command?: string;
-  result?: 'ok' | 'error';
+  result?: 'ok' | 'error' | 'dry-run';
   error?: string;
 }
 

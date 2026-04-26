@@ -15,3 +15,7 @@ export function inferCommandFromIntent(intent: string): string | undefined {
   }
   return undefined;
 }
+
+export function containsCjk(intent: string): boolean {
+  return /[\u3400-\u9FFF]/u.test(intent);
+}

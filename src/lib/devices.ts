@@ -1,6 +1,6 @@
 import type { AxiosInstance } from 'axios';
 import { createClient } from '../api/client.js';
-import { idempotencyCache } from './idempotency.js';
+import { idempotencyCache, fingerprintIdempotencyKey } from './idempotency.js';
 import {
   findCatalogEntry,
   suggestedActions,
@@ -179,6 +179,7 @@ export async function executeCommand(
     parameter,
     commandType,
     dryRun: isDryRun(),
+    ...(options?.idempotencyKey ? { idempotencyKeyFingerprint: fingerprintIdempotencyKey(options.idempotencyKey) } : {}),
     ...(options?.planId ? { planId: options.planId } : {}),
   };
 
@@ -194,7 +195,7 @@ export async function executeCommand(
     } catch (err) {
       // Dry-run intercepts throw DryRunSignal — still log the intent.
       if (err instanceof Error && err.name === 'DryRunSignal') {
-        writeAudit({ ...baseAudit, result: 'ok' });
+        writeAudit({ ...baseAudit, result: 'dry-run' });
       } else {
         writeAudit({
           ...baseAudit,
@@ -212,6 +213,12 @@ export async function executeCommand(
     { command: cmd, parameter },
   );
   if (!replayed) return result;
+  writeAudit({
+    ...baseAudit,
+    t: new Date().toISOString(),
+    result: 'ok',
+    replayed: true,
+  });
   // Cached hit — attach replayed marker without mutating the original.
   if (result && typeof result === 'object') {
     return { ...(result as Record<string, unknown>), replayed: true };

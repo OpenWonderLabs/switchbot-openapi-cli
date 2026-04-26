@@ -49,8 +49,12 @@ export interface AuditEntry {
   parameter: unknown;
   commandType: 'command' | 'customize';
   dryRun: boolean;
-  result?: 'ok' | 'error';
+  result?: 'ok' | 'error' | 'dry-run';
   error?: string;
+  /** True when a cached idempotent result was returned instead of executing again. */
+  replayed?: boolean;
+  /** Short SHA-256 fingerprint of the user-supplied idempotency key. */
+  idempotencyKeyFingerprint?: string;
   /** When execution is initiated via `plan run`, the stable plan ID for traceability. */
   planId?: string;
   /** Present for rule-engine kinds; absent for direct CLI command entries. */

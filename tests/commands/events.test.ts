@@ -377,6 +377,7 @@ describe('events mqtt-tail', () => {
     );
     expect(events).toHaveLength(1);
     expect(events[0].schemaVersion).toBe('1.1');
+    expect(events[0].data!.payloadVersion).toBe('1');
     expect(events[0].data!.topic).toBe('test/topic');
   });
 
@@ -439,11 +440,12 @@ describe('events mqtt-tail', () => {
             stream?: boolean;
             eventKind?: string;
             cadence?: string;
-            data?: { type?: string; state?: string; at?: string; eventId?: string };
+            data?: { payloadVersion?: string; type?: string; state?: string; at?: string; eventId?: string };
           },
       );
     const sessionStart = jsonLines.find((j) => j.data?.type === '__session_start');
     expect(sessionStart).toBeDefined();
+    expect(sessionStart!.data!.payloadVersion).toBe('1');
     expect(sessionStart!.data!.state).toBe('connecting');
     expect(typeof sessionStart!.data!.at).toBe('string');
     expect(typeof sessionStart!.data!.eventId).toBe('string');
@@ -524,7 +526,7 @@ describe('events mqtt-tail', () => {
       eventKind: string;
       cadence: string;
     };
-    expect(header.schemaVersion).toBe('1');
+    expect(header.schemaVersion).toBe('1.1');
     expect(header.stream).toBe(true);
     expect(header.eventKind).toBe('event');
     expect(header.cadence).toBe('push');

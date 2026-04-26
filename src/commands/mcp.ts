@@ -136,7 +136,7 @@ interface AuditFilterOptions {
   kinds?: AuditEntry['kind'][];
   deviceId?: string;
   ruleName?: string;
-  results?: Array<'ok' | 'error'>;
+  results?: Array<'ok' | 'error' | 'dry-run'>;
 }
 
 function resolveAuditRange(opts: Pick<AuditFilterOptions, 'since' | 'from' | 'to'>): {
@@ -1731,7 +1731,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         kinds: z.array(z.enum(['command', 'rule-fire', 'rule-fire-dry', 'rule-throttled', 'rule-webhook-rejected'])).optional().describe('Filter by entry kind.'),
         device_id: z.string().optional().describe('Filter by deviceId.'),
         rule_name: z.string().optional().describe('Filter by rule.name (rule-engine entries).'),
-        results: z.array(z.enum(['ok', 'error'])).optional().describe('Filter by execution result.'),
+        results: z.array(z.enum(['ok', 'error', 'dry-run'])).optional().describe('Filter by execution result.'),
         limit: z.number().int().min(1).max(5000).optional().describe('Max entries returned from the tail of the filtered set (default 200).'),
       }).strict(),
       outputSchema: {
@@ -1788,7 +1788,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         kinds: z.array(z.enum(['command', 'rule-fire', 'rule-fire-dry', 'rule-throttled', 'rule-webhook-rejected'])).optional().describe('Filter by entry kind.'),
         device_id: z.string().optional().describe('Filter by deviceId.'),
         rule_name: z.string().optional().describe('Filter by rule.name (rule-engine entries).'),
-        results: z.array(z.enum(['ok', 'error'])).optional().describe('Filter by execution result.'),
+        results: z.array(z.enum(['ok', 'error', 'dry-run'])).optional().describe('Filter by execution result.'),
         top_n: z.number().int().min(1).max(100).optional().describe('Number of top device/rule rows to return (default 10).'),
       }).strict(),
       outputSchema: {

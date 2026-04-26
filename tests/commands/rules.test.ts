@@ -830,6 +830,45 @@ describe('rules suggest', () => {
     expect(body.data.rule.name).toBe('turn on lights at 8am every morning');
   });
 
+  it('interpolates --device into the generated command instead of leaving <id> behind', async () => {
+    const { stdout } = await runCli([
+      '--json',
+      'rules',
+      'suggest',
+      '--intent',
+      'turn on light when motion detected',
+      '--device',
+      'SENSOR1',
+      '--device',
+      'DE53EC157E2C',
+    ]);
+    const body = JSON.parse(stdout.join('')) as {
+      data: {
+        rule: { then: Array<{ command: string; device?: string }> };
+        rule_yaml: string;
+      };
+    };
+
+    expect(body.data.rule.then).toHaveLength(1);
+    expect(body.data.rule.then[0].command).toBe('devices command DE53EC157E2C turnOn');
+    expect(body.data.rule.then[0].device).toBeUndefined();
+    expect(body.data.rule_yaml).toContain('devices command DE53EC157E2C turnOn');
+    expect(body.data.rule_yaml).not.toContain('devices command <id> turnOn');
+  });
+
+  it('exits 2 for unsupported Chinese intent instead of silently generating a wrong rule', async () => {
+    const { stderr, exitCode } = await runCli([
+      'rules',
+      'suggest',
+      '--intent',
+      '晚上23点关闭窗帘',
+      '--device',
+      'DE53EC157E2C',
+    ]);
+    expect(exitCode).toBe(2);
+    expect(stderr.join('\n')).toMatch(/cannot safely infer/i);
+  });
+
   it('writes YAML to --out file instead of stdout', async () => {
     const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sbsug-'));
     const outFile = path.join(outDir, 'rule.yaml');

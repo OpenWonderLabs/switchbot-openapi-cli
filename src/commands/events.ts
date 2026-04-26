@@ -74,6 +74,14 @@ interface EventRecord {
   matched: boolean;
 }
 
+function emitJsonStreamRecord<T extends { schemaVersion: string }>(record: T): void {
+  const { schemaVersion, ...rest } = record as T & Record<string, unknown>;
+  printJson({
+    payloadVersion: schemaVersion,
+    ...rest,
+  });
+}
+
 function matchFilterDetail(
   body: unknown,
   clauses: FilterClause[] | null,
@@ -262,7 +270,7 @@ Examples:
               if (!ev.matched) return;
               matchedCount++;
               if (isJsonMode()) {
-                printJson(ev);
+                emitJsonStreamRecord(ev);
               } else {
                 const when = new Date(ev.t).toLocaleTimeString();
                 console.log(`[${when}] ${ev.remote} ${ev.path} ${JSON.stringify(ev.body)}`);
@@ -457,7 +465,7 @@ Examples:
         // connected" even when mqtt-tail exits before the broker connects.
         if (isJsonMode()) {
           const sessionStartAt = new Date().toISOString();
-          printJson({
+          emitJsonStreamRecord({
             schemaVersion: EVENTS_SCHEMA_VERSION,
             source: 'mqtt',
             kind: 'control',
@@ -518,7 +526,7 @@ Examples:
               payload: parsed,
             };
             if (isJsonMode()) {
-              printJson(record);
+              emitJsonStreamRecord(record);
             } else {
               console.log(JSON.stringify(record));
             }
@@ -554,7 +562,7 @@ Examples:
           // Control events always go to stdout as JSONL so consumers that
           // filter real events by presence of `payload` can skip them.
           if (isJsonMode()) {
-            printJson(ctl);
+            emitJsonStreamRecord(ctl);
           } else {
             console.log(JSON.stringify(ctl));
           }

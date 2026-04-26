@@ -326,7 +326,7 @@ describe('devices watch', () => {
       eventKind: string;
       cadence: string;
     };
-    expect(header.schemaVersion).toBe('1');
+    expect(header.schemaVersion).toBe('1.1');
     expect(header.stream).toBe(true);
     expect(header.eventKind).toBe('tick');
     expect(header.cadence).toBe('poll');
