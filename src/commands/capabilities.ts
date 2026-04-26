@@ -166,6 +166,8 @@ export const COMMAND_META: Record<string, CommandMeta> = {
   'history aggregate': READ_LOCAL,
   'install': ACTION_LOCAL,
   'mcp serve': READ_LOCAL,
+  'mcp tools': READ_LOCAL,
+  'mcp list-tools': READ_LOCAL,
   'plan schema': READ_LOCAL,
   'plan validate': READ_LOCAL,
   'plan suggest': READ_LOCAL,

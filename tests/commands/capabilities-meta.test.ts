@@ -39,7 +39,7 @@ const ALL_EXPECTED_LEAF_COMMANDS = [
   'history show', 'history replay', 'history range', 'history stats',
   'history verify', 'history aggregate',
   'install',
-  'mcp serve',
+  'mcp serve', 'mcp tools', 'mcp list-tools',
   'plan schema', 'plan validate', 'plan suggest', 'plan run',
   'plan save', 'plan list', 'plan review', 'plan approve', 'plan execute',
   'policy validate', 'policy new', 'policy migrate', 'policy diff',

@@ -7,6 +7,30 @@ All notable changes to `@switchbot/openapi-cli` are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.2] - 2026-04-26
+
+### Fixed
+
+- **`switchbot capabilities` crashed on 3.3.1 with `capabilities metadata
+  coverage error: missing:mcp list-tools, missing:mcp tools`.** 3.3.0 added
+  the `mcp tools` and `mcp list-tools` subcommands to `mcp.ts` but did not
+  register them in `COMMAND_META`. The runtime coverage check inside
+  `capabilities` fires against the fully-registered program, but the
+  existing `capabilities-meta` unit test only registered the `capabilities`
+  command in isolation — so the gap never surfaced in CI and only showed
+  up in the post-publish tarball smoke. Entries are now present and the
+  command prints its manifest again.
+
+### Added
+
+- **Regression guard test `capabilities-program-coverage.test.ts`.**
+  Registers every `register*Command` from `src/index.ts` (mirrored order)
+  against a fresh `Command`, then actually invokes
+  `capabilities --compact` so `validateCommandMetaCoverage` walks the
+  complete command tree. Any future leaf command added without a
+  `COMMAND_META` entry now fails this test before publish instead of on
+  users' machines.
+
 ## [3.3.1] - 2026-04-26
 
 ### Fixed
