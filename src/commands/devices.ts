@@ -880,6 +880,8 @@ Examples:
             capabilities,
             source,
             suggestedActions: picks,
+            ...(result.catalogNote ? { catalogNote: result.catalogNote } : {}),
+            ...(result.warnings && result.warnings.length > 0 ? { warnings: result.warnings } : {}),
             ...(expandHint ? { expandHint: { command: expandHint.command, flags: expandHint.flags, example: `switchbot devices expand ${deviceId} ${expandHint.command} ${expandHint.flags}` } } : {}),
           });
           return;
@@ -917,8 +919,17 @@ Examples:
           capabilities && 'liveStatus' in capabilities ? capabilities.liveStatus : undefined;
 
         console.log('');
+        if (result.warnings && result.warnings.length > 0) {
+          for (const warning of result.warnings) {
+            console.log(`Warning: ${warning}`);
+          }
+          console.log('');
+        }
         if (!catalog) {
           console.log(`(Type "${typeName}" is not in the built-in catalog — no command reference available.)`);
+          if (result.catalogNote) {
+            console.log(result.catalogNote);
+          }
           if (isPhysical) {
             console.log(`Try 'switchbot devices status ${deviceId}' to see what this device reports.`);
           } else {

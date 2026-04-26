@@ -131,6 +131,8 @@ describe('mcp server', () => {
     const res = await runCli(registerMcpCommand, ['--json', 'mcp', 'tools']);
     expect(res.exitCode).toBeNull();
     const out = JSON.parse(res.stdout.join('\n'));
+    expect(Object.keys(out)).toEqual(['schemaVersion', 'data']);
+    expect(Object.keys(out.data)).toEqual(['tools', 'resources']);
     expect(Array.isArray(out.data.tools)).toBe(true);
     expect(out.data.tools.some((t: { name: string }) => t.name === 'list_devices')).toBe(true);
     expect(Array.isArray(out.data.resources)).toBe(true);
@@ -918,6 +920,34 @@ describe('mcp server', () => {
       expect(sc.present).toBe(true);
       expect(sc.valid).toBe(false);
       expect((sc.errors as unknown[]).length).toBeGreaterThan(0);
+    });
+
+    it('policy_validate live:true resolves aliases against the current inventory', async () => {
+      const policyPath = path.join(tmp, 'live-bad.yaml');
+      fs.writeFileSync(
+        policyPath,
+        [
+          'version: "0.2"',
+          'aliases:',
+          '  room-sensor: 01-202407090924-26354212',
+          '',
+        ].join('\n'),
+      );
+      process.env.SWITCHBOT_TOKEN = 't';
+      process.env.SWITCHBOT_SECRET = 's';
+      apiMock.__instance.get.mockResolvedValueOnce({
+        data: { body: { deviceList: [], infraredRemoteList: [] } },
+      });
+      const { client } = await pair();
+      const res = await client.callTool({
+        name: 'policy_validate',
+        arguments: { path: policyPath, live: true },
+      });
+      const sc = (res as { structuredContent?: Record<string, unknown> }).structuredContent!;
+      expect(sc.valid).toBe(false);
+      expect(sc.validationScope).toBe('schema+offline-semantics+live-inventory');
+      const errors = sc.errors as Array<{ keyword: string }>;
+      expect(errors.some((e) => e.keyword === 'alias-live-device-not-found')).toBe(true);
     });
 
     it('policy_new writes a starter file and refuses to overwrite without force', async () => {

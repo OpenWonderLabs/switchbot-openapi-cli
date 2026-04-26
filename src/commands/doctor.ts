@@ -6,7 +6,7 @@ import { execSync } from 'node:child_process';
 import { printJson, isJsonMode, exitWithError } from '../utils/output.js';
 import { getEffectiveCatalog } from '../devices/catalog.js';
 import { configFilePath, listProfiles, readProfileMeta } from '../config.js';
-import { describeCache, resetListCache } from '../devices/cache.js';
+import { describeCache, resetListCache, loadCache } from '../devices/cache.js';
 import { DAILY_QUOTA, todayUsage } from '../utils/quota.js';
 import { AGENT_BOOTSTRAP_SCHEMA_VERSION } from './agent-bootstrap.js';
 import { CATALOG_SCHEMA_VERSION } from '../devices/catalog.js';
@@ -359,6 +359,52 @@ interface AuditRecord {
   command?: string;
   result?: 'ok' | 'error' | 'dry-run';
   error?: string;
+}
+
+function checkInventoryConsistency(): Check {
+  const cache = loadCache();
+  if (!cache) {
+    return {
+      name: 'inventory',
+      status: 'ok',
+      detail: "no local inventory cache — run 'switchbot devices list' to enable hub-reference checks",
+    };
+  }
+
+  const dangling = Object.entries(cache.devices)
+    .filter(([, device]) => device.category === 'physical')
+    .filter(([deviceId, device]) => {
+      const hubDeviceId = device.hubDeviceId;
+      return Boolean(
+        hubDeviceId &&
+        hubDeviceId !== '000000000000' &&
+        hubDeviceId !== deviceId &&
+        !cache.devices[hubDeviceId],
+      );
+    })
+    .map(([deviceId, device]) => ({
+      deviceId,
+      deviceName: device.name,
+      hubDeviceId: device.hubDeviceId!,
+      deviceType: device.type,
+    }));
+
+  if (dangling.length === 0) {
+    return {
+      name: 'inventory',
+      status: 'ok',
+      detail: `inventory graph consistent across ${Object.keys(cache.devices).length} cached devices`,
+    };
+  }
+
+  return {
+    name: 'inventory',
+    status: 'warn',
+    detail: {
+      message: `${dangling.length} device(s) reference a hubDeviceId that is not present in the current inventory`,
+      dangling: dangling.slice(0, 10),
+    },
+  };
 }
 
 function checkAudit(): Check {
@@ -894,6 +940,7 @@ const CHECK_REGISTRY: CheckDef[] = [
   { name: 'profiles', description: 'profile definitions valid', run: () => checkProfiles() },
   { name: 'catalog', description: 'catalog loads', run: () => checkCatalog() },
   { name: 'catalog-schema', description: 'catalog vs agent-bootstrap version aligned', run: () => checkCatalogSchema() },
+  { name: 'inventory', description: 'cached inventory graph consistency (hubDeviceId references)', run: () => checkInventoryConsistency() },
   { name: 'cache', description: 'device cache state', run: () => checkCache() },
   { name: 'quota', description: 'API quota headroom', run: () => checkQuotaFile() },
   { name: 'clock', description: 'system clock skew', run: () => checkClockSkew() },

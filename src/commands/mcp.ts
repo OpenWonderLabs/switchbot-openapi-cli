@@ -48,7 +48,7 @@ import {
   PolicyFileNotFoundError,
   PolicyYamlParseError,
 } from '../policy/load.js';
-import { validateLoadedPolicy } from '../policy/validate.js';
+import { validateLoadedPolicy, validateLoadedPolicyAgainstInventory } from '../policy/validate.js';
 import {
   CURRENT_POLICY_SCHEMA_VERSION,
   SUPPORTED_POLICY_SCHEMA_VERSIONS,
@@ -1114,12 +1114,14 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
       title: 'Validate a policy.yaml file',
       description:
         'Check a policy file against the embedded JSON Schema, offline command/device semantics, and local safety guards. ' +
-        'Does not resolve aliases against the live device inventory or verify commands against the real target device, live capabilities, or current firmware. ' +
+        'By default this stays offline; set live=true to resolve aliases and rule targets against the current account inventory. ' +
+        'It still does not verify commands against live capabilities, current firmware, or other runtime-only device behavior. ' +
         'When no path is given, reads the resolved default (${SWITCHBOT_POLICY_PATH} or ~/.config/openclaw/switchbot/policy.yaml). ' +
         'Use before relying on aliases/quiet_hours/confirmations so the agent never acts on a broken policy.',
       _meta: { agentSafetyTier: 'read' },
       inputSchema: z.object({
         path: z.string().optional().describe('Optional policy file path; defaults to the resolved default path'),
+        live: z.boolean().optional().describe('When true, also resolve aliases and rule targets against the current account inventory'),
       }).strict(),
       outputSchema: {
         policyPath: z.string(),
@@ -1139,11 +1141,20 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         })).describe('Empty when valid or when the file is missing'),
       },
     },
-    async ({ path: pathArg }) => {
+    async ({ path: pathArg, live }) => {
       const policyPath = resolvePolicyPath({ flag: pathArg });
       try {
         const loaded = loadPolicyFile(policyPath);
-        const result = validateLoadedPolicy(loaded);
+        let result = validateLoadedPolicy(loaded);
+        if (live) {
+          if (!tryLoadConfig()) {
+            return mcpError('runtime', 151, 'policy_validate live=true requires configured SwitchBot credentials.', {
+              hint: "Run 'switchbot config set-token' first, or set SWITCHBOT_TOKEN and SWITCHBOT_SECRET.",
+            });
+          }
+          const inventory = await fetchDeviceList(undefined, { bypassCache: true });
+          result = validateLoadedPolicyAgainstInventory(loaded, inventory);
+        }
         const structured = {
           policyPath: result.policyPath,
           schemaVersion: result.schemaVersion,
@@ -2019,7 +2030,8 @@ export function registerMcpCommand(program: Command): void {
   - get_device_history      fetch raw JSONL history records for a device
   - query_device_history    filter + page history records with field/time predicates
   - aggregate_device_history compute count/min/max/avg/sum/p50/p95 over history records
-  - policy_validate         check policy.yaml against the embedded schema + local safety guards
+  - policy_validate         check policy.yaml against the embedded schema + offline semantics
+                            (set live=true to resolve aliases and rule targets against current inventory)
   - policy_new              scaffold a starter policy.yaml (action — confirm first)
   - policy_migrate          rewrite policy.yaml between currently supported schemas (action — preserves comments)
   - policy_diff             compare two policy files with structural + line diff output

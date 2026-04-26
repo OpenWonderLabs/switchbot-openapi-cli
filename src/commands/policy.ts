@@ -11,7 +11,7 @@ import {
   PolicyFileNotFoundError,
   PolicyYamlParseError,
 } from '../policy/load.js';
-import { validateLoadedPolicy } from '../policy/validate.js';
+import { validateLoadedPolicy, validateLoadedPolicyAgainstInventory } from '../policy/validate.js';
 import { formatValidationResult } from '../policy/format.js';
 import {
   CURRENT_POLICY_SCHEMA_VERSION,
@@ -21,6 +21,8 @@ import {
 import { planMigration, PolicyMigrationError } from '../policy/migrate.js';
 import { addRuleToPolicyFile, AddRuleError } from '../policy/add-rule.js';
 import { diffPolicyValues } from '../policy/diff.js';
+import { tryLoadConfig } from '../config.js';
+import { fetchDeviceList } from '../lib/devices.js';
 
 // Latest version the CLI knows how to migrate *to*.
 // CURRENT_POLICY_SCHEMA_VERSION is the version `policy new` emits by default.
@@ -88,6 +90,20 @@ function exitPolicyError(kind: 'file-not-found' | 'yaml-parse' | 'internal', mes
   process.exit(code);
 }
 
+function validationScopeLine(scope: string): string {
+  if (scope === 'schema+offline-semantics+live-inventory') {
+    return 'Validation scope: schema + offline semantics + live inventory checks + local safety guards.';
+  }
+  return 'Validation scope: schema + offline semantics + local safety guards.';
+}
+
+function validationNotCheckedLine(scope: string): string {
+  if (scope === 'schema+offline-semantics+live-inventory') {
+    return 'Not checked: live capabilities, current firmware, and runtime-only device behavior.';
+  }
+  return 'Not checked: alias targets against live devices; command support on the real target device, live capabilities, or current firmware.';
+}
+
 function summarizeChangeValue(v: unknown): string {
   if (v === null) return 'null';
   if (v === undefined) return 'undefined';
@@ -110,7 +126,8 @@ audit log path, and which actions always or never need confirmation.
 Default location: ${DEFAULT_POLICY_PATH}
 
 Subcommands:
-  validate [path]   Check a policy file against the embedded schema + local safety guards
+  validate [path]   Check a policy file against the embedded schema + offline semantics
+                    (add --live to resolve aliases and rule targets against current inventory)
   new [path]        Write a starter policy to the default location (or a given path)
   migrate [path]    Rewrite a policy file between schema versions this CLI still supports
                     (this build only supports v${CURRENT_POLICY_SCHEMA_VERSION}; legacy v0.1 files cannot be migrated here)
@@ -145,10 +162,13 @@ Examples:
 
   policy
     .command('validate [path]')
-    .description(`Validate a policy.yaml against the embedded v${CURRENT_POLICY_SCHEMA_VERSION} schema (structure + local safety guards only)`)
+    .description(
+      `Validate a policy.yaml against the embedded v${CURRENT_POLICY_SCHEMA_VERSION} schema, offline semantics, and local safety guards`,
+    )
+    .option('--live', 'Also resolve aliases and rule target devices against the current account inventory (1 API call)')
     .option('--no-color', 'disable ANSI color in human output')
     .option('--no-snippet', 'omit the source-line + caret preview')
-    .action((pathArg: string | undefined, opts: { color?: boolean; snippet?: boolean }) => {
+    .action(async (pathArg: string | undefined, opts: { color?: boolean; snippet?: boolean; live?: boolean }) => {
       const policyPath = resolvePolicyPath({ flag: pathArg });
 
       let loaded;
@@ -170,7 +190,22 @@ Examples:
         exitPolicyError('internal', `unexpected error loading policy: ${String(err)}`);
       }
 
-      const result = validateLoadedPolicy(loaded);
+      let result = validateLoadedPolicy(loaded);
+      if (opts.live) {
+        if (!tryLoadConfig()) {
+          exitWithError({
+            code: 1,
+            kind: 'runtime',
+            message: 'policy validate --live requires configured SwitchBot credentials.',
+            extra: {
+              hint: "Run 'switchbot config set-token' first, or set SWITCHBOT_TOKEN and SWITCHBOT_SECRET.",
+            },
+          });
+          return;
+        }
+        const inventory = await fetchDeviceList(undefined, { bypassCache: true });
+        result = validateLoadedPolicyAgainstInventory(loaded, inventory);
+      }
 
       if (isJsonMode()) {
         printJson(result);
@@ -184,8 +219,8 @@ Examples:
         }),
       );
       console.log('');
-      console.log('Validation scope: schema + offline semantics + local safety guards.');
-      console.log('Not checked: alias targets against live devices; command support on the real target device, live capabilities, or current firmware.');
+      console.log(validationScopeLine(result.validationScope));
+      console.log(validationNotCheckedLine(result.validationScope));
       process.exit(result.valid ? 0 : 1);
     });
 

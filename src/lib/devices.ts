@@ -64,6 +64,8 @@ export interface DescribeResult {
   capabilities: DescribeCapabilities | { liveStatus: Record<string, unknown> } | null;
   source: 'catalog' | 'live' | 'catalog+live' | 'none';
   suggestedActions: ReturnType<typeof suggestedActions>;
+  catalogNote?: string;
+  warnings?: string[];
   /** For IR remotes: the family/room inherited from their bound Hub. Undefined for physical devices. */
   inheritedLocation?: { family?: string; room?: string; roomID?: string };
 }
@@ -84,6 +86,30 @@ export class CommandValidationError extends Error {
     super(message);
     this.name = 'CommandValidationError';
   }
+}
+
+function hasDanglingHubReference(
+  device: Device | InfraredDevice,
+  isPhysical: boolean,
+  deviceList: Device[],
+): boolean {
+  if (!isPhysical) return false;
+  const hubDeviceId = device.hubDeviceId;
+  if (!hubDeviceId || hubDeviceId === '000000000000' || hubDeviceId === device.deviceId) return false;
+  return !deviceList.some((d) => d.deviceId === hubDeviceId);
+}
+
+function describeCatalogNote(
+  deviceId: string,
+  typeName: string,
+  isPhysical: boolean,
+): string {
+  if (isPhysical) {
+    const label = typeName || 'this device type';
+    return `No built-in catalog entry for ${label}; raw device metadata is shown. Try \`switchbot devices status ${deviceId}\` for live raw status.`;
+  }
+  const label = typeName || 'this IR remote type';
+  return `No built-in catalog entry for ${label}; raw device metadata is shown. Use \`switchbot devices command ${deviceId} "<buttonName>" --type customize\` for custom IR buttons.`;
 }
 
 /** Fetch the full device + IR remote inventory and refresh the local cache. */
@@ -420,8 +446,14 @@ export async function describeDevice(
       ? { liveStatus }
       : null;
 
+  const warnings: string[] = [];
+  const selectedDevice = (physical ?? ir) as Device | InfraredDevice;
+  if (hasDanglingHubReference(selectedDevice, Boolean(physical), deviceList)) {
+    warnings.push(`hubDeviceId ${selectedDevice.hubDeviceId} is not present in the current inventory`);
+  }
+
   return {
-    device: (physical ?? ir) as Device | InfraredDevice,
+    device: selectedDevice,
     isPhysical: Boolean(physical),
     typeName,
     controlType: physical?.controlType ?? ir?.controlType ?? null,
@@ -429,6 +461,8 @@ export async function describeDevice(
     capabilities,
     source,
     suggestedActions: catalogEntry ? suggestedActions(catalogEntry) : [],
+    ...(catalogEntry ? {} : { catalogNote: describeCatalogNote(deviceId, typeName, Boolean(physical)) }),
+    ...(warnings.length > 0 ? { warnings } : {}),
     inheritedLocation: ir ? buildHubLocationMap(deviceList).get(ir.hubDeviceId) : undefined,
   };
 }
@@ -490,6 +524,8 @@ export interface McpDescribeShape {
   source: 'catalog' | 'live' | 'catalog+live' | 'none';
   capabilities: unknown;
   suggestedActions: Array<{ command: string; parameter?: string; description: string }>;
+  catalogNote?: string;
+  warnings?: string[];
   inheritedLocation?: { family?: string; room?: string };
 }
 
@@ -515,6 +551,8 @@ export function toMcpDescribeShape(r: DescribeResult): McpDescribeShape {
     source: r.source,
     capabilities: r.capabilities,
     suggestedActions: r.suggestedActions,
+    ...(r.catalogNote !== undefined ? { catalogNote: r.catalogNote } : {}),
+    ...(r.warnings !== undefined ? { warnings: r.warnings } : {}),
     ...(r.inheritedLocation !== undefined
       ? { inheritedLocation: { family: r.inheritedLocation.family, room: r.inheritedLocation.room } }
       : {}),

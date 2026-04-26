@@ -10,9 +10,10 @@ import {
   isSupportedPolicySchemaVersion,
   type PolicySchemaVersion,
 } from './schema.js';
-import { getEffectiveCatalog } from '../devices/catalog.js';
+import { findCatalogEntry, getEffectiveCatalog } from '../devices/catalog.js';
 import { parseRuleCommand } from '../rules/action.js';
 import { destructiveVerbOf, DESTRUCTIVE_COMMANDS } from '../rules/destructive.js';
+import type { DeviceListBody } from '../lib/devices.js';
 
 const require = createRequire(import.meta.url);
 type AddFormatsFn = (ajv: Ajv2020Type) => Ajv2020Type;
@@ -34,7 +35,7 @@ export interface PolicyValidationError {
 export interface PolicyValidationResult {
   policyPath: string;
   schemaVersion: PolicySchemaVersion;
-  validationScope: 'schema+offline-semantics';
+  validationScope: 'schema+offline-semantics' | 'schema+offline-semantics+live-inventory';
   limitations: string[];
   valid: boolean;
   errors: PolicyValidationError[];
@@ -43,6 +44,11 @@ export interface PolicyValidationResult {
 const POLICY_VALIDATION_LIMITATIONS = [
   'Does not resolve aliases against the live device inventory.',
   'Does not verify commands against the real target device, live capabilities, or current firmware.',
+] as const;
+
+const POLICY_VALIDATION_LIVE_LIMITATIONS = [
+  'Live inventory checks reflect a point-in-time device list snapshot.',
+  'Does not verify commands against live capabilities or current firmware.',
 ] as const;
 
 const HEX_MAC_DEVICE_ID_RE = /^[A-Fa-f0-9]{12}(?:-[A-Za-z0-9]{2,16})?$/;
@@ -250,6 +256,16 @@ function resolvePolicyDeviceRef(
   return { ok: false, reason: 'unknown-device-ref' };
 }
 
+function collectAliasMap(data: unknown): Record<string, string> {
+  const aliases = (data as { aliases?: Record<string, string> } | null | undefined)?.aliases;
+  if (!aliases || typeof aliases !== 'object') return {};
+  return Object.fromEntries(
+    Object.entries(aliases).filter(
+      (entry): entry is [string, string] => typeof entry[0] === 'string' && typeof entry[1] === 'string',
+    ),
+  );
+}
+
 /**
  * Walk `automation.rules[].then[]` and flag any command string whose verb
  * appears in DESTRUCTIVE_COMMANDS. Uses the YAML doc (not the data tree) to
@@ -322,14 +338,7 @@ function collectOfflineSemanticErrors(
     | undefined;
 
   const out: PolicyValidationError[] = [];
-  const aliases =
-    data?.aliases && typeof data.aliases === 'object'
-      ? Object.fromEntries(
-          Object.entries(data.aliases).filter(
-            (entry): entry is [string, string] => typeof entry[0] === 'string' && typeof entry[1] === 'string',
-          ),
-        )
-      : {};
+  const aliases = collectAliasMap(data);
 
   for (const [aliasName, deviceId] of Object.entries(aliases)) {
     const path = `/aliases/${escapeJsonPointerSegment(aliasName)}`;
@@ -436,6 +445,124 @@ function collectOfflineSemanticErrors(
   }
 
   return out;
+}
+
+function resolveInventoryDeviceId(
+  raw: string | undefined,
+  aliases: Record<string, string>,
+): string | null {
+  if (!raw || raw === '<id>') return null;
+  if (Object.hasOwn(aliases, raw)) return aliases[raw];
+  return raw;
+}
+
+export function validateLoadedPolicyAgainstInventory(
+  loaded: LoadedPolicy,
+  inventory: DeviceListBody,
+): PolicyValidationResult {
+  const base = validateLoadedPolicy(loaded);
+  const errors = [...base.errors];
+  const aliases = collectAliasMap(loaded.data);
+  const inventoryById = new Map<string, { typeName: string }>();
+  for (const device of inventory.deviceList) {
+    inventoryById.set(device.deviceId, { typeName: device.deviceType ?? '' });
+  }
+  for (const remote of inventory.infraredRemoteList) {
+    inventoryById.set(remote.deviceId, { typeName: remote.remoteType });
+  }
+
+  for (const [aliasName, deviceId] of Object.entries(aliases)) {
+    const path = `/aliases/${escapeJsonPointerSegment(aliasName)}`;
+    if (hasErrorAtPath(errors, path)) continue;
+    if (!inventoryById.has(deviceId)) {
+      const { line, col } = locateInstancePath(loaded.doc, loaded.lineCounter, path);
+      errors.push({
+        path,
+        line,
+        col,
+        keyword: 'alias-live-device-not-found',
+        message: `alias "${aliasName}" points to deviceId "${deviceId}" which is not present in the current inventory`,
+        hint: 'refresh with `switchbot devices list` and confirm the alias target still exists on this account',
+        schemaPath: '#/properties/aliases',
+      });
+    }
+  }
+
+  const data = loaded.data as
+    | {
+        automation?: {
+          rules?: Array<{
+            name?: string;
+            then?: Array<{ command?: string; device?: string }>;
+          }>;
+        };
+      }
+    | null
+    | undefined;
+  const rules = data?.automation?.rules;
+  if (Array.isArray(rules)) {
+    for (let ri = 0; ri < rules.length; ri++) {
+      const rule = rules[ri];
+      const actions = Array.isArray(rule?.then) ? rule.then : [];
+      for (let ai = 0; ai < actions.length; ai++) {
+        const action = actions[ai];
+        const cmd = action?.command;
+        if (typeof cmd !== 'string') continue;
+        const parsed = parseRuleCommand(cmd);
+        if (!parsed) continue;
+
+        const ruleName = typeof rule?.name === 'string' ? rule.name : `#${ri}`;
+        const commandPath = `/automation/rules/${ri}/then/${ai}/command`;
+        const devicePath = `/automation/rules/${ri}/then/${ai}/device`;
+        const effectiveRef = typeof action?.device === 'string' ? action.device : parsed.deviceIdSlot ?? undefined;
+        const effectiveDeviceId = resolveInventoryDeviceId(effectiveRef, aliases);
+        if (!effectiveDeviceId) continue;
+
+        const target = inventoryById.get(effectiveDeviceId);
+        if (!target) {
+          const path = typeof action?.device === 'string' ? devicePath : commandPath;
+          const { line, col } = locateInstancePath(loaded.doc, loaded.lineCounter, path);
+          errors.push({
+            path,
+            line,
+            col,
+            keyword: 'rule-live-device-not-found',
+            message: `rule "${ruleName}" action #${ai} resolves to deviceId "${effectiveDeviceId}" which is not present in the current inventory`,
+            hint: 'confirm the alias/deviceId against `switchbot devices list` before relying on this policy',
+            schemaPath: '#/properties/automation/properties/rules/items/properties/then/items/properties/device',
+          });
+          continue;
+        }
+
+        const match = target.typeName ? findCatalogEntry(target.typeName) : null;
+        const entry = !match || Array.isArray(match) ? null : match;
+        if (!entry) continue;
+        const supported = entry.commands
+          .filter((spec) => spec.commandType !== 'customize')
+          .some((spec) => spec.command === parsed.verb);
+        if (supported) continue;
+
+        const { line, col } = locateInstancePath(loaded.doc, loaded.lineCounter, commandPath);
+        errors.push({
+          path: commandPath,
+          line,
+          col,
+          keyword: 'rule-live-unsupported-command',
+          message: `rule "${ruleName}" action #${ai} uses command "${parsed.verb}" but live target "${effectiveDeviceId}" is type "${target.typeName}"`,
+          hint: `supported offline verbs for ${target.typeName}: ${entry.commands.filter((spec) => spec.commandType !== 'customize').map((spec) => spec.command).join(', ')}`,
+          schemaPath: '#/properties/automation/properties/rules/items/properties/then/items/properties/command',
+        });
+      }
+    }
+  }
+
+  return {
+    ...base,
+    validationScope: 'schema+offline-semantics+live-inventory',
+    limitations: [...POLICY_VALIDATION_LIVE_LIMITATIONS],
+    valid: errors.length === 0,
+    errors,
+  };
 }
 
 export function validateLoadedPolicy(loaded: LoadedPolicy): PolicyValidationResult {

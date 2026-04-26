@@ -114,6 +114,20 @@ describe('schema export', () => {
       'version',
     ]);
   });
+
+  it('exports hub-family advisory roles and statusFields as a stable contract', async () => {
+    const res = await runCli(registerSchemaCommand, ['schema', 'export']);
+    const parsed = JSON.parse(res.stdout.join('')).data;
+    const hub2 = parsed.types.find((t: { type: string }) => t.type === 'Hub 2');
+    const hubMini = parsed.types.find((t: { type: string }) => t.type === 'Hub Mini');
+    const hub3 = parsed.types.find((t: { type: string }) => t.type === 'Hub 3');
+    expect(hub2.role).toBe('hub');
+    expect(hub2.statusFields).toEqual(['version', 'temperature', 'humidity', 'lightLevel']);
+    expect(hubMini.role).toBe('hub');
+    expect(hubMini.statusFields).toEqual(['version']);
+    expect(hub3.role).toBe('hub');
+    expect(hub3.statusFields).toEqual(['version', 'temperature', 'humidity', 'lightLevel']);
+  });
 });
 
 describe('schema export B3 slim flags', () => {

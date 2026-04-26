@@ -186,6 +186,36 @@ describe('devices explain', () => {
     expect(parsed.data.warnings.some((w: string) => w.toLowerCase().includes('cloud'))).toBe(true);
   });
 
+  it('--json: surfaces dangling hubDeviceId warnings from describeDevice', async () => {
+    devicesMock.describeDevice.mockResolvedValue({
+      ...botDescribeResult,
+      warnings: ['hubDeviceId HUB-MISSING is not present in the current inventory'],
+    });
+
+    const res = await runExplain('--json', DID);
+
+    const parsed = JSON.parse(res.stdout[0]);
+    expect(parsed.data.warnings).toContain(
+      'hubDeviceId HUB-MISSING is not present in the current inventory',
+    );
+  });
+
+  it('--json: exposes catalogNote for uncatalogued devices', async () => {
+    devicesMock.describeDevice.mockResolvedValue({
+      ...botDescribeResult,
+      catalog: null,
+      capabilities: null,
+      source: 'none',
+      catalogNote: 'No built-in catalog entry for type "AI MindClip"; try `switchbot devices status BOT-001 --json` for raw status.',
+    });
+
+    const res = await runExplain('--json', DID);
+
+    const parsed = JSON.parse(res.stdout[0]);
+    expect(parsed.data.catalogNote).toMatch(/No built-in catalog entry/);
+    expect(parsed.data.warnings.some((w: string) => w.includes('No catalog entry'))).toBe(true);
+  });
+
   it('--json: hub role fetches and lists IR children', async () => {
     const hubResult = {
       ...botDescribeResult,

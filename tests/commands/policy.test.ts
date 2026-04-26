@@ -35,7 +35,7 @@ class ExitError extends Error {
   }
 }
 
-function runCli(argv: string[]): RunResult {
+async function runCli(argv: string[]): Promise<RunResult> {
   const stdout: string[] = [];
   const stderr: string[] = [];
   const logSpy = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
@@ -53,7 +53,7 @@ function runCli(argv: string[]): RunResult {
   const prevArgv = process.argv;
   process.argv = ['node', 'switchbot', ...argv];
   try {
-    program.parse(['node', 'switchbot', ...argv]);
+    await program.parseAsync(['node', 'switchbot', ...argv]);
   } catch (err) {
     if (err instanceof ExitError) exitCode = err.code;
     else throw err;
@@ -78,9 +78,9 @@ describe('switchbot policy (commander surface)', () => {
   });
 
   describe('policy new', () => {
-    it('writes the starter template to the given path (exit 0)', () => {
+    it('writes the starter template to the given path (exit 0)', async () => {
       const p = path.join(tmpDir, 'policy.yaml');
-      const { stdout, exitCode } = runCli(['policy', 'new', p]);
+      const { stdout, exitCode } = await runCli(['policy', 'new', p]);
       expect(exitCode).toBe(0);
       expect(fs.existsSync(p)).toBe(true);
       const contents = fs.readFileSync(p, 'utf-8');
@@ -88,26 +88,26 @@ describe('switchbot policy (commander surface)', () => {
       expect(stdout.join('\n')).toContain('wrote starter policy');
     });
 
-    it('refuses to overwrite an existing file without --force (exit 5)', () => {
+    it('refuses to overwrite an existing file without --force (exit 5)', async () => {
       const p = path.join(tmpDir, 'policy.yaml');
       fs.writeFileSync(p, 'original\n', 'utf-8');
-      const { stderr, exitCode } = runCli(['policy', 'new', p]);
+      const { stderr, exitCode } = await runCli(['policy', 'new', p]);
       expect(exitCode).toBe(5);
       expect(fs.readFileSync(p, 'utf-8')).toBe('original\n');
       expect(stderr.join('\n')).toContain('refusing to overwrite');
     });
 
-    it('overwrites with --force', () => {
+    it('overwrites with --force', async () => {
       const p = path.join(tmpDir, 'policy.yaml');
       fs.writeFileSync(p, 'original\n', 'utf-8');
-      const { exitCode } = runCli(['policy', 'new', p, '--force']);
+      const { exitCode } = await runCli(['policy', 'new', p, '--force']);
       expect(exitCode).toBe(0);
       expect(fs.readFileSync(p, 'utf-8')).toMatch(/version: "0\.2"/);
     });
 
-    it('emits a structured --json envelope on success', () => {
+    it('emits a structured --json envelope on success', async () => {
       const p = path.join(tmpDir, 'policy.yaml');
-      const { stdout, exitCode } = runCli(['--json', 'policy', 'new', p]);
+      const { stdout, exitCode } = await runCli(['--json', 'policy', 'new', p]);
       expect(exitCode).toBe(0);
       const parsed = JSON.parse(stdout[0]) as {
         schemaVersion: string;
@@ -118,19 +118,19 @@ describe('switchbot policy (commander surface)', () => {
       expect(parsed.data.schemaVersion).toBe('0.2');
     });
 
-    it('emits a --json error envelope when the file exists', () => {
+    it('emits a --json error envelope when the file exists', async () => {
       const p = path.join(tmpDir, 'policy.yaml');
       fs.writeFileSync(p, 'original\n', 'utf-8');
-      const { stdout, exitCode } = runCli(['--json', 'policy', 'new', p]);
+      const { stdout, exitCode } = await runCli(['--json', 'policy', 'new', p]);
       expect(exitCode).toBe(5);
       const parsed = JSON.parse(stdout[0]) as { error: { code: number; kind: string } };
       expect(parsed.error.code).toBe(5);
       expect(parsed.error.kind).toBe('exists');
     });
 
-    it('accepts --output as an alias of the positional path', () => {
+    it('accepts --output as an alias of the positional path', async () => {
       const p = path.join(tmpDir, 'out-policy.yaml');
-      const { exitCode } = runCli(['policy', 'new', '--output', p]);
+      const { exitCode } = await runCli(['policy', 'new', '--output', p]);
       expect(exitCode).toBe(0);
       expect(fs.existsSync(p)).toBe(true);
       expect(fs.readFileSync(p, 'utf-8')).toMatch(/version: "0\.2"/);
@@ -154,9 +154,9 @@ describe('switchbot policy (commander surface)', () => {
       return p;
     }
 
-    it('exits 0 on a valid policy and prints the green tick line', () => {
+    it('exits 0 on a valid policy and prints the green tick line', async () => {
       const p = seedValid();
-      const { stdout, exitCode } = runCli(['policy', 'validate', p]);
+      const { stdout, exitCode } = await runCli(['policy', 'validate', p]);
       expect(exitCode).toBe(0);
       const out = stdout.join('\n');
       expect(out).toMatch(/is valid \(schema v0\.2\)/);
@@ -164,33 +164,33 @@ describe('switchbot policy (commander surface)', () => {
       expect(out).toMatch(/Not checked: alias targets against live devices/);
     });
 
-    it('exits 1 on an invalid policy and prints error blocks', () => {
+    it('exits 1 on an invalid policy and prints error blocks', async () => {
       const p = seedInvalid();
-      const { stdout, exitCode } = runCli(['policy', 'validate', p]);
+      const { stdout, exitCode } = await runCli(['policy', 'validate', p]);
       expect(exitCode).toBe(1);
       const out = stdout.join('\n');
       expect(out).toContain('error');
       expect(out).toMatch(/1 error/);
     });
 
-    it('exits 2 when the file does not exist with a hint', () => {
+    it('exits 2 when the file does not exist with a hint', async () => {
       const missing = path.join(tmpDir, 'nope.yaml');
-      const { stderr, exitCode } = runCli(['policy', 'validate', missing]);
+      const { stderr, exitCode } = await runCli(['policy', 'validate', missing]);
       expect(exitCode).toBe(2);
       expect(stderr.join('\n')).toContain('policy file not found');
     });
 
-    it('exits 3 on YAML parse errors', () => {
+    it('exits 3 on YAML parse errors', async () => {
       const p = path.join(tmpDir, 'bad.yaml');
       fs.writeFileSync(p, 'version: "0.2"\naliases: [unterminated\n', 'utf-8');
-      const { stderr, exitCode } = runCli(['policy', 'validate', p]);
+      const { stderr, exitCode } = await runCli(['policy', 'validate', p]);
       expect(exitCode).toBe(3);
       expect(stderr.join('\n')).toContain('YAML parse error');
     });
 
-    it('emits a full validation envelope in --json mode on success', () => {
+    it('emits a full validation envelope in --json mode on success', async () => {
       const p = seedValid();
-      const { stdout, exitCode } = runCli(['--json', 'policy', 'validate', p]);
+      const { stdout, exitCode } = await runCli(['--json', 'policy', 'validate', p]);
       expect(exitCode).toBe(0);
       const parsed = JSON.parse(stdout[0]) as {
         schemaVersion: string;
@@ -207,11 +207,20 @@ describe('switchbot policy (commander surface)', () => {
       expect(parsed.data.schemaVersion).toBe('0.2');
       expect(parsed.data.validationScope).toBe('schema+offline-semantics');
       expect(parsed.data.limitations.length).toBeGreaterThan(0);
+      expect(Object.keys(parsed)).toEqual(['schemaVersion', 'data']);
+      expect(Object.keys(parsed.data)).toEqual([
+        'policyPath',
+        'schemaVersion',
+        'validationScope',
+        'limitations',
+        'valid',
+        'errors',
+      ]);
     });
 
-    it('emits a validation envelope in --json mode on failure (still exit 1)', () => {
+    it('emits a validation envelope in --json mode on failure (still exit 1)', async () => {
       const p = seedInvalid();
-      const { stdout, exitCode } = runCli(['--json', 'policy', 'validate', p]);
+      const { stdout, exitCode } = await runCli(['--json', 'policy', 'validate', p]);
       expect(exitCode).toBe(1);
       const parsed = JSON.parse(stdout[0]) as {
         data: { valid: boolean; errors: Array<{ keyword: string }> };
@@ -220,9 +229,9 @@ describe('switchbot policy (commander surface)', () => {
       expect(parsed.data.errors.some((e) => e.keyword === 'unsupported-version')).toBe(true);
     });
 
-    it('emits a file-not-found envelope in --json mode (exit 2)', () => {
+    it('emits a file-not-found envelope in --json mode (exit 2)', async () => {
       const missing = path.join(tmpDir, 'nope.yaml');
-      const { stdout, exitCode } = runCli(['--json', 'policy', 'validate', missing]);
+      const { stdout, exitCode } = await runCli(['--json', 'policy', 'validate', missing]);
       expect(exitCode).toBe(2);
       const parsed = JSON.parse(stdout[0]) as {
         error: { code: number; kind: string; hint: string };
@@ -241,16 +250,16 @@ describe('switchbot policy (commander surface)', () => {
       return p;
     }
 
-    it('reports "already-current" on v0.2 with exit 0', () => {
+    it('reports "already-current" on v0.2 with exit 0', async () => {
       // LATEST supported is v0.2; seeding v0.2 hits the no-op path.
       const p = seed('policy.yaml', '0.2');
-      const { stdout, exitCode } = runCli(['--json', 'policy', 'migrate', p]);
+      const { stdout, exitCode } = await runCli(['--json', 'policy', 'migrate', p]);
       expect(exitCode).toBe(0);
       const parsed = JSON.parse(stdout[0]) as { data: { status: string } };
       expect(parsed.data.status).toBe('already-current');
     });
 
-    it('upgrades v0.1 → v0.2 now fails (no migration path in v3.0)', () => {
+    it('upgrades v0.1 → v0.2 now fails (no migration path in v3.0)', async () => {
       const p = path.join(tmpDir, 'policy.yaml');
       const original = [
         '# My SwitchBot policy',
@@ -263,7 +272,7 @@ describe('switchbot policy (commander surface)', () => {
       ].join('\n');
       fs.writeFileSync(p, original, 'utf-8');
 
-      const { stdout, exitCode } = runCli(['--json', 'policy', 'migrate', p]);
+      const { stdout, exitCode } = await runCli(['--json', 'policy', 'migrate', p]);
       // v0.1 is no longer in SUPPORTED_POLICY_SCHEMA_VERSIONS — exit 6.
       expect(exitCode).toBe(6);
       const parsed = JSON.parse(stdout[0]) as {
@@ -277,10 +286,10 @@ describe('switchbot policy (commander surface)', () => {
       expect(fs.readFileSync(p, 'utf-8')).toBe(original);
     });
 
-    it('--dry-run on v0.1 also returns exit 6 (unsupported, no migration path)', () => {
+    it('--dry-run on v0.1 also returns exit 6 (unsupported, no migration path)', async () => {
       const p = seed('policy.yaml', '0.1');
       const before = fs.readFileSync(p, 'utf-8');
-      const { stdout, exitCode } = runCli(['--json', 'policy', 'migrate', p, '--dry-run']);
+      const { stdout, exitCode } = await runCli(['--json', 'policy', 'migrate', p, '--dry-run']);
       // v0.1 unsupported — exits before dry-run logic.
       expect(exitCode).toBe(6);
       const parsed = JSON.parse(stdout[0]) as { error: { code: number; kind: string; hint: string } };
@@ -290,17 +299,17 @@ describe('switchbot policy (commander surface)', () => {
       expect(fs.readFileSync(p, 'utf-8')).toBe(before);
     });
 
-    it('reports "no-version-field" when version is absent (exit 0)', () => {
+    it('reports "no-version-field" when version is absent (exit 0)', async () => {
       const p = seed('policy.yaml', null);
-      const { stdout, exitCode } = runCli(['--json', 'policy', 'migrate', p]);
+      const { stdout, exitCode } = await runCli(['--json', 'policy', 'migrate', p]);
       expect(exitCode).toBe(0);
       const parsed = JSON.parse(stdout[0]) as { data: { status: string } };
       expect(parsed.data.status).toBe('no-version-field');
     });
 
-    it('emits an unsupported-version error envelope for newer schemas (exit 6)', () => {
+    it('emits an unsupported-version error envelope for newer schemas (exit 6)', async () => {
       const p = seed('policy.yaml', '0.9');
-      const { stdout, exitCode } = runCli(['--json', 'policy', 'migrate', p]);
+      const { stdout, exitCode } = await runCli(['--json', 'policy', 'migrate', p]);
       expect(exitCode).toBe(6);
       const parsed = JSON.parse(stdout[0]) as {
         error: { code: number; kind: string; hint: string };
@@ -310,7 +319,7 @@ describe('switchbot policy (commander surface)', () => {
       expect(parsed.error.hint).toContain('downgrade');
     });
 
-    it('exits 7 when the migrated file would fail v0.2 schema precheck (v0.2 source)', () => {
+    it('exits 7 when the migrated file would fail v0.2 schema precheck (v0.2 source)', async () => {
       // Seed a v0.2 file with a broken automation rule that fails v0.2 precheck
       // when planMigration runs it through the validator again after a no-op.
       // Since MIGRATION_CHAIN is empty, we test precheck failure by seeding a
@@ -334,7 +343,7 @@ describe('switchbot policy (commander surface)', () => {
         'utf-8',
       );
       const before = fs.readFileSync(p, 'utf-8');
-      const { stdout, exitCode } = runCli(['--json', 'policy', 'migrate', p]);
+      const { stdout, exitCode } = await runCli(['--json', 'policy', 'migrate', p]);
       // v0.1 is unsupported — exits 6 before reaching precheck.
       expect(exitCode).toBe(6);
       const parsed = JSON.parse(stdout[0]) as {
@@ -346,33 +355,33 @@ describe('switchbot policy (commander surface)', () => {
       expect(fs.readFileSync(p, 'utf-8')).toBe(before);
     });
 
-    it('exits 2 when the file does not exist', () => {
+    it('exits 2 when the file does not exist', async () => {
       const missing = path.join(tmpDir, 'nope.yaml');
-      const { exitCode } = runCli(['policy', 'migrate', missing]);
+      const { exitCode } = await runCli(['policy', 'migrate', missing]);
       expect(exitCode).toBe(2);
     });
   });
 
   describe('policy diff', () => {
-    it('prints no-difference message for identical files', () => {
+    it('prints no-difference message for identical files', async () => {
       const left = path.join(tmpDir, 'left.yaml');
       const right = path.join(tmpDir, 'right.yaml');
       const body = ['version: "0.1"', 'aliases:', '  "lamp": "01-202407090924-26354212"', ''].join('\n');
       fs.writeFileSync(left, body, 'utf-8');
       fs.writeFileSync(right, body, 'utf-8');
 
-      const { stdout, exitCode } = runCli(['policy', 'diff', left, right]);
+      const { stdout, exitCode } = await runCli(['policy', 'diff', left, right]);
       expect(exitCode).toBe(0);
       expect(stdout.join('\n')).toContain('no structural differences');
     });
 
-    it('emits structured --json diff output with change stats', () => {
+    it('emits structured --json diff output with change stats', async () => {
       const left = path.join(tmpDir, 'left.yaml');
       const right = path.join(tmpDir, 'right.yaml');
       fs.writeFileSync(left, ['version: "0.1"', 'quiet_hours:', '  start: "22:00"', ''].join('\n'), 'utf-8');
       fs.writeFileSync(right, ['version: "0.2"', 'quiet_hours:', '  start: "23:00"', ''].join('\n'), 'utf-8');
 
-      const { stdout, exitCode } = runCli(['--json', 'policy', 'diff', left, right]);
+      const { stdout, exitCode } = await runCli(['--json', 'policy', 'diff', left, right]);
       expect(exitCode).toBe(0);
       const parsed = JSON.parse(stdout[0]) as {
         data: {
@@ -391,12 +400,12 @@ describe('switchbot policy (commander surface)', () => {
       expect(parsed.data.diff).toContain('+++ after');
     });
 
-    it('exits 2 when either input file does not exist', () => {
+    it('exits 2 when either input file does not exist', async () => {
       const left = path.join(tmpDir, 'left.yaml');
       fs.writeFileSync(left, 'version: "0.1"\n', 'utf-8');
       const missing = path.join(tmpDir, 'missing.yaml');
 
-      const { stderr, exitCode } = runCli(['policy', 'diff', left, missing]);
+      const { stderr, exitCode } = await runCli(['policy', 'diff', left, missing]);
       expect(exitCode).toBe(2);
       expect(stderr.join('\n')).toContain('policy file not found');
     });
@@ -416,8 +425,8 @@ describe('switchbot policy (commander surface)', () => {
       delete process.env.SWITCHBOT_POLICY_PATH;
     });
 
-    it('creates a .bak.yaml backup alongside the policy', () => {
-      const { stdout, exitCode } = runCli(['policy', 'backup']);
+    it('creates a .bak.yaml backup alongside the policy', async () => {
+      const { stdout, exitCode } = await runCli(['policy', 'backup']);
       expect(exitCode).toBe(0);
       const backupPath = policyFile.replace(/\.yaml$/, '.bak.yaml');
       expect(fs.existsSync(backupPath)).toBe(true);
@@ -425,34 +434,34 @@ describe('switchbot policy (commander surface)', () => {
       expect(stdout.join('\n')).toContain('Backup written');
     });
 
-    it('writes backup to an explicit path', () => {
+    it('writes backup to an explicit path', async () => {
       const dest = path.join(tmpDir, 'my-snapshot.yaml');
-      const { stdout, exitCode } = runCli(['policy', 'backup', dest]);
+      const { stdout, exitCode } = await runCli(['policy', 'backup', dest]);
       expect(exitCode).toBe(0);
       expect(fs.existsSync(dest)).toBe(true);
       expect(stdout.join('\n')).toContain(dest);
     });
 
-    it('refuses to overwrite existing backup without --force', () => {
+    it('refuses to overwrite existing backup without --force', async () => {
       const backupPath = policyFile.replace(/\.yaml$/, '.bak.yaml');
       fs.writeFileSync(backupPath, 'original\n', 'utf-8');
 
-      const { exitCode } = runCli(['policy', 'backup']);
+      const { exitCode } = await runCli(['policy', 'backup']);
       expect(exitCode).toBe(2);
       expect(fs.readFileSync(backupPath, 'utf-8')).toBe('original\n');
     });
 
-    it('overwrites existing backup with --force', () => {
+    it('overwrites existing backup with --force', async () => {
       const backupPath = policyFile.replace(/\.yaml$/, '.bak.yaml');
       fs.writeFileSync(backupPath, 'old\n', 'utf-8');
 
-      const { exitCode } = runCli(['policy', 'backup', '--force']);
+      const { exitCode } = await runCli(['policy', 'backup', '--force']);
       expect(exitCode).toBe(0);
       expect(fs.readFileSync(backupPath, 'utf-8')).not.toBe('old\n');
     });
 
-    it('--json returns ok:true with source and dest', () => {
-      const { stdout, exitCode } = runCli(['--json', 'policy', 'backup']);
+    it('--json returns ok:true with source and dest', async () => {
+      const { stdout, exitCode } = await runCli(['--json', 'policy', 'backup']);
       expect(exitCode).toBe(0);
       const out = JSON.parse(stdout[0]) as { data: Record<string, unknown> };
       expect(out.data.ok).toBe(true);
@@ -460,9 +469,9 @@ describe('switchbot policy (commander surface)', () => {
       expect(typeof out.data.dest).toBe('string');
     });
 
-    it('exits 2 when the policy file does not exist', () => {
+    it('exits 2 when the policy file does not exist', async () => {
       fs.unlinkSync(policyFile);
-      const { exitCode } = runCli(['policy', 'backup']);
+      const { exitCode } = await runCli(['policy', 'backup']);
       expect(exitCode).toBe(2);
     });
   });
@@ -485,26 +494,26 @@ describe('switchbot policy (commander surface)', () => {
       delete process.env.SWITCHBOT_POLICY_PATH;
     });
 
-    it('restores the backup to the active policy path', () => {
-      const { stdout, exitCode } = runCli(['policy', 'restore', backupFile]);
+    it('restores the backup to the active policy path', async () => {
+      const { stdout, exitCode } = await runCli(['policy', 'restore', backupFile]);
       expect(exitCode).toBe(0);
       expect(fs.readFileSync(policyFile, 'utf-8')).toBe(fs.readFileSync(backupFile, 'utf-8'));
       expect(stdout.join('\n')).toContain('Policy restored');
     });
 
-    it('auto-creates a pre-restore backup of the existing policy', () => {
-      runCli(['policy', 'restore', backupFile]);
+    it('auto-creates a pre-restore backup of the existing policy', async () => {
+      await runCli(['policy', 'restore', backupFile]);
       const autoBackup = policyFile.replace(/\.yaml$/, '.pre-restore.bak.yaml');
       expect(fs.existsSync(autoBackup)).toBe(true);
     });
 
-    it('exits 2 when the restore source does not exist', () => {
-      const { exitCode } = runCli(['policy', 'restore', path.join(tmpDir, 'missing.yaml')]);
+    it('exits 2 when the restore source does not exist', async () => {
+      const { exitCode } = await runCli(['policy', 'restore', path.join(tmpDir, 'missing.yaml')]);
       expect(exitCode).toBe(2);
     });
 
-    it('--json returns ok:true with restored path', () => {
-      const { stdout, exitCode } = runCli(['--json', 'policy', 'restore', backupFile]);
+    it('--json returns ok:true with restored path', async () => {
+      const { stdout, exitCode } = await runCli(['--json', 'policy', 'restore', backupFile]);
       expect(exitCode).toBe(0);
       const out = JSON.parse(stdout[0]) as { data: Record<string, unknown> };
       expect(out.data.ok).toBe(true);
@@ -532,33 +541,33 @@ describe('switchbot policy (commander surface)', () => {
       return p;
     }
 
-    it('accepts standard hyphenated IDs (01-202407090924-26354212)', () => {
-      const { exitCode } = runCli(['policy', 'validate', writePolicy('01-202407090924-26354212')]);
+    it('accepts standard hyphenated IDs (01-202407090924-26354212)', async () => {
+      const { exitCode } = await runCli(['policy', 'validate', writePolicy('01-202407090924-26354212')]);
       expect(exitCode).toBe(0);
     });
 
-    it('accepts 12-digit hex MAC without hyphen (28372F4C9C4A)', () => {
-      const { exitCode } = runCli(['policy', 'validate', writePolicy('28372F4C9C4A')]);
+    it('accepts 12-digit hex MAC without hyphen (28372F4C9C4A)', async () => {
+      const { exitCode } = await runCli(['policy', 'validate', writePolicy('28372F4C9C4A')]);
       expect(exitCode).toBe(0);
     });
 
-    it('accepts lowercase hex MAC (b0e9fe51ef2e)', () => {
-      const { exitCode } = runCli(['policy', 'validate', writePolicy('b0e9fe51ef2e')]);
+    it('accepts lowercase hex MAC (b0e9fe51ef2e)', async () => {
+      const { exitCode } = await runCli(['policy', 'validate', writePolicy('b0e9fe51ef2e')]);
       expect(exitCode).toBe(0);
     });
 
-    it('accepts IoT suffix format (28372F4C9C4A-vzwa)', () => {
-      const { exitCode } = runCli(['policy', 'validate', writePolicy('28372F4C9C4A-vzwa')]);
+    it('accepts IoT suffix format (28372F4C9C4A-vzwa)', async () => {
+      const { exitCode } = await runCli(['policy', 'validate', writePolicy('28372F4C9C4A-vzwa')]);
       expect(exitCode).toBe(0);
     });
 
-    it('rejects single-char IDs', () => {
-      const { exitCode } = runCli(['policy', 'validate', writePolicy('A')]);
+    it('rejects single-char IDs', async () => {
+      const { exitCode } = await runCli(['policy', 'validate', writePolicy('A')]);
       expect(exitCode).not.toBe(0);
     });
 
-    it('rejects IDs longer than 64 chars', () => {
-      const { exitCode } = runCli(['policy', 'validate', writePolicy('A'.repeat(65))]);
+    it('rejects IDs longer than 64 chars', async () => {
+      const { exitCode } = await runCli(['policy', 'validate', writePolicy('A'.repeat(65))]);
       expect(exitCode).not.toBe(0);
     });
   });

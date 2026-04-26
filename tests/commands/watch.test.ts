@@ -386,6 +386,24 @@ describe('devices watch', () => {
     expect(header.stream).toBe(true);
     expect(header.eventKind).toBe('tick');
     expect(header.cadence).toBe('poll');
+    expect(Object.keys(header)).toEqual(['schemaVersion', 'stream', 'eventKind', 'cadence']);
+  });
+
+  it('P7: watch JSONL tick records keep a stable envelope and event shape', async () => {
+    cacheMock.map.set('BOT1', { type: 'Bot', name: 'Kitchen', category: 'physical' });
+    apiMock.__instance.get.mockResolvedValueOnce({
+      data: { statusCode: 100, body: { power: 'on', battery: 90 } },
+    });
+
+    const res = await runCli(registerDevicesCommand, [
+      '--json', 'devices', 'watch', 'BOT1', '--interval', '5s', '--max', '1',
+    ]);
+
+    const lines = res.stdout.filter((l) => l.trim().startsWith('{'));
+    const event = JSON.parse(lines[1]) as { schemaVersion: string; data: Record<string, unknown> };
+    expect(event.schemaVersion).toBe('1.1');
+    expect(Object.keys(event)).toEqual(['schemaVersion', 'data']);
+    expect(Object.keys(event.data)).toEqual(['t', 'tick', 'deviceId', 'type', 'changed', 'snapshot']);
   });
 
   it('P7: does NOT emit the stream header in non-JSON mode', async () => {

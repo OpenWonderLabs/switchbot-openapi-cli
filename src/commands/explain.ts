@@ -16,6 +16,7 @@ interface ExplainResult {
   name: string;
   role: string | null;
   readOnly: boolean;
+  catalogNote?: string;
   location?: { family?: string; room?: string };
   liveStatus?: Record<string, unknown>;
   commands: Array<{
@@ -59,7 +60,7 @@ Examples:
         const wantLive = options.live !== false;
         const desc: DescribeResult = await describeDevice(deviceId, { live: wantLive });
 
-        const warnings: string[] = [];
+        const warnings: string[] = [...(desc.warnings ?? [])];
         if (desc.isPhysical && !(desc.device as Device).enableCloudService) {
           warnings.push('Cloud service disabled on this device — commands will fail.');
         }
@@ -106,6 +107,7 @@ Examples:
           name: deviceName(desc.device),
           role: desc.catalog?.role ?? null,
           readOnly: desc.catalog?.readOnly ?? false,
+          ...(desc.catalogNote ? { catalogNote: desc.catalogNote } : {}),
           location,
           liveStatus,
           commands,
@@ -132,6 +134,9 @@ function printHuman(r: ExplainResult): void {
   if (r.location?.family || r.location?.room) {
     const loc = [r.location?.family, r.location?.room].filter(Boolean).join(' / ');
     console.log(`location: ${loc}`);
+  }
+  if (r.catalogNote) {
+    console.log(`catalog:  ${r.catalogNote}`);
   }
   if (r.warnings.length) {
     console.log('warnings:');

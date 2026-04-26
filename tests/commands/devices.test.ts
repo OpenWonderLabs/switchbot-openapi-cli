@@ -1778,7 +1778,27 @@ describe('devices command', () => {
       expect(parsed.data.device.deviceId).toBe('AI-DEV');
       expect(parsed.data.device.deviceType).toBeUndefined();
       expect(parsed.data.catalog).toBeNull();
+      expect(parsed.data.catalogNote).toMatch(/No built-in catalog entry/);
       expect(apiMock.__instance.get).toHaveBeenCalledTimes(1);
+    });
+
+    it('--json includes warnings when a physical device points at a missing hubDeviceId', async () => {
+      const body = {
+        deviceList: [{
+          deviceId: 'METER-X',
+          deviceName: 'Bedroom Meter',
+          deviceType: 'Meter',
+          hubDeviceId: 'HUB-MISSING',
+          enableCloudService: true,
+        }],
+        infraredRemoteList: [],
+      };
+      apiMock.__instance.get.mockResolvedValue({ data: { body } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'describe', 'METER-X', '--json']);
+      const parsed = JSON.parse(res.stdout.join('\n'));
+      expect(parsed.data.warnings).toEqual([
+        'hubDeviceId HUB-MISSING is not present in the current inventory',
+      ]);
     });
 
     it('exits 1 with guidance when the deviceId is unknown', async () => {

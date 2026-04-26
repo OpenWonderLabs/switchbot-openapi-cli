@@ -23,7 +23,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { loadPolicyFile } from '../../src/policy/load.js';
-import { validateLoadedPolicy } from '../../src/policy/validate.js';
+import { validateLoadedPolicy, validateLoadedPolicyAgainstInventory } from '../../src/policy/validate.js';
 
 function writeAndLoad(tmpDir: string, yaml: string) {
   const p = path.join(tmpDir, 'policy.yaml');
@@ -536,5 +536,63 @@ describe('policy validator (v0.2)', () => {
     );
     const result = validateLoadedPolicy(loaded);
     expect(result.valid, JSON.stringify(result.errors)).toBe(true);
+  });
+
+  it('live inventory validation rejects aliases that do not exist on the account', () => {
+    const loaded = writeAndLoad(
+      tmpDir,
+      [
+        'version: "0.2"',
+        'aliases:',
+        '  hall-light: 01-202407090924-26354212',
+        '',
+      ].join('\n'),
+    );
+    const result = validateLoadedPolicyAgainstInventory(loaded, {
+      deviceList: [],
+      infraredRemoteList: [],
+    });
+    expect(result.valid).toBe(false);
+    expect(result.validationScope).toBe('schema+offline-semantics+live-inventory');
+    const err = result.errors.find((e) => e.keyword === 'alias-live-device-not-found');
+    expect(err).toBeDefined();
+    expect(err!.path).toBe('/aliases/hall-light');
+  });
+
+  it('live inventory validation rejects commands unsupported by the resolved real device type', () => {
+    const loaded = writeAndLoad(
+      tmpDir,
+      [
+        'version: "0.2"',
+        'aliases:',
+        '  room-sensor: 01-202407090924-26354212',
+        'automation:',
+        '  rules:',
+        '    - name: "bad live target"',
+        '      when:',
+        '        source: mqtt',
+        '        event: x.y',
+        '      then:',
+        '        - command: "devices command <id> turnOn"',
+        '          device: room-sensor',
+        '',
+      ].join('\n'),
+    );
+    const result = validateLoadedPolicyAgainstInventory(loaded, {
+      deviceList: [
+        {
+          deviceId: '01-202407090924-26354212',
+          deviceName: 'Bedroom Meter',
+          deviceType: 'Meter',
+          enableCloudService: true,
+          hubDeviceId: '',
+        },
+      ],
+      infraredRemoteList: [],
+    });
+    expect(result.valid).toBe(false);
+    const err = result.errors.find((e) => e.keyword === 'rule-live-unsupported-command');
+    expect(err).toBeDefined();
+    expect(err!.path).toBe('/automation/rules/0/then/0/command');
   });
 });

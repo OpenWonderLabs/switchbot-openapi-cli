@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
+import { updateCacheFromDeviceList, resetListCache } from '../../src/devices/cache.js';
 
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>();
@@ -22,6 +23,7 @@ describe('doctor command', () => {
   beforeEach(() => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sbdoc-'));
     homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(tmp);
+    resetListCache();
     delete process.env.SWITCHBOT_TOKEN;
     delete process.env.SWITCHBOT_SECRET;
     // DEFAULT_POLICY_PATH is evaluated at module load time using the real homedir,
@@ -32,6 +34,7 @@ describe('doctor command', () => {
     vi.mocked(execSync).mockReset().mockImplementation(() => { throw new Error('not found'); });
   });
   afterEach(() => {
+    resetListCache();
     homedirSpy.mockRestore();
     delete process.env.SWITCHBOT_POLICY_PATH;
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -321,6 +324,7 @@ describe('doctor command', () => {
     expect(names).toContain('credentials');
     expect(names).toContain('mcp');
     expect(names).toContain('catalog-schema');
+    expect(names).toContain('inventory');
     expect(names).toContain('audit');
     // Should NOT include check results — just registry entries with description.
     expect(payload.data.summary).toBeUndefined();
@@ -675,6 +679,32 @@ describe('doctor command', () => {
       const res = await runCli(registerDoctorCommand, ['--json', 'doctor']);
       const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
       expect(Number.isInteger(payload.data.maturityScore)).toBe(true);
+    });
+  });
+
+  it('inventory check warns when a cached device points at a missing hubDeviceId', async () => {
+    process.env.SWITCHBOT_TOKEN = 't';
+    process.env.SWITCHBOT_SECRET = 's';
+    updateCacheFromDeviceList({
+      deviceList: [
+        {
+          deviceId: 'METER-1',
+          deviceName: 'Bedroom Meter',
+          deviceType: 'Meter',
+          hubDeviceId: 'HUB-MISSING',
+          enableCloudService: true,
+        },
+      ],
+      infraredRemoteList: [],
+    });
+    const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--section', 'inventory']);
+    const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    const inventory = payload.data.checks.find((c: { name: string }) => c.name === 'inventory');
+    expect(inventory.status).toBe('warn');
+    expect(inventory.detail.message).toMatch(/hubDeviceId/);
+    expect(inventory.detail.dangling[0]).toMatchObject({
+      deviceId: 'METER-1',
+      hubDeviceId: 'HUB-MISSING',
     });
   });
 

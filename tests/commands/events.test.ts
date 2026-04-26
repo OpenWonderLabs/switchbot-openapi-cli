@@ -530,6 +530,22 @@ describe('events mqtt-tail', () => {
     expect(header.stream).toBe(true);
     expect(header.eventKind).toBe('event');
     expect(header.cadence).toBe('push');
+    expect(Object.keys(header)).toEqual(['schemaVersion', 'stream', 'eventKind', 'cadence']);
+  });
+
+  it('P7: mqtt-tail JSON event lines keep the unified envelope and payloadVersion fields', async () => {
+    mqttMock.connectShouldFireMessage = true;
+    const res = await runCli(registerEventsCommand, ['--json', 'events', 'mqtt-tail', '--max', '1']);
+    const records = res.stdout
+      .filter((l) => l.trim().startsWith('{'))
+      .map((l) => JSON.parse(l))
+      .filter((r) => !r.stream);
+    expect(records.length).toBeGreaterThan(0);
+    expect(Object.keys(records[0])).toEqual(['schemaVersion', 'data']);
+    expect(records[0].schemaVersion).toBe('1.1');
+    expect(records[0].data.payloadVersion).toBe('1');
+    expect(records[0].data.source).toBe('mqtt');
+    expect(records[0].data.kind).toBeDefined();
   });
 });
 
