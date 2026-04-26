@@ -894,7 +894,7 @@ Queries the npm registry for the latest published version and compares it agains
 
 ```json
 {
-  "current": "3.2.1",
+  "current": "3.2.2",
   "latest": "4.0.0",
   "upToDate": false,
   "updateAvailable": true,

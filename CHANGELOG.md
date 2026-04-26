@@ -7,7 +7,7 @@ All notable changes to `@switchbot/openapi-cli` are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [3.2.2] - 2026-04-26
 
 ### Changed — release pipeline
 
@@ -29,6 +29,12 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   than silently repairing it the way `copy-assets.mjs` used to.
 
 ## [3.2.1] - 2026-04-25
+
+> **Deprecated on npm.** The initial `3.2.1` publish shipped a broken bin
+> (missing shebang / exec bit after `npm pack`). It has been rolled back
+> from `main` and relanded in `3.2.2`; install `@switchbot/openapi-cli@3.2.2`
+> or later. The feature list below is retained as the historical record of
+> what `3.2.1` intended to deliver and what `3.2.2` now ships.
 
 ### Added — plan resource model, MCP risk profiles, rules safety primitives
 
