@@ -233,3 +233,73 @@ describe('catalog refresh', () => {
     expect(parsed.data.refreshed).toBe(true);
   });
 });
+
+describe('catalog search', () => {
+  it('returns hits sorted by match-tier (type > role/command > alias-substring)', async () => {
+    // "bot" exists as type "Bot" (tier 0), appears in no roles/commands exactly,
+    // and is a substring of other aliases like "robot vacuum" (tier 2).
+    const { stdout } = await runCli(registerCatalogCommand, ['--json', 'catalog', 'search', 'bot']);
+    const parsed = JSON.parse(stdout.join('\n'));
+    const matches = parsed.data.matches as Array<{ type: string; _tier: number; _matchedOn: string[] }>;
+    expect(matches.length).toBeGreaterThan(0);
+    // First hit must be the exact type (tier 0).
+    expect(matches[0].type).toBe('Bot');
+    expect(matches[0]._tier).toBe(0);
+    expect(matches[0]._matchedOn).toContain('type');
+    // Tiers are monotonically non-decreasing.
+    for (let i = 1; i < matches.length; i++) {
+      expect(matches[i]._tier).toBeGreaterThanOrEqual(matches[i - 1]._tier);
+    }
+  });
+
+  it('marks alias-substring-only matches as alias-only', async () => {
+    const { stdout } = await runCli(registerCatalogCommand, ['--json', 'catalog', 'search', 'bot']);
+    const parsed = JSON.parse(stdout.join('\n'));
+    const matches = parsed.data.matches as Array<{ type: string; _matchedOn: string[] }>;
+    // At least one tier-2 entry should be labelled alias-only.
+    const aliasOnly = matches.filter((m) => m._matchedOn.includes('alias-only'));
+    expect(aliasOnly.length).toBeGreaterThan(0);
+    // And that entry is NOT labelled 'alias' (the exact-alias tag).
+    for (const m of aliasOnly) {
+      expect(m._matchedOn).not.toContain('alias');
+    }
+  });
+
+  it('--strict restricts hits to type-name matches only', async () => {
+    const { stdout } = await runCli(registerCatalogCommand, [
+      '--json',
+      'catalog',
+      'search',
+      'bot',
+      '--strict',
+    ]);
+    const parsed = JSON.parse(stdout.join('\n'));
+    const matches = parsed.data.matches as Array<{ type: string; _matchedOn: string[]; _tier: number }>;
+    expect(parsed.data.strict).toBe(true);
+    expect(matches.length).toBeGreaterThan(0);
+    for (const m of matches) {
+      expect(m._matchedOn).toContain('type');
+      expect(m._tier).toBe(0);
+    }
+  });
+
+  it('--strict with no type match prints a helpful suffix', async () => {
+    const { stdout } = await runCli(registerCatalogCommand, [
+      'catalog',
+      'search',
+      'zzzzznonexistentzzz',
+      '--strict',
+    ]);
+    const out = stdout.join('\n');
+    expect(out).toContain('No catalog entries match');
+    expect(out).toContain('strict mode');
+  });
+
+  it('table output labels the column matched_on', async () => {
+    const { stdout } = await runCli(registerCatalogCommand, ['catalog', 'search', 'Bot']);
+    const out = stdout.join('\n');
+    expect(out).toContain('matched_on');
+    // Legacy column header `matched` without the `_on` suffix must be gone.
+    expect(out).not.toMatch(/\bmatched\b(?!_)/);
+  });
+});
