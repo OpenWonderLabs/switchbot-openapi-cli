@@ -7,6 +7,71 @@ All notable changes to `@switchbot/openapi-cli` are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.1] - 2026-04-26
+
+### Fixed
+
+- **`status-sync start --probe` preflight was a false-negative.** The probe
+  hit the OpenClaw base URL with GET and accepted any response (including
+  401 / 404 / 5xx from upstream proxies) as success, so misconfigurations
+  only surfaced after the detached daemon had already started and was
+  silently dropping writes. The probe now POSTs to the same endpoint the
+  sink uses at runtime (`/v1/chat/completions`), with a body the server
+  actually parses, and separates network-error handling from HTTP-error
+  handling. Status-specific hints (401/403 → token, 404 → URL path,
+  400/422 → model, 5xx → server) point at the misconfigured input.
+- **`switchbot schema --type` / `switchbot health --prometheus` (bare
+  fallback forms) silently ignored their flags.** Commander v12 routes
+  parsing of a parent/child dual-declared option to the parent command,
+  leaving the subcommand's action with empty opts. Options are now
+  declared on the root command only; subcommand actions pull them via
+  `cmd.optsWithGlobals()`. Bare and explicit forms now behave identically.
+- **Live-inventory policy validation could silently skip pathological
+  rule device refs.** `validateLoadedPolicyAgainstInventory` relies on
+  the offline base pass catching `undefined` / empty-string / `<id>`
+  device refs, because the live validator `continue`s when
+  `resolveInventoryDeviceId()` returns null. A parametric test now pins
+  the contract so weakening either side is caught immediately
+  (`tests/policy/validate.test.ts`).
+- **`writeAudit` best-effort contract pinned by tests.** Several callers
+  (the `src/lib/devices.ts` dry-run path in particular) relied on audit
+  log writes never throwing. The contract was enforced by the
+  implementation but not by any test. ENOSPC / EACCES / mkdirSync
+  failures are now asserted non-throwing (`tests/utils/audit.test.ts`).
+
+### Changed
+
+- **`test:release-smoke` renamed to `test:release-smoke:manual`.** The
+  aggregated 25-file release suite runs manually, not from
+  `prepublishOnly` or CI; the new name stops future maintainers from
+  assuming it is wired in.
+
+### Removed
+
+- **`RELEASE_METADATA` 3.3.0 entry.** The `{schemaVersion, data}` JSON
+  envelope actually shipped in `v2.0.0` (commit 33d3825) and has been in
+  every 3.x release; flagging 3.3.0 as the breaking boundary would fire
+  upgrade-check warnings on every 3.2.x → 3.3.x upgrade for no reason.
+  The registry is back to empty, and `upgrade-check` / `doctor
+  release-notes` tests now pin that contract.
+
+### Added
+
+- **Live-inventory policy validation tier.**
+  `validateLoadedPolicyAgainstInventory(policy, devices)` now runs after
+  the always-on offline pass and raises `alias-live-device-not-found`
+  and `rule-live-unsupported-command` with schema-pointed paths and
+  actionable `hint` fields. Covered end-to-end in
+  `tests/policy/validate.test.ts`.
+- **Catalog fidelity fixture + regression test.**
+  `tests/fixtures/catalog-fidelity.observed.json` pins role and
+  `statusFields` for 11 real device types; `tests/devices/catalog-fidelity.test.ts`
+  fails loudly on silent catalog drift.
+- **`tests/helpers/contracts.ts`** — shared envelope-shape helpers
+  (`expectJsonEnvelopeShape`, `expectStreamHeaderShape`) codify the
+  `{schemaVersion, data}` contract across command tests. Stream variants
+  pin `schemaVersion: "1.1"` for watch / events.
+
 ## [3.3.0] - 2026-04-26
 
 ### Fixed — P0 bundled-asset loader
