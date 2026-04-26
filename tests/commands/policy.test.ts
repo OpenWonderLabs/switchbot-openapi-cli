@@ -150,7 +150,10 @@ describe('switchbot policy (commander surface)', () => {
       const p = seedValid();
       const { stdout, exitCode } = runCli(['policy', 'validate', p]);
       expect(exitCode).toBe(0);
-      expect(stdout.join('\n')).toMatch(/is valid \(schema v0\.2\)/);
+      const out = stdout.join('\n');
+      expect(out).toMatch(/is valid \(schema v0\.2\)/);
+      expect(out).toMatch(/Validation scope: schema \+ local safety guards only\./);
+      expect(out).toMatch(/Not checked: alias targets against live devices/);
     });
 
     it('exits 1 on an invalid policy and prints error blocks', () => {
@@ -183,11 +186,19 @@ describe('switchbot policy (commander surface)', () => {
       expect(exitCode).toBe(0);
       const parsed = JSON.parse(stdout[0]) as {
         schemaVersion: string;
-        data: { valid: boolean; errors: unknown[]; schemaVersion: string };
+        data: {
+          valid: boolean;
+          errors: unknown[];
+          schemaVersion: string;
+          validationScope: string;
+          limitations: string[];
+        };
       };
       expect(parsed.data.valid).toBe(true);
       expect(parsed.data.errors).toEqual([]);
       expect(parsed.data.schemaVersion).toBe('0.2');
+      expect(parsed.data.validationScope).toBe('schema+local-guards');
+      expect(parsed.data.limitations.length).toBeGreaterThan(0);
     });
 
     it('emits a validation envelope in --json mode on failure (still exit 1)', () => {
@@ -248,10 +259,12 @@ describe('switchbot policy (commander surface)', () => {
       // v0.1 is no longer in SUPPORTED_POLICY_SCHEMA_VERSIONS — exit 6.
       expect(exitCode).toBe(6);
       const parsed = JSON.parse(stdout[0]) as {
-        error: { code: number; kind: string };
+        error: { code: number; kind: string; hint: string; message: string };
       };
       expect(parsed.error.code).toBe(6);
       expect(parsed.error.kind).toBe('unsupported-version');
+      expect(parsed.error.message).toMatch(/cannot be migrated by this CLI/i);
+      expect(parsed.error.hint).toMatch(/<=2\.15/);
       // File must be untouched.
       expect(fs.readFileSync(p, 'utf-8')).toBe(original);
     });
@@ -262,9 +275,10 @@ describe('switchbot policy (commander surface)', () => {
       const { stdout, exitCode } = runCli(['--json', 'policy', 'migrate', p, '--dry-run']);
       // v0.1 unsupported — exits before dry-run logic.
       expect(exitCode).toBe(6);
-      const parsed = JSON.parse(stdout[0]) as { error: { code: number; kind: string } };
+      const parsed = JSON.parse(stdout[0]) as { error: { code: number; kind: string; hint: string } };
       expect(parsed.error.code).toBe(6);
       expect(parsed.error.kind).toBe('unsupported-version');
+      expect(parsed.error.hint).toMatch(/<=2\.15/);
       expect(fs.readFileSync(p, 'utf-8')).toBe(before);
     });
 

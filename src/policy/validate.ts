@@ -32,9 +32,16 @@ export interface PolicyValidationError {
 export interface PolicyValidationResult {
   policyPath: string;
   schemaVersion: PolicySchemaVersion;
+  validationScope: 'schema+local-guards';
+  limitations: string[];
   valid: boolean;
   errors: PolicyValidationError[];
 }
+
+const POLICY_VALIDATION_LIMITATIONS = [
+  'Does not resolve aliases against the live device inventory.',
+  'Does not verify that rule command strings are valid for a real device type.',
+] as const;
 
 interface CompiledValidator {
   ajv: Ajv2020Type;
@@ -186,6 +193,8 @@ function unsupportedVersionResult(loaded: LoadedPolicy, declared: string): Polic
   return {
     policyPath: loaded.path,
     schemaVersion: CURRENT_POLICY_SCHEMA_VERSION,
+    validationScope: 'schema+local-guards',
+    limitations: [...POLICY_VALIDATION_LIMITATIONS],
     valid: false,
     errors: [
       {
@@ -299,6 +308,8 @@ export function validateLoadedPolicy(loaded: LoadedPolicy): PolicyValidationResu
   return {
     policyPath: loaded.path,
     schemaVersion: version,
+    validationScope: 'schema+local-guards',
+    limitations: [...POLICY_VALIDATION_LIMITATIONS],
     valid,
     errors,
   };

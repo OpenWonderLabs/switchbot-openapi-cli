@@ -860,6 +860,8 @@ describe('mcp server', () => {
       expect(sc.present).toBe(false);
       expect(sc.valid).toBeNull();
       expect(sc.policyPath).toBe(missing);
+      expect(sc.validationScope).toBe('schema+local-guards');
+      expect(Array.isArray(sc.limitations)).toBe(true);
     });
 
     it('policy_validate returns valid:false with unsupported-version on a v0.1 file (v3.0)', async () => {
@@ -874,6 +876,7 @@ describe('mcp server', () => {
       const sc = (res as { structuredContent?: Record<string, unknown> }).structuredContent!;
       expect(sc.present).toBe(true);
       expect(sc.valid).toBe(false);
+      expect(sc.validationScope).toBe('schema+local-guards');
       const errors = sc.errors as Array<{ keyword: string }>;
       expect(Array.isArray(errors)).toBe(true);
       expect(errors.some((e) => e.keyword === 'unsupported-version')).toBe(true);

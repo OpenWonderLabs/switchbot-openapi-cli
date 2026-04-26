@@ -10,7 +10,7 @@
     "version": {
       "type": "string",
       "const": "0.2",
-      "description": "Policy schema version. Will migrate 0.1 -> 0.2 in place via `switchbot policy migrate`."
+      "description": "Policy schema version. This CLI only rewrites between schema versions it still supports; legacy v0.1 files require an older CLI for migration."
     },
 
     "aliases": {

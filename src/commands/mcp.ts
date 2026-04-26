@@ -1113,8 +1113,8 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
     {
       title: 'Validate a policy.yaml file',
       description:
-        'Check a policy file against the embedded JSON Schema (supports v0.1 and v0.2). ' +
-        'Returns the validation result with per-error line/col and a hint. ' +
+        'Check a policy file against the embedded JSON Schema plus local safety guards. ' +
+        'Does not resolve aliases against the live device inventory or verify rule commands against real device capabilities. ' +
         'When no path is given, reads the resolved default (${SWITCHBOT_POLICY_PATH} or ~/.config/openclaw/switchbot/policy.yaml). ' +
         'Use before relying on aliases/quiet_hours/confirmations so the agent never acts on a broken policy.',
       _meta: { agentSafetyTier: 'read' },
@@ -1124,6 +1124,8 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
       outputSchema: {
         policyPath: z.string(),
         schemaVersion: z.string(),
+        validationScope: z.string(),
+        limitations: z.array(z.string()),
         present: z.boolean().describe('false when the file does not exist'),
         valid: z.boolean().nullable().describe('null when present=false'),
         errors: z.array(z.object({
@@ -1145,6 +1147,8 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         const structured = {
           policyPath: result.policyPath,
           schemaVersion: result.schemaVersion,
+          validationScope: result.validationScope,
+          limitations: result.limitations,
           present: true,
           valid: result.valid,
           errors: result.errors,
@@ -1158,6 +1162,11 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
           const structured = {
             policyPath,
             schemaVersion: CURRENT_POLICY_SCHEMA_VERSION,
+            validationScope: 'schema+local-guards' as const,
+            limitations: [
+              'Does not resolve aliases against the live device inventory.',
+              'Does not verify that rule command strings are valid for a real device type.',
+            ],
             present: false,
             valid: null,
             errors: [],
@@ -1171,6 +1180,11 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
           const structured = {
             policyPath,
             schemaVersion: CURRENT_POLICY_SCHEMA_VERSION,
+            validationScope: 'schema+local-guards' as const,
+            limitations: [
+              'Does not resolve aliases against the live device inventory.',
+              'Does not verify that rule command strings are valid for a real device type.',
+            ],
             present: true,
             valid: false,
             errors: err.yamlErrors.map((e) => ({
@@ -1243,11 +1257,11 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
     {
       title: 'Migrate a policy file to the latest supported schema',
       description:
-        'Upgrades the policy file\'s schema version in place while preserving comments. ' +
+        'Rewrites a policy file between schema versions this CLI still supports while preserving comments. ' +
         'Safe by default: if the migrated document would fail schema validation, the file is NOT rewritten ' +
         'and the tool returns status="precheck-failed" with the list of errors. ' +
         'Pass dryRun=true to preview without touching the file. ' +
-        'Currently the only supported upgrade path is v0.1 → v0.2.',
+        'This release only supports v0.2, so legacy v0.1 files are reported as unsupported rather than migrated.',
       _meta: { agentSafetyTier: 'action' },
       inputSchema: z.object({
         path: z.string().optional().describe('Optional policy file path; defaults to the resolved default path'),
@@ -1323,10 +1337,13 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
       }
 
       if (!SUPPORTED_POLICY_SCHEMA_VERSIONS.includes(fileVersion as PolicySchemaVersion)) {
+        const isLegacy = fileVersion === '0.1';
         const structured = {
           ...base,
           status: 'unsupported' as const,
-          message: `policy schema v${fileVersion} is not supported (supports: ${SUPPORTED_POLICY_SCHEMA_VERSIONS.join(', ')})`,
+          message: isLegacy
+            ? `policy schema v${fileVersion} is legacy and cannot be migrated by this CLI`
+            : `policy schema v${fileVersion} is not supported (supports: ${SUPPORTED_POLICY_SCHEMA_VERSIONS.join(', ')})`,
         };
         return {
           content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
@@ -1978,9 +1995,9 @@ export function registerMcpCommand(program: Command): void {
   - get_device_history      fetch raw JSONL history records for a device
   - query_device_history    filter + page history records with field/time predicates
   - aggregate_device_history compute count/min/max/avg/sum/p50/p95 over history records
-  - policy_validate         check policy.yaml against the embedded schema (v0.1 / v0.2)
+  - policy_validate         check policy.yaml against the embedded schema + local safety guards
   - policy_new              scaffold a starter policy.yaml (action — confirm first)
-  - policy_migrate          upgrade policy.yaml to the latest schema (action — preserves comments)
+  - policy_migrate          rewrite policy.yaml between currently supported schemas (action — preserves comments)
   - policy_diff             compare two policy files with structural + line diff output
   - plan_suggest            draft a Plan JSON from intent + device IDs (heuristic, no LLM)
   - plan_run                validate + execute a Plan JSON document
