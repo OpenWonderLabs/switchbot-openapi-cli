@@ -220,4 +220,24 @@ describe('devices expand', () => {
       expect.objectContaining({ command: 'setPosition' })
     );
   });
+
+  it('--name-category and --name-room are forwarded to name resolution', async () => {
+    updateCacheFromDeviceList({
+      deviceList: [
+        { deviceId: 'CURTAIN-LR', deviceName: 'Curtain', deviceType: 'Curtain', hubDeviceId: 'H1', enableCloudService: true, roomName: 'Living Room' },
+        { deviceId: 'CURTAIN-BR', deviceName: 'Curtain', deviceType: 'Curtain', hubDeviceId: 'H1', enableCloudService: true, roomName: 'Bedroom' },
+      ],
+      infraredRemoteList: [],
+    });
+
+    const res = await runCli(registerDevicesCommand, [
+      'devices', 'expand', '--name', 'Curtain', '--name-category', 'physical', '--name-room', 'Bed', 'setPosition',
+      '--position', '50',
+    ]);
+    expect(res.exitCode).toBe(null);
+    expect(apiMock.__instance.post).toHaveBeenCalledWith(
+      '/v1.1/devices/CURTAIN-BR/commands',
+      expect.objectContaining({ command: 'setPosition' }),
+    );
+  });
 });

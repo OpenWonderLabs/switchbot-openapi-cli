@@ -72,9 +72,10 @@ vi.mock('../../src/devices/cache.js', () => ({
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { createSwitchBotMcpServer } from '../../src/commands/mcp.js';
+import { createSwitchBotMcpServer, registerMcpCommand } from '../../src/commands/mcp.js';
 import { registerPolicyCommand } from '../../src/commands/policy.js';
 import { ApiError } from '../../src/api/client.js';
+import { runCli } from '../helpers/cli.js';
 
 /** Connect a fresh server + client pair and return both. */
 async function pair() {
@@ -126,6 +127,16 @@ function runPolicyDiffCliJson(leftPath: string, rightPath: string): Record<strin
 }
 
 describe('mcp server', () => {
+  it('mcp tools --json returns a machine-readable tool directory', async () => {
+    const res = await runCli(registerMcpCommand, ['--json', 'mcp', 'tools']);
+    expect(res.exitCode).toBeNull();
+    const out = JSON.parse(res.stdout.join('\n'));
+    expect(Array.isArray(out.data.tools)).toBe(true);
+    expect(out.data.tools.some((t: { name: string }) => t.name === 'list_devices')).toBe(true);
+    expect(Array.isArray(out.data.resources)).toBe(true);
+    expect(out.data.resources.some((r: { uri: string }) => r.uri === 'switchbot://events')).toBe(true);
+  });
+
   beforeEach(() => {
     apiMock.__instance.get.mockReset();
     apiMock.__instance.post.mockReset();

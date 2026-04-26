@@ -81,6 +81,11 @@ Examples:
 Starts a detached child process that runs:
   switchbot status-sync run ...
 
+Local preflight before spawning:
+  - SwitchBot credentials must be configured
+  - OpenClaw token + model must be present
+  - OpenClaw URL must parse as http:// or https://
+
 State files:
   state.json   process metadata (pid, startedAt, command)
   stdout.log   redirected stdout from the child process

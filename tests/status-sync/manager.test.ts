@@ -215,6 +215,26 @@ describe('status-sync manager', () => {
       /OpenClaw model missing[\s\S]*--openclaw-model[\s\S]*OPENCLAW_MODEL[\s\S]*status-sync status/,
     );
   });
+
+  it('rejects an invalid OPENCLAW_URL before spawning the child', () => {
+    process.env.OPENCLAW_TOKEN = 'env-token';
+    process.env.OPENCLAW_MODEL = 'env-model';
+    process.env.OPENCLAW_URL = 'not-a-url';
+    expect(() => startStatusSync({ stateDir: '/tmp/status-sync' })).toThrow(
+      /OpenClaw URL is invalid[\s\S]*--openclaw-url[\s\S]*OPENCLAW_URL/,
+    );
+    expect(childProcessMock.spawn).not.toHaveBeenCalled();
+  });
+
+  it('rejects unsupported URL protocols before spawning the child', () => {
+    process.env.OPENCLAW_TOKEN = 'env-token';
+    process.env.OPENCLAW_MODEL = 'env-model';
+    process.env.OPENCLAW_URL = 'ftp://example.com/openclaw';
+    expect(() => startStatusSync({ stateDir: '/tmp/status-sync' })).toThrow(
+      /must use http:\/\/ or https:\/\//,
+    );
+    expect(childProcessMock.spawn).not.toHaveBeenCalled();
+  });
 });
 
 function pathFromArgv(): string {

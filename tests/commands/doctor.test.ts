@@ -677,4 +677,15 @@ describe('doctor command', () => {
       expect(Number.isInteger(payload.data.maturityScore)).toBe(true);
     });
   });
+
+  it('release-notes check warns when the current release has a breaking-change notice', async () => {
+    process.env.SWITCHBOT_TOKEN = 't';
+    process.env.SWITCHBOT_SECRET = 's';
+    const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--section', 'release-notes']);
+    const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    const note = payload.data.checks.find((c: { name: string }) => c.name === 'release-notes');
+    expect(note).toBeDefined();
+    expect(note.status).toBe('warn');
+    expect(String(note.detail.message)).toMatch(/schemaVersion,data|envelope/i);
+  });
 });

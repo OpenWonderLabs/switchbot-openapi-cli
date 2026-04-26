@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 
 const FAKE_HOME = '/fake/home';
 const CONFIG_DIR = path.join(FAKE_HOME, '.switchbot');
@@ -164,10 +165,12 @@ describe('config', () => {
 
       showConfig();
       const output = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+      const tokenFp = createHash('sha256').update('env-token').digest('hex').slice(-8);
+      const secretFp = createHash('sha256').update('abcdefgh').digest('hex').slice(-8);
       expect(output).toContain('Credential source: environment variables');
-      expect(output).toMatch(/token : env-\*+oken/);
+      expect(output).toContain(`token : **** [sha256:${tokenFp}]`);
       expect(output).not.toContain('env-token');
-      expect(output).toContain('ab****gh');
+      expect(output).toContain(`secret: **** [sha256:${secretFp}]`);
       expect(output).not.toContain('abcdefgh');
     });
 
@@ -178,10 +181,12 @@ describe('config', () => {
 
       showConfig();
       const output = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+      const tokenFp = createHash('sha256').update('file-token').digest('hex').slice(-8);
+      const secretFp = createHash('sha256').update('longsecretvalue').digest('hex').slice(-8);
       expect(output).toContain(`Credential source: ${CONFIG_FILE}`);
-      expect(output).toMatch(/token : file\*+oken/);
+      expect(output).toContain(`token : **** [sha256:${tokenFp}]`);
       expect(output).not.toContain('file-token');
-      expect(output).toMatch(/secret: lo\*+ue/);
+      expect(output).toContain(`secret: **** [sha256:${secretFp}]`);
     });
 
     it('says "No credentials configured" when nothing is set', () => {
@@ -210,7 +215,8 @@ describe('config', () => {
 
       showConfig();
       const output = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
-      expect(output).toContain('secret: ****');
+      const secretFp = createHash('sha256').update('abcd').digest('hex').slice(-8);
+      expect(output).toContain(`secret: **** [sha256:${secretFp}]`);
       expect(output).not.toContain('abcd');
     });
   });

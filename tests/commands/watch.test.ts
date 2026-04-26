@@ -119,14 +119,14 @@ describe('devices watch', () => {
     expect(res.exitCode).toBeNull();
   }, 3000);
 
-  it('emits one JSONL event per device on first tick with from:null (--max=1)', async () => {
+  it('--initial=emit emits one JSONL event per device on first tick with from:null (--max=1)', async () => {
     cacheMock.map.set('BOT1', { type: 'Bot', name: 'Kitchen', category: 'physical' });
     apiMock.__instance.get.mockResolvedValueOnce({
       data: { statusCode: 100, body: { power: 'on', battery: 90 } },
     });
 
     const res = await runCli(registerDevicesCommand, [
-      '--json', 'devices', 'watch', 'BOT1', '--interval', '5s', '--max', '1',
+      '--json', 'devices', 'watch', 'BOT1', '--initial', 'emit', '--interval', '5s', '--max', '1',
     ]);
 
     // Loop exits via --max so parseAsync resolves — exitCode is null.
@@ -143,6 +143,62 @@ describe('devices watch', () => {
     expect(ev.changed.battery).toEqual({ from: null, to: 90 });
     expect(apiMock.createClient).toHaveBeenCalledTimes(1);
   });
+
+  it('defaults to a snapshot baseline instead of null-to-value seed diffs', async () => {
+    cacheMock.map.set('BOT1', { type: 'Bot', name: 'Kitchen', category: 'physical' });
+    apiMock.__instance.get.mockResolvedValueOnce({
+      data: { statusCode: 100, body: { power: 'on', battery: 90 } },
+    });
+
+    const res = await runCli(registerDevicesCommand, [
+      '--json', 'devices', 'watch', 'BOT1', '--interval', '5s', '--max', '1',
+    ]);
+
+    expect(res.exitCode).toBeNull();
+    const lines = res.stdout.filter((l) => l.trim().startsWith('{'));
+    expect(lines.length).toBe(2);
+    const ev = JSON.parse(lines[1]).data;
+    expect(ev.snapshot).toEqual({ power: 'on', battery: 90 });
+    expect(ev.changed).toEqual({});
+  });
+
+  it('--initial=emit preserves the legacy null-to-value seed diff behavior', async () => {
+    cacheMock.map.set('BOT1', { type: 'Bot', name: 'Kitchen', category: 'physical' });
+    apiMock.__instance.get.mockResolvedValueOnce({
+      data: { statusCode: 100, body: { power: 'on', battery: 90 } },
+    });
+
+    const res = await runCli(registerDevicesCommand, [
+      '--json', 'devices', 'watch', 'BOT1', '--initial', 'emit', '--interval', '5s', '--max', '1',
+    ]);
+
+    expect(res.exitCode).toBeNull();
+    const lines = res.stdout.filter((l) => l.trim().startsWith('{'));
+    const ev = JSON.parse(lines[1]).data;
+    expect(ev.snapshot).toBeUndefined();
+    expect(ev.changed.power).toEqual({ from: null, to: 'on' });
+  });
+
+  it('--initial=skip records the baseline silently and only emits later diffs', async () => {
+    cacheMock.map.set('BOT1', { type: 'Bot', name: 'Kitchen', category: 'physical' });
+    apiMock.__instance.get
+      .mockResolvedValueOnce({ data: { statusCode: 100, body: { power: 'on', battery: 90 } } })
+      .mockResolvedValueOnce({ data: { statusCode: 100, body: { power: 'off', battery: 90 } } });
+
+    const res = await runCli(registerDevicesCommand, [
+      '--json', 'devices', 'watch', 'BOT1', '--initial', 'skip', '--interval', '1s', '--max', '2',
+    ]);
+
+    expect(res.exitCode).toBeNull();
+    const events = res.stdout
+      .filter((l) => l.trim().startsWith('{'))
+      .map((l) => JSON.parse(l))
+      .filter((j) => !j.stream)
+      .map((j) => j.data);
+    expect(events).toHaveLength(1);
+    expect(events[0].tick).toBe(2);
+    expect(events[0].changed.power).toEqual({ from: 'on', to: 'off' });
+  }, 20_000);
 
   it('only emits changed fields on subsequent ticks', async () => {
     cacheMock.map.set('BOT1', { type: 'Bot', name: 'Kitchen', category: 'physical' });
@@ -216,7 +272,7 @@ describe('devices watch', () => {
     flagsMock.getFields.mockReturnValueOnce(['power', 'battery']);
 
     const res = await runCli(registerDevicesCommand, [
-      '--json', 'devices', 'watch', 'BOT1', '--interval', '5s', '--max', '1', '--fields', 'power,battery',
+      '--json', 'devices', 'watch', 'BOT1', '--initial', 'emit', '--interval', '5s', '--max', '1', '--fields', 'power,battery',
     ]);
     expect(res.exitCode).toBeNull();
 
@@ -234,7 +290,7 @@ describe('devices watch', () => {
     flagsMock.getFields.mockReturnValueOnce(['batt', 'humid']);
 
     const res = await runCli(registerDevicesCommand, [
-      '--json', 'devices', 'watch', 'BOT1', '--interval', '5s', '--max', '1', '--fields', 'batt,humid',
+      '--json', 'devices', 'watch', 'BOT1', '--initial', 'emit', '--interval', '5s', '--max', '1', '--fields', 'batt,humid',
     ]);
     expect(res.exitCode).toBeNull();
 
@@ -288,7 +344,7 @@ describe('devices watch', () => {
     expect(events).toHaveLength(2);
     const byId = Object.fromEntries(events.map((e) => [e.deviceId, e]));
     expect(byId.BOT1.error).toMatch(/boom/);
-    expect(byId.BOT2.changed.power).toEqual({ from: null, to: 'on' });
+    expect(byId.BOT2.snapshot).toEqual({ power: 'on' });
   });
 
   it('exits 2 when no deviceId and no --name', async () => {
@@ -354,9 +410,10 @@ describe('devices watch', () => {
     expect(out).toMatch(/human-readable table/);
     expect(out).toMatch(/--json/);
     expect(out).toMatch(/JSON-Lines/);
-    // Seed-tick note is present in help.
-    expect(out).toMatch(/seed tick/i);
-    expect(out).toMatch(/"from": null/);
+    // Initial-poll modes are documented in help.
+    expect(out).toMatch(/--initial=snapshot/i);
+    expect(out).toMatch(/--initial=emit/i);
+    expect(out).toMatch(/--initial=skip/i);
     // Example block explicitly labels the --json form as agent-friendly.
     expect(out).toMatch(/agent-friendly/i);
   });

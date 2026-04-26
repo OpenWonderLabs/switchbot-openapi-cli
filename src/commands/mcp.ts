@@ -4,7 +4,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
 import { intArg, stringArg } from '../utils/arg-parsers.js';
-import { handleError, isJsonMode, buildErrorPayload, exitWithError, type ErrorPayload, type ErrorSubKind } from '../utils/output.js';
+import { handleError, isJsonMode, printJson, buildErrorPayload, exitWithError, type ErrorPayload, type ErrorSubKind } from '../utils/output.js';
 import { VERSION } from '../version.js';
 import {
   fetchDeviceList,
@@ -1978,6 +1978,10 @@ export function listRegisteredTools(server: McpServer): string[] {
   return Object.keys(internal._registeredTools).sort();
 }
 
+function listRegisteredResources(): string[] {
+  return ['switchbot://events'];
+}
+
 export function registerMcpCommand(program: Command): void {
   const mcp = program
     .command('mcp')
@@ -2029,6 +2033,29 @@ Example Claude Desktop config (~/Library/Application Support/Claude/claude_deskt
 Inspect locally:
   $ npx @modelcontextprotocol/inspector switchbot mcp serve
 `);
+
+  mcp
+    .command('tools')
+    .description('Print the registered MCP tools in human or JSON form')
+    .action(() => {
+      const server = createSwitchBotMcpServer();
+      const tools = listRegisteredTools(server).map((name) => ({ name }));
+      const resources = listRegisteredResources().map((uri) => ({ uri }));
+      if (isJsonMode()) {
+        printJson({ tools, resources });
+        return;
+      }
+      console.log('Tools:');
+      for (const tool of tools) {
+        console.log(`  ${tool.name}`);
+      }
+      console.log('');
+      console.log('Resources:');
+      for (const resource of resources) {
+        console.log(`  ${resource.uri}`);
+      }
+      console.log(`\nTotal: ${tools.length} tool(s), ${resources.length} resource(s)`);
+    });
 
   mcp
     .command('serve')

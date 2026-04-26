@@ -99,6 +99,15 @@ describe('catalog show', () => {
     expect(out).toContain('Robot Vacuum Cleaner S1');
   });
 
+  it('resolves "Hub 2" to a standalone hub entry', async () => {
+    const { stdout, exitCode } = await runCli(registerCatalogCommand, ['catalog', 'show', 'Hub', '2']);
+    expect(exitCode).toBeNull();
+    const out = stdout.join('\n');
+    expect(out).toMatch(/Type:\s+Hub 2/);
+    expect(out).toMatch(/Role:\s+hub/);
+    expect(out).not.toContain('Meter');
+  });
+
   it('--source built-in ignores overlay', async () => {
     writeOverlay([{ type: 'Bot', remove: true }]);
     const { stdout } = await runCli(registerCatalogCommand, ['catalog', 'show', '--source', 'built-in']);
@@ -263,6 +272,19 @@ describe('catalog search', () => {
     for (const m of aliasOnly) {
       expect(m._matchedOn).not.toContain('alias');
     }
+  });
+
+  it('treats Hub 2 as a hub type, not as a Meter alias leak', async () => {
+    const { stdout } = await runCli(registerCatalogCommand, ['--json', 'catalog', 'search', 'Hub']);
+    const parsed = JSON.parse(stdout.join('\n'));
+    const matches = parsed.data.matches as Array<{ type: string; role?: string; aliases?: string[]; _matchedOn: string[] }>;
+    const hub2 = matches.find((m) => m.type === 'Hub 2');
+    expect(hub2).toBeDefined();
+    expect(hub2?.role).toBe('hub');
+    expect(hub2?._matchedOn).toContain('type');
+
+    const meter = matches.find((m) => m.type === 'Meter');
+    expect(meter).toBeUndefined();
   });
 
   it('--strict restricts hits to type-name matches only', async () => {

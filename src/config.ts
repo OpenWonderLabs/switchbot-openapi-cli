@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { createHash } from 'node:crypto';
 import { getConfigPath } from './utils/flags.js';
 import { getActiveProfile } from './lib/request-context.js';
 import { emitJsonError, isJsonMode } from './utils/output.js';
@@ -270,11 +271,13 @@ export function getConfigSummary(): ConfigSummary {
 }
 
 function maskCredential(token: string): string {
-  if (token.length <= 8) return '*'.repeat(Math.max(4, token.length));
-  return token.slice(0, 4) + '*'.repeat(token.length - 8) + token.slice(-4);
+  return `**** [sha256:${fingerprintCredential(token)}]`;
 }
 
 function maskSecret(secret: string): string {
-  if (secret.length <= 4) return '****';
-  return secret.slice(0, 2) + '*'.repeat(secret.length - 4) + secret.slice(-2);
+  return `**** [sha256:${fingerprintCredential(secret)}]`;
+}
+
+function fingerprintCredential(value: string): string {
+  return createHash('sha256').update(value).digest('hex').slice(-8);
 }

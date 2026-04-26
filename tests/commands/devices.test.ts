@@ -639,6 +639,45 @@ describe('devices command', () => {
       expect(res.stdout.join('\n')).toContain('"power"');
     });
 
+    it('annotates empty status bodies as unsupported in --json mode', async () => {
+      updateCacheFromDeviceList({
+        deviceList: [{
+          deviceId: 'AI-EMPTY',
+          deviceName: 'AI MindClip',
+          enableCloudService: true,
+          hubDeviceId: '',
+        }],
+        infraredRemoteList: [],
+      });
+      apiMock.__instance.get.mockResolvedValue({
+        data: { body: {} },
+      });
+      const res = await runCli(registerDevicesCommand, ['devices', 'status', 'AI-EMPTY', '--json']);
+      const out = JSON.parse(res.stdout.join('\n'));
+      expect(out.data.supported).toBe(false);
+      expect(out.data.note).toMatch(/does not expose cloud status/i);
+    });
+
+    it('adds a stale-reading hint for zeroed Meter status without onlineStatus', async () => {
+      updateCacheFromDeviceList({
+        deviceList: [{
+          deviceId: 'METER-D9',
+          deviceName: 'Dead Meter',
+          deviceType: 'Meter',
+          enableCloudService: true,
+          hubDeviceId: 'HUB-1',
+        }],
+        infraredRemoteList: [],
+      });
+      apiMock.__instance.get.mockResolvedValue({
+        data: { body: { battery: 0, temperature: 0, humidity: 0 } },
+      });
+      const res = await runCli(registerDevicesCommand, ['devices', 'status', 'METER-D9', '--json']);
+      const out = JSON.parse(res.stdout.join('\n'));
+      expect(out.data.hint).toMatch(/stale/i);
+      expect(out.data.hint).toMatch(/batteries|hub connectivity/i);
+    });
+
     it('exits 1 when the API throws', async () => {
       apiMock.__instance.get.mockRejectedValue(new Error('device offline'));
       const res = await runCli(registerDevicesCommand, ['devices', 'status', 'BLE']);
@@ -2465,6 +2504,7 @@ describe('devices command', () => {
       const out = res.stdout.join('\n');
       expect(out).toMatch(/dry-run/i);
       expect(out).toContain(DRY_ID);
+      expect(out).not.toMatch(/Would POST/i);
     });
   });
 

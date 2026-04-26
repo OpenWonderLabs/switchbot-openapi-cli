@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
+import { findBreakingChangeBetween } from '../../src/version-notes.js';
 
 // ── https mock (for action-level tests) ─────────────────────────────────────
 const httpsMock = vi.hoisted(() => {
@@ -77,6 +78,13 @@ describe('breakingChange detection (upgrade-check)', () => {
   it('older latest → no breaking change', () => {
     expect(isBreaking('2.0.0', '3.0.0')).toBe(false);
   });
+
+  it('metadata catches known same-major breaking releases', () => {
+    const notice = findBreakingChangeBetween('3.2.9', '3.3.1');
+    expect(notice).not.toBeNull();
+    expect(notice?.version).toBe('3.3.0');
+    expect(notice?.summary).toMatch(/schemaVersion,data|envelope/i);
+  });
 });
 
 // ── action-level tests (prerelease guard) ────────────────────────────────────
@@ -150,6 +158,7 @@ describe('upgrade-check action — version comparison', () => {
     expect(data.breakingChange).toBe(true);
     expect(typeof data.installCommand).toBe('string');
   });
+
 
   it('--json: network error produces ok:false envelope and exits 1', async () => {
     httpsMock.get.mockImplementation((_url: unknown, _opts: unknown, _cb: unknown) => {

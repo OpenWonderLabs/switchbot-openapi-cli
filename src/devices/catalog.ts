@@ -523,7 +523,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     description: 'Battery-powered temperature and humidity sensor; read-only, no control commands.',
     role: 'sensor',
     readOnly: true,
-    aliases: ['Meter Plus', 'MeterPro', 'MeterPro(CO2)', 'WoIOSensor', 'Hub 2'],
+    aliases: ['Meter Plus', 'MeterPro', 'MeterPro(CO2)', 'WoIOSensor'],
     commands: [],
     statusFields: ['temperature', 'humidity', 'CO2', 'battery', 'version'],
   },
@@ -555,6 +555,15 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     statusFields: ['battery', 'version', 'status'],
   },
   // Status-only hub-class devices (no control commands)
+  {
+    type: 'Hub 2',
+    category: 'physical',
+    description: 'Wi-Fi hub with built-in temperature, humidity, and light sensors; bridges BLE devices to the cloud.',
+    role: 'hub',
+    readOnly: true,
+    commands: [],
+    statusFields: ['version', 'temperature', 'humidity', 'lightLevel'],
+  },
   {
     type: 'Hub Mini',
     category: 'physical',

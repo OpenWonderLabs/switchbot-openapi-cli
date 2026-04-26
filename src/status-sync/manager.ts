@@ -105,8 +105,35 @@ function resolveStatusSyncRuntime(options: {
     );
   }
 
+  const openclawUrl = options.openclawUrl ?? process.env.OPENCLAW_URL ?? DEFAULT_OPENCLAW_URL;
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(openclawUrl);
+  } catch {
+    throw new UsageError(
+      [
+        `OpenClaw URL is invalid: ${openclawUrl}`,
+        'Provide a full http:// or https:// URL via one of:',
+        '  1. --openclaw-url <url>',
+        '  2. OPENCLAW_URL=<url> in the environment',
+        '',
+        'After fixing it, re-run the command and verify with `switchbot status-sync status`.',
+      ].join('\n'),
+    );
+  }
+  if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+    throw new UsageError(
+      [
+        `OpenClaw URL must use http:// or https:// (received ${parsedUrl.protocol})`,
+        'Provide a full http:// or https:// URL via one of:',
+        '  1. --openclaw-url <url>',
+        '  2. OPENCLAW_URL=<url> in the environment',
+      ].join('\n'),
+    );
+  }
+
   return {
-    openclawUrl: options.openclawUrl ?? process.env.OPENCLAW_URL ?? DEFAULT_OPENCLAW_URL,
+    openclawUrl,
     openclawToken,
     openclawModel,
     ...(options.topic ? { topic: options.topic } : {}),

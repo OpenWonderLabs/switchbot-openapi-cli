@@ -11,6 +11,8 @@ import { DAILY_QUOTA, todayUsage } from '../utils/quota.js';
 import { AGENT_BOOTSTRAP_SCHEMA_VERSION } from './agent-bootstrap.js';
 import { CATALOG_SCHEMA_VERSION } from '../devices/catalog.js';
 import { createSwitchBotMcpServer, listRegisteredTools } from './mcp.js';
+import { getReleaseMetadata } from '../version-notes.js';
+import { VERSION as currentVersion } from '../version.js';
 import {
   resolvePolicyPath,
   loadPolicyFile,
@@ -853,6 +855,27 @@ function checkMcp(): Check {
   }
 }
 
+function checkReleaseNotes(): Check {
+  const meta = getReleaseMetadata(currentVersion);
+  if (!meta || !meta.breaking) {
+    return {
+      name: 'release-notes',
+      status: 'ok',
+      detail: { version: currentVersion, message: 'no known breaking-change notice for the current release' },
+    };
+  }
+  return {
+    name: 'release-notes',
+    status: 'warn',
+    detail: {
+      version: currentVersion,
+      breaking: true,
+      message: meta.summary,
+      hint: 'If you have scripts pinned to 3.2.x JSON output, update them before rolling this release wider.',
+    },
+  };
+}
+
 interface CheckDef {
   name: string;
   description: string;
@@ -880,6 +903,7 @@ const CHECK_REGISTRY: CheckDef[] = [
     run: ({ probe }) => (probe ? checkMqttProbe() : checkMqtt()),
   },
   { name: 'mcp', description: 'MCP server instantiable + tool count', run: () => checkMcp() },
+  { name: 'release-notes', description: 'current release breaking-change notice', run: () => checkReleaseNotes() },
   { name: 'policy', description: 'policy.yaml present + schema-valid (if configured)', run: () => checkPolicy() },
   { name: 'audit', description: 'recent command errors (last 24h)', run: () => checkAudit() },
   { name: 'daemon', description: 'daemon state file + runtime status', run: () => checkDaemon() },
