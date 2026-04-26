@@ -3,7 +3,7 @@ import { dirname, resolve as resolvePath } from 'node:path';
 import { Command } from 'commander';
 import { parse as yamlParse } from 'yaml';
 import { printJson, emitJsonError, isJsonMode, exitWithError } from '../utils/output.js';
-import { readEmbeddedAsset } from '../utils/embedded-asset.js';
+import { readPolicyExampleYaml } from '../embedded-assets.js';
 import {
   loadPolicyFile,
   resolvePolicyPath,
@@ -28,10 +28,7 @@ const LATEST_SUPPORTED_VERSION: PolicySchemaVersion =
   SUPPORTED_POLICY_SCHEMA_VERSIONS[SUPPORTED_POLICY_SCHEMA_VERSIONS.length - 1];
 
 function readEmbeddedTemplate(): string {
-  return readEmbeddedAsset(import.meta.url, [
-    '../policy/examples/policy.example.yaml',
-    './policy/examples/policy.example.yaml',
-  ]);
+  return readPolicyExampleYaml();
 }
 
 export class PolicyFileExistsError extends Error {

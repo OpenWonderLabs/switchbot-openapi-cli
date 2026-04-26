@@ -72,7 +72,7 @@ const LATEST_SUPPORTED_VERSION: PolicySchemaVersion =
 import { dirname as pathDirname, join as pathJoin } from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
-import { readEmbeddedAsset } from '../utils/embedded-asset.js';
+import { readPolicyExampleYaml } from '../embedded-assets.js';
 
 /**
  * Factory — build an McpServer with the six SwitchBot tools registered.
@@ -1221,10 +1221,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
           context: { policyPath },
         });
       }
-      const template = readEmbeddedAsset(import.meta.url, [
-        '../policy/examples/policy.example.yaml',
-        './policy/examples/policy.example.yaml',
-      ]);
+      const template = readPolicyExampleYaml();
       fs.mkdirSync(pathDirname(policyPath), { recursive: true });
       fs.writeFileSync(policyPath, template, { encoding: 'utf-8' });
       const structured = {

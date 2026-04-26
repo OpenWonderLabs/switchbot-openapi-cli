@@ -1,4 +1,4 @@
-import { readEmbeddedAsset } from '../utils/embedded-asset.js';
+import { readPolicySchemaJson } from '../embedded-assets.js';
 
 export type PolicySchemaVersion = '0.2';
 
@@ -11,10 +11,7 @@ export function loadPolicySchema(version: PolicySchemaVersion = CURRENT_POLICY_S
   const cached = schemaCache.get(version);
   if (cached) return cached;
 
-  const raw = readEmbeddedAsset(import.meta.url, [
-    `./schema/v${version}.json`,
-    `./policy/schema/v${version}.json`,
-  ]);
+  const raw = readPolicySchemaJson(version);
   const parsed = JSON.parse(raw) as object;
   schemaCache.set(version, parsed);
   return parsed;
