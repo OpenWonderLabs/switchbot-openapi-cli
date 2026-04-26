@@ -274,6 +274,52 @@ function collectAliasMap(data: unknown): Record<string, string> {
   );
 }
 
+function isDeviceStateConditionLike(
+  value: unknown,
+): value is { device: string; field: string; op: string } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const candidate = value as { device?: unknown; field?: unknown; op?: unknown };
+  return (
+    typeof candidate.device === 'string'
+    && typeof candidate.field === 'string'
+    && typeof candidate.op === 'string'
+  );
+}
+
+function collectConditionDeviceRefs(
+  condition: unknown,
+  path: string,
+): Array<{ path: string; ref: string }> {
+  if (!condition || typeof condition !== 'object' || Array.isArray(condition)) return [];
+  const out: Array<{ path: string; ref: string }> = [];
+
+  if (isDeviceStateConditionLike(condition)) {
+    out.push({ path: `${path}/device`, ref: condition.device });
+  }
+
+  const candidate = condition as {
+    all?: unknown[];
+    any?: unknown[];
+    not?: unknown;
+  };
+
+  if (Array.isArray(candidate.all)) {
+    for (let i = 0; i < candidate.all.length; i++) {
+      out.push(...collectConditionDeviceRefs(candidate.all[i], `${path}/all/${i}`));
+    }
+  }
+  if (Array.isArray(candidate.any)) {
+    for (let i = 0; i < candidate.any.length; i++) {
+      out.push(...collectConditionDeviceRefs(candidate.any[i], `${path}/any/${i}`));
+    }
+  }
+  if (candidate.not !== undefined) {
+    out.push(...collectConditionDeviceRefs(candidate.not, `${path}/not`));
+  }
+
+  return out;
+}
+
 /**
  * Walk `automation.rules[].then[]` and flag any command string whose verb
  * appears in DESTRUCTIVE_COMMANDS. Uses the YAML doc (not the data tree) to
@@ -338,6 +384,8 @@ function collectOfflineSemanticErrors(
         automation?: {
           rules?: Array<{
             name?: string;
+            when?: { source?: string; device?: string };
+            conditions?: unknown[];
             then?: Array<{ command?: string; device?: string }>;
           }>;
         };
@@ -376,12 +424,48 @@ function collectOfflineSemanticErrors(
 
   for (let ri = 0; ri < rules.length; ri++) {
     const rule = rules[ri];
+    const ruleName = typeof rule?.name === 'string' ? rule.name : `#${ri}`;
+    if (typeof rule?.when?.device === 'string') {
+      const whenDevicePath = `/automation/rules/${ri}/when/device`;
+      const resolved = resolvePolicyDeviceRef(rule.when.device, aliases);
+      if (!resolved.ok) {
+        const { line, col } = locateInstancePath(loaded.doc, loaded.lineCounter, whenDevicePath);
+        out.push({
+          path: whenDevicePath,
+          line,
+          col,
+          keyword: resolved.reason ?? 'unknown-device-ref',
+          message: `rule "${ruleName}" trigger references unknown device "${rule.when.device}"`,
+          hint: 'set `when.device` to a declared alias or a plausible deviceId',
+          schemaPath: '#/properties/automation/properties/rules/items/properties/when/properties/device',
+        });
+      }
+    }
+
+    const conditions = Array.isArray(rule?.conditions) ? rule.conditions : [];
+    for (let ci = 0; ci < conditions.length; ci++) {
+      for (const ref of collectConditionDeviceRefs(conditions[ci], `/automation/rules/${ri}/conditions/${ci}`)) {
+        const resolved = resolvePolicyDeviceRef(ref.ref, aliases);
+        if (!resolved.ok) {
+          const { line, col } = locateInstancePath(loaded.doc, loaded.lineCounter, ref.path);
+          out.push({
+            path: ref.path,
+            line,
+            col,
+            keyword: resolved.reason ?? 'unknown-device-ref',
+            message: `rule "${ruleName}" condition references unknown device "${ref.ref}"`,
+            hint: 'set condition `device` to a declared alias or a plausible deviceId',
+            schemaPath: '#/properties/automation/properties/rules/items/properties/conditions',
+          });
+        }
+      }
+    }
+
     const actions = Array.isArray(rule?.then) ? rule.then : [];
     for (let ai = 0; ai < actions.length; ai++) {
       const action = actions[ai];
       const cmd = action?.command;
       if (typeof cmd !== 'string') continue;
-      const ruleName = typeof rule?.name === 'string' ? rule.name : `#${ri}`;
       const commandPath = `/automation/rules/${ri}/then/${ai}/command`;
       const devicePath = `/automation/rules/${ri}/then/${ai}/device`;
 
@@ -501,6 +585,8 @@ export function validateLoadedPolicyAgainstInventory(
         automation?: {
           rules?: Array<{
             name?: string;
+            when?: { source?: string; device?: string };
+            conditions?: unknown[];
             then?: Array<{ command?: string; device?: string }>;
           }>;
         };
@@ -511,6 +597,44 @@ export function validateLoadedPolicyAgainstInventory(
   if (Array.isArray(rules)) {
     for (let ri = 0; ri < rules.length; ri++) {
       const rule = rules[ri];
+      const ruleName = typeof rule?.name === 'string' ? rule.name : `#${ri}`;
+
+      if (typeof rule?.when?.device === 'string') {
+        const whenDevicePath = `/automation/rules/${ri}/when/device`;
+        const effectiveDeviceId = resolveInventoryDeviceId(rule.when.device, aliases);
+        if (effectiveDeviceId && !inventoryById.has(effectiveDeviceId)) {
+          const { line, col } = locateInstancePath(loaded.doc, loaded.lineCounter, whenDevicePath);
+          errors.push({
+            path: whenDevicePath,
+            line,
+            col,
+            keyword: 'rule-live-device-not-found',
+            message: `rule "${ruleName}" trigger resolves to deviceId "${effectiveDeviceId}" which is not present in the current inventory`,
+            hint: 'confirm `when.device` against `switchbot devices list` before relying on this policy',
+            schemaPath: '#/properties/automation/properties/rules/items/properties/when/properties/device',
+          });
+        }
+      }
+
+      const conditions = Array.isArray(rule?.conditions) ? rule.conditions : [];
+      for (let ci = 0; ci < conditions.length; ci++) {
+        for (const ref of collectConditionDeviceRefs(conditions[ci], `/automation/rules/${ri}/conditions/${ci}`)) {
+          const effectiveDeviceId = resolveInventoryDeviceId(ref.ref, aliases);
+          if (effectiveDeviceId && !inventoryById.has(effectiveDeviceId)) {
+            const { line, col } = locateInstancePath(loaded.doc, loaded.lineCounter, ref.path);
+            errors.push({
+              path: ref.path,
+              line,
+              col,
+              keyword: 'rule-live-device-not-found',
+              message: `rule "${ruleName}" condition resolves to deviceId "${effectiveDeviceId}" which is not present in the current inventory`,
+              hint: 'confirm the condition device against `switchbot devices list` before relying on this policy',
+              schemaPath: '#/properties/automation/properties/rules/items/properties/conditions',
+            });
+          }
+        }
+      }
+
       const actions = Array.isArray(rule?.then) ? rule.then : [];
       for (let ai = 0; ai < actions.length; ai++) {
         const action = actions[ai];
@@ -519,7 +643,6 @@ export function validateLoadedPolicyAgainstInventory(
         const parsed = parseRuleCommand(cmd);
         if (!parsed) continue;
 
-        const ruleName = typeof rule?.name === 'string' ? rule.name : `#${ri}`;
         const commandPath = `/automation/rules/${ri}/then/${ai}/command`;
         const devicePath = `/automation/rules/${ri}/then/${ai}/device`;
         const effectiveRef = typeof action?.device === 'string' ? action.device : parsed.deviceIdSlot ?? undefined;

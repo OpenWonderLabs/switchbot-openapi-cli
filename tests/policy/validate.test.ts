@@ -538,6 +538,60 @@ describe('policy validator (v0.2)', () => {
     expect(result.valid, JSON.stringify(result.errors)).toBe(true);
   });
 
+  it('rejects unknown mqtt trigger device refs during offline validation', () => {
+    const loaded = writeAndLoad(
+      tmpDir,
+      [
+        'version: "0.2"',
+        'automation:',
+        '  rules:',
+        '    - name: "bad trigger ref"',
+        '      when:',
+        '        source: mqtt',
+        '        event: motion.detected',
+        '        device: kitchen sesnor',
+        '      then:',
+        '        - command: "devices command hall-light turnOn"',
+        '',
+      ].join('\n'),
+    );
+    const result = validateLoadedPolicy(loaded);
+    expect(result.valid).toBe(false);
+    const err = result.errors.find((e) => e.path === '/automation/rules/0/when/device');
+    expect(err).toBeDefined();
+    expect(err!.message).toContain('trigger references unknown device');
+  });
+
+  it('rejects unknown device_state refs during offline validation', () => {
+    const loaded = writeAndLoad(
+      tmpDir,
+      [
+        'version: "0.2"',
+        'aliases:',
+        '  hall-light: 01-202407090924-26354212',
+        'automation:',
+        '  rules:',
+        '    - name: "bad condition ref"',
+        '      when:',
+        '        source: mqtt',
+        '        event: motion.detected',
+        '      conditions:',
+        '        - device: old sensor',
+        '          field: temperature',
+        '          op: ">="',
+        '          value: 20',
+        '      then:',
+        '        - command: "devices command hall-light turnOn"',
+        '',
+      ].join('\n'),
+    );
+    const result = validateLoadedPolicy(loaded);
+    expect(result.valid).toBe(false);
+    const err = result.errors.find((e) => e.path === '/automation/rules/0/conditions/0/device');
+    expect(err).toBeDefined();
+    expect(err!.message).toContain('condition references unknown device');
+  });
+
   it('live inventory validation rejects aliases that do not exist on the account', () => {
     const loaded = writeAndLoad(
       tmpDir,
@@ -594,6 +648,86 @@ describe('policy validator (v0.2)', () => {
     const err = result.errors.find((e) => e.keyword === 'rule-live-unsupported-command');
     expect(err).toBeDefined();
     expect(err!.path).toBe('/automation/rules/0/then/0/command');
+  });
+
+  it('live inventory validation rejects stale mqtt trigger device refs', () => {
+    const loaded = writeAndLoad(
+      tmpDir,
+      [
+        'version: "0.2"',
+        'aliases:',
+        '  hall-sensor: 01-202407090924-26354212',
+        '  hall-light: 01-202407090924-26354213',
+        'automation:',
+        '  rules:',
+        '    - name: "stale trigger ref"',
+        '      when:',
+        '        source: mqtt',
+        '        event: motion.detected',
+        '        device: hall-sensor',
+        '      then:',
+        '        - command: "devices command hall-light turnOn"',
+        '',
+      ].join('\n'),
+    );
+    const result = validateLoadedPolicyAgainstInventory(loaded, {
+      deviceList: [
+        {
+          deviceId: '01-202407090924-26354213',
+          deviceName: 'Hall Light',
+          deviceType: 'Bot',
+          enableCloudService: true,
+          hubDeviceId: '',
+        },
+      ],
+      infraredRemoteList: [],
+    });
+    expect(result.valid).toBe(false);
+    const err = result.errors.find((e) => e.path === '/automation/rules/0/when/device');
+    expect(err).toBeDefined();
+    expect(err!.keyword).toBe('rule-live-device-not-found');
+  });
+
+  it('live inventory validation rejects stale condition device refs', () => {
+    const loaded = writeAndLoad(
+      tmpDir,
+      [
+        'version: "0.2"',
+        'aliases:',
+        '  climate-sensor: 01-202407090924-26354212',
+        '  hall-light: 01-202407090924-26354213',
+        'automation:',
+        '  rules:',
+        '    - name: "stale condition ref"',
+        '      when:',
+        '        source: mqtt',
+        '        event: motion.detected',
+        '      conditions:',
+        '        - device: climate-sensor',
+        '          field: temperature',
+        '          op: ">="',
+        '          value: 20',
+        '      then:',
+        '        - command: "devices command hall-light turnOn"',
+        '',
+      ].join('\n'),
+    );
+    const result = validateLoadedPolicyAgainstInventory(loaded, {
+      deviceList: [
+        {
+          deviceId: '01-202407090924-26354213',
+          deviceName: 'Hall Light',
+          deviceType: 'Bot',
+          enableCloudService: true,
+          hubDeviceId: '',
+        },
+      ],
+      infraredRemoteList: [],
+    });
+    expect(result.valid).toBe(false);
+    const err = result.errors.find((e) => e.path === '/automation/rules/0/conditions/0/device');
+    expect(err).toBeDefined();
+    expect(err!.keyword).toBe('rule-live-device-not-found');
   });
 
   // Contract guard for the C-1 concern from the 3.3.1 review.
