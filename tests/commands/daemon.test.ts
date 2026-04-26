@@ -165,3 +165,119 @@ describe('daemon command', () => {
     );
   });
 });
+
+describe('daemon stop', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fsMock.unlinkSync.mockClear();
+    pidFileMock.readPidFile.mockReset().mockReturnValue(null);
+    pidFileMock.isPidAlive.mockReset().mockReturnValue(false);
+    daemonStateMock.readDaemonState.mockReset().mockReturnValue(null);
+    daemonStateMock.writeDaemonState.mockClear();
+  });
+
+  it('prints "No running daemon found" and persists stopped state when no daemon is running', async () => {
+    const res = await runCli(registerDaemonCommand, ['daemon', 'stop']);
+    expect(res.exitCode).toBeNull();
+    expect(res.stdout.join(' ')).toMatch(/no running daemon/i);
+    expect(daemonStateMock.writeDaemonState).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'stopped', pid: null }),
+    );
+  });
+
+  it('enters the running branch, unlinks pid files, and persists stopped state when daemon is alive', async () => {
+    pidFileMock.readPidFile.mockImplementation((file: string) =>
+      file === daemonStateMock.DAEMON_PID_FILE ? 12345 : null,
+    );
+    pidFileMock.isPidAlive.mockReturnValue(true);
+
+    // process.kill is called from killIfAlive; stub it so the test suite is
+    // not allowed to signal the test runner itself. The assertions below do
+    // not depend on the spy being hit — they check observable side effects
+    // (pid file unlink + persisted state + "stopped" message).
+    const origKill = process.kill;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (process as any).kill = vi.fn(() => true);
+
+    const res = await runCli(registerDaemonCommand, ['daemon', 'stop']);
+
+    (process as any).kill = origKill;
+
+    expect(res.exitCode).toBeNull();
+    expect(fsMock.unlinkSync).toHaveBeenCalled();
+    expect(daemonStateMock.writeDaemonState).toHaveBeenLastCalledWith(
+      expect.objectContaining({ status: 'stopped', pid: null }),
+    );
+    expect(res.stdout.join(' ')).toMatch(/daemon stopped \(pid 12345\)/i);
+  });
+});
+
+describe('daemon status', () => {
+  beforeEach(() => {
+    pidFileMock.readPidFile.mockReset().mockReturnValue(null);
+    pidFileMock.isPidAlive.mockReset().mockReturnValue(false);
+    daemonStateMock.readDaemonState.mockReset().mockReturnValue(null);
+  });
+
+  it('--json reports status:stopped when no daemon is running', async () => {
+    const res = await runCli(registerDaemonCommand, ['--json', 'daemon', 'status']);
+    expect(res.exitCode).toBeNull();
+    const body = JSON.parse(res.stdout.join('')) as { data: { status: string; pid: unknown } };
+    expect(body.data.status).toBe('stopped');
+    expect(body.data.pid).toBeNull();
+  });
+
+  it('--json reports status:running with correct pid when daemon is alive', async () => {
+    pidFileMock.readPidFile.mockImplementation((file: string) =>
+      file === daemonStateMock.DAEMON_PID_FILE ? 9999 : null,
+    );
+    pidFileMock.isPidAlive.mockReturnValue(true);
+
+    const res = await runCli(registerDaemonCommand, ['--json', 'daemon', 'status']);
+    expect(res.exitCode).toBeNull();
+    const body = JSON.parse(res.stdout.join('')) as { data: { status: string; pid: number } };
+    expect(body.data.status).toBe('running');
+    expect(body.data.pid).toBe(9999);
+  });
+
+  it('human output prints "not running" when stopped', async () => {
+    const res = await runCli(registerDaemonCommand, ['daemon', 'status']);
+    expect(res.exitCode).toBeNull();
+    expect(res.stdout.join(' ')).toMatch(/not running/i);
+  });
+});
+
+describe('daemon reload', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    pidFileMock.readPidFile.mockReset().mockReturnValue(null);
+    pidFileMock.isPidAlive.mockReset().mockReturnValue(false);
+    daemonStateMock.readDaemonState.mockReset().mockReturnValue(null);
+    daemonStateMock.writeDaemonState.mockClear();
+    pidFileMock.writeReloadSentinel.mockClear();
+    pidFileMock.sighupSupported.mockReturnValue(false);
+  });
+
+  it('exits 2 with usage error when no daemon is running', async () => {
+    const res = await runCli(registerDaemonCommand, ['daemon', 'reload']);
+    expect(res.exitCode).toBe(2);
+    expect(res.stderr.join(' ')).toMatch(/no running daemon/i);
+  });
+
+  it('succeeds via sentinel when daemon and rules engine are running', async () => {
+    pidFileMock.readPidFile.mockImplementation((file: string) => {
+      if (file === daemonStateMock.DAEMON_PID_FILE) return 8888;
+      if (file === '/mock/.switchbot/rules.pid') return 7777;
+      return null;
+    });
+    pidFileMock.isPidAlive.mockReturnValue(true);
+
+    const res = await runCli(registerDaemonCommand, ['daemon', 'reload']);
+    expect(res.exitCode).toBeNull();
+    expect(pidFileMock.writeReloadSentinel).toHaveBeenCalledWith('/mock/.switchbot/rules.reload');
+    expect(daemonStateMock.writeDaemonState).toHaveBeenCalledWith(
+      expect.objectContaining({ lastReloadStatus: 'ok' }),
+    );
+    expect(res.stdout.join(' ')).toMatch(/reload requested/i);
+  });
+});
