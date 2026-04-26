@@ -284,4 +284,33 @@ describe('capabilities B3/B4', () => {
     const keys = resources.keys as Array<{ keyType: string }>;
     expect(keys.map((k) => k.keyType).sort()).toEqual(['disposable', 'permanent', 'timeLimit', 'urgent']);
   });
+
+  it('--surface cli restricts surfaces block to cli only', async () => {
+    const out = await runCapabilitiesWith(['--surface', 'cli']);
+    const surfaces = out.surfaces as Record<string, unknown>;
+    expect(Object.keys(surfaces)).toEqual(['cli']);
+  });
+
+  it('--surface with invalid value throws CommanderError', async () => {
+    const program = makeProgram();
+    program.exitOverride();
+    registerCapabilitiesCommand(program);
+    await expect(
+      program.parseAsync(['node', 'test', 'capabilities', '--surface', 'bogus'])
+    ).rejects.toThrow(/must be one of/i);
+  });
+
+  it('commandMeta entries all carry required safety fields', async () => {
+    const out = await runCapabilities();
+    const meta = out.commandMeta as Record<string, Record<string, unknown>>;
+    const entries = Object.values(meta);
+    expect(entries.length).toBeGreaterThan(50);
+    for (const entry of entries) {
+      expect(['read', 'action', 'destructive']).toContain(entry.agentSafetyTier);
+      expect(typeof entry.mutating).toBe('boolean');
+      expect(typeof entry.consumesQuota).toBe('boolean');
+      expect(['low', 'medium', 'high']).toContain(entry.riskLevel);
+      expect(['direct', 'plan', 'review-before-execute']).toContain(entry.recommendedMode);
+    }
+  });
 });
