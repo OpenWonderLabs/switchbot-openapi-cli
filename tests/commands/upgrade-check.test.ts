@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
+import fs from 'node:fs';
 
 // ── https mock (for action-level tests) ─────────────────────────────────────
 const httpsMock = vi.hoisted(() => {
@@ -111,5 +112,68 @@ describe('upgrade-check action — prerelease guard', () => {
     const out = res.stdout.join('\n');
     expect(out).toMatch(/prerelease/i);
     expect(out).not.toMatch(/Update available/i);
+  });
+});
+
+// ── action-level tests (happy path / up-to-date / network error) ─────────────
+describe('upgrade-check action — available update', () => {
+  afterEach(() => {
+    httpsMock.get.mockReset();
+  });
+
+  it('--json: updateAvailable:true and installCommand present when newer patch is available', async () => {
+    // Force a clearly-newer version that is definitely greater than current
+    makeHttpsGet('99.99.99');
+    const { registerUpgradeCheckCommand } = await import('../../src/commands/upgrade-check.js');
+    const { runCli } = await import('../helpers/cli.js');
+
+    const res = await runCli(registerUpgradeCheckCommand, ['--json', 'upgrade-check']);
+    const line = res.stdout.find((l) => l.trim().startsWith('{'));
+    expect(line).toBeDefined();
+    const out = JSON.parse(line!) as Record<string, unknown>;
+    const data = (out.data ?? out) as Record<string, unknown>;
+    expect(data.updateAvailable).toBe(true);
+    expect(data.upToDate).toBe(false);
+    expect(typeof data.installCommand).toBe('string');
+    expect(String(data.installCommand)).toContain('npm install');
+    expect(String(data.installCommand)).toContain('99.99.99');
+  });
+
+  it('--json: upToDate:true and updateAvailable:false when version matches current', async () => {
+    const currentVersion = JSON.parse(fs.readFileSync('package.json', 'utf-8')).version as string;
+    makeHttpsGet(currentVersion);
+    const { registerUpgradeCheckCommand } = await import('../../src/commands/upgrade-check.js');
+    const { runCli } = await import('../helpers/cli.js');
+
+    const res = await runCli(registerUpgradeCheckCommand, ['--json', 'upgrade-check']);
+    const line = res.stdout.find((l) => l.trim().startsWith('{'));
+    const out = JSON.parse(line!) as Record<string, unknown>;
+    const data = (out.data ?? out) as Record<string, unknown>;
+    expect(data.upToDate).toBe(true);
+    expect(data.updateAvailable).toBe(false);
+  });
+
+  it('exits non-zero and reports an error when the registry request times out', async () => {
+    httpsMock.get.mockImplementation((_url: unknown, _opts: unknown, _cb: unknown) => {
+      const req = Object.assign(new EventEmitter(), { destroy: vi.fn() });
+      process.nextTick(() => req.emit('error', new Error('registry request timed out after 8000ms')));
+      return req;
+    });
+    const { registerUpgradeCheckCommand } = await import('../../src/commands/upgrade-check.js');
+    const { runCli } = await import('../helpers/cli.js');
+
+    const res = await runCli(registerUpgradeCheckCommand, ['upgrade-check']);
+    expect(res.exitCode).not.toBe(0);
+    expect(res.exitCode).not.toBeNull();
+  });
+
+  it('human: prints "Update available" message with the new version', async () => {
+    makeHttpsGet('99.99.99');
+    const { registerUpgradeCheckCommand } = await import('../../src/commands/upgrade-check.js');
+    const { runCli } = await import('../helpers/cli.js');
+
+    const res = await runCli(registerUpgradeCheckCommand, ['upgrade-check']);
+    const out = res.stdout.join('\n');
+    expect(out).toMatch(/Update available|newer version/i);
   });
 });
