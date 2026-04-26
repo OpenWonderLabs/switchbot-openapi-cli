@@ -40,8 +40,8 @@ git push   ──▶ pre-push hook  ──── verify:pre-push
                                     smoke:pack-install)
 
 open PR    ──▶ ci.yml ──────────── docs-lint
-                                   test matrix (Node 18/20/22)
-                                   bundle-smoke (advisory)
+                                   test matrix (Node 18/20/22, tsc)
+                                   bundle-smoke (Node 18/20/22, esbuild)
                                    offline-smoke (size budgets)
                                    pack-install-smoke  (esbuild, matches publish)
                                    policy-schema-sync
@@ -115,18 +115,13 @@ Changes to the release pipeline must preserve these invariants:
    exec bit are enforced. Moving that logic elsewhere — or adding a third build
    path that skips it — will break npm bin execution.
 
-## Known gaps
-
-- **`bundle-smoke` is advisory (`continue-on-error: true`).** Since the bundle
-  is now the publish source, this job should become blocking once the tracked
-  Node 22 CJS interop issue is resolved. Until then, the pre-publish smoke and
-  the post-publish `npm-published-smoke.yml` workflow provide coverage.
-
-- **The `test` matrix runs `npm run build` (tsc), not `build:prod`.** This
-  verifies that the source compiles under Node 18/20/22, but does not exercise
-  the esbuild bundle on all three. The `pack-install-smoke` job covers the
-  bundle on Node 20 only. If end-user Node 22 runtime behavior with the bundle
-  matters, add a bundle-aware matrix job in a follow-up.
+5. **`bundle-smoke` must stay blocking and matrixed.** Because the bundle is
+   the publish source, it has to start cleanly on every Node version the
+   package supports (`engines.node >= 18`). The job runs `build:prod + node
+   --check + --version + bundle size test` on Node 18/20/22. Adding a new
+   supported Node version means adding it to the matrix; making the job
+   advisory again means end-users on some supported Node version can install a
+   broken CLI without CI catching it.
 
 ## Related tests
 

@@ -48,6 +48,9 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - New `npm-published-smoke.yml` workflow verifies published tarballs on the
   npm registry, auto-promotes `next → latest` on success, and auto-deprecates
   on package-install/offline smoke failures only (never on live API flakes).
+- `bundle-smoke` CI job is now a blocking matrix across Node 18/20/22 (was
+  single-node Node 20, advisory), so the esbuild bundle must start cleanly
+  on every supported Node version before a PR can merge.
 - See [`docs/release-pipeline.md`](./docs/release-pipeline.md) for the full
   gate sequence and invariants.
 
