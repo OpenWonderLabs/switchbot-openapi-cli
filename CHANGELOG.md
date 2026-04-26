@@ -7,7 +7,34 @@ All notable changes to `@switchbot/openapi-cli` are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.2.2] - 2026-04-26
+
+### Changed — release pipeline
+
+- Release pipeline unified: `npm run build` is now the single source for the
+  published tarball. It runs a 5-stage `scripts/build.mjs` orchestrator
+  (clean → typecheck → bundle → copy-assets → ensure-binary). `prepublishOnly`,
+  `verify:pre-commit`, `verify:pre-push`, `publish.yml`, and the `bundle-smoke`
+  / `pack-install-smoke` CI jobs all call `npm run build` by name — no job
+  re-implements the build steps and no other script writes to `dist/`.
+- Removed `npm run build:prod` and `npm run clean` — both are folded into
+  `scripts/build.mjs`.
+- Added `npm run typecheck` (`tsc --noEmit`) as the local "does it still
+  compile?" escape hatch.
+- Split `scripts/copy-assets.mjs` responsibility into two scripts with one
+  failure mode each: `copy-assets.mjs` only copies policy assets, and the
+  new `scripts/ensure-binary.mjs` asserts the shebang is present on
+  `dist/index.js` and `chmod 0755`s it. `ensure-binary.mjs` is a regression
+  guard — it fails loudly if the esbuild banner drops the shebang, rather
+  than silently repairing it the way `copy-assets.mjs` used to.
+
 ## [3.2.1] - 2026-04-25
+
+> **Deprecated on npm.** The initial `3.2.1` publish shipped a broken bin
+> (missing shebang / exec bit after `npm pack`). It has been rolled back
+> from `main` and relanded in `3.2.2`; install `@switchbot/openapi-cli@3.2.2`
+> or later. The feature list below is retained as the historical record of
+> what `3.2.1` intended to deliver and what `3.2.2` now ships.
 
 ### Added — plan resource model, MCP risk profiles, rules safety primitives
 
@@ -31,6 +58,28 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - `rules lint` now validates `hysteresis` / `requires_stable_for` duration syntax and warns
   when `hysteresis` and `requires_stable_for` are both set.
+
+### Changed — release pipeline
+
+- **Single publish source**: `publish.yml` now runs `npm run build:prod`
+  (esbuild) to match what `prepublishOnly` produces at `npm publish` time. The
+  tarball validated by `smoke:pack-install` is now byte-identical to the
+  tarball that actually ships to the registry — no artifact swap during
+  publish.
+- Pre-publish `smoke:pack-install` runs in `publish.yml` before `npm publish`,
+  and the same smoke runs locally via `pre-push` hook (`verify:pre-push`) and
+  on every PR in CI (`pack-install-smoke`).
+- `scripts/copy-assets.mjs` now injects the `#!/usr/bin/env node` shebang into
+  `dist/index.js` and chmods it to `0755` after every build, so the npm bin
+  entry is always executable.
+- New `npm-published-smoke.yml` workflow verifies published tarballs on the
+  npm registry, auto-promotes `next → latest` on success, and auto-deprecates
+  on package-install/offline smoke failures only (never on live API flakes).
+- `bundle-smoke` CI job is now a blocking matrix across Node 18/20/22 (was
+  single-node Node 20, advisory), so the esbuild bundle must start cleanly
+  on every supported Node version before a PR can merge.
+- See [`docs/release-pipeline.md`](./docs/release-pipeline.md) for the full
+  gate sequence and invariants.
 
 ## [3.2.0] - 2026-04-25
 

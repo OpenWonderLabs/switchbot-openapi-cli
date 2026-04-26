@@ -298,4 +298,94 @@ describe('scenes command', () => {
       expect((out.error as Record<string, unknown>).message).toMatch(/scene not found/i);
     });
   });
+
+  describe('validate', () => {
+    function mockScenes() {
+      apiMock.__instance.get.mockResolvedValue({
+        data: {
+          body: [
+            { sceneId: 'V1', sceneName: 'Sunrise' },
+            { sceneId: 'V2', sceneName: 'Sunset' },
+          ],
+        },
+      });
+    }
+
+    it('--json exits 0 with ok:true when all supplied IDs exist', async () => {
+      mockScenes();
+      const res = await runCli(registerScenesCommand, ['--json', 'scenes', 'validate', 'V1', 'V2']);
+      expect(res.exitCode).toBeNull();
+      const body = JSON.parse(res.stdout.join('')) as { data: { ok: boolean; results: unknown[] } };
+      expect(body.data.ok).toBe(true);
+      expect(body.data.results).toHaveLength(2);
+    });
+
+    it('--json exits 1 with ok:false when a supplied ID does not exist', async () => {
+      mockScenes();
+      const res = await runCli(registerScenesCommand, ['--json', 'scenes', 'validate', 'V1', 'MISSING']);
+      expect(res.exitCode).toBe(1);
+      const body = JSON.parse(res.stdout[0]) as { data: { ok: boolean; results: Array<{ sceneId: string; valid: boolean }> } };
+      expect(body.data.ok).toBe(false);
+      const missingEntry = body.data.results.find((r) => r.sceneId === 'MISSING');
+      expect(missingEntry?.valid).toBe(false);
+    });
+
+    it('human mode exits 0 and prints ✓ for valid scenes', async () => {
+      mockScenes();
+      const res = await runCli(registerScenesCommand, ['scenes', 'validate', 'V1']);
+      expect(res.exitCode).toBeNull();
+      expect(res.stdout.join(' ')).toContain('✓');
+    });
+
+    it('validates all scenes when no IDs are supplied', async () => {
+      mockScenes();
+      const res = await runCli(registerScenesCommand, ['--json', 'scenes', 'validate']);
+      expect(res.exitCode).toBeNull();
+      const body = JSON.parse(res.stdout.join('')) as { data: { ok: boolean; results: unknown[] } };
+      expect(body.data.results).toHaveLength(2);
+    });
+  });
+
+  describe('simulate', () => {
+    function mockScenes() {
+      apiMock.__instance.get.mockResolvedValue({
+        data: {
+          body: [
+            { sceneId: 'SIM1', sceneName: 'Good Night' },
+          ],
+        },
+      });
+    }
+
+    it('--json returns simulated:true with wouldSend details', async () => {
+      mockScenes();
+      const res = await runCli(registerScenesCommand, ['--json', 'scenes', 'simulate', 'SIM1']);
+      expect(res.exitCode).toBeNull();
+      const body = JSON.parse(res.stdout.join('')) as { data: Record<string, unknown> };
+      expect(body.data.simulated).toBe(true);
+      expect(body.data.sceneId).toBe('SIM1');
+      expect(body.data.sceneName).toBe('Good Night');
+      const wouldSend = body.data.wouldSend as Record<string, string>;
+      expect(wouldSend.method).toBe('POST');
+      expect(wouldSend.url).toContain('SIM1');
+    });
+
+    it('human mode prints sceneId, sceneName and wouldSend', async () => {
+      mockScenes();
+      const res = await runCli(registerScenesCommand, ['scenes', 'simulate', 'SIM1']);
+      expect(res.exitCode).toBeNull();
+      const out = res.stdout.join('\n');
+      expect(out).toContain('SIM1');
+      expect(out).toContain('Good Night');
+      expect(out).toContain('POST');
+    });
+
+    it('--json exits 2 with error envelope for unknown sceneId', async () => {
+      mockScenes();
+      const res = await runCli(registerScenesCommand, ['--json', 'scenes', 'simulate', 'UNKNOWN']);
+      expect(res.exitCode).toBe(2);
+      const out = JSON.parse(res.stdout.find((l) => l.trim().startsWith('{'))!) as Record<string, unknown>;
+      expect((out.error as Record<string, unknown>).message).toMatch(/scene not found/i);
+    });
+  });
 });

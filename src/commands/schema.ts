@@ -120,6 +120,7 @@ export function registerSchemaCommand(program: Command): void {
     .option('--compact', 'Drop descriptions/aliases/example params — emit ~60% smaller payload. Useful for agent prompts.')
     .option('--used', 'Restrict to device types present in the local devices cache (run "devices list" first)')
     .option('--project <csv>', 'Project per-type fields (e.g. --project type,commands,statusFields)', stringArg('--project'))
+    .option('--capabilities', 'Annotate each device type with CLI command safety metadata (agentSafetyTier, mutating, consumesQuota)')
     .addHelpText('after', `
 Output is always JSON (this command ignores --format). The output is a
 catalog export — not a formal JSON Schema standard document — suitable for
@@ -148,7 +149,7 @@ Examples:
   $ switchbot schema export --role security --category physical
   $ switchbot schema export --project type,commands,statusFields
 `)
-    .action((options: { type?: string; types?: string; role?: string; category?: string; compact?: boolean; used?: boolean; project?: string }) => {
+    .action(async (options: { type?: string; types?: string; role?: string; category?: string; compact?: boolean; used?: boolean; project?: string; capabilities?: boolean }) => {
       const catalog = getEffectiveCatalog();
       let filtered = catalog;
 
@@ -199,9 +200,18 @@ Examples:
           )
         : mapped;
 
+      let finalTypes = projected as Array<Record<string, unknown>>;
+      if (options.capabilities) {
+        const { COMMAND_META } = await import('./capabilities.js');
+        const devicesMeta = Object.fromEntries(
+          Object.entries(COMMAND_META).filter(([k]) => k.startsWith('devices ')),
+        );
+        finalTypes = finalTypes.map((e) => ({ ...e, commandsMeta: devicesMeta }));
+      }
+
       const payload: Record<string, unknown> = {
         version: '1.0',
-        types: projected,
+        types: finalTypes,
       };
       if (!options.compact) {
         payload.generatedAt = new Date().toISOString();

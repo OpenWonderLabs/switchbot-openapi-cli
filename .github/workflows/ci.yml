@@ -44,6 +44,44 @@ jobs:
           fi
       - run: npm test
 
+  bundle-smoke:
+    name: esbuild bundle smoke test (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [18.x, 20.x, 22.x]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Shebang count must be exactly 1
+        run: |
+          COUNT=$(grep -c "#!/usr/bin/env node" dist/index.js)
+          if [ "$COUNT" -ne 1 ]; then
+            echo "FAIL: Expected 1 shebang, found $COUNT"
+            exit 1
+          fi
+          echo "OK: shebang count = $COUNT"
+      - name: Node.js syntax check
+        run: node --check dist/index.js
+      - name: --version smoke test (exits 0, outputs correct semver)
+        run: |
+          PKG=$(node -p "require('./package.json').version")
+          CLI=$(node dist/index.js --version)
+          echo "package.json=$PKG  bundle=$CLI"
+          if [ "$PKG" != "$CLI" ]; then
+            echo "FAIL: version mismatch"
+            exit 1
+          fi
+      - name: Bundle size check
+        run: npm test -- tests/build/
+
   offline-smoke:
     name: Offline size budgets
     runs-on: ubuntu-latest
@@ -88,6 +126,21 @@ jobs:
             echo "FAIL: budget is 15000, got $BYTES"
             exit 1
           fi
+
+  pack-install-smoke:
+    name: Packed install smoke (esbuild — matches publish)
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: npm pack -> npm install tarball -> switchbot --version
+        run: npm run smoke:pack-install
 
   policy-schema-sync:
     name: Policy schema sync with skill repo

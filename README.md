@@ -93,7 +93,7 @@ Under the hood every surface shares the same catalog, cache, and HMAC client —
 - 🎨 **Dual output modes** — colorized tables by default; `--json` passthrough for `jq` and scripting
 - 🔐 **Secure credentials** — HMAC-SHA256 signed requests; config file written with `0600`; env-var override for CI
 - 🔍 **Dry-run mode** — preview every mutating request before it hits the API
-- 🧪 **Fully tested** — 1882 Vitest tests, mocked axios, zero network in CI
+- 🧪 **Fully tested** — 1959 Vitest tests, mocked axios, zero network in CI
 - ⚡ **Shell completion** — Bash / Zsh / Fish / PowerShell
 
 ## Requirements
@@ -894,7 +894,7 @@ Queries the npm registry for the latest published version and compares it agains
 
 ```json
 {
-  "current": "3.2.1",
+  "current": "3.2.2",
   "latest": "4.0.0",
   "upToDate": false,
   "updateAvailable": true,
@@ -1123,7 +1123,7 @@ npm install
 
 npm run dev -- <args>       # Run from TypeScript sources via tsx
 npm run build               # Compile to dist/
-npm test                    # Run the Vitest suite (1882 tests)
+npm test                    # Run the Vitest suite (1959 tests)
 npm run test:watch          # Watch mode
 npm run test:coverage       # Coverage report (v8, HTML + text)
 ```
@@ -1205,7 +1205,7 @@ src/
     ├── format.ts         # renderRows / filterFields / output-format dispatch
     ├── audit.ts          # JSONL audit log writer
     └── quota.ts          # Local daily-quota counter
-tests/                    # Vitest suite (1882 tests, mocked axios, no network)
+tests/                    # Vitest suite (1959 tests, mocked axios, no network)
 ```
 
 ### Release flow
@@ -1218,6 +1218,8 @@ git push --follow-tags
 ```
 
 Then on GitHub → **Releases → Draft a new release → select tag → Publish**. The `publish.yml` workflow runs tests, verifies the tag matches `package.json`, and publishes `@switchbot/openapi-cli` to npm with [provenance](https://docs.npmjs.com/generating-provenance-statements).
+
+See [`docs/release-pipeline.md`](./docs/release-pipeline.md) for the full pre-publish and post-publish verification flow (local hooks → CI → `publish.yml` → `npm-published-smoke.yml`).
 
 ## License
 

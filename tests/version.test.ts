@@ -12,6 +12,11 @@ const pkg = JSON.parse(
 ) as { version: string };
 
 describe('CLI --version', () => {
+  it('keeps a node shebang on dist/index.js for npm bin execution', () => {
+    const cli = readFileSync(path.join(here, '..', 'dist', 'index.js'), 'utf-8');
+    expect(cli.startsWith('#!/usr/bin/env node\n')).toBe(true);
+  });
+
   it('matches package.json version', () => {
     // Regression guard for the v1.3.1 bug where src/index.ts hardcoded a
     // stale version string. execFileSync + process.execPath avoids shell

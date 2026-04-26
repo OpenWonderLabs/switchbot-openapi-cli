@@ -1,0 +1,162 @@
+name: npm published smoke
+
+on:
+  workflow_run:
+    workflows: ['Publish to npm']
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Published npm version to verify (defaults to package.json from checked-out commit)'
+        required: false
+
+jobs:
+  smoke:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'release')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          registry-url: https://registry.npmjs.org
+
+      - name: Verify credentials present
+        env:
+          TOKEN: ${{ secrets.SWITCHBOT_TOKEN }}
+          SECRET: ${{ secrets.SWITCHBOT_SECRET }}
+        run: |
+          if [ -z "$TOKEN" ] || [ -z "$SECRET" ]; then
+            echo "SWITCHBOT_TOKEN / SWITCHBOT_SECRET not set in repo secrets"
+            exit 1
+          fi
+
+      - name: Verify npm token present
+        env:
+          TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "NPM_TOKEN not set in repo secrets"
+            exit 1
+          fi
+
+      - name: Resolve target version
+        id: version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION=$(node -p "require('./package.json').version")
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "target_version=$VERSION"
+
+      - name: Resolve current latest dist-tag
+        id: latest
+        run: |
+          LATEST=$(npm view @switchbot/openapi-cli dist-tags.latest)
+          echo "version=$LATEST" >> "$GITHUB_OUTPUT"
+          echo "current_latest=$LATEST"
+
+      - name: Wait for npm package to become available
+        id: wait_package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          for i in $(seq 1 24); do
+            if [ "${{ github.event_name }}" = "workflow_run" ]; then
+              FOUND=$(npm view "@switchbot/openapi-cli@next" version 2>/dev/null || true)
+              if [ "$FOUND" = "$VERSION" ]; then
+                echo "npm package is available on next: $FOUND"
+                exit 0
+              fi
+              echo "waiting for @switchbot/openapi-cli@$VERSION to appear on npm dist-tag next ($i/24); current next=$FOUND"
+            else
+              FOUND=$(npm view "@switchbot/openapi-cli@$VERSION" version 2>/dev/null || true)
+              if [ "$FOUND" = "$VERSION" ]; then
+                echo "npm package version is available: $FOUND"
+                exit 0
+              fi
+              echo "waiting for @switchbot/openapi-cli@$VERSION to appear on npm ($i/24)"
+            fi
+            sleep 10
+          done
+          echo "Timed out waiting for @switchbot/openapi-cli@$VERSION on npm"
+          exit 1
+
+      - name: Install published package in a clean temp project
+        id: install_package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          TMPDIR=$(mktemp -d)
+          echo "TMPDIR=$TMPDIR" >> "$GITHUB_ENV"
+          cd "$TMPDIR"
+          npm init -y >/dev/null 2>&1
+          npm install "@switchbot/openapi-cli@$VERSION"
+
+      - name: Binary and offline smoke
+        id: offline_smoke
+        env:
+          TMPDIR: ${{ env.TMPDIR }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          cd "$TMPDIR"
+          ACTUAL=$(npx --no-install switchbot --version)
+          test "$ACTUAL" = "$VERSION"
+          npx --no-install switchbot --help >/dev/null
+          npx --no-install switchbot schema export --compact >/dev/null
+          npx --no-install switchbot capabilities --json | jq -e '.data.commandMeta != null' >/dev/null
+
+      - name: Live smoke with configured credentials
+        id: live_smoke
+        env:
+          TMPDIR: ${{ env.TMPDIR }}
+          SWITCHBOT_TOKEN: ${{ secrets.SWITCHBOT_TOKEN }}
+          SWITCHBOT_SECRET: ${{ secrets.SWITCHBOT_SECRET }}
+        run: |
+          cd "$TMPDIR"
+          npx --no-install switchbot doctor --json | jq -e '.data.summary != null' >/dev/null
+          npx --no-install switchbot devices list --json | jq -e '.data.deviceList != null or .data.infraredRemoteList != null' >/dev/null
+
+      - name: Promote verified version to latest
+        if: success()
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm dist-tag add "@switchbot/openapi-cli@$VERSION" latest
+          echo "Promoted @switchbot/openapi-cli@$VERSION to dist-tag latest"
+
+      - name: Deprecate failed version
+        if: >
+          failure() &&
+          steps.wait_package.outcome == 'success' &&
+          (
+            steps.install_package.outcome == 'failure' ||
+            steps.offline_smoke.outcome == 'failure'
+          )
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          PREVIOUS_LATEST: ${{ steps.latest.outputs.version }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm deprecate "@switchbot/openapi-cli@$VERSION" "Published to dist-tag next but failed package smoke tests. Install @switchbot/openapi-cli@${PREVIOUS_LATEST} or use dist-tag latest."
+          echo "Deprecated @switchbot/openapi-cli@$VERSION after package smoke failure"
+
+      - name: Cleanup temp project
+        if: always()
+        env:
+          TMPDIR: ${{ env.TMPDIR }}
+        run: |
+          if [ -n "$TMPDIR" ] && [ -d "$TMPDIR" ]; then
+            rm -rf "$TMPDIR"
+          fi

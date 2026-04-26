@@ -156,4 +156,32 @@ describe('schema export B3 slim flags', () => {
     expect(parsed.types[0].category).toBeUndefined();
     expect(parsed.types[0].description).toBeUndefined();
   });
+
+  // =====================================================================
+  // --capabilities flag (MVP 5)
+  // =====================================================================
+  describe('schema export --capabilities', () => {
+    it('adds commandsMeta to each device type entry', async () => {
+      const res = await runCli(registerSchemaCommand, ['schema', 'export', '--capabilities', '--type', 'Bot']);
+      expect(res.exitCode).toBeNull();
+      const parsed = JSON.parse(res.stdout.join('')).data;
+      expect(parsed.types.length).toBeGreaterThan(0);
+      const first = parsed.types[0] as Record<string, unknown>;
+      expect(first).toHaveProperty('commandsMeta');
+      const meta = first.commandsMeta as Record<string, unknown>;
+      expect(typeof meta).toBe('object');
+      // commandsMeta contains entries from COMMAND_META for 'devices *' commands
+      expect(Object.keys(meta).length).toBeGreaterThan(0);
+      const firstEntry = Object.values(meta)[0] as Record<string, unknown>;
+      expect(firstEntry).toHaveProperty('agentSafetyTier');
+      expect(firstEntry).toHaveProperty('mutating');
+    });
+
+    it('normal export without --capabilities does not include commandsMeta', async () => {
+      const res = await runCli(registerSchemaCommand, ['schema', 'export', '--type', 'Bot']);
+      const parsed = JSON.parse(res.stdout.join('')).data;
+      const first = parsed.types[0] as Record<string, unknown>;
+      expect(first).not.toHaveProperty('commandsMeta');
+    });
+  });
 });
