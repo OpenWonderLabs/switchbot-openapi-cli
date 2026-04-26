@@ -725,4 +725,130 @@ describe('switchbot rules (commander surface)', () => {
       expect(body.data.count).toBe(5);
     });
   });
+
+  describe('rules webhook-rotate-token', () => {
+    let tokenDir: string;
+    let prevEnv: string | undefined;
+
+    beforeEach(() => {
+      tokenDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sbwh-'));
+      vi.spyOn(os, 'homedir').mockReturnValue(tokenDir);
+      prevEnv = process.env.SWITCHBOT_WEBHOOK_TOKEN;
+      delete process.env.SWITCHBOT_WEBHOOK_TOKEN;
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+      if (prevEnv !== undefined) process.env.SWITCHBOT_WEBHOOK_TOKEN = prevEnv;
+      fs.rmSync(tokenDir, { recursive: true, force: true });
+    });
+
+    it('creates a token file and prints the token', async () => {
+      const { exitCode, stdout } = await runCli(['rules', 'webhook-rotate-token']);
+      expect(exitCode).toBe(0);
+      const tokenFile = path.join(tokenDir, '.switchbot', 'webhook-token');
+      expect(fs.existsSync(tokenFile)).toBe(true);
+      const persisted = fs.readFileSync(tokenFile, 'utf-8').trim();
+      expect(persisted.length).toBeGreaterThan(20);
+      expect(stdout.join(' ')).toContain(persisted);
+    });
+
+    it('--json reports status:rotated with filePath and tokenLength', async () => {
+      const { exitCode, stdout } = await runCli(['--json', 'rules', 'webhook-rotate-token']);
+      expect(exitCode).toBe(0);
+      const body = JSON.parse(stdout[0]) as { data: { status: string; filePath: string; tokenLength: number } };
+      expect(body.data.status).toBe('rotated');
+      expect(body.data.tokenLength).toBeGreaterThan(20);
+      expect(body.data.filePath).toContain('webhook-token');
+    });
+
+    it('produces a different token on each rotation', async () => {
+      await runCli(['rules', 'webhook-rotate-token']);
+      const file = path.join(tokenDir, '.switchbot', 'webhook-token');
+      const first = fs.readFileSync(file, 'utf-8').trim();
+      await runCli(['rules', 'webhook-rotate-token']);
+      const second = fs.readFileSync(file, 'utf-8').trim();
+      expect(first).not.toBe(second);
+    });
+  });
+
+  describe('rules webhook-show-token', () => {
+    let tokenDir: string;
+    let prevEnv: string | undefined;
+
+    beforeEach(() => {
+      tokenDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sbwh2-'));
+      vi.spyOn(os, 'homedir').mockReturnValue(tokenDir);
+      prevEnv = process.env.SWITCHBOT_WEBHOOK_TOKEN;
+      delete process.env.SWITCHBOT_WEBHOOK_TOKEN;
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+      if (prevEnv !== undefined) process.env.SWITCHBOT_WEBHOOK_TOKEN = prevEnv;
+      fs.rmSync(tokenDir, { recursive: true, force: true });
+    });
+
+    it('creates and prints a token on first call', async () => {
+      const { exitCode, stdout } = await runCli(['rules', 'webhook-show-token']);
+      expect(exitCode).toBe(0);
+      expect(stdout.join('').trim().length).toBeGreaterThan(20);
+    });
+
+    it('returns the same token on repeated calls', async () => {
+      await runCli(['rules', 'webhook-show-token']);
+      const file = path.join(tokenDir, '.switchbot', 'webhook-token');
+      const first = fs.readFileSync(file, 'utf-8').trim();
+      await runCli(['rules', 'webhook-show-token']);
+      const second = fs.readFileSync(file, 'utf-8').trim();
+      expect(first).toBe(second);
+    });
+
+    it('--json reports filePath and tokenLength without exposing the raw token', async () => {
+      const { exitCode, stdout } = await runCli(['--json', 'rules', 'webhook-show-token']);
+      expect(exitCode).toBe(0);
+      const body = JSON.parse(stdout[0]) as { data: { filePath: string; tokenLength: number } };
+      expect(body.data.tokenLength).toBeGreaterThan(20);
+      // The raw 64-hex-char token must NOT appear in the JSON payload
+      expect(JSON.stringify(body.data)).not.toMatch(/\b[0-9a-f]{64}\b/);
+    });
+  });
+
+  describe('rules suggest', () => {
+    it('--json generates a cron-trigger rule for "every morning" intent', async () => {
+      const { exitCode, stdout } = await runCli([
+        '--json', 'rules', 'suggest', '--intent', 'turn on lights every morning',
+      ]);
+      expect(exitCode).toBe(0);
+      const body = JSON.parse(stdout[0]) as { data: { rule: Record<string, unknown>; rule_yaml: string; warnings: string[] } };
+      expect(body.data.rule_yaml).toContain('name:');
+      expect(body.data.rule_yaml).toMatch(/cron/i);
+      expect(Array.isArray(body.data.warnings)).toBe(true);
+    });
+
+    it('--json generates an mqtt-trigger rule for "motion detected" intent', async () => {
+      const { exitCode, stdout } = await runCli([
+        '--json', 'rules', 'suggest', '--intent', 'when motion detected turn on hallway light',
+      ]);
+      expect(exitCode).toBe(0);
+      const body = JSON.parse(stdout[0]) as { data: { rule_yaml: string } };
+      expect(body.data.rule_yaml).toMatch(/mqtt/i);
+      expect(body.data.rule_yaml).toMatch(/motion\.detected/i);
+    });
+
+    it('--json includes the device ID when --device is specified', async () => {
+      const { exitCode, stdout } = await runCli([
+        '--json', 'rules', 'suggest',
+        '--intent', 'when button pressed turn on light',
+        '--device', 'AA:BB:CC:DD:EE:FF',
+      ]);
+      expect(exitCode).toBe(0);
+      const body = JSON.parse(stdout[0]) as { data: { rule_yaml: string } };
+      expect(body.data.rule_yaml).toContain('AA:BB:CC:DD:EE:FF');
+    });
+
+    it('throws when --intent is missing (commander required option)', async () => {
+      await expect(runCli(['rules', 'suggest'])).rejects.toThrow();
+    });
+  });
 });
