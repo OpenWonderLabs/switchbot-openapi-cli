@@ -199,6 +199,22 @@ describe('status-sync manager', () => {
     expect(paths.stdoutLog).toMatch(/override[\\/]status-sync[\\/]stdout\.log$/);
     expect(paths.stderrLog).toMatch(/override[\\/]status-sync[\\/]stderr\.log$/);
   });
+
+  it('missing OPENCLAW_TOKEN error names both the flag and the env var and suggests a verify step', () => {
+    delete process.env.OPENCLAW_TOKEN;
+    process.env.OPENCLAW_MODEL = 'env-model';
+    expect(() => startStatusSync({ stateDir: '/tmp/status-sync' })).toThrow(
+      /OpenClaw token missing[\s\S]*--openclaw-token[\s\S]*OPENCLAW_TOKEN[\s\S]*status-sync status/,
+    );
+  });
+
+  it('missing OPENCLAW_MODEL error names both the flag and the env var and suggests a verify step', () => {
+    process.env.OPENCLAW_TOKEN = 'env-token';
+    delete process.env.OPENCLAW_MODEL;
+    expect(() => startStatusSync({ stateDir: '/tmp/status-sync' })).toThrow(
+      /OpenClaw model missing[\s\S]*--openclaw-model[\s\S]*OPENCLAW_MODEL[\s\S]*status-sync status/,
+    );
+  });
 });
 
 function pathFromArgv(): string {
