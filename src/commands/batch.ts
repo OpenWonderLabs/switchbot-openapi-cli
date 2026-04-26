@@ -513,9 +513,22 @@ Examples:
         if (isJsonMode()) {
           printJson(result);
         } else {
-          console.log(
-            `\nSummary: ${result.summary.ok} ok, ${result.summary.failed} failed, ${result.summary.skipped} skipped (${result.summary.durationMs}ms)`
-          );
+          if (dryRunned.length > 0) {
+            console.log(`\nPlanned (dry-run): ${dryRunned.length} device(s)`);
+            for (const d of dryRunned) console.log(`  - ${d.deviceId}`);
+          }
+          if (preSkipped.length > 0) {
+            console.log(`\nSkipped (offline): ${preSkipped.length} device(s)`);
+            for (const d of preSkipped) console.log(`  - ${d.deviceId}`);
+          }
+          const parts: string[] = [
+            `${result.summary.ok} ok`,
+            `${result.summary.failed} failed`,
+          ];
+          if (dryRunned.length > 0) parts.push(`${dryRunned.length} planned`);
+          if (preSkipped.length > 0) parts.push(`${preSkipped.length} skipped_offline`);
+          parts.push(`(${result.summary.durationMs}ms)`);
+          console.log(`\nSummary: ${parts.join(', ')}`);
         }
 
         // Non-zero exit when anything failed so scripts can react.
