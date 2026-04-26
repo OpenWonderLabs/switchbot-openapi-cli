@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Command } from 'commander';
 import { runCli } from '../helpers/cli.js';
+import { expectJsonEnvelopeShape } from '../helpers/contracts.js';
 
 // ---------------------------------------------------------------------------
 // Mock the lib/devices layer so no real HTTP calls are made.
@@ -116,20 +117,35 @@ describe('devices explain', () => {
 
     expect(res.exitCode).toBeNull();
     const parsed = JSON.parse(res.stdout[0]);
-    expect(parsed.data.deviceId).toBe(DID);
-    expect(parsed.data.type).toBe('Bot');
-    expect(parsed.data.category).toBe('physical');
-    expect(parsed.data.name).toBe('My Bot');
-    expect(parsed.data.role).toBe('power');
-    expect(parsed.data.readOnly).toBe(false);
-    expect(Array.isArray(parsed.data.commands)).toBe(true);
-    expect(parsed.data.commands[0].command).toBe('turnOn');
-    expect(parsed.data.commands[0].idempotent).toBe(true);
-    expect(Array.isArray(parsed.data.statusFields)).toBe(true);
-    expect(parsed.data.liveStatus).toMatchObject({ power: 'on', battery: 95 });
-    expect(Array.isArray(parsed.data.suggestedActions)).toBe(true);
-    expect(Array.isArray(parsed.data.warnings)).toBe(true);
-    expect(parsed.data.warnings).toHaveLength(0);
+    const data = expectJsonEnvelopeShape(parsed as Record<string, unknown>, [
+      'deviceId',
+      'type',
+      'category',
+      'name',
+      'role',
+      'readOnly',
+      'location',
+      'liveStatus',
+      'commands',
+      'statusFields',
+      'children',
+      'suggestedActions',
+      'warnings',
+    ]);
+    expect(data.deviceId).toBe(DID);
+    expect(data.type).toBe('Bot');
+    expect(data.category).toBe('physical');
+    expect(data.name).toBe('My Bot');
+    expect(data.role).toBe('power');
+    expect(data.readOnly).toBe(false);
+    expect(Array.isArray(data.commands)).toBe(true);
+    expect((data.commands as Array<{ command: string }>)[0].command).toBe('turnOn');
+    expect((data.commands as Array<{ idempotent?: boolean }>)[0].idempotent).toBe(true);
+    expect(Array.isArray(data.statusFields)).toBe(true);
+    expect(data.liveStatus).toMatchObject({ power: 'on', battery: 95 });
+    expect(Array.isArray(data.suggestedActions)).toBe(true);
+    expect(Array.isArray(data.warnings)).toBe(true);
+    expect(data.warnings).toHaveLength(0);
   });
 
   it('--json: device not found emits { error: { code:1, kind:"runtime" } } on stdout (bug #SYS-1)', async () => {

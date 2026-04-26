@@ -1,0 +1,27 @@
+[
+  {
+    "type": "Meter",
+    "role": "sensor",
+    "statusFields": ["temperature", "humidity", "battery", "version"]
+  },
+  {
+    "type": "Home Climate Panel",
+    "role": "climate",
+    "statusFields": ["battery", "brightness", "moveDetected", "humidity", "temperature", "version"]
+  },
+  {
+    "type": "Hub 2",
+    "role": "hub",
+    "statusFields": ["version", "temperature", "humidity", "lightLevel"]
+  },
+  {
+    "type": "Hub Mini",
+    "role": "hub",
+    "statusFields": ["version"]
+  },
+  {
+    "type": "Hub 3",
+    "role": "hub",
+    "statusFields": ["version", "temperature", "humidity", "lightLevel"]
+  }
+]

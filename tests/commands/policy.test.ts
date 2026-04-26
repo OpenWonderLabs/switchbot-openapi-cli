@@ -14,6 +14,7 @@ import path from 'node:path';
 
 import { Command } from 'commander';
 import { registerPolicyCommand } from '../../src/commands/policy.js';
+import { expectJsonEnvelopeShape } from '../helpers/contracts.js';
 
 function makeProgram(): Command {
   const program = new Command();
@@ -207,8 +208,7 @@ describe('switchbot policy (commander surface)', () => {
       expect(parsed.data.schemaVersion).toBe('0.2');
       expect(parsed.data.validationScope).toBe('schema+offline-semantics');
       expect(parsed.data.limitations.length).toBeGreaterThan(0);
-      expect(Object.keys(parsed)).toEqual(['schemaVersion', 'data']);
-      expect(Object.keys(parsed.data)).toEqual([
+      expectJsonEnvelopeShape(parsed as Record<string, unknown>, [
         'policyPath',
         'schemaVersion',
         'validationScope',

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { expectJsonEnvelopeContainingKeys } from '../helpers/contracts.js';
 
 const clientInstance = vi.hoisted(() => ({
   get: vi.fn(),
@@ -1814,22 +1815,19 @@ describe('devices command', () => {
       apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
       const res = await runCli(registerDevicesCommand, ['devices', 'describe', 'BLE-001', '--json']);
       const parsed = JSON.parse(res.stdout.join('\n'));
-      expect(Object.keys(parsed)).toEqual(['schemaVersion', 'data']);
-      expect(Object.keys(parsed.data)).toEqual(
-        expect.arrayContaining([
-          'device',
-          'controlType',
-          'catalog',
-          'capabilities',
-          'source',
-          'suggestedActions',
-        ]),
-      );
-      expect(parsed.data).toHaveProperty('device');
-      expect(parsed.data).toHaveProperty('controlType', 'Bot');
-      expect(parsed.data).toHaveProperty('catalog');
-      expect(parsed.data.catalog.type).toBe('Bot');
-      expect(parsed.data).not.toHaveProperty('category');
+      const data = expectJsonEnvelopeContainingKeys(parsed as Record<string, unknown>, [
+        'device',
+        'controlType',
+        'catalog',
+        'capabilities',
+        'source',
+        'suggestedActions',
+      ]);
+      expect(data).toHaveProperty('device');
+      expect(data).toHaveProperty('controlType', 'Bot');
+      expect(data).toHaveProperty('catalog');
+      expect((data.catalog as { type: string }).type).toBe('Bot');
+      expect(data).not.toHaveProperty('category');
     });
 
     it('--json for IR remote surfaces controlType from the device', async () => {

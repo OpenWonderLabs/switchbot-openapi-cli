@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { expectStreamHeaderShape } from '../helpers/contracts.js';
 
 const apiMock = vi.hoisted(() => {
   const instance = { get: vi.fn(), post: vi.fn() };
@@ -382,11 +383,7 @@ describe('devices watch', () => {
       eventKind: string;
       cadence: string;
     };
-    expect(header.schemaVersion).toBe('1.1');
-    expect(header.stream).toBe(true);
-    expect(header.eventKind).toBe('tick');
-    expect(header.cadence).toBe('poll');
-    expect(Object.keys(header)).toEqual(['schemaVersion', 'stream', 'eventKind', 'cadence']);
+    expectStreamHeaderShape(header as Record<string, unknown>, 'tick', 'poll');
   });
 
   it('P7: watch JSONL tick records keep a stable envelope and event shape', async () => {

@@ -15,6 +15,7 @@ vi.mock('node:child_process', async (importOriginal) => {
 
 import { registerDoctorCommand } from '../../src/commands/doctor.js';
 import { runCli } from '../helpers/cli.js';
+import { expectJsonEnvelopeShape } from '../helpers/contracts.js';
 
 describe('doctor command', () => {
   let tmp: string;
@@ -141,9 +142,7 @@ describe('doctor command', () => {
     process.env.SWITCHBOT_SECRET = 's';
     const res = await runCli(registerDoctorCommand, ['--json', 'doctor']);
     const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
-    expect(Object.keys(payload)).toEqual(['schemaVersion', 'data']);
-    const data = payload.data;
-    expect(Object.keys(data)).toEqual([
+    const data = expectJsonEnvelopeShape(payload as Record<string, unknown>, [
       'ok',
       'overall',
       'maturityScore',

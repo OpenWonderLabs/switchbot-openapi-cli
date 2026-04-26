@@ -9,6 +9,7 @@ import { startReceiver, registerEventsCommand } from '../../src/commands/events.
 import type { FilterClause } from '../../src/utils/filter.js';
 import { deviceHistoryStore } from '../../src/mcp/device-history.js';
 import { runCli } from '../helpers/cli.js';
+import { expectStreamHeaderShape } from '../helpers/contracts.js';
 
 // ---------------------------------------------------------------------------
 // Shared mock state for SwitchBotMqttClient — hoisted so the factory can use it
@@ -526,11 +527,7 @@ describe('events mqtt-tail', () => {
       eventKind: string;
       cadence: string;
     };
-    expect(header.schemaVersion).toBe('1.1');
-    expect(header.stream).toBe(true);
-    expect(header.eventKind).toBe('event');
-    expect(header.cadence).toBe('push');
-    expect(Object.keys(header)).toEqual(['schemaVersion', 'stream', 'eventKind', 'cadence']);
+    expectStreamHeaderShape(header as Record<string, unknown>, 'event', 'push');
   });
 
   it('P7: mqtt-tail JSON event lines keep the unified envelope and payloadVersion fields', async () => {
