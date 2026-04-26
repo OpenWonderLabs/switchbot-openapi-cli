@@ -237,6 +237,43 @@ describe('devices command', () => {
       expect(row!.match(/—/g)?.length).toBeGreaterThanOrEqual(2);
     });
 
+    it('cache hit in --json keeps physical devices whose deviceType is missing', async () => {
+      apiMock.__instance.get.mockResolvedValueOnce({
+        data: {
+          body: {
+            deviceList: [
+              {
+                deviceId: 'AI-DEV',
+                deviceName: 'AI MindClip',
+                hubDeviceId: '',
+                enableCloudService: true,
+                familyName: 'Home',
+                roomID: 'R1',
+                roomName: 'Office',
+                controlType: '',
+              },
+            ],
+            infraredRemoteList: [],
+          },
+        },
+      });
+
+      const first = await runCli(registerDevicesCommand, ['--json', 'devices', 'list']);
+      expect(first.exitCode).toBeNull();
+      const firstParsed = JSON.parse(first.stdout.join('\n'));
+      expect(firstParsed.data.deviceList).toHaveLength(1);
+      expect(firstParsed.data.deviceList[0].deviceId).toBe('AI-DEV');
+      expect(apiMock.__instance.get).toHaveBeenCalledTimes(1);
+
+      const second = await runCli(registerDevicesCommand, ['--json', 'devices', 'list']);
+      expect(second.exitCode).toBeNull();
+      const secondParsed = JSON.parse(second.stdout.join('\n'));
+      expect(secondParsed.data.deviceList).toHaveLength(1);
+      expect(secondParsed.data.deviceList[0].deviceId).toBe('AI-DEV');
+      expect(secondParsed.data.deviceList[0].deviceType).toBeUndefined();
+      expect(apiMock.__instance.get).toHaveBeenCalledTimes(1);
+    });
+
     it('renders roomID column for physical devices with --wide', async () => {
       apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
       const res = await runCli(registerDevicesCommand, ['devices', 'list', '--wide']);
@@ -1669,6 +1706,42 @@ describe('devices command', () => {
       expect(out).toContain('--type customize');
     });
 
+    it('describe falls back to a live device-list fetch when the cached inventory misses the device', async () => {
+      updateCacheFromDeviceList({
+        deviceList: [
+          { deviceId: 'OTHER-1', deviceName: 'Other', deviceType: 'Bot' },
+        ],
+        infraredRemoteList: [],
+      });
+      apiMock.__instance.get.mockResolvedValueOnce({
+        data: {
+          body: {
+            deviceList: [
+              {
+                deviceId: 'AI-DEV',
+                deviceName: 'AI MindClip',
+                hubDeviceId: '',
+                enableCloudService: true,
+                familyName: 'Home',
+                roomID: 'R1',
+                roomName: 'Office',
+                controlType: '',
+              },
+            ],
+            infraredRemoteList: [],
+          },
+        },
+      });
+
+      const res = await runCli(registerDevicesCommand, ['--json', 'devices', 'describe', 'AI-DEV']);
+      expect(res.exitCode).toBeNull();
+      const parsed = JSON.parse(res.stdout.join('\n'));
+      expect(parsed.data.device.deviceId).toBe('AI-DEV');
+      expect(parsed.data.device.deviceType).toBeUndefined();
+      expect(parsed.data.catalog).toBeNull();
+      expect(apiMock.__instance.get).toHaveBeenCalledTimes(1);
+    });
+
     it('exits 1 with guidance when the deviceId is unknown', async () => {
       apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
       const res = await runCli(registerDevicesCommand, ['devices', 'describe', 'UNKNOWN-ID']);
@@ -2482,6 +2555,29 @@ describe('devices command', () => {
       });
       const res = await runCli(registerDevicesCommand, ['devices', 'status', 'DEVICE123']);
       expect(res.exitCode).toBeNull();
+    });
+
+    it('fails fast on ambiguous --name within IR devices instead of calling the API', async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sbcli-status-ambiguous-'));
+      vi.spyOn(os, 'homedir').mockReturnValue(tmpDir);
+      updateCacheFromDeviceList({
+        deviceList: [],
+        infraredRemoteList: [
+          { deviceId: 'IR-AC-1', deviceName: '客厅空调', remoteType: 'Air Conditioner', hubDeviceId: 'H1' },
+          { deviceId: 'IR-AC-2', deviceName: '主卧空调', remoteType: 'Air Conditioner', hubDeviceId: 'H1' },
+          { deviceId: 'IR-AC-3', deviceName: '书房空调', remoteType: 'Air Conditioner', hubDeviceId: 'H1' },
+        ],
+      });
+
+      const res = await runCli(registerDevicesCommand, [
+        'devices', 'status', '--name', '空调', '--name-category', 'ir',
+      ]);
+      expect(res.exitCode).toBe(2);
+      expect(res.stderr.join('\n')).toMatch(/ambiguous/i);
+      expect(res.stderr.join('\n')).toMatch(/IR-AC-1|IR-AC-2|IR-AC-3/);
+      expect(apiMock.__instance.get).not.toHaveBeenCalled();
+
+      fs.rmSync(tmpDir, { recursive: true, force: true });
     });
   });
 });

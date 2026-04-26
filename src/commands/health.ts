@@ -6,6 +6,37 @@ import { intArg } from '../utils/arg-parsers.js';
 
 const HEALTHZ_SCHEMA_VERSION = '1.1';
 
+function runHealthCheck(opts: { prometheus?: boolean; auditLog?: string }): void {
+  const report = getHealthReport(opts.auditLog);
+  if (opts.prometheus) {
+    process.stdout.write(toPrometheusText(report));
+    return;
+  }
+  if (isJsonMode()) {
+    printJson(report);
+    return;
+  }
+  const statusEmoji = report.overall === 'ok' ? '✓' : report.overall === 'degraded' ? '⚠' : '✗';
+  console.log(`${statusEmoji} overall: ${report.overall}  (${report.generatedAt})`);
+  console.log('');
+  printTable(
+    ['Component', 'Status', 'Detail'],
+    [
+      ['quota', report.quota.status,
+        `${report.quota.used}/${report.quota.limit} (${report.quota.percentUsed}% used, ${report.quota.remaining} remaining)`],
+      ['audit', report.audit.status,
+        report.audit.present
+          ? `${report.audit.recentErrors}/${report.audit.recentTotal} errors in 24h (${report.audit.errorRatePercent}%)`
+          : 'log not present'],
+      ['circuit', report.circuit.status,
+        `${report.circuit.name}: ${report.circuit.state} (failures: ${report.circuit.failures})`],
+      ['process', 'ok',
+        `pid ${report.process.pid} · uptime ${report.process.uptimeSeconds}s · mem ${report.process.memoryMb}MB`],
+    ],
+  );
+  if (report.overall !== 'ok') process.exit(1);
+}
+
 /**
  * Create an HTTP request handler for the health endpoints. Exposed separately
  * so integration tests can call it directly without binding a port.
@@ -34,40 +65,17 @@ export function registerHealthCommand(program: Command): void {
     .command('health')
     .description('Report process health: quota, audit error rate, circuit breaker state.');
 
+  health.action(() => {
+    runHealthCheck({});
+  });
+
   health
     .command('check')
     .description('Print a one-shot health report.')
     .option('--prometheus', 'Emit Prometheus text format.')
     .option('--audit-log <path>', 'Audit log path (default: ~/.switchbot/audit.log).')
     .action((opts: { prometheus?: boolean; auditLog?: string }) => {
-      const report = getHealthReport(opts.auditLog);
-      if (opts.prometheus) {
-        process.stdout.write(toPrometheusText(report));
-        return;
-      }
-      if (isJsonMode()) {
-        printJson(report);
-        return;
-      }
-      const statusEmoji = report.overall === 'ok' ? '✓' : report.overall === 'degraded' ? '⚠' : '✗';
-      console.log(`${statusEmoji} overall: ${report.overall}  (${report.generatedAt})`);
-      console.log('');
-      printTable(
-        ['Component', 'Status', 'Detail'],
-        [
-          ['quota', report.quota.status,
-            `${report.quota.used}/${report.quota.limit} (${report.quota.percentUsed}% used, ${report.quota.remaining} remaining)`],
-          ['audit', report.audit.status,
-            report.audit.present
-              ? `${report.audit.recentErrors}/${report.audit.recentTotal} errors in 24h (${report.audit.errorRatePercent}%)`
-              : 'log not present'],
-          ['circuit', report.circuit.status,
-            `${report.circuit.name}: ${report.circuit.state} (failures: ${report.circuit.failures})`],
-          ['process', 'ok',
-            `pid ${report.process.pid} · uptime ${report.process.uptimeSeconds}s · mem ${report.process.memoryMb}MB`],
-        ],
-      );
-      if (report.overall !== 'ok') process.exit(1);
+      runHealthCheck(opts);
     });
 
   // switchbot health serve [--port <n>]

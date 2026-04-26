@@ -87,12 +87,15 @@ export class CommandValidationError extends Error {
 }
 
 /** Fetch the full device + IR remote inventory and refresh the local cache. */
-export async function fetchDeviceList(client?: AxiosInstance): Promise<DeviceListBody> {
+export async function fetchDeviceList(
+  client?: AxiosInstance,
+  options: { bypassCache?: boolean } = {},
+): Promise<DeviceListBody> {
   // TTL-gated read: when the on-disk cache is younger than the configured
   // list TTL, skip the API call and synthesize a DeviceListBody from the
   // metadata cache.
   const mode = getCacheMode();
-  if (mode.listTtlMs > 0 && isListCacheFresh(mode.listTtlMs)) {
+  if (!options.bypassCache && mode.listTtlMs > 0 && isListCacheFresh(mode.listTtlMs)) {
     const cached = loadCache();
     if (cached) {
       const deviceList: Device[] = [];
@@ -102,7 +105,7 @@ export async function fetchDeviceList(client?: AxiosInstance): Promise<DeviceLis
           deviceList.push({
             deviceId,
             deviceName: entry.name,
-            deviceType: entry.type,
+            ...(entry.type ? { deviceType: entry.type } : {}),
             enableCloudService: entry.enableCloudService ?? true,
             hubDeviceId: entry.hubDeviceId ?? '',
             roomID: entry.roomID,
@@ -353,11 +356,19 @@ export async function describeDevice(
   options: { live?: boolean } = {},
   client?: AxiosInstance
 ): Promise<DescribeResult> {
-  const body = await fetchDeviceList(client);
-  const { deviceList, infraredRemoteList } = body;
+  let body = await fetchDeviceList(client);
+  let { deviceList, infraredRemoteList } = body;
 
-  const physical = deviceList.find((d) => d.deviceId === deviceId);
-  const ir = infraredRemoteList.find((d) => d.deviceId === deviceId);
+  let physical = deviceList.find((d) => d.deviceId === deviceId);
+  let ir = infraredRemoteList.find((d) => d.deviceId === deviceId);
+
+  if (!physical && !ir) {
+    body = await fetchDeviceList(client, { bypassCache: true });
+    deviceList = body.deviceList;
+    infraredRemoteList = body.infraredRemoteList;
+    physical = deviceList.find((d) => d.deviceId === deviceId);
+    ir = infraredRemoteList.find((d) => d.deviceId === deviceId);
+  }
 
   if (!physical && !ir) throw new DeviceNotFoundError(deviceId);
 

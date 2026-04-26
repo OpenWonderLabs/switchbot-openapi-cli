@@ -60,6 +60,13 @@ describe('quota command', () => {
     expect(result.stdout.join('\n')).toMatch(/no requests recorded yet/);
   });
 
+  it('bare quota defaults to status', async () => {
+    await seedQuota();
+    const result = await runCli(registerQuotaCommand, ['quota']);
+    expect(result.exitCode).toBeNull();
+    expect(result.stdout.join('\n')).toContain('Requests used:');
+  });
+
   it('reset deletes the quota file', async () => {
     await seedQuota();
     const file = path.join(tmpRoot, '.switchbot', 'quota.json');

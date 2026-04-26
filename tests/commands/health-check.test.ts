@@ -62,6 +62,12 @@ describe('health check CLI', () => {
     expect(res.stdout.join(' ')).toMatch(/overall.*ok/i);
   });
 
+  it('bare health defaults to check', async () => {
+    const res = await runCli(registerHealthCommand, ['health']);
+    expect(res.exitCode).toBeNull();
+    expect(res.stdout.join(' ')).toMatch(/overall.*ok/i);
+  });
+
   it('human mode exits 1 when overall is degraded', async () => {
     healthMock.getHealthReport.mockReturnValue(DEGRADED_REPORT);
     const res = await runCli(registerHealthCommand, ['health', 'check']);

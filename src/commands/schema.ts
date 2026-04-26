@@ -103,12 +103,122 @@ function projectFields<T extends Record<string, unknown>>(entry: T, fields: stri
   return out;
 }
 
+function runSchemaExport(options: { type?: string; types?: string; role?: string; category?: string; compact?: boolean; used?: boolean; project?: string; capabilities?: boolean }): Promise<void> | void {
+  const catalog = getEffectiveCatalog();
+  let filtered = catalog;
+
+  if (options.type) {
+    const q = options.type.toLowerCase();
+    filtered = filtered.filter((e) =>
+      e.type.toLowerCase() === q ||
+      (e.aliases ?? []).some((a) => a.toLowerCase() === q),
+    );
+  }
+  if (options.types) {
+    const set = new Set(options.types.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
+    filtered = filtered.filter((e) =>
+      set.has(e.type.toLowerCase()) ||
+      (e.aliases ?? []).some((a) => set.has(a.toLowerCase())),
+    );
+  }
+  if (options.role) {
+    const q = options.role.toLowerCase();
+    filtered = filtered.filter((e) => (e.role ?? 'other') === q);
+  }
+  if (options.category) {
+    const q = options.category.toLowerCase();
+    filtered = filtered.filter((e) => e.category === q);
+  }
+  if (options.used) {
+    const cache = loadCache();
+    if (cache) {
+      const usedTypes = new Set(
+        Object.values(cache.devices).map((d) => d.type.toLowerCase()),
+      );
+      filtered = filtered.filter((e) =>
+        usedTypes.has(e.type.toLowerCase()) ||
+        (e.aliases ?? []).some((a) => usedTypes.has(a.toLowerCase())),
+      );
+    } else {
+      filtered = [];
+    }
+  }
+
+  const mapped = options.compact
+    ? filtered.map(toCompactEntry)
+    : filtered.map(toSchemaEntry);
+
+  const projected = options.project
+    ? mapped.map((e) =>
+        projectFields(e as unknown as Record<string, unknown>, options.project!.split(',').map((s) => s.trim()).filter(Boolean)),
+      )
+    : mapped;
+
+  const finish = (finalTypes: Array<Record<string, unknown>>) => {
+    const payload: Record<string, unknown> = {
+      version: '1.0',
+      types: finalTypes,
+    };
+    if (!options.compact) {
+      payload.generatedAt = new Date().toISOString();
+      payload.resources = RESOURCE_CATALOG;
+      payload.cliAddedFields = [
+        {
+          field: '_fetchedAt',
+          appliesTo: ['devices status', 'devices describe'],
+          type: 'string (ISO-8601)',
+          description:
+            'CLI-synthesized timestamp indicating when this status response was fetched or served from the cache. Not part of the upstream SwitchBot API.',
+        },
+        {
+          field: 'replayed',
+          appliesTo: ['devices command (with --idempotency-key)'],
+          type: 'boolean',
+          description:
+            'CLI-synthesized flag — true when the response was served from the idempotency cache instead of re-executing the command.',
+        },
+        {
+          field: 'verification',
+          appliesTo: ['devices command'],
+          type: 'object',
+          description:
+            'CLI-synthesized receipt-acknowledgment metadata. For IR devices, verifiable:false signals that no device-side confirmation is possible.',
+        },
+        {
+          field: 'hints',
+          appliesTo: ['agent-bootstrap'],
+          type: 'string[]',
+          description:
+            'CLI-synthesized advisory messages for the calling agent. Always emitted; empty array ([]) means no hints to report — never null and not a disabled-field signal.',
+        },
+      ];
+    }
+    printJson(payload);
+  };
+
+  const finalTypes = projected as Array<Record<string, unknown>>;
+  if (options.capabilities) {
+    return import('./capabilities.js').then(({ COMMAND_META }) => {
+      const devicesMeta = Object.fromEntries(
+        Object.entries(COMMAND_META).filter(([k]) => k.startsWith('devices ')),
+      );
+      finish(finalTypes.map((e) => ({ ...e, commandsMeta: devicesMeta })));
+    });
+  }
+
+  finish(finalTypes);
+}
+
 export function registerSchemaCommand(program: Command): void {
   const ROLES = ['lighting', 'security', 'sensor', 'climate', 'media', 'cleaning', 'curtain', 'fan', 'power', 'hub', 'other'] as const;
   const CATEGORIES = ['physical', 'ir'] as const;
   const schema = program
     .command('schema')
     .description('Export the SwitchBot device catalog as structured JSON (for AI agent prompts / tooling)');
+
+  schema.action(async () => {
+    await runSchemaExport({});
+  });
 
   schema
     .command('export')
@@ -150,103 +260,6 @@ Examples:
   $ switchbot schema export --project type,commands,statusFields
 `)
     .action(async (options: { type?: string; types?: string; role?: string; category?: string; compact?: boolean; used?: boolean; project?: string; capabilities?: boolean }) => {
-      const catalog = getEffectiveCatalog();
-      let filtered = catalog;
-
-      if (options.type) {
-        const q = options.type.toLowerCase();
-        filtered = filtered.filter((e) =>
-          e.type.toLowerCase() === q ||
-          (e.aliases ?? []).some((a) => a.toLowerCase() === q),
-        );
-      }
-      if (options.types) {
-        const set = new Set(options.types.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
-        filtered = filtered.filter((e) =>
-          set.has(e.type.toLowerCase()) ||
-          (e.aliases ?? []).some((a) => set.has(a.toLowerCase())),
-        );
-      }
-      if (options.role) {
-        const q = options.role.toLowerCase();
-        filtered = filtered.filter((e) => (e.role ?? 'other') === q);
-      }
-      if (options.category) {
-        const q = options.category.toLowerCase();
-        filtered = filtered.filter((e) => e.category === q);
-      }
-      if (options.used) {
-        const cache = loadCache();
-        if (cache) {
-          const usedTypes = new Set(
-            Object.values(cache.devices).map((d) => d.type.toLowerCase()),
-          );
-          filtered = filtered.filter((e) =>
-            usedTypes.has(e.type.toLowerCase()) ||
-            (e.aliases ?? []).some((a) => usedTypes.has(a.toLowerCase())),
-          );
-        } else {
-          filtered = [];
-        }
-      }
-
-      const mapped = options.compact
-        ? filtered.map(toCompactEntry)
-        : filtered.map(toSchemaEntry);
-
-      const projected = options.project
-        ? mapped.map((e) =>
-            projectFields(e as unknown as Record<string, unknown>, options.project!.split(',').map((s) => s.trim()).filter(Boolean)),
-          )
-        : mapped;
-
-      let finalTypes = projected as Array<Record<string, unknown>>;
-      if (options.capabilities) {
-        const { COMMAND_META } = await import('./capabilities.js');
-        const devicesMeta = Object.fromEntries(
-          Object.entries(COMMAND_META).filter(([k]) => k.startsWith('devices ')),
-        );
-        finalTypes = finalTypes.map((e) => ({ ...e, commandsMeta: devicesMeta }));
-      }
-
-      const payload: Record<string, unknown> = {
-        version: '1.0',
-        types: finalTypes,
-      };
-      if (!options.compact) {
-        payload.generatedAt = new Date().toISOString();
-        payload.resources = RESOURCE_CATALOG;
-        payload.cliAddedFields = [
-          {
-            field: '_fetchedAt',
-            appliesTo: ['devices status', 'devices describe'],
-            type: 'string (ISO-8601)',
-            description:
-              'CLI-synthesized timestamp indicating when this status response was fetched or served from the cache. Not part of the upstream SwitchBot API.',
-          },
-          {
-            field: 'replayed',
-            appliesTo: ['devices command (with --idempotency-key)'],
-            type: 'boolean',
-            description:
-              'CLI-synthesized flag — true when the response was served from the idempotency cache instead of re-executing the command.',
-          },
-          {
-            field: 'verification',
-            appliesTo: ['devices command'],
-            type: 'object',
-            description:
-              'CLI-synthesized receipt-acknowledgment metadata. For IR devices, verifiable:false signals that no device-side confirmation is possible.',
-          },
-          {
-            field: 'hints',
-            appliesTo: ['agent-bootstrap'],
-            type: 'string[]',
-            description:
-              'CLI-synthesized advisory messages for the calling agent. Always emitted; empty array ([]) means no hints to report — never null and not a disabled-field signal.',
-          },
-        ];
-      }
-      printJson(payload);
+      await runSchemaExport(options);
     });
 }

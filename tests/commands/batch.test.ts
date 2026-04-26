@@ -398,6 +398,7 @@ describe('devices batch', () => {
     expect(apiMock.__instance.post).not.toHaveBeenCalled();
     const parsed = JSON.parse(result.stdout[0]);
     expect(parsed.data.dryRun).toBe(true);
+    expect(parsed.data.schemaVersion).toBeUndefined();
     expect(parsed.data.plan.command).toBe('turnOn');
     expect(parsed.data.plan.maxConcurrent).toBe(3);
     expect(parsed.data.plan.staggerMs).toBe(250);
@@ -422,6 +423,7 @@ describe('devices batch', () => {
     expect(result.exitCode).toBeNull();
     expect(apiMock.__instance.post).not.toHaveBeenCalled();
     const parsed = JSON.parse(result.stdout[0]);
+    expect(parsed.data.schemaVersion).toBeUndefined();
     expect(parsed.data.plan.command).toBe('turnOn');
     expect(parsed.data.plan.stepCount).toBe(2);
     // --emit-plan must not trigger the deprecation warning.
@@ -537,6 +539,7 @@ describe('devices batch', () => {
     expect(parsed.data.summary.ok).toBe(1);
     expect(parsed.data.summary.total).toBe(2);
     expect(parsed.data.summary.skipped).toBe(1);
+    expect(parsed.data.summary.schemaVersion).toBeUndefined();
     expect(parsed.data.skipped).toEqual([{ deviceId: 'BOT2', reason: 'offline' }]);
     expect(parsed.data.succeeded[0].deviceId).toBe('BOT1');
   });

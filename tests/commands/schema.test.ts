@@ -25,6 +25,14 @@ describe('schema export', () => {
     }
   });
 
+  it('bare schema defaults to export', async () => {
+    const res = await runCli(registerSchemaCommand, ['schema']);
+    expect(res.exitCode).toBeNull();
+    const envelope = JSON.parse(res.stdout.join(''));
+    expect(envelope.schemaVersion).toBe('1.1');
+    expect(Array.isArray(envelope.data.types)).toBe(true);
+  });
+
   it('filters by --type (matches name + aliases, case-insensitive)', async () => {
     const res = await runCli(registerSchemaCommand, ['schema', 'export', '--type', 'bot']);
     const parsed = JSON.parse(res.stdout.join('')).data;

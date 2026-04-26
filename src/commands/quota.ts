@@ -7,6 +7,48 @@ import {
   todayUsage,
 } from '../utils/quota.js';
 
+function runQuotaStatus(): void {
+  const usage = todayUsage();
+  const history = loadQuota();
+
+  if (isJsonMode()) {
+    printJson({
+      today: {
+        date: usage.date,
+        total: usage.total,
+        remaining: usage.remaining,
+        dailyLimit: DAILY_QUOTA,
+        endpoints: usage.endpoints,
+      },
+      history: history.days,
+    });
+    return;
+  }
+
+  console.log(`Today (${usage.date}):`);
+  console.log(`  Requests used:      ${usage.total} / ${DAILY_QUOTA}`);
+  console.log(`  Remaining budget:   ${usage.remaining}`);
+  if (Object.keys(usage.endpoints).length === 0) {
+    console.log('  (no requests recorded yet)');
+  } else {
+    console.log('  Endpoint breakdown:');
+    const entries = Object.entries(usage.endpoints).sort((a, b) => b[1] - a[1]);
+    for (const [endpoint, count] of entries) {
+      console.log(`    ${endpoint.padEnd(48)} ${count}`);
+    }
+  }
+
+  const otherDays = Object.entries(history.days)
+    .filter(([d]) => d !== usage.date)
+    .sort((a, b) => b[0].localeCompare(a[0]));
+  if (otherDays.length > 0) {
+    console.log('\nRecent history:');
+    for (const [date, bucket] of otherDays) {
+      console.log(`  ${date}  ${bucket.total}`);
+    }
+  }
+}
+
 export function registerQuotaCommand(program: Command): void {
   const quota = program
     .command('quota')
@@ -28,50 +70,16 @@ Examples:
   $ switchbot quota reset
 `);
 
+  quota.action(() => {
+    runQuotaStatus();
+  });
+
   quota
     .command('status')
     .alias('show')
     .description("Show today's usage and the last 7 days (alias: show)")
     .action(() => {
-      const usage = todayUsage();
-      const history = loadQuota();
-
-      if (isJsonMode()) {
-        printJson({
-          today: {
-            date: usage.date,
-            total: usage.total,
-            remaining: usage.remaining,
-            dailyLimit: DAILY_QUOTA,
-            endpoints: usage.endpoints,
-          },
-          history: history.days,
-        });
-        return;
-      }
-
-      console.log(`Today (${usage.date}):`);
-      console.log(`  Requests used:      ${usage.total} / ${DAILY_QUOTA}`);
-      console.log(`  Remaining budget:   ${usage.remaining}`);
-      if (Object.keys(usage.endpoints).length === 0) {
-        console.log('  (no requests recorded yet)');
-      } else {
-        console.log('  Endpoint breakdown:');
-        const entries = Object.entries(usage.endpoints).sort((a, b) => b[1] - a[1]);
-        for (const [endpoint, count] of entries) {
-          console.log(`    ${endpoint.padEnd(48)} ${count}`);
-        }
-      }
-
-      const otherDays = Object.entries(history.days)
-        .filter(([d]) => d !== usage.date)
-        .sort((a, b) => b[0].localeCompare(a[0]));
-      if (otherDays.length > 0) {
-        console.log('\nRecent history:');
-        for (const [date, bucket] of otherDays) {
-          console.log(`  ${date}  ${bucket.total}`);
-        }
-      }
+      runQuotaStatus();
     });
 
   quota

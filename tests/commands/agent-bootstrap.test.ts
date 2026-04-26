@@ -84,6 +84,46 @@ describe('agent-bootstrap', () => {
     expect(Array.isArray(catalog.types)).toBe(true);
   });
 
+  it('keeps cached devices whose type is unknown instead of dropping them from the payload', async () => {
+    const cacheDir = path.join(tmpDir, '.switchbot');
+    fs.writeFileSync(
+      path.join(cacheDir, 'devices.json'),
+      JSON.stringify({
+        lastUpdated: new Date().toISOString(),
+        devices: {
+          ABC123: {
+            type: 'Bot',
+            name: 'Living Room Bot',
+            category: 'physical',
+            roomName: 'Living Room',
+          },
+          AI999: {
+            type: '',
+            name: 'AI MindClip',
+            category: 'physical',
+            roomName: 'Office',
+          },
+        },
+      }),
+    );
+
+    process.argv = ['node', 'cli', 'agent-bootstrap', '--compact', '--json'];
+    const program = new Command();
+    program.exitOverride();
+    registerAgentBootstrapCommand(program);
+    const payload = await captureJson(async () => {
+      await program.parseAsync(['node', 'cli', 'agent-bootstrap', '--compact']);
+    }) as { data?: Record<string, unknown> };
+    const data = payload.data as Record<string, unknown>;
+    const devices = data.devices as Array<{ deviceId: string; type: string; name: string }>;
+    expect(devices).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ deviceId: 'ABC123', type: 'Bot' }),
+        expect.objectContaining({ deviceId: 'AI999', type: '', name: 'AI MindClip' }),
+      ]),
+    );
+  });
+
   it('stays below 20 KB on a small account with --compact', async () => {
     process.argv = ['node', 'cli', 'agent-bootstrap', '--compact', '--json'];
     const program = new Command();
