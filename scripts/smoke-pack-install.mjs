@@ -68,7 +68,7 @@ try {
   }
   console.log(`pack-install smoke ok: switchbot --version -> ${actualVersion}`);
 
-  // 2. policy new — exercises readEmbeddedAsset for the policy.example.yaml template.
+  // 2. policy new — exercises readPolicyExampleYaml for the example template.
   //    If the bundle's embedded-asset resolver can't find the template, this fails
   //    with ENOENT before writing the file — which is exactly the 3.2.2 P0.
   const policyPath = path.join(workDir, 'policy.yaml');
@@ -79,7 +79,7 @@ try {
   }
   console.log(`pack-install smoke ok: policy new -> ${policyPath} (${policyStat.size} bytes)`);
 
-  // 3. policy validate --json — exercises readEmbeddedAsset for schema/v0.2.json.
+  // 3. policy validate --json — exercises readPolicySchemaJson for v0.2.json.
   //    This is the other loader site and would also be broken by a future drift
   //    in dist/ asset layout.
   const validateOut = runBin(['policy', 'validate', policyPath, '--json']);
