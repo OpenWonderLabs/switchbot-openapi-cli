@@ -389,13 +389,16 @@ export async function describeDevice(
   options: { live?: boolean } = {},
   client?: AxiosInstance
 ): Promise<DescribeResult> {
+  const mode = getCacheMode();
+  const hadFreshListCache =
+    mode.listTtlMs > 0 && isListCacheFresh(mode.listTtlMs) && loadCache() !== null;
   let body = await fetchDeviceList(client);
   let { deviceList, infraredRemoteList } = body;
 
   let physical = deviceList.find((d) => d.deviceId === deviceId);
   let ir = infraredRemoteList.find((d) => d.deviceId === deviceId);
 
-  if (!physical && !ir) {
+  if (!physical && !ir && hadFreshListCache) {
     body = await fetchDeviceList(client, { bypassCache: true });
     deviceList = body.deviceList;
     infraredRemoteList = body.infraredRemoteList;

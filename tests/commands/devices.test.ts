@@ -1814,6 +1814,17 @@ describe('devices command', () => {
       apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
       const res = await runCli(registerDevicesCommand, ['devices', 'describe', 'BLE-001', '--json']);
       const parsed = JSON.parse(res.stdout.join('\n'));
+      expect(Object.keys(parsed)).toEqual(['schemaVersion', 'data']);
+      expect(Object.keys(parsed.data)).toEqual(
+        expect.arrayContaining([
+          'device',
+          'controlType',
+          'catalog',
+          'capabilities',
+          'source',
+          'suggestedActions',
+        ]),
+      );
       expect(parsed.data).toHaveProperty('device');
       expect(parsed.data).toHaveProperty('controlType', 'Bot');
       expect(parsed.data).toHaveProperty('catalog');

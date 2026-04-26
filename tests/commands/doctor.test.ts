@@ -141,7 +141,18 @@ describe('doctor command', () => {
     process.env.SWITCHBOT_SECRET = 's';
     const res = await runCli(registerDoctorCommand, ['--json', 'doctor']);
     const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    expect(Object.keys(payload)).toEqual(['schemaVersion', 'data']);
     const data = payload.data;
+    expect(Object.keys(data)).toEqual([
+      'ok',
+      'overall',
+      'maturityScore',
+      'maturityLabel',
+      'generatedAt',
+      'schemaVersion',
+      'summary',
+      'checks',
+    ]);
     expect(typeof data.ok).toBe('boolean');
     expect(['ok', 'warn', 'fail']).toContain(data.overall);
     expect(typeof data.generatedAt).toBe('string');

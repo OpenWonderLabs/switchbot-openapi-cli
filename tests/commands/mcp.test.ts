@@ -467,6 +467,8 @@ describe('mcp server', () => {
     expect(res.isError).toBe(true);
     const text = (res.content as Array<{ text: string }>)[0].text;
     expect(text).toMatch(/No device with id/);
+    expect(apiMock.__instance.get).toHaveBeenCalledTimes(1);
+    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/devices');
   });
 
   it('describe_device with live:true merges /status payload', async () => {
