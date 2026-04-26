@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -43,22 +43,56 @@ try {
     stdio: 'inherit',
   });
 
-  const actualVersion = process.platform === 'win32'
-    ? execFileSync(path.join(workDir, 'node_modules', '.bin', 'switchbot.cmd'), ['--version'], {
+  const switchbotBin = process.platform === 'win32'
+    ? path.join(workDir, 'node_modules', '.bin', 'switchbot.cmd')
+    : path.join(workDir, 'node_modules', '.bin', 'switchbot');
+
+  function runBin(args) {
+    if (process.platform === 'win32') {
+      return execFileSync(switchbotBin, args, {
         cwd: workDir,
         encoding: 'utf-8',
         shell: true,
-      }).trim()
-    : execFileSync(path.join(workDir, 'node_modules', '.bin', 'switchbot'), ['--version'], {
-        cwd: workDir,
-        encoding: 'utf-8',
-      }).trim();
+      });
+    }
+    return execFileSync(switchbotBin, args, {
+      cwd: workDir,
+      encoding: 'utf-8',
+    });
+  }
 
+  // 1. --version (existing check)
+  const actualVersion = runBin(['--version']).trim();
   if (actualVersion !== expectedVersion) {
     throw new Error(`Packed CLI version mismatch: expected ${expectedVersion}, got ${actualVersion}`);
   }
-
   console.log(`pack-install smoke ok: switchbot --version -> ${actualVersion}`);
+
+  // 2. policy new — exercises readEmbeddedAsset for the policy.example.yaml template.
+  //    If the bundle's embedded-asset resolver can't find the template, this fails
+  //    with ENOENT before writing the file — which is exactly the 3.2.2 P0.
+  const policyPath = path.join(workDir, 'policy.yaml');
+  runBin(['policy', 'new', policyPath]);
+  const policyStat = statSync(policyPath);
+  if (policyStat.size < 500) {
+    throw new Error(`policy new wrote ${policyStat.size} bytes to ${policyPath}; expected >= 500`);
+  }
+  console.log(`pack-install smoke ok: policy new -> ${policyPath} (${policyStat.size} bytes)`);
+
+  // 3. policy validate --json — exercises readEmbeddedAsset for schema/v0.2.json.
+  //    This is the other loader site and would also be broken by a future drift
+  //    in dist/ asset layout.
+  const validateOut = runBin(['policy', 'validate', policyPath, '--json']);
+  let parsed;
+  try {
+    parsed = JSON.parse(validateOut);
+  } catch (e) {
+    throw new Error(`policy validate --json did not return JSON: ${validateOut}`);
+  }
+  if (parsed?.data?.valid !== true) {
+    throw new Error(`policy validate reported not valid: ${JSON.stringify(parsed)}`);
+  }
+  console.log(`pack-install smoke ok: policy validate -> { valid: true }`);
 } finally {
   if (tarballPath) {
     rmSync(tarballPath, { force: true });

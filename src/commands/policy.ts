@@ -1,9 +1,9 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync, statSync } from 'node:fs';
 import { dirname, resolve as resolvePath } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { parse as yamlParse } from 'yaml';
 import { printJson, emitJsonError, isJsonMode, exitWithError } from '../utils/output.js';
+import { readEmbeddedAsset } from '../utils/embedded-asset.js';
 import {
   loadPolicyFile,
   resolvePolicyPath,
@@ -28,8 +28,10 @@ const LATEST_SUPPORTED_VERSION: PolicySchemaVersion =
   SUPPORTED_POLICY_SCHEMA_VERSIONS[SUPPORTED_POLICY_SCHEMA_VERSIONS.length - 1];
 
 function readEmbeddedTemplate(): string {
-  const url = new URL('../policy/examples/policy.example.yaml', import.meta.url);
-  return readFileSync(fileURLToPath(url), 'utf-8');
+  return readEmbeddedAsset(import.meta.url, [
+    '../policy/examples/policy.example.yaml',
+    './policy/examples/policy.example.yaml',
+  ]);
 }
 
 export class PolicyFileExistsError extends Error {

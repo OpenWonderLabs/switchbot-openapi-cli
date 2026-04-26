@@ -1,5 +1,4 @@
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { readEmbeddedAsset } from '../utils/embedded-asset.js';
 
 export type PolicySchemaVersion = '0.2';
 
@@ -12,8 +11,10 @@ export function loadPolicySchema(version: PolicySchemaVersion = CURRENT_POLICY_S
   const cached = schemaCache.get(version);
   if (cached) return cached;
 
-  const url = new URL(`./schema/v${version}.json`, import.meta.url);
-  const raw = readFileSync(fileURLToPath(url), 'utf-8');
+  const raw = readEmbeddedAsset(import.meta.url, [
+    `./schema/v${version}.json`,
+    `./policy/schema/v${version}.json`,
+  ]);
   const parsed = JSON.parse(raw) as object;
   schemaCache.set(version, parsed);
   return parsed;
