@@ -127,7 +127,7 @@ jobs:
           fi
 
   pack-install-smoke:
-    name: Packed install smoke (esbuild)
+    name: Packed install smoke (esbuild — matches publish)
     runs-on: ubuntu-latest
     needs: test
     steps:
@@ -138,24 +138,6 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build:prod
-      - name: npm pack -> npm install tarball -> switchbot --version
-        run: npm run smoke:pack-install
-
-  # Mirrors exactly what publish.yml does: `npm run build` (tsc) + smoke:pack-install.
-  # Keeps the PR gate honest — if this job fails, the publish workflow would also fail.
-  # See docs/release-pipeline.md for the tsc vs esbuild split.
-  pack-install-smoke-tsc:
-    name: Packed install smoke (tsc — matches publish)
-    runs-on: ubuntu-latest
-    needs: test
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20.x
-          cache: npm
-      - run: npm ci
-      - run: npm run build
       - name: npm pack -> npm install tarball -> switchbot --version
         run: npm run smoke:pack-install
 
