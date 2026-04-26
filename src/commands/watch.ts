@@ -72,7 +72,7 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 export function registerWatchCommand(devices: Command): void {
   devices
     .command('watch')
-    .description('Poll device status on an interval and emit field-level changes (JSONL)')
+    .description('Poll device status on an interval and emit field-level changes (human table by default; JSONL with --json for agents)')
     .argument('[deviceId...]', 'One or more deviceIds to watch (or use --name for one device)')
     .option('--name <query>', 'Resolve one device by fuzzy name (combined with any positional IDs)', stringArg('--name'))
     .option(
@@ -87,16 +87,22 @@ export function registerWatchCommand(devices: Command): void {
     .addHelpText(
       'after',
       `
-Each poll emits one JSON line per deviceId with the shape:
+Default output is a human-readable table of field changes per tick; add --json
+to get one JSON-Lines record per deviceId per tick (the agent-friendly form).
+
+The very first poll emits a seed tick with "from": null for every field, so
+the initial state is observable. Subsequent ticks only include fields whose
+value changed (unless --include-unchanged is passed).
+
+Each --json line has the shape:
   { "t": "<ISO>", "tick": <n>, "deviceId": "ID", "type": "Bot",
     "changed": { "power": { "from": "off", "to": "on" } } }
-
-The very first poll has "from": null for every field (seed).
 
 Examples:
   $ switchbot devices watch ABC123 --interval 10s
   $ switchbot devices watch ABC123 --fields battery,power --interval 1m
   $ switchbot devices watch ABC123 DEF456 --interval 30s --max 10
+  # Agent-friendly: one JSONL record per tick, pipeable to jq
   $ switchbot devices watch ABC123 --json | jq 'select(.changed.power)'
   $ switchbot devices watch --name "Living Room AC" --interval 10s
 `,
