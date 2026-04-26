@@ -30,6 +30,24 @@
     "statusFields": ["version"]
   },
   {
+    "type": "Strip Light",
+    "observedAs": "Strip Light 3",
+    "role": "lighting",
+    "statusFields": ["power", "brightness", "color", "colorTemperature", "version"]
+  },
+  {
+    "type": "Curtain",
+    "observedAs": "Curtain",
+    "role": "curtain",
+    "statusFields": ["calibrate", "group", "moving", "slidePosition", "battery", "version"]
+  },
+  {
+    "type": "Meter",
+    "observedAs": "MeterPro",
+    "role": "sensor",
+    "statusFields": ["temperature", "humidity", "battery", "version"]
+  },
+  {
     "type": "Contact Sensor",
     "role": "sensor",
     "statusFields": ["battery", "version", "moveDetected", "openState", "brightness"]

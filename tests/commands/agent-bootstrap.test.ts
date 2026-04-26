@@ -292,8 +292,9 @@ describe('agent-bootstrap', () => {
         'agent-bootstrap', '--sections', 'identity,cliVersion',
       ]);
       expect(res.exitCode).toBeNull();
-      const out = JSON.parse(res.stdout.join('')) as { data: Record<string, unknown> };
-      const keys = Object.keys(out.data);
+      const out = JSON.parse(res.stdout.join('')) as Record<string, unknown>;
+      const data = expectJsonEnvelopeContainingKeys(out, ['identity', 'cliVersion']);
+      const keys = Object.keys(data);
       expect(keys).toContain('identity');
       expect(keys).toContain('cliVersion');
       expect(keys).not.toContain('catalog');
@@ -303,9 +304,10 @@ describe('agent-bootstrap', () => {
 
     it('includes all keys when --sections is not provided', async () => {
       const res = await runCli(registerAgentBootstrapCommand, ['agent-bootstrap', '--compact']);
-      const out = JSON.parse(res.stdout.join('')) as { data: Record<string, unknown> };
-      expect(Object.keys(out.data)).toContain('catalog');
-      expect(Object.keys(out.data)).toContain('hints');
+      const out = JSON.parse(res.stdout.join('')) as Record<string, unknown>;
+      const data = expectJsonEnvelopeContainingKeys(out, ['catalog', 'hints']);
+      expect(Object.keys(data)).toContain('catalog');
+      expect(Object.keys(data)).toContain('hints');
     });
 
     it('exits 2 and prints hint when an unknown section name is requested', async () => {

@@ -4,14 +4,14 @@ import os from 'node:os';
 import { registerSchemaCommand } from '../../src/commands/schema.js';
 import { updateCacheFromDeviceList, resetListCache } from '../../src/devices/cache.js';
 import { runCli } from '../helpers/cli.js';
+import { expectJsonEnvelopeContainingKeys } from '../helpers/contracts.js';
 
 describe('schema export', () => {
   it('dumps every catalog type as a JSON payload', async () => {
     const res = await runCli(registerSchemaCommand, ['schema', 'export']);
     const out = res.stdout.join('');
-    const envelope = JSON.parse(out);
-    expect(envelope.schemaVersion).toBe('1.1');
-    const parsed = envelope.data;
+    const envelope = JSON.parse(out) as Record<string, unknown>;
+    const parsed = expectJsonEnvelopeContainingKeys(envelope, ['version', 'types', 'generatedAt', 'resources', 'cliAddedFields']);
     expect(parsed.version).toBe('1.0');
     expect(parsed.generatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(Array.isArray(parsed.types)).toBe(true);
@@ -28,9 +28,9 @@ describe('schema export', () => {
   it('bare schema defaults to export', async () => {
     const res = await runCli(registerSchemaCommand, ['schema']);
     expect(res.exitCode).toBeNull();
-    const envelope = JSON.parse(res.stdout.join(''));
-    expect(envelope.schemaVersion).toBe('1.1');
-    expect(Array.isArray(envelope.data.types)).toBe(true);
+    const envelope = JSON.parse(res.stdout.join('')) as Record<string, unknown>;
+    const data = expectJsonEnvelopeContainingKeys(envelope, ['version', 'types', 'generatedAt', 'resources', 'cliAddedFields']);
+    expect(Array.isArray(data.types)).toBe(true);
   });
 
   it('filters by --type (matches name + aliases, case-insensitive)', async () => {

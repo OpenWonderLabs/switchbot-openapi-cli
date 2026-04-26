@@ -5,6 +5,7 @@ import { DEVICE_CATALOG } from '../../src/devices/catalog.js';
 
 interface ObservedCatalogFixture {
   type: string;
+  observedAs?: string;
   role: string;
   statusFields: string[];
 }
@@ -21,12 +22,32 @@ describe('catalog fidelity fixtures', () => {
 
     for (const fixture of fixtures) {
       const entry = DEVICE_CATALOG.find((e) => e.type === fixture.type);
-      expect(entry, `Missing catalog entry for observed type ${fixture.type}`).toBeDefined();
-      expect(entry?.role, `${fixture.type} role drifted from observed fixture`).toBe(fixture.role);
+      const label = fixture.observedAs ? `${fixture.observedAs} -> ${fixture.type}` : fixture.type;
+      expect(entry, `Missing catalog entry for observed type ${label}`).toBeDefined();
+      expect(entry?.role, `${label} role drifted from observed fixture`).toBe(fixture.role);
       expect(
         entry?.statusFields ?? [],
-        `${fixture.type} statusFields drifted from observed fixture`,
+        `${label} statusFields drifted from observed fixture`,
       ).toEqual(fixture.statusFields);
+    }
+  });
+
+  it('keeps observedAs names resolvable to the pinned catalog entry via type or alias', () => {
+    const fixtures = loadObservedFixtures();
+
+    for (const fixture of fixtures) {
+      if (!fixture.observedAs) continue;
+      const entry = DEVICE_CATALOG.find((e) => e.type === fixture.type);
+      expect(entry, `Missing catalog entry for observedAs fixture ${fixture.observedAs}`).toBeDefined();
+
+      const candidates = [entry?.type, ...(entry?.aliases ?? [])]
+        .filter((value): value is string => typeof value === 'string')
+        .map((value) => value.toLowerCase());
+
+      expect(
+        candidates,
+        `${fixture.observedAs} is no longer resolvable to catalog type ${fixture.type} via type/alias`,
+      ).toContain(fixture.observedAs.toLowerCase());
     }
   });
 });

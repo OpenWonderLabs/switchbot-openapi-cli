@@ -5,6 +5,7 @@ import os from 'node:os';
 import { runCli } from '../helpers/cli.js';
 import { registerCatalogCommand } from '../../src/commands/catalog.js';
 import { resetCatalogOverlayCache } from '../../src/devices/catalog.js';
+import { expectJsonArrayEnvelope, expectJsonEnvelopeContainingKeys } from '../helpers/contracts.js';
 
 let tmpRoot: string;
 
@@ -60,10 +61,11 @@ describe('catalog path', () => {
   it('emits JSON when --json is passed', async () => {
     writeOverlay([{ type: 'Bot' }]);
     const { stdout } = await runCli(registerCatalogCommand, ['--json', 'catalog', 'path']);
-    const parsed = JSON.parse(stdout.join('\n'));
-    expect(parsed.data.exists).toBe(true);
-    expect(parsed.data.valid).toBe(true);
-    expect(parsed.data.entryCount).toBe(1);
+    const parsed = JSON.parse(stdout.join('\n')) as Record<string, unknown>;
+    const data = expectJsonEnvelopeContainingKeys(parsed, ['path', 'exists', 'valid', 'entryCount']);
+    expect(data.exists).toBe(true);
+    expect(data.valid).toBe(true);
+    expect(data.entryCount).toBe(1);
   });
 });
 
@@ -152,15 +154,16 @@ describe('catalog show', () => {
 
   it('emits JSON array with --json', async () => {
     const { stdout } = await runCli(registerCatalogCommand, ['--json', 'catalog', 'show']);
-    const parsed = JSON.parse(stdout.join('\n'));
-    expect(Array.isArray(parsed.data)).toBe(true);
-    expect(parsed.data.find((e: { type: string }) => e.type === 'Bot')).toBeDefined();
+    const parsed = JSON.parse(stdout.join('\n')) as Record<string, unknown>;
+    const data = expectJsonArrayEnvelope(parsed) as Array<{ type: string }>;
+    expect(data.find((e) => e.type === 'Bot')).toBeDefined();
   });
 
   it('emits a single-entry JSON object when a type is given', async () => {
     const { stdout } = await runCli(registerCatalogCommand, ['--json', 'catalog', 'show', 'Bot']);
-    const parsed = JSON.parse(stdout.join('\n'));
-    expect(parsed.data.type).toBe('Bot');
+    const parsed = JSON.parse(stdout.join('\n')) as Record<string, unknown>;
+    const data = expectJsonEnvelopeContainingKeys(parsed, ['type', 'category', 'description', 'role', 'commands', 'statusFields']);
+    expect(data.type).toBe('Bot');
   });
 });
 
@@ -212,12 +215,19 @@ describe('catalog diff', () => {
       { type: 'Curtain', remove: true },
     ]);
     const { stdout } = await runCli(registerCatalogCommand, ['--json', 'catalog', 'diff']);
-    const parsed = JSON.parse(stdout.join('\n'));
-    expect(parsed.data.replaced).toHaveLength(1);
-    expect(parsed.data.replaced[0].type).toBe('Bot');
-    expect(parsed.data.replaced[0].changedKeys).toContain('role');
-    expect(parsed.data.removed).toContain('Curtain');
-    expect(parsed.data.added).toEqual([]);
+    const parsed = JSON.parse(stdout.join('\n')) as Record<string, unknown>;
+    const data = expectJsonEnvelopeContainingKeys(parsed, [
+      'overlayPath', 'overlayExists', 'overlayValid', 'replaced', 'added', 'removed', 'ignored',
+    ]) as {
+      replaced: Array<{ type: string; changedKeys: string[] }>;
+      removed: string[];
+      added: string[];
+    };
+    expect(data.replaced).toHaveLength(1);
+    expect(data.replaced[0].type).toBe('Bot');
+    expect(data.replaced[0].changedKeys).toContain('role');
+    expect(data.removed).toContain('Curtain');
+    expect(data.added).toEqual([]);
   });
 });
 
@@ -238,8 +248,9 @@ describe('catalog refresh', () => {
 
   it('emits JSON with --json', async () => {
     const { stdout } = await runCli(registerCatalogCommand, ['--json', 'catalog', 'refresh']);
-    const parsed = JSON.parse(stdout.join('\n'));
-    expect(parsed.data.refreshed).toBe(true);
+    const parsed = JSON.parse(stdout.join('\n')) as Record<string, unknown>;
+    const data = expectJsonEnvelopeContainingKeys(parsed, ['refreshed', 'path', 'exists', 'valid', 'entryCount']);
+    expect(data.refreshed).toBe(true);
   });
 });
 
@@ -248,8 +259,11 @@ describe('catalog search', () => {
     // "bot" exists as type "Bot" (tier 0), appears in no roles/commands exactly,
     // and is a substring of other aliases like "robot vacuum" (tier 2).
     const { stdout } = await runCli(registerCatalogCommand, ['--json', 'catalog', 'search', 'bot']);
-    const parsed = JSON.parse(stdout.join('\n'));
-    const matches = parsed.data.matches as Array<{ type: string; _tier: number; _matchedOn: string[] }>;
+    const parsed = JSON.parse(stdout.join('\n')) as Record<string, unknown>;
+    const data = expectJsonEnvelopeContainingKeys(parsed, ['query', 'strict', 'matches']) as {
+      matches: Array<{ type: string; _tier: number; _matchedOn: string[] }>;
+    };
+    const matches = data.matches;
     expect(matches.length).toBeGreaterThan(0);
     // First hit must be the exact type (tier 0).
     expect(matches[0].type).toBe('Bot');
@@ -263,8 +277,11 @@ describe('catalog search', () => {
 
   it('marks alias-substring-only matches as alias-only', async () => {
     const { stdout } = await runCli(registerCatalogCommand, ['--json', 'catalog', 'search', 'bot']);
-    const parsed = JSON.parse(stdout.join('\n'));
-    const matches = parsed.data.matches as Array<{ type: string; _matchedOn: string[] }>;
+    const parsed = JSON.parse(stdout.join('\n')) as Record<string, unknown>;
+    const data = expectJsonEnvelopeContainingKeys(parsed, ['query', 'strict', 'matches']) as {
+      matches: Array<{ type: string; _matchedOn: string[] }>;
+    };
+    const matches = data.matches;
     // At least one tier-2 entry should be labelled alias-only.
     const aliasOnly = matches.filter((m) => m._matchedOn.includes('alias-only'));
     expect(aliasOnly.length).toBeGreaterThan(0);
@@ -276,8 +293,11 @@ describe('catalog search', () => {
 
   it('treats Hub 2 as a hub type, not as a Meter alias leak', async () => {
     const { stdout } = await runCli(registerCatalogCommand, ['--json', 'catalog', 'search', 'Hub']);
-    const parsed = JSON.parse(stdout.join('\n'));
-    const matches = parsed.data.matches as Array<{ type: string; role?: string; aliases?: string[]; _matchedOn: string[] }>;
+    const parsed = JSON.parse(stdout.join('\n')) as Record<string, unknown>;
+    const data = expectJsonEnvelopeContainingKeys(parsed, ['query', 'strict', 'matches']) as {
+      matches: Array<{ type: string; role?: string; aliases?: string[]; _matchedOn: string[] }>;
+    };
+    const matches = data.matches;
     const hub2 = matches.find((m) => m.type === 'Hub 2');
     expect(hub2).toBeDefined();
     expect(hub2?.role).toBe('hub');
@@ -295,9 +315,13 @@ describe('catalog search', () => {
       'bot',
       '--strict',
     ]);
-    const parsed = JSON.parse(stdout.join('\n'));
-    const matches = parsed.data.matches as Array<{ type: string; _matchedOn: string[]; _tier: number }>;
-    expect(parsed.data.strict).toBe(true);
+    const parsed = JSON.parse(stdout.join('\n')) as Record<string, unknown>;
+    const data = expectJsonEnvelopeContainingKeys(parsed, ['query', 'strict', 'matches']) as {
+      strict: boolean;
+      matches: Array<{ type: string; _matchedOn: string[]; _tier: number }>;
+    };
+    const matches = data.matches;
+    expect(data.strict).toBe(true);
     expect(matches.length).toBeGreaterThan(0);
     for (const m of matches) {
       expect(m._matchedOn).toContain('type');
