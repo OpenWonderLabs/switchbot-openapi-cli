@@ -5,13 +5,16 @@ import path from 'node:path';
 import { addRuleToPolicySource, addRuleToPolicyFile, AddRuleError } from '../../src/policy/add-rule.js';
 
 const MINIMAL_POLICY_V02 = `version: "0.2"
-aliases: ~
+aliases:
+  lamp-1: "28372F4C9C4C"
 automation:
   enabled: false
   rules: []
 `;
 
 const POLICY_WITH_RULE = `version: "0.2"
+aliases:
+  lamp-1: "28372F4C9C4C"
 automation:
   enabled: true
   rules:
@@ -21,11 +24,13 @@ automation:
         schedule: "0 8 * * *"
       then:
         - command: "devices command <id> turnOn"
+          device: "lamp-1"
       dry_run: true
 `;
 
 const POLICY_NO_AUTOMATION = `version: "0.2"
-aliases: ~
+aliases:
+  lamp-1: "28372F4C9C4C"
 `;
 
 const SIMPLE_RULE_YAML = `name: "test rule"
@@ -34,6 +39,7 @@ when:
   schedule: "0 9 * * *"
 then:
   - command: "devices command <id> turnOn"
+    device: "lamp-1"
 dry_run: true
 `;
 
@@ -93,7 +99,7 @@ describe('addRuleToPolicySource', () => {
 
   it('throws on duplicate rule name without --force', () => {
     fs.writeFileSync(policyPath, POLICY_WITH_RULE, 'utf8');
-    const dupRule = `name: "existing rule"\nwhen:\n  source: cron\n  schedule: "0 7 * * *"\nthen:\n  - command: "devices command <id> turnOff"\ndry_run: true\n`;
+    const dupRule = `name: "existing rule"\nwhen:\n  source: cron\n  schedule: "0 7 * * *"\nthen:\n  - command: "devices command <id> turnOff"\n    device: "lamp-1"\ndry_run: true\n`;
     expect(() =>
       addRuleToPolicySource({ ruleYaml: dupRule, policyPath }),
     ).toThrowError(AddRuleError);
@@ -104,7 +110,7 @@ describe('addRuleToPolicySource', () => {
 
   it('overwrites duplicate rule name with --force', () => {
     fs.writeFileSync(policyPath, POLICY_WITH_RULE, 'utf8');
-    const dupRule = `name: "existing rule"\nwhen:\n  source: cron\n  schedule: "0 7 * * *"\nthen:\n  - command: "devices command <id> turnOff"\ndry_run: true\n`;
+    const dupRule = `name: "existing rule"\nwhen:\n  source: cron\n  schedule: "0 7 * * *"\nthen:\n  - command: "devices command <id> turnOff"\n    device: "lamp-1"\ndry_run: true\n`;
     const { nextSource } = addRuleToPolicySource({
       ruleYaml: dupRule,
       policyPath,
