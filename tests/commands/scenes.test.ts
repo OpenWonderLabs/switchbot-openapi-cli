@@ -298,4 +298,95 @@ describe('scenes command', () => {
       expect((out.error as Record<string, unknown>).message).toMatch(/scene not found/i);
     });
   });
+
+  describe('validate', () => {
+    function mockScenes() {
+      apiMock.__instance.get.mockResolvedValue({
+        data: {
+          body: [
+            { sceneId: 'S1', sceneName: 'Good Morning' },
+            { sceneId: 'S2', sceneName: 'Movie Time' },
+          ],
+        },
+      });
+    }
+
+    it('exits 0 when all specified sceneIds are valid', async () => {
+      mockScenes();
+      const res = await runCli(registerScenesCommand, ['scenes', 'validate', 'S1']);
+      expect(res.exitCode).toBeNull();
+      expect(res.stdout.join(' ')).toMatch(/✓/);
+    });
+
+    it('exits 1 when a specified sceneId does not exist', async () => {
+      mockScenes();
+      const res = await runCli(registerScenesCommand, ['scenes', 'validate', 'MISSING-SCENE']);
+      expect(res.exitCode).toBe(1);
+      expect(res.stdout.join(' ')).toMatch(/✗/);
+    });
+
+    it('--json emits ok:true when all IDs valid', async () => {
+      mockScenes();
+      const res = await runCli(registerScenesCommand, ['--json', 'scenes', 'validate', 'S1']);
+      expect(res.exitCode).toBeNull();
+      const body = JSON.parse(res.stdout.join('')) as { data: { ok: boolean; results: Array<{ sceneId: string; valid: boolean }> } };
+      expect(body.data.ok).toBe(true);
+      expect(body.data.results[0].valid).toBe(true);
+    });
+
+    it('--json emits ok:false and exits 1 when an ID is not found', async () => {
+      mockScenes();
+      const res = await runCli(registerScenesCommand, ['--json', 'scenes', 'validate', 'MISSING-SCENE']);
+      expect(res.exitCode).toBe(1);
+      const body = JSON.parse(res.stdout.find((l) => l.trim().startsWith('{'))!) as { data: { ok: boolean; results: Array<{ valid: boolean }> } };
+      expect(body.data.ok).toBe(false);
+      expect(body.data.results.some((r) => !r.valid)).toBe(true);
+    });
+  });
+
+  describe('simulate', () => {
+    function mockScenes() {
+      apiMock.__instance.get.mockResolvedValue({
+        data: {
+          body: [
+            { sceneId: 'S1', sceneName: 'Good Morning' },
+            { sceneId: 'S2', sceneName: 'Movie Time' },
+          ],
+        },
+      });
+    }
+
+    it('--json emits simulation envelope with wouldSend and simulated:true', async () => {
+      mockScenes();
+      const res = await runCli(registerScenesCommand, ['--json', 'scenes', 'simulate', 'S1']);
+      expect(res.exitCode).toBeNull();
+      const body = JSON.parse(res.stdout.join('')) as {
+        data: { simulated: boolean; sceneId: string; wouldSend: { method: string; url: string } };
+      };
+      expect(body.data.simulated).toBe(true);
+      expect(body.data.sceneId).toBe('S1');
+      expect(body.data.wouldSend.method).toBe('POST');
+      expect(body.data.wouldSend.url).toContain('S1');
+    });
+
+    it('human output prints sceneId, sceneName, and wouldSend', async () => {
+      mockScenes();
+      const res = await runCli(registerScenesCommand, ['scenes', 'simulate', 'S1']);
+      expect(res.exitCode).toBeNull();
+      const out = res.stdout.join('\n');
+      expect(out).toMatch(/sceneId/i);
+      expect(out).toMatch(/wouldSend/i);
+    });
+
+    it('exits 2 with scene_not_found envelope for unknown sceneId', async () => {
+      mockScenes();
+      const res = await runCli(registerScenesCommand, ['--json', 'scenes', 'simulate', 'MISSING']);
+      expect(res.exitCode).toBe(2);
+      const body = JSON.parse(res.stdout.find((l) => l.trim().startsWith('{'))!) as {
+        error: { message?: string; context?: { error?: string } };
+      };
+      const sig = body.error.context?.error ?? body.error.message ?? '';
+      expect(sig).toMatch(/scene.?not.?found/i);
+    });
+  });
 });
