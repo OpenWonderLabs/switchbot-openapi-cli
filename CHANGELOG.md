@@ -16,12 +16,15 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   esbuild bundling, `import.meta.url` points at `dist/index.js` instead of the
   original source file, so the three call-sites that loaded embedded assets via
   `new URL('<relative>', import.meta.url)` resolved to non-existent paths
-  (`dist/schema/v0.2.json` instead of `dist/policy/schema/v0.2.json`, etc.). All
-  three loaders — `src/policy/schema.ts`, `src/commands/policy.ts`, and
-  `src/commands/mcp.ts` — now route through a shared
-  `readEmbeddedAsset(metaUrl, candidates)` helper that probes the source-tree
-  path first (dev/tsx) and the bundle-tree path second (prod), failing loudly
-  with both attempted paths if neither exists.
+  (`dist/schema/v0.2.json` instead of `dist/policy/schema/v0.2.json`, etc.).
+  Fix: a new top-level `src/embedded-assets.ts` module, positioned at the
+  source-tree counterpart of `dist/index.js`, now owns the two asset-loading
+  functions (`readPolicySchemaJson`, `readPolicyExampleYaml`). Because
+  `embedded-assets.ts` and the bundle entry sit at the same relative depth,
+  `./policy/schema/...` and `./policy/examples/...` resolve identically under
+  tsx (dev) and under the bundle (prod) — no runtime fallback needed. All
+  three call-sites (`src/policy/schema.ts`, `src/commands/policy.ts`,
+  `src/commands/mcp.ts`) now route through those two helpers.
 - `scripts/smoke-pack-install.mjs` now exercises the loader paths end-to-end
   against the installed tarball — in addition to the existing `--version`
   check, it runs `switchbot policy new <tmp>/policy.yaml` (asserts the template
