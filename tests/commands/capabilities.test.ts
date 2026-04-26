@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { Command } from 'commander';
 import { registerCapabilitiesCommand } from '../../src/commands/capabilities.js';
+import { expectJsonEnvelopeContainingKeys } from '../helpers/contracts.js';
 
 /** Build a representative program that mirrors the real CLI structure. */
 function makeProgram(): Command {
@@ -65,7 +66,16 @@ async function runCapabilities(): Promise<Record<string, unknown>> {
     logSpy.mockRestore();
   }
 
-  return (JSON.parse(chunks.join('')) as { data: Record<string, unknown> }).data;
+  const body = JSON.parse(chunks.join('')) as Record<string, unknown>;
+  return expectJsonEnvelopeContainingKeys(body, [
+    'version',
+    'generatedAt',
+    'identity',
+    'surfaces',
+    'commands',
+    'globalFlags',
+    'catalog',
+  ]);
 }
 
 describe('capabilities', () => {
@@ -182,7 +192,26 @@ async function runCapabilitiesWith(extra: string[]): Promise<Record<string, unkn
   } finally {
     logSpy.mockRestore();
   }
-  return (JSON.parse(chunks.join('')) as { data: Record<string, unknown> }).data;
+  const body = JSON.parse(chunks.join('')) as Record<string, unknown>;
+  const compact = extra.includes('--compact');
+  return expectJsonEnvelopeContainingKeys(body, compact ? [
+    'version',
+    'schemaVersion',
+    'agentGuide',
+    'identity',
+    'surfaces',
+    'commands',
+    'commandMeta',
+    'resources',
+  ] : [
+    'version',
+    'generatedAt',
+    'identity',
+    'surfaces',
+    'commands',
+    'globalFlags',
+    'catalog',
+  ]);
 }
 
 describe('capabilities B3/B4', () => {

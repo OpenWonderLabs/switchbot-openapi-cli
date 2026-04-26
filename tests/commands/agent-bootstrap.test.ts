@@ -7,6 +7,7 @@ import { Command } from 'commander';
 import { registerAgentBootstrapCommand } from '../../src/commands/agent-bootstrap.js';
 import { resetListCache } from '../../src/devices/cache.js';
 import { runCli } from '../helpers/cli.js';
+import { expectJsonEnvelopeContainingKeys } from '../helpers/contracts.js';
 
 async function captureJson(fn: () => void | Promise<void>): Promise<unknown> {
   const lines: string[] = [];
@@ -61,9 +62,25 @@ describe('agent-bootstrap', () => {
     registerAgentBootstrapCommand(program);
     const payload = await captureJson(async () => {
       await program.parseAsync(['node', 'cli', 'agent-bootstrap', '--compact']);
-    }) as { schemaVersion?: string; data?: Record<string, unknown> };
+    }) as Record<string, unknown>;
+    const data = expectJsonEnvelopeContainingKeys(payload, [
+      'schemaVersion',
+      'generatedAt',
+      'cliVersion',
+      'identity',
+      'quickReference',
+      'safetyTiers',
+      'nameStrategies',
+      'profile',
+      'quota',
+      'policyStatus',
+      'credentialsBackend',
+      'devices',
+      'catalog',
+      'hints',
+    ]);
     expect(payload.schemaVersion).toBeDefined();
-    const data = payload.data as Record<string, unknown>;
+    expect(typeof data.schemaVersion).toBe('string');
     expect(data.identity).toBeDefined();
     const identity = data.identity as Record<string, unknown>;
     expect(identity.product).toBe('SwitchBot');
@@ -82,6 +99,46 @@ describe('agent-bootstrap', () => {
     const catalog = data.catalog as { scope?: string; types?: unknown[] };
     expect(catalog.scope).toBe('used');
     expect(Array.isArray(catalog.types)).toBe(true);
+  });
+
+  it('keeps cached devices whose type is unknown instead of dropping them from the payload', async () => {
+    const cacheDir = path.join(tmpDir, '.switchbot');
+    fs.writeFileSync(
+      path.join(cacheDir, 'devices.json'),
+      JSON.stringify({
+        lastUpdated: new Date().toISOString(),
+        devices: {
+          ABC123: {
+            type: 'Bot',
+            name: 'Living Room Bot',
+            category: 'physical',
+            roomName: 'Living Room',
+          },
+          AI999: {
+            type: '',
+            name: 'AI MindClip',
+            category: 'physical',
+            roomName: 'Office',
+          },
+        },
+      }),
+    );
+
+    process.argv = ['node', 'cli', 'agent-bootstrap', '--compact', '--json'];
+    const program = new Command();
+    program.exitOverride();
+    registerAgentBootstrapCommand(program);
+    const payload = await captureJson(async () => {
+      await program.parseAsync(['node', 'cli', 'agent-bootstrap', '--compact']);
+    }) as { data?: Record<string, unknown> };
+    const data = payload.data as Record<string, unknown>;
+    const devices = data.devices as Array<{ deviceId: string; type: string; name: string }>;
+    expect(devices).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ deviceId: 'ABC123', type: 'Bot' }),
+        expect.objectContaining({ deviceId: 'AI999', type: '', name: 'AI MindClip' }),
+      ]),
+    );
   });
 
   it('stays below 20 KB on a small account with --compact', async () => {
@@ -235,8 +292,9 @@ describe('agent-bootstrap', () => {
         'agent-bootstrap', '--sections', 'identity,cliVersion',
       ]);
       expect(res.exitCode).toBeNull();
-      const out = JSON.parse(res.stdout.join('')) as { data: Record<string, unknown> };
-      const keys = Object.keys(out.data);
+      const out = JSON.parse(res.stdout.join('')) as Record<string, unknown>;
+      const data = expectJsonEnvelopeContainingKeys(out, ['identity', 'cliVersion']);
+      const keys = Object.keys(data);
       expect(keys).toContain('identity');
       expect(keys).toContain('cliVersion');
       expect(keys).not.toContain('catalog');
@@ -246,9 +304,10 @@ describe('agent-bootstrap', () => {
 
     it('includes all keys when --sections is not provided', async () => {
       const res = await runCli(registerAgentBootstrapCommand, ['agent-bootstrap', '--compact']);
-      const out = JSON.parse(res.stdout.join('')) as { data: Record<string, unknown> };
-      expect(Object.keys(out.data)).toContain('catalog');
-      expect(Object.keys(out.data)).toContain('hints');
+      const out = JSON.parse(res.stdout.join('')) as Record<string, unknown>;
+      const data = expectJsonEnvelopeContainingKeys(out, ['catalog', 'hints']);
+      expect(Object.keys(data)).toContain('catalog');
+      expect(Object.keys(data)).toContain('hints');
     });
 
     it('exits 2 and prints hint when an unknown section name is requested', async () => {

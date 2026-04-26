@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { expectJsonEnvelopeContainingKeys } from '../helpers/contracts.js';
 
 const clientInstance = vi.hoisted(() => ({
   get: vi.fn(),
@@ -235,6 +236,43 @@ describe('devices command', () => {
       expect(row).not.toContain('undefined');
       // type column (position 3) and controlType column (position 5) should both render as em-dash
       expect(row!.match(/—/g)?.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('cache hit in --json keeps physical devices whose deviceType is missing', async () => {
+      apiMock.__instance.get.mockResolvedValueOnce({
+        data: {
+          body: {
+            deviceList: [
+              {
+                deviceId: 'AI-DEV',
+                deviceName: 'AI MindClip',
+                hubDeviceId: '',
+                enableCloudService: true,
+                familyName: 'Home',
+                roomID: 'R1',
+                roomName: 'Office',
+                controlType: '',
+              },
+            ],
+            infraredRemoteList: [],
+          },
+        },
+      });
+
+      const first = await runCli(registerDevicesCommand, ['--json', 'devices', 'list']);
+      expect(first.exitCode).toBeNull();
+      const firstParsed = JSON.parse(first.stdout.join('\n'));
+      expect(firstParsed.data.deviceList).toHaveLength(1);
+      expect(firstParsed.data.deviceList[0].deviceId).toBe('AI-DEV');
+      expect(apiMock.__instance.get).toHaveBeenCalledTimes(1);
+
+      const second = await runCli(registerDevicesCommand, ['--json', 'devices', 'list']);
+      expect(second.exitCode).toBeNull();
+      const secondParsed = JSON.parse(second.stdout.join('\n'));
+      expect(secondParsed.data.deviceList).toHaveLength(1);
+      expect(secondParsed.data.deviceList[0].deviceId).toBe('AI-DEV');
+      expect(secondParsed.data.deviceList[0].deviceType).toBeUndefined();
+      expect(apiMock.__instance.get).toHaveBeenCalledTimes(1);
     });
 
     it('renders roomID column for physical devices with --wide', async () => {
@@ -600,6 +638,45 @@ describe('devices command', () => {
       });
       const res = await runCli(registerDevicesCommand, ['devices', 'status', 'XYZ', '--json']);
       expect(res.stdout.join('\n')).toContain('"power"');
+    });
+
+    it('annotates empty status bodies as unsupported in --json mode', async () => {
+      updateCacheFromDeviceList({
+        deviceList: [{
+          deviceId: 'AI-EMPTY',
+          deviceName: 'AI MindClip',
+          enableCloudService: true,
+          hubDeviceId: '',
+        }],
+        infraredRemoteList: [],
+      });
+      apiMock.__instance.get.mockResolvedValue({
+        data: { body: {} },
+      });
+      const res = await runCli(registerDevicesCommand, ['devices', 'status', 'AI-EMPTY', '--json']);
+      const out = JSON.parse(res.stdout.join('\n'));
+      expect(out.data.supported).toBe(false);
+      expect(out.data.note).toMatch(/does not expose cloud status/i);
+    });
+
+    it('adds a stale-reading hint for zeroed Meter status without onlineStatus', async () => {
+      updateCacheFromDeviceList({
+        deviceList: [{
+          deviceId: 'METER-D9',
+          deviceName: 'Dead Meter',
+          deviceType: 'Meter',
+          enableCloudService: true,
+          hubDeviceId: 'HUB-1',
+        }],
+        infraredRemoteList: [],
+      });
+      apiMock.__instance.get.mockResolvedValue({
+        data: { body: { battery: 0, temperature: 0, humidity: 0 } },
+      });
+      const res = await runCli(registerDevicesCommand, ['devices', 'status', 'METER-D9', '--json']);
+      const out = JSON.parse(res.stdout.join('\n'));
+      expect(out.data.hint).toMatch(/stale/i);
+      expect(out.data.hint).toMatch(/batteries|hub connectivity/i);
     });
 
     it('exits 1 when the API throws', async () => {
@@ -1669,6 +1746,62 @@ describe('devices command', () => {
       expect(out).toContain('--type customize');
     });
 
+    it('describe falls back to a live device-list fetch when the cached inventory misses the device', async () => {
+      updateCacheFromDeviceList({
+        deviceList: [
+          { deviceId: 'OTHER-1', deviceName: 'Other', deviceType: 'Bot' },
+        ],
+        infraredRemoteList: [],
+      });
+      apiMock.__instance.get.mockResolvedValueOnce({
+        data: {
+          body: {
+            deviceList: [
+              {
+                deviceId: 'AI-DEV',
+                deviceName: 'AI MindClip',
+                hubDeviceId: '',
+                enableCloudService: true,
+                familyName: 'Home',
+                roomID: 'R1',
+                roomName: 'Office',
+                controlType: '',
+              },
+            ],
+            infraredRemoteList: [],
+          },
+        },
+      });
+
+      const res = await runCli(registerDevicesCommand, ['--json', 'devices', 'describe', 'AI-DEV']);
+      expect(res.exitCode).toBeNull();
+      const parsed = JSON.parse(res.stdout.join('\n'));
+      expect(parsed.data.device.deviceId).toBe('AI-DEV');
+      expect(parsed.data.device.deviceType).toBeUndefined();
+      expect(parsed.data.catalog).toBeNull();
+      expect(parsed.data.catalogNote).toMatch(/No built-in catalog entry/);
+      expect(apiMock.__instance.get).toHaveBeenCalledTimes(1);
+    });
+
+    it('--json includes warnings when a physical device points at a missing hubDeviceId', async () => {
+      const body = {
+        deviceList: [{
+          deviceId: 'METER-X',
+          deviceName: 'Bedroom Meter',
+          deviceType: 'Meter',
+          hubDeviceId: 'HUB-MISSING',
+          enableCloudService: true,
+        }],
+        infraredRemoteList: [],
+      };
+      apiMock.__instance.get.mockResolvedValue({ data: { body } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'describe', 'METER-X', '--json']);
+      const parsed = JSON.parse(res.stdout.join('\n'));
+      expect(parsed.data.warnings).toEqual([
+        'hubDeviceId HUB-MISSING is not present in the current inventory',
+      ]);
+    });
+
     it('exits 1 with guidance when the deviceId is unknown', async () => {
       apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
       const res = await runCli(registerDevicesCommand, ['devices', 'describe', 'UNKNOWN-ID']);
@@ -1682,11 +1815,19 @@ describe('devices command', () => {
       apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
       const res = await runCli(registerDevicesCommand, ['devices', 'describe', 'BLE-001', '--json']);
       const parsed = JSON.parse(res.stdout.join('\n'));
-      expect(parsed.data).toHaveProperty('device');
-      expect(parsed.data).toHaveProperty('controlType', 'Bot');
-      expect(parsed.data).toHaveProperty('catalog');
-      expect(parsed.data.catalog.type).toBe('Bot');
-      expect(parsed.data).not.toHaveProperty('category');
+      const data = expectJsonEnvelopeContainingKeys(parsed as Record<string, unknown>, [
+        'device',
+        'controlType',
+        'catalog',
+        'capabilities',
+        'source',
+        'suggestedActions',
+      ]);
+      expect(data).toHaveProperty('device');
+      expect(data).toHaveProperty('controlType', 'Bot');
+      expect(data).toHaveProperty('catalog');
+      expect((data.catalog as { type: string }).type).toBe('Bot');
+      expect(data).not.toHaveProperty('category');
     });
 
     it('--json for IR remote surfaces controlType from the device', async () => {
@@ -1746,6 +1887,53 @@ describe('devices command', () => {
       expect(
         parsed.data.suggestedActions.find((a: { command: string }) => a.command === 'unlock')
       ).toBeUndefined();
+    });
+
+    it('--json for Meter does not over-promise CO2 in advisory statusFields', async () => {
+      const meterBody = {
+        deviceList: [{
+          deviceId: 'METER-1',
+          deviceName: 'Bedroom Meter',
+          deviceType: 'Meter',
+          hubDeviceId: 'HUB-1',
+          enableCloudService: true,
+        }],
+        infraredRemoteList: [],
+      };
+      apiMock.__instance.get.mockResolvedValue({ data: { body: meterBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'describe', 'METER-1', '--json']);
+      const parsed = JSON.parse(res.stdout.join('\n'));
+      expect(parsed.data.capabilities.statusFields).toEqual([
+        'temperature',
+        'humidity',
+        'battery',
+        'version',
+      ]);
+      expect(parsed.data.capabilities.statusFields).not.toContain('CO2');
+    });
+
+    it('--json for Home Climate Panel includes the fuller advisory statusFields set', async () => {
+      const panelBody = {
+        deviceList: [{
+          deviceId: 'CLIMATE-1',
+          deviceName: 'Hall Panel',
+          deviceType: 'Home Climate Panel',
+          hubDeviceId: 'HUB-1',
+          enableCloudService: true,
+        }],
+        infraredRemoteList: [],
+      };
+      apiMock.__instance.get.mockResolvedValue({ data: { body: panelBody } });
+      const res = await runCli(registerDevicesCommand, ['devices', 'describe', 'CLIMATE-1', '--json']);
+      const parsed = JSON.parse(res.stdout.join('\n'));
+      expect(parsed.data.capabilities.statusFields).toEqual([
+        'battery',
+        'brightness',
+        'moveDetected',
+        'humidity',
+        'temperature',
+        'version',
+      ]);
     });
 
     it('human output marks destructive commands in the command table', async () => {
@@ -2392,6 +2580,7 @@ describe('devices command', () => {
       const out = res.stdout.join('\n');
       expect(out).toMatch(/dry-run/i);
       expect(out).toContain(DRY_ID);
+      expect(out).not.toMatch(/Would POST/i);
     });
   });
 
@@ -2482,6 +2671,29 @@ describe('devices command', () => {
       });
       const res = await runCli(registerDevicesCommand, ['devices', 'status', 'DEVICE123']);
       expect(res.exitCode).toBeNull();
+    });
+
+    it('fails fast on ambiguous --name within IR devices instead of calling the API', async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sbcli-status-ambiguous-'));
+      vi.spyOn(os, 'homedir').mockReturnValue(tmpDir);
+      updateCacheFromDeviceList({
+        deviceList: [],
+        infraredRemoteList: [
+          { deviceId: 'IR-AC-1', deviceName: '客厅空调', remoteType: 'Air Conditioner', hubDeviceId: 'H1' },
+          { deviceId: 'IR-AC-2', deviceName: '主卧空调', remoteType: 'Air Conditioner', hubDeviceId: 'H1' },
+          { deviceId: 'IR-AC-3', deviceName: '书房空调', remoteType: 'Air Conditioner', hubDeviceId: 'H1' },
+        ],
+      });
+
+      const res = await runCli(registerDevicesCommand, [
+        'devices', 'status', '--name', '空调', '--name-category', 'ir',
+      ]);
+      expect(res.exitCode).toBe(2);
+      expect(res.stderr.join('\n')).toMatch(/ambiguous/i);
+      expect(res.stderr.join('\n')).toMatch(/IR-AC-1|IR-AC-2|IR-AC-3/);
+      expect(apiMock.__instance.get).not.toHaveBeenCalled();
+
+      fs.rmSync(tmpDir, { recursive: true, force: true });
     });
   });
 });

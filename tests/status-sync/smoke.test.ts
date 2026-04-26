@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { expectJsonEnvelopeShape } from '../helpers/contracts.js';
 
 const cli = path.resolve(import.meta.dirname, '../../dist/index.js');
 
@@ -36,10 +37,25 @@ describe('status-sync smoke (no credentials required)', () => {
   it('status-sync status --json reports not running when state dir is empty', () => {
     const r = run(['--json', 'status-sync', 'status', '--state-dir', stateDir]);
     expect(r.status).toBe(0);
-    const json = JSON.parse(r.stdout);
-    expect(json.data.running).toBe(false);
-    expect(json.data.pid).toBeNull();
-    expect(json.data.stateDir).toBe(stateDir);
+    const json = JSON.parse(r.stdout) as Record<string, unknown>;
+    const data = expectJsonEnvelopeShape(json, [
+      'running',
+      'pid',
+      'startedAt',
+      'stateDir',
+      'stateFile',
+      'stdoutLog',
+      'stderrLog',
+      'command',
+      'openclawUrl',
+      'openclawModel',
+      'topic',
+      'configPath',
+      'profile',
+    ]) as { running: boolean; pid: number | null; stateDir: string };
+    expect(data.running).toBe(false);
+    expect(data.pid).toBeNull();
+    expect(data.stateDir).toBe(stateDir);
   });
 
   it('status-sync stop exits 0 and prints "not running" when nothing is running', () => {
@@ -52,7 +68,22 @@ describe('status-sync smoke (no credentials required)', () => {
     const custom = path.join(stateDir, 'custom');
     const r = run(['--json', 'status-sync', 'status', '--state-dir', custom]);
     expect(r.status).toBe(0);
-    const json = JSON.parse(r.stdout);
-    expect(path.resolve(json.data.stateDir)).toBe(path.resolve(custom));
+    const json = JSON.parse(r.stdout) as Record<string, unknown>;
+    const data = expectJsonEnvelopeShape(json, [
+      'running',
+      'pid',
+      'startedAt',
+      'stateDir',
+      'stateFile',
+      'stdoutLog',
+      'stderrLog',
+      'command',
+      'openclawUrl',
+      'openclawModel',
+      'topic',
+      'configPath',
+      'profile',
+    ]) as { stateDir: string };
+    expect(path.resolve(data.stateDir)).toBe(path.resolve(custom));
   });
 });

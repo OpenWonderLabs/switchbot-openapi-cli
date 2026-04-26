@@ -33,6 +33,10 @@ function hashKey(key: string): string {
   return crypto.createHash('sha256').update(key).digest('hex');
 }
 
+export function fingerprintIdempotencyKey(key: string): string {
+  return hashKey(key).slice(0, 12);
+}
+
 function shapeSignature(command: string, parameter: unknown): string {
   // Canonical-ish JSON — stable enough for object equality with no nested sort
   // (callers can pass primitives or small objects).

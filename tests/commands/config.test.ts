@@ -15,6 +15,7 @@ vi.mock('../../src/config.js', () => configMock);
 
 import { registerConfigCommand } from '../../src/commands/config.js';
 import { runCli } from '../helpers/cli.js';
+import { expectJsonEnvelopeShape } from '../helpers/contracts.js';
 
 describe('config command', () => {
   beforeEach(() => {
@@ -78,10 +79,11 @@ describe('config command', () => {
         secret: 'ab****yz',
       });
       const res = await runCli(registerConfigCommand, ['--json', 'config', 'show']);
-      const parsed = JSON.parse(res.stdout.join('\n'));
-      expect(parsed.data.source).toBe('file');
-      expect(parsed.data.path).toBe('/tmp/config.json');
-      expect(parsed.data.token).toBe('abcd****wxyz');
+      const parsed = JSON.parse(res.stdout.join('\n')) as Record<string, unknown>;
+      const data = expectJsonEnvelopeShape(parsed, ['source', 'path', 'token', 'secret']);
+      expect(data.source).toBe('file');
+      expect(data.path).toBe('/tmp/config.json');
+      expect(data.token).toBe('abcd****wxyz');
     });
   });
 
@@ -102,8 +104,11 @@ describe('config command', () => {
     it('emits JSON with --json', async () => {
       configMock.listProfiles.mockReturnValue(['home']);
       const res = await runCli(registerConfigCommand, ['--json', 'config', 'list-profiles']);
-      const out = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
-      expect(out.data.profiles).toEqual([{ name: 'home' }]);
+      const out = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join('')) as Record<string, unknown>;
+      const data = expectJsonEnvelopeShape(out, ['profiles']) as {
+        profiles: Array<{ name: string }>;
+      };
+      expect(data.profiles).toEqual([{ name: 'home' }]);
     });
 
     it('C5: surfaces label and dailyCap when present', async () => {
@@ -153,6 +158,19 @@ describe('config command', () => {
       expect(configMock.saveConfig).not.toHaveBeenCalled();
       fs.rmSync(dir, { recursive: true, force: true });
     });
+
+    it('returns ok:true under --json when credentials are saved', async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sbenv-'));
+      const envFile = path.join(dir, '.env');
+      fs.writeFileSync(envFile, 'SWITCHBOT_TOKEN=env_tok\nSWITCHBOT_SECRET=env_sec\n');
+      const res = await runCli(registerConfigCommand, ['--json', 'config', 'set-token', '--from-env-file', envFile]);
+      expect(res.exitCode).toBeNull();
+      const out = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join('')) as Record<string, unknown>;
+      const data = expectJsonEnvelopeShape(out, ['ok', 'message']);
+      expect(data.ok).toBe(true);
+      expect(data.message).toBe('credentials saved');
+      fs.rmSync(dir, { recursive: true, force: true });
+    });
   });
 
   describe('agent-profile', () => {
@@ -172,8 +190,12 @@ describe('config command', () => {
     it('emits the template as JSON without --write', async () => {
       const res = await runCli(registerConfigCommand, ['--json', 'config', 'agent-profile']);
       expect(res.exitCode).toBeNull();
-      const out = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
-      const tpl = out.data ?? out;
+      const out = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join('')) as Record<string, unknown>;
+      const tpl = expectJsonEnvelopeShape(out, ['label', 'description', 'limits', 'defaults']) as {
+        label: string;
+        limits: { dailyCap: number };
+        defaults: { auditLog: boolean };
+      };
       expect(tpl.label).toBe('agent');
       expect(tpl.limits.dailyCap).toBe(100);
       expect(tpl.defaults.auditLog).toBe(true);
@@ -222,10 +244,15 @@ describe('config command', () => {
     it('--write --json returns ok:true with path and template', async () => {
       const res = await runCli(registerConfigCommand, ['--json', 'config', 'agent-profile', '--write']);
       expect(res.exitCode).toBeNull();
-      const out = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
-      expect(out.data.ok).toBe(true);
-      expect(typeof out.data.path).toBe('string');
-      expect(out.data.template.label).toBe('agent');
+      const out = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join('')) as Record<string, unknown>;
+      const data = expectJsonEnvelopeShape(out, ['ok', 'path', 'template']) as {
+        ok: boolean;
+        path: string;
+        template: { label: string };
+      };
+      expect(data.ok).toBe(true);
+      expect(typeof data.path).toBe('string');
+      expect(data.template.label).toBe('agent');
     });
   });
 });

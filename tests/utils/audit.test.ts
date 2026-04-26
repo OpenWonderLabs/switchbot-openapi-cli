@@ -183,4 +183,48 @@ describe('audit log', () => {
     expect(report.fileMissing).toBe(true);
     expect(report.problems).toHaveLength(0);
   });
+
+  // Contract guard: the 3.3.1 review flagged the dry-run path in
+  // src/lib/devices.ts as unguarded (call site has no try/catch around
+  // writeAudit). The code is fine because writeAudit already swallows
+  // fs failures internally — but that's the contract callers rely on.
+  // If anyone removes the internal try/catch in src/utils/audit.ts,
+  // this test fails immediately rather than surfacing as a crash on a
+  // full disk / file-locked Windows box / permission-denied audit dir
+  // in production.
+  it.each([
+    { label: 'appendFileSync throws (disk full / permission denied)', spy: 'append' as const },
+    { label: 'mkdirSync throws (no permission to create parent dir)', spy: 'mkdir' as const },
+  ])('writeAudit is best-effort — $label', ({ spy }) => {
+    const file = path.join(tmp, 'nested', 'audit.log');
+    process.argv = ['node', 'cli', '--audit-log', '--audit-log-path', file];
+    const appendSpy = vi.spyOn(fs, 'appendFileSync').mockImplementation(() => {
+      if (spy === 'append') {
+        throw Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' });
+      }
+    });
+    const mkdirSpy = vi.spyOn(fs, 'mkdirSync').mockImplementation(() => {
+      if (spy === 'mkdir') {
+        throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+      }
+      return undefined;
+    });
+    try {
+      expect(() =>
+        writeAudit({
+          t: '2026-04-26T00:00:00.000Z',
+          kind: 'command',
+          deviceId: 'X',
+          command: 'turnOn',
+          parameter: undefined,
+          commandType: 'command',
+          dryRun: true,
+          result: 'dry-run',
+        }),
+      ).not.toThrow();
+    } finally {
+      appendSpy.mockRestore();
+      mkdirSpy.mockRestore();
+    }
+  });
 });

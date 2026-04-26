@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { HealthReport } from '../../src/utils/health.js';
+import { expectJsonEnvelopeShape } from '../helpers/contracts.js';
 
 const healthMock = vi.hoisted(() => ({
   getHealthReport: vi.fn<[], HealthReport>(),
@@ -41,11 +42,19 @@ describe('health check CLI', () => {
   it('--json exits 0 and includes overall, quota, circuit, process', async () => {
     const res = await runCli(registerHealthCommand, ['--json', 'health', 'check']);
     expect(res.exitCode).toBeNull();
-    const body = JSON.parse(res.stdout.join('')) as { data: HealthReport };
-    expect(body.data.overall).toBe('ok');
-    expect(body.data.quota).toBeDefined();
-    expect(body.data.circuit).toBeDefined();
-    expect(body.data.process).toBeDefined();
+    const body = JSON.parse(res.stdout.join('')) as Record<string, unknown>;
+    const data = expectJsonEnvelopeShape(body, [
+      'generatedAt',
+      'overall',
+      'process',
+      'quota',
+      'audit',
+      'circuit',
+    ]) as HealthReport;
+    expect(data.overall).toBe('ok');
+    expect(data.quota).toBeDefined();
+    expect(data.circuit).toBeDefined();
+    expect(data.process).toBeDefined();
   });
 
   it('--json exits 0 even when overall is degraded (no process.exit in JSON mode)', async () => {
@@ -58,6 +67,12 @@ describe('health check CLI', () => {
 
   it('human mode exits 0 and prints ✓ overall when healthy', async () => {
     const res = await runCli(registerHealthCommand, ['health', 'check']);
+    expect(res.exitCode).toBeNull();
+    expect(res.stdout.join(' ')).toMatch(/overall.*ok/i);
+  });
+
+  it('bare health defaults to check', async () => {
+    const res = await runCli(registerHealthCommand, ['health']);
     expect(res.exitCode).toBeNull();
     expect(res.stdout.join(' ')).toMatch(/overall.*ok/i);
   });

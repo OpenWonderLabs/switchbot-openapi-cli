@@ -67,6 +67,7 @@ vi.mock('../../src/utils/flags.js', () => flagsMock);
 
 import { registerPlanCommand, validatePlan } from '../../src/commands/plan.js';
 import { runCli } from '../helpers/cli.js';
+import { expectJsonEnvelopeContainingKeys } from '../helpers/contracts.js';
 
 describe('plan command', () => {
   let tmp: string;
@@ -161,9 +162,10 @@ describe('plan command', () => {
         steps: [{ type: 'command', deviceId: 'A', command: 'turnOn' }],
       });
       const res = await runCli(registerPlanCommand, ['--json', 'plan', 'validate', file]);
-      const out = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join('')).data;
-      expect(out.valid).toBe(true);
-      expect(out.steps).toBe(1);
+      const out = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join('')) as Record<string, unknown>;
+      const data = expectJsonEnvelopeContainingKeys(out, ['valid', 'steps']) as { valid: boolean; steps: number };
+      expect(data.valid).toBe(true);
+      expect(data.steps).toBe(1);
     });
 
     it('--help output contains "structural only" (bug #32)', async () => {
@@ -270,9 +272,36 @@ describe('plan command', () => {
       });
       apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body: {} } });
       const res = await runCli(registerPlanCommand, ['--json', 'plan', 'run', file]);
-      const out = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join('')).data;
-      expect(out.ran).toBe(true);
-      expect(out.summary).toEqual({ total: 1, ok: 1, error: 0, skipped: 0 });
+      const out = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join('')) as Record<string, unknown>;
+      const data = expectJsonEnvelopeContainingKeys(out, ['ran', 'planId', 'summary', 'results']) as {
+        ran: boolean;
+        summary: Record<string, number>;
+      };
+      expect(data.ran).toBe(true);
+      expect(data.summary).toEqual({ total: 1, ok: 1, error: 0, skipped: 0, dryRun: 0 });
+    });
+
+    it('--dry-run reports command steps with status=dry-run instead of ok', async () => {
+      flagsMock.dryRun = true;
+      const file = writePlan({
+        version: '1.0',
+        steps: [{ type: 'command', deviceId: 'BOT1', command: 'turnOn' }],
+      });
+      apiMock.__instance.post.mockImplementation(async () => {
+        throw new apiMock.DryRunSignal('POST', '/v1.1/devices/BOT1/commands');
+      });
+
+      const res = await runCli(registerPlanCommand, ['--json', '--dry-run', 'plan', 'run', file]);
+      const out = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join('')) as Record<string, unknown>;
+      const data = expectJsonEnvelopeContainingKeys(out, ['ran', 'planId', 'summary', 'results']) as {
+        ran: boolean;
+        summary: Record<string, number>;
+        results: Array<{ status: string }>;
+      };
+
+      expect(data.ran).toBe(true);
+      expect(data.summary).toEqual({ total: 1, ok: 0, error: 0, skipped: 0, dryRun: 1 });
+      expect(data.results[0].status).toBe('dry-run');
     });
 
     it('writes audit entries tagged with the generated planId', async () => {
@@ -284,13 +313,24 @@ describe('plan command', () => {
       apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body: {} } });
 
       const res = await runCli(registerPlanCommand, ['--json', 'plan', 'run', file]);
-      const out = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join('')).data;
+      const out = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join('')) as Record<string, unknown>;
+      const data = expectJsonEnvelopeContainingKeys(out, ['ran', 'planId', 'summary', 'results']) as { planId: string };
       const entries = readAudit(auditFile);
 
       expect(entries).toHaveLength(1);
       expect(entries[0].deviceId).toBe('BOT1');
       expect(entries[0].result).toBe('ok');
-      expect(entries[0].planId).toBe(out.planId);
+      expect(entries[0].planId).toBe(data.planId);
+    });
+  });
+
+  describe('plan suggest', () => {
+    it('exits 2 for unsupported Chinese command intent instead of defaulting to turnOn', async () => {
+      const res = await runCli(registerPlanCommand, [
+        'plan', 'suggest', '--intent', '关掉所有灯', '--device', 'BOT1',
+      ]);
+      expect(res.exitCode).toBe(2);
+      expect(res.stderr.join('\n')).toMatch(/cannot safely infer/i);
     });
   });
 });

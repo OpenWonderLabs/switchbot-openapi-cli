@@ -70,6 +70,11 @@ describe('suggestPlan', () => {
     expect(plan.steps[0]).toMatchObject({ command: 'turnOn' });
   });
 
+  it('fails fast on unsupported Chinese command intent instead of defaulting silently', () => {
+    expect(() => suggestPlan({ intent: '关掉所有灯', devices: [{ id: 'D1' }] }))
+      .toThrow(/cannot safely infer/i);
+  });
+
   it('generates one step per device', () => {
     const { plan } = suggestPlan({ intent: 'turn off', devices });
     expect(plan.steps).toHaveLength(2);

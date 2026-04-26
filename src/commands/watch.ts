@@ -3,7 +3,7 @@ import { printJson, isJsonMode, handleError, UsageError, emitStreamHeader } from
 import { fetchDeviceStatus } from '../lib/devices.js';
 import { getCachedDevice } from '../devices/cache.js';
 import { parseDurationToMs, getFields } from '../utils/flags.js';
-import { intArg, durationArg, stringArg } from '../utils/arg-parsers.js';
+import { intArg, durationArg, stringArg, enumArg } from '../utils/arg-parsers.js';
 import { createClient } from '../api/client.js';
 import { resolveDeviceId } from '../utils/name-resolver.js';
 import { resolveFieldList, listAllCanonical } from '../schema/field-aliases.js';
@@ -17,8 +17,11 @@ interface TickEvent {
   deviceId: string;
   type?: string;
   changed: Record<string, { from: unknown; to: unknown }>;
+  snapshot?: Record<string, unknown>;
   error?: string;
 }
+
+const INITIAL_MODES = ['snapshot', 'emit', 'skip'] as const;
 
 function diff(
   prev: Record<string, unknown> | undefined,
@@ -41,6 +44,12 @@ function formatHumanLine(ev: TickEvent): string {
   const when = new Date(ev.t).toLocaleTimeString();
   const head = `[${when}] ${ev.deviceId}${ev.type ? ` (${ev.type})` : ''}`;
   if (ev.error) return `${head}: error — ${ev.error}`;
+  if (ev.snapshot) {
+    const pairs = Object.entries(ev.snapshot)
+      .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+      .join(', ');
+    return `${head}: snapshot ${pairs}`;
+  }
   const keys = Object.keys(ev.changed);
   if (keys.length === 0) return `${head}: no changes`;
   const pairs = keys
@@ -84,15 +93,20 @@ export function registerWatchCommand(devices: Command): void {
     .option('--max <n>', 'Stop after N ticks (default: run until Ctrl-C)', intArg('--max', { min: 1 }))
     .option('--for <dur>', 'Stop after elapsed time (e.g. "5m", "30s"). Combines with --max: first limit wins.', durationArg('--for'))
     .option('--include-unchanged', 'Emit a tick even when no field changed')
+    .option('--initial <mode>', 'How to handle the first poll: snapshot | emit | skip (default: snapshot)', enumArg('--initial', INITIAL_MODES), 'snapshot')
     .addHelpText(
       'after',
       `
 Default output is a human-readable table of field changes per tick; add --json
 to get one JSON-Lines record per deviceId per tick (the agent-friendly form).
 
-The very first poll emits a seed tick with "from": null for every field, so
-the initial state is observable. Subsequent ticks only include fields whose
-value changed (unless --include-unchanged is passed).
+The first poll is configurable:
+  --initial=snapshot  emit one baseline snapshot event, then only diffs
+  --initial=emit      treat the first poll as null -> value changes
+  --initial=skip      record the baseline silently, then only diffs
+
+Subsequent ticks only include fields whose value changed (unless
+--include-unchanged is passed).
 
 Each --json line has the shape:
   { "t": "<ISO>", "tick": <n>, "deviceId": "ID", "type": "Bot",
@@ -116,6 +130,7 @@ Examples:
           max?: string;
           for?: string;
           includeUnchanged?: boolean;
+          initial: 'snapshot' | 'emit' | 'skip';
         },
       ) => {
         try {
@@ -180,7 +195,34 @@ Examples:
                 const cached = getCachedDevice(id);
                 try {
                   const body = await fetchDeviceStatus(id, client);
-                  const changed = diff(prev.get(id), body, fields);
+                  const previous = prev.get(id);
+                  const baseline = fields
+                    ? Object.fromEntries(fields.map((f) => [f, body[f] ?? null]))
+                    : body;
+                  if (!prev.has(id)) {
+                    if (options.initial === 'skip') {
+                      prev.set(id, body);
+                      return;
+                    }
+                    if (options.initial === 'snapshot') {
+                      prev.set(id, body);
+                      const ev: TickEvent = {
+                        t,
+                        tick,
+                        deviceId: id,
+                        type: cached?.type,
+                        changed: {},
+                        snapshot: baseline,
+                      };
+                      if (isJsonMode()) {
+                        printJson(ev);
+                      } else {
+                        console.log(formatHumanLine(ev));
+                      }
+                      return;
+                    }
+                  }
+                  const changed = diff(previous, body, fields);
                   prev.set(id, body);
                   if (Object.keys(changed).length === 0 && !options.includeUnchanged) {
                     return;

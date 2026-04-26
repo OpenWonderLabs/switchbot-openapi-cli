@@ -2,12 +2,12 @@ import { Command } from 'commander';
 import fs from 'node:fs';
 import readline from 'node:readline';
 import { randomUUID } from 'node:crypto';
-import { printJson, isJsonMode, handleError, exitWithError } from '../utils/output.js';
+import { printJson, isJsonMode, handleError, exitWithError, UsageError } from '../utils/output.js';
 import { executeCommand, isDestructiveCommand } from '../lib/devices.js';
 import { executeScene } from '../lib/scenes.js';
 import { getCachedDevice } from '../devices/cache.js';
 import { resolveDeviceId } from '../utils/name-resolver.js';
-import { COMMAND_KEYWORDS } from '../lib/command-keywords.js';
+import { containsCjk, inferCommandFromIntent } from '../lib/command-keywords.js';
 import {
   savePlanRecord,
   loadPlanRecord,
@@ -218,14 +218,13 @@ export interface SuggestResult {
 
 export function suggestPlan(opts: SuggestOptions): SuggestResult {
   const warnings: string[] = [];
-  let command = '';
-  for (const k of COMMAND_KEYWORDS) {
-    if (k.pattern.test(opts.intent)) {
-      command = k.command;
-      break;
-    }
-  }
+  let command = inferCommandFromIntent(opts.intent) ?? '';
   if (!command) {
+    if (containsCjk(opts.intent)) {
+      throw new UsageError(
+        `Intent "${opts.intent}" contains non-English command text that this heuristic cannot safely infer. Use explicit English command words (turnOn/turnOff/open/close/lock/unlock/press/pause) or author the plan manually.`,
+      );
+    }
     command = 'turnOn';
     warnings.push(
       `Could not infer command from intent "${opts.intent}" — defaulted to "turnOn". Edit the generated plan to set the correct command.`,
@@ -281,11 +280,11 @@ async function promptApproval(stepIdx: number, command: string, deviceId: string
 interface PlanRunResult {
   plan: Plan;
   results: Array<
-    | { step: number; type: 'command'; deviceId: string; command: string; status: 'ok' | 'error' | 'skipped'; error?: string; decision?: 'approved' | 'rejected' }
+    | { step: number; type: 'command'; deviceId: string; command: string; status: 'ok' | 'error' | 'skipped' | 'dry-run'; error?: string; decision?: 'approved' | 'rejected' }
     | { step: number; type: 'scene'; sceneId: string; status: 'ok' | 'error' | 'skipped'; error?: string }
     | { step: number; type: 'wait'; ms: number; status: 'ok' | 'skipped' }
   >;
-  summary: { total: number; ok: number; error: number; skipped: number };
+  summary: { total: number; ok: number; error: number; skipped: number; dryRun: number };
 }
 
 /** Shared plan-execution core used by both `plan run` and `plan execute`. */
@@ -297,7 +296,7 @@ async function executePlanSteps(
   const out: PlanRunResult = {
     plan,
     results: [],
-    summary: { total: plan.steps.length, ok: 0, error: 0, skipped: 0 },
+    summary: { total: plan.steps.length, ok: 0, error: 0, skipped: 0, dryRun: 0 },
   };
   for (let i = 0; i < plan.steps.length; i++) {
     const step = plan.steps[i];
@@ -356,8 +355,8 @@ async function executePlanSteps(
       if (!isJsonMode()) console.log(`  ${idx}. ✓ ${step.command} on ${resolvedDeviceId}`);
     } catch (err) {
       if (err instanceof Error && err.name === 'DryRunSignal') {
-        out.results.push({ step: idx, type: 'command', deviceId: resolvedDeviceId, command: step.command, status: 'ok' });
-        out.summary.ok++;
+        out.results.push({ step: idx, type: 'command', deviceId: resolvedDeviceId, command: step.command, status: 'dry-run' });
+        out.summary.dryRun++;
         if (!isJsonMode()) console.log(`  ${idx}. ◦ dry-run ${step.command} on ${resolvedDeviceId}`);
         continue;
       }
@@ -462,24 +461,28 @@ against the live API without executing any mutations.
     )
     .option('--out <file>', 'Write plan JSON to file instead of stdout')
     .action((opts: { intent: string; device: string[]; out?: string }) => {
-      if (opts.device.length === 0) {
-        console.error('error: at least one --device is required');
-        process.exit(1);
-      }
-      const devices = opts.device.map((ref) => {
-        const cached = getCachedDevice(ref);
-        return { id: ref, name: cached?.name, type: cached?.type };
-      });
-      const { plan: suggested, warnings } = suggestPlan({ intent: opts.intent, devices });
-      for (const w of warnings) process.stderr.write(`warning: ${w}\n`);
-      const json = JSON.stringify(suggested, null, 2);
-      if (opts.out) {
-        fs.writeFileSync(opts.out, json + '\n', 'utf8');
-        if (!isJsonMode()) console.log(`✓ plan written to ${opts.out}`);
-      } else if (isJsonMode()) {
-        printJson({ plan: suggested, warnings });
-      } else {
-        console.log(json);
+      try {
+        if (opts.device.length === 0) {
+          console.error('error: at least one --device is required');
+          process.exit(1);
+        }
+        const devices = opts.device.map((ref) => {
+          const cached = getCachedDevice(ref);
+          return { id: ref, name: cached?.name, type: cached?.type };
+        });
+        const { plan: suggested, warnings } = suggestPlan({ intent: opts.intent, devices });
+        for (const w of warnings) process.stderr.write(`warning: ${w}\n`);
+        const json = JSON.stringify(suggested, null, 2);
+        if (opts.out) {
+          fs.writeFileSync(opts.out, json + '\n', 'utf8');
+          if (!isJsonMode()) console.log(`✓ plan written to ${opts.out}`);
+        } else if (isJsonMode()) {
+          printJson({ plan: suggested, warnings });
+        } else {
+          console.log(json);
+        }
+      } catch (err) {
+        handleError(err);
       }
     });
 

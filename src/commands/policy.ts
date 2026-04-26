@@ -11,7 +11,7 @@ import {
   PolicyFileNotFoundError,
   PolicyYamlParseError,
 } from '../policy/load.js';
-import { validateLoadedPolicy } from '../policy/validate.js';
+import { validateLoadedPolicy, validateLoadedPolicyAgainstInventory } from '../policy/validate.js';
 import { formatValidationResult } from '../policy/format.js';
 import {
   CURRENT_POLICY_SCHEMA_VERSION,
@@ -21,6 +21,8 @@ import {
 import { planMigration, PolicyMigrationError } from '../policy/migrate.js';
 import { addRuleToPolicyFile, AddRuleError } from '../policy/add-rule.js';
 import { diffPolicyValues } from '../policy/diff.js';
+import { tryLoadConfig } from '../config.js';
+import { fetchDeviceList } from '../lib/devices.js';
 
 // Latest version the CLI knows how to migrate *to*.
 // CURRENT_POLICY_SCHEMA_VERSION is the version `policy new` emits by default.
@@ -88,6 +90,20 @@ function exitPolicyError(kind: 'file-not-found' | 'yaml-parse' | 'internal', mes
   process.exit(code);
 }
 
+function validationScopeLine(scope: string): string {
+  if (scope === 'schema+offline-semantics+live-inventory') {
+    return 'Validation scope: schema + offline semantics + live inventory checks + local safety guards.';
+  }
+  return 'Validation scope: schema + offline semantics + local safety guards.';
+}
+
+function validationNotCheckedLine(scope: string): string {
+  if (scope === 'schema+offline-semantics+live-inventory') {
+    return 'Not checked: live capabilities, current firmware, and runtime-only device behavior.';
+  }
+  return 'Not checked: alias targets against live devices; command support on the real target device, live capabilities, or current firmware.';
+}
+
 function summarizeChangeValue(v: unknown): string {
   if (v === null) return 'null';
   if (v === undefined) return 'undefined';
@@ -110,10 +126,11 @@ audit log path, and which actions always or never need confirmation.
 Default location: ${DEFAULT_POLICY_PATH}
 
 Subcommands:
-  validate [path]   Check a policy file against the embedded schema
+  validate [path]   Check a policy file against the embedded schema + offline semantics
+                    (add --live to resolve aliases and rule targets against current inventory)
   new [path]        Write a starter policy to the default location (or a given path)
-  migrate [path]    Upgrade a policy file to the latest supported schema
-                    (v${CURRENT_POLICY_SCHEMA_VERSION} → v${LATEST_SUPPORTED_VERSION} today; no-op if already current)
+  migrate [path]    Rewrite a policy file between schema versions this CLI still supports
+                    (this build only supports v${CURRENT_POLICY_SCHEMA_VERSION}; legacy v0.1 files cannot be migrated here)
   diff <left> <right>
                     Compare two policy files and print structural + line diff
   add-rule          Append a rule YAML (from stdin) into automation.rules[]
@@ -145,10 +162,13 @@ Examples:
 
   policy
     .command('validate [path]')
-    .description(`Validate a policy.yaml against the embedded v${CURRENT_POLICY_SCHEMA_VERSION} schema`)
+    .description(
+      `Validate a policy.yaml against the embedded v${CURRENT_POLICY_SCHEMA_VERSION} schema, offline semantics, and local safety guards`,
+    )
+    .option('--live', 'Also resolve aliases and rule target devices against the current account inventory (1 API call)')
     .option('--no-color', 'disable ANSI color in human output')
     .option('--no-snippet', 'omit the source-line + caret preview')
-    .action((pathArg: string | undefined, opts: { color?: boolean; snippet?: boolean }) => {
+    .action(async (pathArg: string | undefined, opts: { color?: boolean; snippet?: boolean; live?: boolean }) => {
       const policyPath = resolvePolicyPath({ flag: pathArg });
 
       let loaded;
@@ -170,7 +190,22 @@ Examples:
         exitPolicyError('internal', `unexpected error loading policy: ${String(err)}`);
       }
 
-      const result = validateLoadedPolicy(loaded);
+      let result = validateLoadedPolicy(loaded);
+      if (opts.live) {
+        if (!tryLoadConfig()) {
+          exitWithError({
+            code: 1,
+            kind: 'runtime',
+            message: 'policy validate --live requires configured SwitchBot credentials.',
+            extra: {
+              hint: "Run 'switchbot config set-token' first, or set SWITCHBOT_TOKEN and SWITCHBOT_SECRET.",
+            },
+          });
+          return;
+        }
+        const inventory = await fetchDeviceList(undefined, { bypassCache: true });
+        result = validateLoadedPolicyAgainstInventory(loaded, inventory);
+      }
 
       if (isJsonMode()) {
         printJson(result);
@@ -183,15 +218,19 @@ Examples:
           noSnippet: opts.snippet === false,
         }),
       );
+      console.log('');
+      console.log(validationScopeLine(result.validationScope));
+      console.log(validationNotCheckedLine(result.validationScope));
       process.exit(result.valid ? 0 : 1);
     });
 
   policy
     .command('new [path]')
     .description('Write a starter policy.yaml (fails if the file exists unless --force)')
+    .option('-o, --output <path>', 'write the starter policy to this path (alias of positional [path])')
     .option('-f, --force', 'overwrite an existing policy file')
-    .action((pathArg: string | undefined, opts: { force?: boolean }) => {
-      const policyPath = resolvePolicyPath({ flag: pathArg });
+    .action((pathArg: string | undefined, opts: { force?: boolean; output?: string }) => {
+      const policyPath = resolvePolicyPath({ flag: opts.output ?? pathArg });
       const force = opts.force === true;
 
       let result: ScaffoldPolicyResult;
@@ -225,7 +264,7 @@ Examples:
 
   policy
     .command('migrate [path]')
-    .description(`Upgrade a policy file to the latest supported schema (currently v${LATEST_SUPPORTED_VERSION})`)
+    .description(`Rewrite a policy file between schema versions supported by this CLI (currently only v${LATEST_SUPPORTED_VERSION})`)
     .option('--dry-run', 'show what would change without writing the file')
     .option(
       '--to <version>',
@@ -273,8 +312,13 @@ Examples:
       }
 
       if (!SUPPORTED_POLICY_SCHEMA_VERSIONS.includes(fileVersion as PolicySchemaVersion)) {
-        const message = `policy schema v${fileVersion} is not supported by this CLI (supports: ${SUPPORTED_POLICY_SCHEMA_VERSIONS.join(', ')})`;
-        const hint = 'upgrade @switchbot/openapi-cli, or downgrade the policy file to a supported version';
+        const isLegacy = fileVersion === '0.1';
+        const message = isLegacy
+          ? `policy schema v${fileVersion} is legacy and cannot be migrated by this CLI`
+          : `policy schema v${fileVersion} is not supported by this CLI (supports: ${SUPPORTED_POLICY_SCHEMA_VERSIONS.join(', ')})`;
+        const hint = isLegacy
+          ? 'use @switchbot/openapi-cli <=2.15 to migrate v0.1 first, then upgrade back to this release'
+          : 'upgrade @switchbot/openapi-cli, or downgrade the policy file to a supported version';
         if (isJsonMode())
           emitJsonError({ code: 6, kind: 'unsupported-version', ...basePayload, message, hint });
         else {

@@ -49,7 +49,7 @@ export function emitStreamHeader(opts: {
 }): void {
   console.log(
     JSON.stringify({
-      schemaVersion: '1',
+      schemaVersion: SCHEMA_VERSION,
       stream: true,
       eventKind: opts.eventKind,
       cadence: opts.cadence,

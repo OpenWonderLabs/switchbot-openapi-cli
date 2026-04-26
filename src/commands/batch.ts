@@ -364,7 +364,6 @@ Examples:
               : undefined,
           }));
           const planDoc = {
-            schemaVersion: '1.1',
             dryRun: true,
             plan: {
               command: cmd,
@@ -503,7 +502,6 @@ Examples:
             skipped: dryRunned.length + preSkipped.length,
             durationMs: Date.now() - startedAt,
             unverifiableCount: succeeded.filter((s) => getCachedDevice(s.deviceId)?.category === 'ir').length,
-            schemaVersion: '1.1',
             maxConcurrent: concurrency,
             staggerMs,
             ...(dryRun ? { dryRun: true } : {}),

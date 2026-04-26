@@ -72,9 +72,10 @@ vi.mock('../../src/devices/cache.js', () => ({
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { createSwitchBotMcpServer } from '../../src/commands/mcp.js';
+import { createSwitchBotMcpServer, registerMcpCommand } from '../../src/commands/mcp.js';
 import { registerPolicyCommand } from '../../src/commands/policy.js';
 import { ApiError } from '../../src/api/client.js';
+import { runCli } from '../helpers/cli.js';
 
 /** Connect a fresh server + client pair and return both. */
 async function pair() {
@@ -126,6 +127,28 @@ function runPolicyDiffCliJson(leftPath: string, rightPath: string): Record<strin
 }
 
 describe('mcp server', () => {
+  it('mcp tools --json returns a machine-readable tool directory', async () => {
+    const res = await runCli(registerMcpCommand, ['--json', 'mcp', 'tools']);
+    expect(res.exitCode).toBeNull();
+    const out = JSON.parse(res.stdout.join('\n'));
+    expect(Object.keys(out)).toEqual(['schemaVersion', 'data']);
+    expect(Object.keys(out.data)).toEqual(['tools', 'resources']);
+    expect(Array.isArray(out.data.tools)).toBe(true);
+    expect(out.data.tools.some((t: { name: string }) => t.name === 'list_devices')).toBe(true);
+    expect(Array.isArray(out.data.resources)).toBe(true);
+    expect(out.data.resources.some((r: { uri: string }) => r.uri === 'switchbot://events')).toBe(true);
+  });
+
+  it('mcp list-tools --json is an alias of mcp tools', async () => {
+    const res = await runCli(registerMcpCommand, ['--json', 'mcp', 'list-tools']);
+    expect(res.exitCode).toBeNull();
+    const out = JSON.parse(res.stdout.join('\n'));
+    expect(Array.isArray(out.data.tools)).toBe(true);
+    expect(out.data.tools.some((t: { name: string }) => t.name === 'list_devices')).toBe(true);
+    expect(Array.isArray(out.data.resources)).toBe(true);
+    expect(out.data.resources.some((r: { uri: string }) => r.uri === 'switchbot://events')).toBe(true);
+  });
+
   beforeEach(() => {
     apiMock.__instance.get.mockReset();
     apiMock.__instance.post.mockReset();
@@ -444,6 +467,8 @@ describe('mcp server', () => {
     expect(res.isError).toBe(true);
     const text = (res.content as Array<{ text: string }>)[0].text;
     expect(text).toMatch(/No device with id/);
+    expect(apiMock.__instance.get).toHaveBeenCalledTimes(1);
+    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/devices');
   });
 
   it('describe_device with live:true merges /status payload', async () => {
@@ -860,6 +885,8 @@ describe('mcp server', () => {
       expect(sc.present).toBe(false);
       expect(sc.valid).toBeNull();
       expect(sc.policyPath).toBe(missing);
+      expect(sc.validationScope).toBe('schema+offline-semantics');
+      expect(Array.isArray(sc.limitations)).toBe(true);
     });
 
     it('policy_validate returns valid:false with unsupported-version on a v0.1 file (v3.0)', async () => {
@@ -874,6 +901,7 @@ describe('mcp server', () => {
       const sc = (res as { structuredContent?: Record<string, unknown> }).structuredContent!;
       expect(sc.present).toBe(true);
       expect(sc.valid).toBe(false);
+      expect(sc.validationScope).toBe('schema+offline-semantics');
       const errors = sc.errors as Array<{ keyword: string }>;
       expect(Array.isArray(errors)).toBe(true);
       expect(errors.some((e) => e.keyword === 'unsupported-version')).toBe(true);
@@ -894,6 +922,34 @@ describe('mcp server', () => {
       expect(sc.present).toBe(true);
       expect(sc.valid).toBe(false);
       expect((sc.errors as unknown[]).length).toBeGreaterThan(0);
+    });
+
+    it('policy_validate live:true resolves aliases against the current inventory', async () => {
+      const policyPath = path.join(tmp, 'live-bad.yaml');
+      fs.writeFileSync(
+        policyPath,
+        [
+          'version: "0.2"',
+          'aliases:',
+          '  room-sensor: 01-202407090924-26354212',
+          '',
+        ].join('\n'),
+      );
+      process.env.SWITCHBOT_TOKEN = 't';
+      process.env.SWITCHBOT_SECRET = 's';
+      apiMock.__instance.get.mockResolvedValueOnce({
+        data: { body: { deviceList: [], infraredRemoteList: [] } },
+      });
+      const { client } = await pair();
+      const res = await client.callTool({
+        name: 'policy_validate',
+        arguments: { path: policyPath, live: true },
+      });
+      const sc = (res as { structuredContent?: Record<string, unknown> }).structuredContent!;
+      expect(sc.valid).toBe(false);
+      expect(sc.validationScope).toBe('schema+offline-semantics+live-inventory');
+      const errors = sc.errors as Array<{ keyword: string }>;
+      expect(errors.some((e) => e.keyword === 'alias-live-device-not-found')).toBe(true);
     });
 
     it('policy_new writes a starter file and refuses to overwrite without force', async () => {

@@ -3,6 +3,7 @@ import { stringArg } from '../utils/arg-parsers.js';
 import { handleError, isJsonMode, printJson } from '../utils/output.js';
 import {
   getStatusSyncStatus,
+  probeStatusSyncStart,
   runStatusSyncForeground,
   startStatusSync,
   stopStatusSync,
@@ -75,11 +76,21 @@ Examples:
     .option('--topic <pattern>', 'MQTT topic filter (default: SwitchBot shadow topic from credential)', stringArg('--topic'))
     .option('--state-dir <path>', 'Override the status-sync state directory (or env SWITCHBOT_STATUS_SYNC_HOME)', stringArg('--state-dir'))
     .option('--force', 'Stop any existing status-sync bridge before starting a new one')
+    .option('--probe', 'Perform online preflight: fetch MQTT credentials and probe the OpenClaw URL before spawning')
     .addHelpText(
       'after',
       `
 Starts a detached child process that runs:
   switchbot status-sync run ...
+
+Local preflight before spawning:
+  - SwitchBot credentials must be configured
+  - OpenClaw token + model must be present
+  - OpenClaw URL must parse as http:// or https://
+
+Optional online preflight with --probe:
+  - fetch MQTT credentials from SwitchBot
+  - perform a short HTTP probe against the OpenClaw URL
 
 State files:
   state.json   process metadata (pid, startedAt, command)
@@ -92,15 +103,19 @@ Examples:
   $ switchbot status-sync start --state-dir ~/.switchbot/custom-status-sync --force
 `,
     )
-    .action((options: {
+    .action(async (options: {
       openclawUrl?: string;
       openclawToken?: string;
       openclawModel?: string;
       topic?: string;
       stateDir?: string;
       force?: boolean;
+      probe?: boolean;
     }) => {
       try {
+        if (options.probe) {
+          await probeStatusSyncStart(options);
+        }
         const status = startStatusSync(options);
         if (isJsonMode()) {
           printJson(status);

@@ -68,10 +68,14 @@ describe('device cache', () => {
     expect(raw.devices['IR-1']).toEqual({ type: 'TV', name: 'TV Remote', category: 'ir' });
   });
 
-  it('skips physical devices without deviceType', () => {
+  it('keeps physical devices even when deviceType is missing', () => {
     updateCacheFromDeviceList(sampleBody);
     const cache = loadCache();
-    expect(cache?.devices['PHY-3']).toBeUndefined();
+    expect(cache?.devices['PHY-3']).toEqual({
+      type: '',
+      name: 'AI',
+      category: 'physical',
+    });
   });
 
   it('getCachedDevice returns cached entry', () => {

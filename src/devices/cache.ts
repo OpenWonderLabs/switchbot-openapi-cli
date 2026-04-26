@@ -149,9 +149,11 @@ export function updateCacheFromDeviceList(body: DeviceListBodyShape): void {
   const devices: Record<string, CachedDevice> = {};
 
   for (const d of body.deviceList) {
-    if (!d.deviceId || !d.deviceType) continue;
+    if (!d.deviceId) continue;
     devices[d.deviceId] = {
-      type: d.deviceType,
+      // Some real devices omit deviceType entirely (for example AI accessories).
+      // Keep them in cache with an empty type string rather than dropping the row.
+      type: d.deviceType ?? '',
       name: d.deviceName,
       category: 'physical',
       hubDeviceId: d.hubDeviceId,

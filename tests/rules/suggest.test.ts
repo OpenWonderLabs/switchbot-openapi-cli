@@ -138,10 +138,11 @@ describe('suggestRule', () => {
       });
       if (rule.when.source === 'mqtt') expect(rule.when.device).toBe('motion sensor');
       expect(rule.then).toHaveLength(1);
-      expect(rule.then[0].device).toBe('lamp-1');
+      expect(rule.then[0].device).toBeUndefined();
+      expect(rule.then[0].command).toBe('devices command lamp-1 turnOn');
     });
 
-    it('emits action device IDs in YAML instead of display names', () => {
+    it('emits action device IDs inline in the command instead of a separate device field', () => {
       const { ruleYaml } = suggestRule({
         intent: 'motion turns on lamp',
         trigger: 'mqtt',
@@ -151,8 +152,9 @@ describe('suggestRule', () => {
           { id: 'lamp-1', name: 'Hallway Lamp' },
         ],
       });
-      expect(ruleYaml).toContain('device: lamp-1');
+      expect(ruleYaml).toContain('command: devices command lamp-1 turnOn');
       expect(ruleYaml).not.toContain('device: Hallway Lamp');
+      expect(ruleYaml).not.toContain('device: lamp-1');
     });
 
     it('uses all devices as action targets for cron trigger', () => {

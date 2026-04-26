@@ -4,7 +4,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
 import { intArg, stringArg } from '../utils/arg-parsers.js';
-import { handleError, isJsonMode, buildErrorPayload, exitWithError, type ErrorPayload, type ErrorSubKind } from '../utils/output.js';
+import { handleError, isJsonMode, printJson, buildErrorPayload, exitWithError, type ErrorPayload, type ErrorSubKind } from '../utils/output.js';
 import { VERSION } from '../version.js';
 import {
   fetchDeviceList,
@@ -48,7 +48,7 @@ import {
   PolicyFileNotFoundError,
   PolicyYamlParseError,
 } from '../policy/load.js';
-import { validateLoadedPolicy } from '../policy/validate.js';
+import { validateLoadedPolicy, validateLoadedPolicyAgainstInventory } from '../policy/validate.js';
 import {
   CURRENT_POLICY_SCHEMA_VERSION,
   SUPPORTED_POLICY_SCHEMA_VERSIONS,
@@ -136,7 +136,7 @@ interface AuditFilterOptions {
   kinds?: AuditEntry['kind'][];
   deviceId?: string;
   ruleName?: string;
-  results?: Array<'ok' | 'error'>;
+  results?: Array<'ok' | 'error' | 'dry-run'>;
 }
 
 function resolveAuditRange(opts: Pick<AuditFilterOptions, 'since' | 'from' | 'to'>): {
@@ -1113,17 +1113,21 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
     {
       title: 'Validate a policy.yaml file',
       description:
-        'Check a policy file against the embedded JSON Schema (supports v0.1 and v0.2). ' +
-        'Returns the validation result with per-error line/col and a hint. ' +
+        'Check a policy file against the embedded JSON Schema, offline command/device semantics, and local safety guards. ' +
+        'By default this stays offline; set live=true to resolve aliases and rule targets against the current account inventory. ' +
+        'It still does not verify commands against live capabilities, current firmware, or other runtime-only device behavior. ' +
         'When no path is given, reads the resolved default (${SWITCHBOT_POLICY_PATH} or ~/.config/openclaw/switchbot/policy.yaml). ' +
         'Use before relying on aliases/quiet_hours/confirmations so the agent never acts on a broken policy.',
       _meta: { agentSafetyTier: 'read' },
       inputSchema: z.object({
         path: z.string().optional().describe('Optional policy file path; defaults to the resolved default path'),
+        live: z.boolean().optional().describe('When true, also resolve aliases and rule targets against the current account inventory'),
       }).strict(),
       outputSchema: {
         policyPath: z.string(),
         schemaVersion: z.string(),
+        validationScope: z.string(),
+        limitations: z.array(z.string()),
         present: z.boolean().describe('false when the file does not exist'),
         valid: z.boolean().nullable().describe('null when present=false'),
         errors: z.array(z.object({
@@ -1137,14 +1141,25 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         })).describe('Empty when valid or when the file is missing'),
       },
     },
-    async ({ path: pathArg }) => {
+    async ({ path: pathArg, live }) => {
       const policyPath = resolvePolicyPath({ flag: pathArg });
       try {
         const loaded = loadPolicyFile(policyPath);
-        const result = validateLoadedPolicy(loaded);
+        let result = validateLoadedPolicy(loaded);
+        if (live) {
+          if (!tryLoadConfig()) {
+            return mcpError('runtime', 151, 'policy_validate live=true requires configured SwitchBot credentials.', {
+              hint: "Run 'switchbot config set-token' first, or set SWITCHBOT_TOKEN and SWITCHBOT_SECRET.",
+            });
+          }
+          const inventory = await fetchDeviceList(undefined, { bypassCache: true });
+          result = validateLoadedPolicyAgainstInventory(loaded, inventory);
+        }
         const structured = {
           policyPath: result.policyPath,
           schemaVersion: result.schemaVersion,
+          validationScope: result.validationScope,
+          limitations: result.limitations,
           present: true,
           valid: result.valid,
           errors: result.errors,
@@ -1158,6 +1173,11 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
           const structured = {
             policyPath,
             schemaVersion: CURRENT_POLICY_SCHEMA_VERSION,
+            validationScope: 'schema+offline-semantics' as const,
+            limitations: [
+              'Does not resolve aliases against the live device inventory.',
+              'Does not verify commands against the real target device, live capabilities, or current firmware.',
+            ],
             present: false,
             valid: null,
             errors: [],
@@ -1171,6 +1191,11 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
           const structured = {
             policyPath,
             schemaVersion: CURRENT_POLICY_SCHEMA_VERSION,
+            validationScope: 'schema+offline-semantics' as const,
+            limitations: [
+              'Does not resolve aliases against the live device inventory.',
+              'Does not verify commands against the real target device, live capabilities, or current firmware.',
+            ],
             present: true,
             valid: false,
             errors: err.yamlErrors.map((e) => ({
@@ -1243,11 +1268,11 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
     {
       title: 'Migrate a policy file to the latest supported schema',
       description:
-        'Upgrades the policy file\'s schema version in place while preserving comments. ' +
+        'Rewrites a policy file between schema versions this CLI still supports while preserving comments. ' +
         'Safe by default: if the migrated document would fail schema validation, the file is NOT rewritten ' +
         'and the tool returns status="precheck-failed" with the list of errors. ' +
         'Pass dryRun=true to preview without touching the file. ' +
-        'Currently the only supported upgrade path is v0.1 → v0.2.',
+        'This release only supports v0.2, so legacy v0.1 files are reported as unsupported rather than migrated.',
       _meta: { agentSafetyTier: 'action' },
       inputSchema: z.object({
         path: z.string().optional().describe('Optional policy file path; defaults to the resolved default path'),
@@ -1323,10 +1348,13 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
       }
 
       if (!SUPPORTED_POLICY_SCHEMA_VERSIONS.includes(fileVersion as PolicySchemaVersion)) {
+        const isLegacy = fileVersion === '0.1';
         const structured = {
           ...base,
           status: 'unsupported' as const,
-          message: `policy schema v${fileVersion} is not supported (supports: ${SUPPORTED_POLICY_SCHEMA_VERSIONS.join(', ')})`,
+          message: isLegacy
+            ? `policy schema v${fileVersion} is legacy and cannot be migrated by this CLI`
+            : `policy schema v${fileVersion} is not supported (supports: ${SUPPORTED_POLICY_SCHEMA_VERSIONS.join(', ')})`,
         };
         return {
           content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
@@ -1731,7 +1759,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         kinds: z.array(z.enum(['command', 'rule-fire', 'rule-fire-dry', 'rule-throttled', 'rule-webhook-rejected'])).optional().describe('Filter by entry kind.'),
         device_id: z.string().optional().describe('Filter by deviceId.'),
         rule_name: z.string().optional().describe('Filter by rule.name (rule-engine entries).'),
-        results: z.array(z.enum(['ok', 'error'])).optional().describe('Filter by execution result.'),
+        results: z.array(z.enum(['ok', 'error', 'dry-run'])).optional().describe('Filter by execution result.'),
         limit: z.number().int().min(1).max(5000).optional().describe('Max entries returned from the tail of the filtered set (default 200).'),
       }).strict(),
       outputSchema: {
@@ -1788,7 +1816,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         kinds: z.array(z.enum(['command', 'rule-fire', 'rule-fire-dry', 'rule-throttled', 'rule-webhook-rejected'])).optional().describe('Filter by entry kind.'),
         device_id: z.string().optional().describe('Filter by deviceId.'),
         rule_name: z.string().optional().describe('Filter by rule.name (rule-engine entries).'),
-        results: z.array(z.enum(['ok', 'error'])).optional().describe('Filter by execution result.'),
+        results: z.array(z.enum(['ok', 'error', 'dry-run'])).optional().describe('Filter by execution result.'),
         top_n: z.number().int().min(1).max(100).optional().describe('Number of top device/rule rows to return (default 10).'),
       }).strict(),
       outputSchema: {
@@ -1961,6 +1989,30 @@ export function listRegisteredTools(server: McpServer): string[] {
   return Object.keys(internal._registeredTools).sort();
 }
 
+function listRegisteredResources(): string[] {
+  return ['switchbot://events'];
+}
+
+function printMcpToolDirectory(): void {
+  const server = createSwitchBotMcpServer();
+  const tools = listRegisteredTools(server).map((name) => ({ name }));
+  const resources = listRegisteredResources().map((uri) => ({ uri }));
+  if (isJsonMode()) {
+    printJson({ tools, resources });
+    return;
+  }
+  console.log('Tools:');
+  for (const tool of tools) {
+    console.log(`  ${tool.name}`);
+  }
+  console.log('');
+  console.log('Resources:');
+  for (const resource of resources) {
+    console.log(`  ${resource.uri}`);
+  }
+  console.log(`\nTotal: ${tools.length} tool(s), ${resources.length} resource(s)`);
+}
+
 export function registerMcpCommand(program: Command): void {
   const mcp = program
     .command('mcp')
@@ -1978,9 +2030,10 @@ export function registerMcpCommand(program: Command): void {
   - get_device_history      fetch raw JSONL history records for a device
   - query_device_history    filter + page history records with field/time predicates
   - aggregate_device_history compute count/min/max/avg/sum/p50/p95 over history records
-  - policy_validate         check policy.yaml against the embedded schema (v0.1 / v0.2)
+  - policy_validate         check policy.yaml against the embedded schema + offline semantics
+                            (set live=true to resolve aliases and rule targets against current inventory)
   - policy_new              scaffold a starter policy.yaml (action — confirm first)
-  - policy_migrate          upgrade policy.yaml to the latest schema (action — preserves comments)
+  - policy_migrate          rewrite policy.yaml between currently supported schemas (action — preserves comments)
   - policy_diff             compare two policy files with structural + line diff output
   - plan_suggest            draft a Plan JSON from intent + device IDs (heuristic, no LLM)
   - plan_run                validate + execute a Plan JSON document
@@ -2012,6 +2065,16 @@ Example Claude Desktop config (~/Library/Application Support/Claude/claude_deskt
 Inspect locally:
   $ npx @modelcontextprotocol/inspector switchbot mcp serve
 `);
+
+  mcp
+    .command('tools')
+    .description('Print the registered MCP tools in human or JSON form')
+    .action(() => printMcpToolDirectory());
+
+  mcp
+    .command('list-tools')
+    .description('Alias of `mcp tools`')
+    .action(() => printMcpToolDirectory());
 
   mcp
     .command('serve')

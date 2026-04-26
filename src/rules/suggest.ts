@@ -1,5 +1,6 @@
 import { stringify as yamlStringify } from 'yaml';
-import { COMMAND_KEYWORDS } from '../lib/command-keywords.js';
+import { containsCjk, inferCommandFromIntent } from '../lib/command-keywords.js';
+import { UsageError } from '../utils/output.js';
 import type { Rule, MqttTrigger, CronTrigger, WebhookTrigger, Action } from './types.js';
 
 export interface SuggestRuleOptions {
@@ -16,6 +17,13 @@ export interface SuggestRuleResult {
   rule: Rule;
   ruleYaml: string;
   warnings: string[];
+}
+
+function buildSuggestedAction(command: string, deviceId?: string): Action {
+  if (deviceId) {
+    return { command: `devices command ${deviceId} ${command}` };
+  }
+  return { command: `devices command <id> ${command}` };
 }
 
 const TRIGGER_KEYWORDS: Array<{
@@ -55,8 +63,12 @@ function inferSchedule(intent: string, warnings: string[]): string {
 }
 
 function inferCommand(intent: string, warnings: string[]): string {
-  for (const k of COMMAND_KEYWORDS) {
-    if (k.pattern.test(intent)) return k.command;
+  const command = inferCommandFromIntent(intent);
+  if (command) return command;
+  if (containsCjk(intent)) {
+    throw new UsageError(
+      `Intent "${intent}" contains non-English command text that this heuristic cannot safely infer. Use explicit English command words (turnOn/turnOff/open/close/lock/unlock/press/pause) or edit the generated rule manually.`,
+    );
   }
   warnings.push(
     `Could not infer command from intent "${intent}" — defaulted to "turnOn". Edit the generated rule to set the correct command.`,
@@ -66,6 +78,7 @@ function inferCommand(intent: string, warnings: string[]): string {
 
 export function suggestRule(opts: SuggestRuleOptions): SuggestRuleResult {
   const warnings: string[] = [];
+  const cjkIntent = containsCjk(opts.intent);
 
   // Resolve trigger
   let triggerSource = opts.trigger;
@@ -75,6 +88,11 @@ export function suggestRule(opts: SuggestRuleOptions): SuggestRuleResult {
     triggerSource = inferred.trigger;
     inferredEvent = inferred.event;
     if (inferredEvent === 'device.shadow') {
+      if (cjkIntent) {
+        throw new UsageError(
+          `Intent "${opts.intent}" contains non-English trigger text that this heuristic cannot safely infer. Re-run with --trigger and, for mqtt rules, --event explicitly.`,
+        );
+      }
       warnings.push(
         `Could not infer trigger type from intent "${opts.intent}" — defaulted to mqtt/device.shadow. Set --trigger and --event explicitly.`,
       );
@@ -92,6 +110,11 @@ export function suggestRule(opts: SuggestRuleOptions): SuggestRuleResult {
     }
     when = mqttTrigger;
   } else if (triggerSource === 'cron') {
+    if (cjkIntent && !opts.schedule) {
+      throw new UsageError(
+        `Intent "${opts.intent}" contains non-English scheduling text that this heuristic cannot safely infer. Re-run with --schedule "<cron>" explicitly.`,
+      );
+    }
     const schedule = opts.schedule ?? inferSchedule(opts.intent, warnings);
     const cronTrigger: CronTrigger = { source: 'cron', schedule };
     if (opts.days && opts.days.length > 0) cronTrigger.days = opts.days as never;
@@ -108,11 +131,8 @@ export function suggestRule(opts: SuggestRuleOptions): SuggestRuleResult {
       : (opts.devices ?? []);
 
   const then: Action[] = actionDevices.length > 0
-    ? actionDevices.map((d) => ({
-        command: `devices command <id> ${command}`,
-        device: d.id,
-      }))
-    : [{ command: `devices command <id> ${command}` }];
+    ? actionDevices.map((d) => buildSuggestedAction(command, d.id))
+    : [buildSuggestedAction(command)];
 
   const rule: Rule = {
     name: opts.intent,

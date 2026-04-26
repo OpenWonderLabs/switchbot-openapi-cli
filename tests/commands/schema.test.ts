@@ -4,14 +4,14 @@ import os from 'node:os';
 import { registerSchemaCommand } from '../../src/commands/schema.js';
 import { updateCacheFromDeviceList, resetListCache } from '../../src/devices/cache.js';
 import { runCli } from '../helpers/cli.js';
+import { expectJsonEnvelopeContainingKeys } from '../helpers/contracts.js';
 
 describe('schema export', () => {
   it('dumps every catalog type as a JSON payload', async () => {
     const res = await runCli(registerSchemaCommand, ['schema', 'export']);
     const out = res.stdout.join('');
-    const envelope = JSON.parse(out);
-    expect(envelope.schemaVersion).toBe('1.1');
-    const parsed = envelope.data;
+    const envelope = JSON.parse(out) as Record<string, unknown>;
+    const parsed = expectJsonEnvelopeContainingKeys(envelope, ['version', 'types', 'generatedAt', 'resources', 'cliAddedFields']);
     expect(parsed.version).toBe('1.0');
     expect(parsed.generatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(Array.isArray(parsed.types)).toBe(true);
@@ -23,6 +23,14 @@ describe('schema export', () => {
         expect(typeof c.safetyTier).toBe('string');
       }
     }
+  });
+
+  it('bare schema defaults to export', async () => {
+    const res = await runCli(registerSchemaCommand, ['schema']);
+    expect(res.exitCode).toBeNull();
+    const envelope = JSON.parse(res.stdout.join('')) as Record<string, unknown>;
+    const data = expectJsonEnvelopeContainingKeys(envelope, ['version', 'types', 'generatedAt', 'resources', 'cliAddedFields']);
+    expect(Array.isArray(data.types)).toBe(true);
   });
 
   it('filters by --type (matches name + aliases, case-insensitive)', async () => {
@@ -88,6 +96,37 @@ describe('schema export', () => {
       expect(t.description, `${t.type} missing description in export`).toBeTypeOf('string');
       expect((t.description as string).length, `${t.type} description is empty`).toBeGreaterThan(0);
     }
+  });
+
+  it('exports corrected advisory statusFields for Meter and Home Climate Panel', async () => {
+    const res = await runCli(registerSchemaCommand, ['schema', 'export']);
+    const parsed = JSON.parse(res.stdout.join('')).data;
+    const meter = parsed.types.find((t: { type: string }) => t.type === 'Meter');
+    const panel = parsed.types.find((t: { type: string }) => t.type === 'Home Climate Panel');
+    expect(meter.statusFields).not.toContain('CO2');
+    expect(meter.statusFields).toEqual(['temperature', 'humidity', 'battery', 'version']);
+    expect(panel.statusFields).toEqual([
+      'battery',
+      'brightness',
+      'moveDetected',
+      'humidity',
+      'temperature',
+      'version',
+    ]);
+  });
+
+  it('exports hub-family advisory roles and statusFields as a stable contract', async () => {
+    const res = await runCli(registerSchemaCommand, ['schema', 'export']);
+    const parsed = JSON.parse(res.stdout.join('')).data;
+    const hub2 = parsed.types.find((t: { type: string }) => t.type === 'Hub 2');
+    const hubMini = parsed.types.find((t: { type: string }) => t.type === 'Hub Mini');
+    const hub3 = parsed.types.find((t: { type: string }) => t.type === 'Hub 3');
+    expect(hub2.role).toBe('hub');
+    expect(hub2.statusFields).toEqual(['version', 'temperature', 'humidity', 'lightLevel']);
+    expect(hubMini.role).toBe('hub');
+    expect(hubMini.statusFields).toEqual(['version']);
+    expect(hub3.role).toBe('hub');
+    expect(hub3.statusFields).toEqual(['version', 'temperature', 'humidity', 'lightLevel']);
   });
 });
 

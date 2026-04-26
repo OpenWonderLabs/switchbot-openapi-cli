@@ -3,6 +3,7 @@ import https from 'node:https';
 import { isJsonMode, printJson } from '../utils/output.js';
 import chalk from 'chalk';
 import { VERSION as currentVersion } from '../version.js';
+import { findBreakingChangeBetween } from '../version-notes.js';
 
 const pkgName = '@switchbot/openapi-cli';
 
@@ -81,12 +82,19 @@ export function registerUpgradeCheckCommand(program: Command): void {
         return;
       }
 
+      const breakingNotice = findBreakingChangeBetween(currentVersion, latestVersion);
       const result = {
         current: currentVersion,
         latest: latestVersion,
         upToDate,
         updateAvailable: !upToDate,
-        breakingChange: latestMajor > currentMajor,
+        breakingChange: latestMajor > currentMajor || breakingNotice !== null,
+        ...(breakingNotice
+          ? {
+              breakingVersion: breakingNotice.version,
+              breakingSummary: breakingNotice.summary,
+            }
+          : {}),
         installCommand: upToDate ? null : `npm install -g ${pkgName}@${latestVersion}`,
       };
 
@@ -99,6 +107,9 @@ export function registerUpgradeCheckCommand(program: Command): void {
         console.log(`${chalk.green('✓')} You are running the latest version (${currentVersion}).`);
       } else {
         console.log(`${chalk.yellow('!')} Update available: ${chalk.bold(currentVersion)} → ${chalk.bold(latestVersion)}`);
+        if (breakingNotice) {
+          console.log(chalk.red(`  Breaking change in ${breakingNotice.version}: ${breakingNotice.summary}`));
+        }
         console.log(`  Run: ${chalk.cyan(`npm install -g ${pkgName}@${latestVersion}`)}`);
         process.exit(1);
       }

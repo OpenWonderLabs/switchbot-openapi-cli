@@ -1,10 +1,10 @@
 import { Command } from 'commander';
-import { intArg, stringArg } from '../utils/arg-parsers.js';
+import { intArg, stringArg, enumArg } from '../utils/arg-parsers.js';
 import { handleError, isJsonMode, printJson, UsageError, exitWithError } from '../utils/output.js';
 import { getCachedDevice } from '../devices/cache.js';
 import { executeCommand, isDestructiveCommand, getDestructiveReason } from '../lib/devices.js';
 import { isDryRun } from '../utils/flags.js';
-import { resolveDeviceId } from '../utils/name-resolver.js';
+import { resolveDeviceId, ALL_STRATEGIES, type NameResolveStrategy } from '../utils/name-resolver.js';
 import { DryRunSignal } from '../api/client.js';
 import {
   buildAcSetAll,
@@ -22,6 +22,10 @@ export function registerExpandCommand(devices: Command): void {
     .argument('[deviceId]', 'Target device ID from "devices list" (or use --name)')
     .argument('[command]', 'Command name: setAll (AC), setPosition (Curtain/Blind Tilt), setMode (Relay Switch 2)')
     .option('--name <query>', 'Resolve device by fuzzy name instead of deviceId', stringArg('--name'))
+    .option('--name-strategy <s>', `Name match strategy: ${ALL_STRATEGIES.join('|')} (default: require-unique)`, stringArg('--name-strategy'))
+    .option('--name-type <type>', 'Narrow --name by device type (e.g. "Curtain", "Air Conditioner")', stringArg('--name-type'))
+    .option('--name-category <cat>', 'Narrow --name by category: physical|ir', enumArg('--name-category', ['physical', 'ir'] as const))
+    .option('--name-room <room>', 'Narrow --name by room name (substring match)', stringArg('--name-room'))
     .option('--temp <celsius>', 'AC setAll: temperature in Celsius (16-30)', intArg('--temp', { min: 16, max: 30 }))
     .option('--mode <mode>', 'AC: auto|cool|dry|fan|heat  Curtain: default|performance|silent  Relay: toggle|edge|detached|momentary', stringArg('--mode'))
     .option('--fan <speed>', 'AC setAll: fan speed auto|low|mid|high', stringArg('--fan'))
@@ -65,6 +69,10 @@ Examples:
       commandArg: string | undefined,
       options: {
         name?: string;
+        nameStrategy?: string;
+        nameType?: string;
+        nameCategory?: 'physical' | 'ir';
+        nameRoom?: string;
         temp?: string; mode?: string; fan?: string; power?: string;
         position?: string; direction?: string; angle?: string;
         channel?: string; yes?: boolean;
@@ -82,7 +90,12 @@ Examples:
           effectiveDeviceIdArg = undefined;
         }
 
-        deviceId = resolveDeviceId(effectiveDeviceIdArg, options.name);
+        deviceId = resolveDeviceId(effectiveDeviceIdArg, options.name, {
+          strategy: (options.nameStrategy as NameResolveStrategy | undefined) ?? 'require-unique',
+          type: options.nameType,
+          category: options.nameCategory,
+          room: options.nameRoom,
+        });
         if (!effectiveCommand) throw new UsageError('A command argument is required (setAll, setPosition, setMode).');
 
         command = effectiveCommand;

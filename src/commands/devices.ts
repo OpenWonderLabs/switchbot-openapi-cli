@@ -44,6 +44,30 @@ const EXPAND_HINTS: Record<string, { command: string; flags: string }> = {
   'Relay Switch 2PM': { command: 'setMode',      flags: '--channel 1 --mode edge' },
 };
 
+function annotateStatusPayload(deviceId: string, body: Record<string, unknown>): Record<string, unknown> {
+  const annotated = { ...body };
+  if (Object.keys(body).length === 0) {
+    annotated.supported = false;
+    annotated.note = 'this device does not expose cloud status';
+    return annotated;
+  }
+
+  const cached = getCachedDevice(deviceId);
+  const looksLikeMeter = cached?.type?.toLowerCase().includes('meter') ?? false;
+  const staleZeroReading =
+    looksLikeMeter &&
+    !Object.prototype.hasOwnProperty.call(body, 'onlineStatus') &&
+    body.battery === 0 &&
+    body.temperature === 0 &&
+    body.humidity === 0;
+
+  if (staleZeroReading) {
+    annotated.hint = 'readings look stale; check batteries or hub connectivity';
+  }
+
+  return annotated;
+}
+
 export function registerDevicesCommand(program: Command): void {
   const COMMAND_TYPES = ['command', 'customize'] as const;
   const devices = program
@@ -303,7 +327,7 @@ Examples:
           const fetchedAt = new Date().toISOString();
           const batch = results.map((r, i) =>
             r.status === 'fulfilled'
-              ? { deviceId: ids[i], ok: true, _fetchedAt: fetchedAt, ...(r.value as object) }
+              ? { deviceId: ids[i], ok: true, _fetchedAt: fetchedAt, ...annotateStatusPayload(ids[i], r.value as Record<string, unknown>) }
               : { deviceId: ids[i], ok: false, error: (r.reason as Error)?.message ?? String(r.reason) },
           );
           const batchFmt = resolveFormat();
@@ -342,7 +366,7 @@ Examples:
           category: options.nameCategory,
           room: options.nameRoom,
         });
-        const body = await fetchDeviceStatus(deviceId);
+        const body = annotateStatusPayload(deviceId, await fetchDeviceStatus(deviceId));
         const fetchedAt = new Date().toISOString();
         const fmt = resolveFormat();
 
@@ -678,7 +702,7 @@ Examples:
           if (isJsonMode()) {
             printJson({ dryRun: true, wouldSend });
           } else {
-            console.log(`[dry-run] Would POST devices/${_deviceId}/commands with ${JSON.stringify({ command: _cmd, parameter: _parsedParam, commandType })}`);
+            console.log(`◦ dry-run intercepted for ${_cmd} on ${_deviceId}; see stderr preview for the HTTP request.`);
           }
           return;
         }
@@ -856,6 +880,8 @@ Examples:
             capabilities,
             source,
             suggestedActions: picks,
+            ...(result.catalogNote ? { catalogNote: result.catalogNote } : {}),
+            ...(result.warnings && result.warnings.length > 0 ? { warnings: result.warnings } : {}),
             ...(expandHint ? { expandHint: { command: expandHint.command, flags: expandHint.flags, example: `switchbot devices expand ${deviceId} ${expandHint.command} ${expandHint.flags}` } } : {}),
           });
           return;
@@ -893,8 +919,17 @@ Examples:
           capabilities && 'liveStatus' in capabilities ? capabilities.liveStatus : undefined;
 
         console.log('');
+        if (result.warnings && result.warnings.length > 0) {
+          for (const warning of result.warnings) {
+            console.log(`Warning: ${warning}`);
+          }
+          console.log('');
+        }
         if (!catalog) {
           console.log(`(Type "${typeName}" is not in the built-in catalog — no command reference available.)`);
+          if (result.catalogNote) {
+            console.log(result.catalogNote);
+          }
           if (isPhysical) {
             console.log(`Try 'switchbot devices status ${deviceId}' to see what this device reports.`);
           } else {
@@ -995,6 +1030,7 @@ function renderCatalogEntry(entry: DeviceCatalogEntry): void {
   if (entry.statusFields && entry.statusFields.length > 0) {
     console.log('\nStatus fields (from "devices status"):');
     console.log('  ' + entry.statusFields.join(', '));
+    console.log('  Note: statusFields are advisory; actual fields can vary by firmware and device variant.');
   }
 
   const expandHint = EXPAND_HINTS[entry.type];

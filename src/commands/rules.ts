@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { isJsonMode, printJson, exitWithError, printTable } from '../utils/output.js';
+import { isJsonMode, printJson, exitWithError, printTable, handleError } from '../utils/output.js';
 import {
   loadPolicyFile,
   resolvePolicyPath,
@@ -646,29 +646,33 @@ function registerSuggest(rules: Command): void {
         webhookPath?: string;
         out?: string;
       }) => {
-        const trigger = opts.trigger as 'mqtt' | 'cron' | 'webhook' | undefined;
-        const days = opts.days ? opts.days.split(',').map((d) => d.trim()) : undefined;
-        const devices = opts.device.map((ref) => {
-          const cached = getCachedDevice(ref);
-          return { id: ref, name: cached?.name, type: cached?.type };
-        });
-        const { rule, ruleYaml, warnings } = suggestRule({
-          intent: opts.intent,
-          trigger,
-          devices,
-          event: opts.event,
-          schedule: opts.schedule,
-          days,
-          webhookPath: opts.webhookPath,
-        });
-        for (const w of warnings) process.stderr.write(`warning: ${w}\n`);
-        if (opts.out) {
-          fs.writeFileSync(opts.out, ruleYaml, 'utf8');
-          if (!isJsonMode()) console.log(`✓ rule YAML written to ${opts.out}`);
-        } else if (isJsonMode()) {
-          printJson({ rule, rule_yaml: ruleYaml, warnings });
-        } else {
-          process.stdout.write(ruleYaml);
+        try {
+          const trigger = opts.trigger as 'mqtt' | 'cron' | 'webhook' | undefined;
+          const days = opts.days ? opts.days.split(',').map((d) => d.trim()) : undefined;
+          const devices = opts.device.map((ref) => {
+            const cached = getCachedDevice(ref);
+            return { id: ref, name: cached?.name, type: cached?.type };
+          });
+          const { rule, ruleYaml, warnings } = suggestRule({
+            intent: opts.intent,
+            trigger,
+            devices,
+            event: opts.event,
+            schedule: opts.schedule,
+            days,
+            webhookPath: opts.webhookPath,
+          });
+          for (const w of warnings) process.stderr.write(`warning: ${w}\n`);
+          if (opts.out) {
+            fs.writeFileSync(opts.out, ruleYaml, 'utf8');
+            if (!isJsonMode()) console.log(`✓ rule YAML written to ${opts.out}`);
+          } else if (isJsonMode()) {
+            printJson({ rule, rule_yaml: ruleYaml, warnings });
+          } else {
+            process.stdout.write(ruleYaml);
+          }
+        } catch (err) {
+          handleError(err);
         }
       },
     );

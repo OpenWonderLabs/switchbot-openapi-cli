@@ -103,16 +103,125 @@ function projectFields<T extends Record<string, unknown>>(entry: T, fields: stri
   return out;
 }
 
+function runSchemaExport(options: { type?: string; types?: string; role?: string; category?: string; compact?: boolean; used?: boolean; project?: string; capabilities?: boolean }): Promise<void> | void {
+  const catalog = getEffectiveCatalog();
+  let filtered = catalog;
+
+  if (options.type) {
+    const q = options.type.toLowerCase();
+    filtered = filtered.filter((e) =>
+      e.type.toLowerCase() === q ||
+      (e.aliases ?? []).some((a) => a.toLowerCase() === q),
+    );
+  }
+  if (options.types) {
+    const set = new Set(options.types.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
+    filtered = filtered.filter((e) =>
+      set.has(e.type.toLowerCase()) ||
+      (e.aliases ?? []).some((a) => set.has(a.toLowerCase())),
+    );
+  }
+  if (options.role) {
+    const q = options.role.toLowerCase();
+    filtered = filtered.filter((e) => (e.role ?? 'other') === q);
+  }
+  if (options.category) {
+    const q = options.category.toLowerCase();
+    filtered = filtered.filter((e) => e.category === q);
+  }
+  if (options.used) {
+    const cache = loadCache();
+    if (cache) {
+      const usedTypes = new Set(
+        Object.values(cache.devices).map((d) => d.type.toLowerCase()),
+      );
+      filtered = filtered.filter((e) =>
+        usedTypes.has(e.type.toLowerCase()) ||
+        (e.aliases ?? []).some((a) => usedTypes.has(a.toLowerCase())),
+      );
+    } else {
+      filtered = [];
+    }
+  }
+
+  const mapped = options.compact
+    ? filtered.map(toCompactEntry)
+    : filtered.map(toSchemaEntry);
+
+  const projected = options.project
+    ? mapped.map((e) =>
+        projectFields(e as unknown as Record<string, unknown>, options.project!.split(',').map((s) => s.trim()).filter(Boolean)),
+      )
+    : mapped;
+
+  const finish = (finalTypes: Array<Record<string, unknown>>) => {
+    const payload: Record<string, unknown> = {
+      version: '1.0',
+      types: finalTypes,
+    };
+    if (!options.compact) {
+      payload.generatedAt = new Date().toISOString();
+      payload.resources = RESOURCE_CATALOG;
+      payload.cliAddedFields = [
+        {
+          field: '_fetchedAt',
+          appliesTo: ['devices status', 'devices describe'],
+          type: 'string (ISO-8601)',
+          description:
+            'CLI-synthesized timestamp indicating when this status response was fetched or served from the cache. Not part of the upstream SwitchBot API.',
+        },
+        {
+          field: 'replayed',
+          appliesTo: ['devices command (with --idempotency-key)'],
+          type: 'boolean',
+          description:
+            'CLI-synthesized flag — true when the response was served from the idempotency cache instead of re-executing the command.',
+        },
+        {
+          field: 'verification',
+          appliesTo: ['devices command'],
+          type: 'object',
+          description:
+            'CLI-synthesized receipt-acknowledgment metadata. For IR devices, verifiable:false signals that no device-side confirmation is possible.',
+        },
+        {
+          field: 'hints',
+          appliesTo: ['agent-bootstrap'],
+          type: 'string[]',
+          description:
+            'CLI-synthesized advisory messages for the calling agent. Always emitted; empty array ([]) means no hints to report — never null and not a disabled-field signal.',
+        },
+      ];
+    }
+    printJson(payload);
+  };
+
+  const finalTypes = projected as Array<Record<string, unknown>>;
+  if (options.capabilities) {
+    return import('./capabilities.js').then(({ COMMAND_META }) => {
+      const devicesMeta = Object.fromEntries(
+        Object.entries(COMMAND_META).filter(([k]) => k.startsWith('devices ')),
+      );
+      finish(finalTypes.map((e) => ({ ...e, commandsMeta: devicesMeta })));
+    });
+  }
+
+  finish(finalTypes);
+}
+
 export function registerSchemaCommand(program: Command): void {
   const ROLES = ['lighting', 'security', 'sensor', 'climate', 'media', 'cleaning', 'curtain', 'fan', 'power', 'hub', 'other'] as const;
   const CATEGORIES = ['physical', 'ir'] as const;
+
+  // Export options are declared on the root `schema` command only, so that
+  // `switchbot schema --type Bot` (the documented fallback form) parses the
+  // same flags as `switchbot schema export --type Bot`. The subcommand picks
+  // the values up via `cmd.optsWithGlobals()`. Declaring options on BOTH
+  // parent and child causes commander v12 to route parsing to the parent and
+  // leave the child's action with empty opts — don't go that route.
   const schema = program
     .command('schema')
-    .description('Export the SwitchBot device catalog as structured JSON (for AI agent prompts / tooling)');
-
-  schema
-    .command('export')
-    .description('Print the catalog as structured JSON (one object per type)')
+    .description('Export the SwitchBot device catalog as structured JSON (for AI agent prompts / tooling)')
     .option('--type <type>', 'Restrict to a single device type (e.g. "Strip Light")', stringArg('--type'))
     .option('--types <csv>', 'Restrict to multiple device types (comma-separated)', stringArg('--types'))
     .option('--role <role>', 'Restrict to a functional role: lighting, security, sensor, climate, media, cleaning, curtain, fan, power, hub, other', enumArg('--role', ROLES))
@@ -120,11 +229,21 @@ export function registerSchemaCommand(program: Command): void {
     .option('--compact', 'Drop descriptions/aliases/example params — emit ~60% smaller payload. Useful for agent prompts.')
     .option('--used', 'Restrict to device types present in the local devices cache (run "devices list" first)')
     .option('--project <csv>', 'Project per-type fields (e.g. --project type,commands,statusFields)', stringArg('--project'))
-    .option('--capabilities', 'Annotate each device type with CLI command safety metadata (agentSafetyTier, mutating, consumesQuota)')
+    .option('--capabilities', 'Annotate each device type with CLI command safety metadata (agentSafetyTier, mutating, consumesQuota)');
+
+  schema.action(async (options: { type?: string; types?: string; role?: string; category?: string; compact?: boolean; used?: boolean; project?: string; capabilities?: boolean }) => {
+    await runSchemaExport(options);
+  });
+
+  schema
+    .command('export')
+    .description('Print the catalog as structured JSON (one object per type)')
     .addHelpText('after', `
 Output is always JSON (this command ignores --format). The output is a
 catalog export — not a formal JSON Schema standard document — suitable for
 pre-baking LLM prompts or regenerating docs when the catalog changes.
+\`statusFields\` are advisory offline hints; actual live status can differ by
+firmware and device variant.
 
 Size tips:
   --compact --used          Smallest realistic payload for a given account
@@ -149,104 +268,9 @@ Examples:
   $ switchbot schema export --role security --category physical
   $ switchbot schema export --project type,commands,statusFields
 `)
-    .action(async (options: { type?: string; types?: string; role?: string; category?: string; compact?: boolean; used?: boolean; project?: string; capabilities?: boolean }) => {
-      const catalog = getEffectiveCatalog();
-      let filtered = catalog;
-
-      if (options.type) {
-        const q = options.type.toLowerCase();
-        filtered = filtered.filter((e) =>
-          e.type.toLowerCase() === q ||
-          (e.aliases ?? []).some((a) => a.toLowerCase() === q),
-        );
-      }
-      if (options.types) {
-        const set = new Set(options.types.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
-        filtered = filtered.filter((e) =>
-          set.has(e.type.toLowerCase()) ||
-          (e.aliases ?? []).some((a) => set.has(a.toLowerCase())),
-        );
-      }
-      if (options.role) {
-        const q = options.role.toLowerCase();
-        filtered = filtered.filter((e) => (e.role ?? 'other') === q);
-      }
-      if (options.category) {
-        const q = options.category.toLowerCase();
-        filtered = filtered.filter((e) => e.category === q);
-      }
-      if (options.used) {
-        const cache = loadCache();
-        if (cache) {
-          const usedTypes = new Set(
-            Object.values(cache.devices).map((d) => d.type.toLowerCase()),
-          );
-          filtered = filtered.filter((e) =>
-            usedTypes.has(e.type.toLowerCase()) ||
-            (e.aliases ?? []).some((a) => usedTypes.has(a.toLowerCase())),
-          );
-        } else {
-          filtered = [];
-        }
-      }
-
-      const mapped = options.compact
-        ? filtered.map(toCompactEntry)
-        : filtered.map(toSchemaEntry);
-
-      const projected = options.project
-        ? mapped.map((e) =>
-            projectFields(e as unknown as Record<string, unknown>, options.project!.split(',').map((s) => s.trim()).filter(Boolean)),
-          )
-        : mapped;
-
-      let finalTypes = projected as Array<Record<string, unknown>>;
-      if (options.capabilities) {
-        const { COMMAND_META } = await import('./capabilities.js');
-        const devicesMeta = Object.fromEntries(
-          Object.entries(COMMAND_META).filter(([k]) => k.startsWith('devices ')),
-        );
-        finalTypes = finalTypes.map((e) => ({ ...e, commandsMeta: devicesMeta }));
-      }
-
-      const payload: Record<string, unknown> = {
-        version: '1.0',
-        types: finalTypes,
-      };
-      if (!options.compact) {
-        payload.generatedAt = new Date().toISOString();
-        payload.resources = RESOURCE_CATALOG;
-        payload.cliAddedFields = [
-          {
-            field: '_fetchedAt',
-            appliesTo: ['devices status', 'devices describe'],
-            type: 'string (ISO-8601)',
-            description:
-              'CLI-synthesized timestamp indicating when this status response was fetched or served from the cache. Not part of the upstream SwitchBot API.',
-          },
-          {
-            field: 'replayed',
-            appliesTo: ['devices command (with --idempotency-key)'],
-            type: 'boolean',
-            description:
-              'CLI-synthesized flag — true when the response was served from the idempotency cache instead of re-executing the command.',
-          },
-          {
-            field: 'verification',
-            appliesTo: ['devices command'],
-            type: 'object',
-            description:
-              'CLI-synthesized receipt-acknowledgment metadata. For IR devices, verifiable:false signals that no device-side confirmation is possible.',
-          },
-          {
-            field: 'hints',
-            appliesTo: ['agent-bootstrap'],
-            type: 'string[]',
-            description:
-              'CLI-synthesized advisory messages for the calling agent. Always emitted; empty array ([]) means no hints to report — never null and not a disabled-field signal.',
-          },
-        ];
-      }
-      printJson(payload);
+    .action(async (_options: Record<string, unknown>, cmd: Command) => {
+      // See comment above: options are declared on the parent, so the
+      // subcommand reads them via optsWithGlobals() instead of the local opts.
+      await runSchemaExport(cmd.optsWithGlobals() as { type?: string; types?: string; role?: string; category?: string; compact?: boolean; used?: boolean; project?: string; capabilities?: boolean });
     });
 }

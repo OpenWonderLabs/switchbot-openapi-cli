@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
+import { updateCacheFromDeviceList, resetListCache } from '../../src/devices/cache.js';
 
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>();
@@ -14,6 +15,7 @@ vi.mock('node:child_process', async (importOriginal) => {
 
 import { registerDoctorCommand } from '../../src/commands/doctor.js';
 import { runCli } from '../helpers/cli.js';
+import { expectJsonEnvelopeShape } from '../helpers/contracts.js';
 
 describe('doctor command', () => {
   let tmp: string;
@@ -22,6 +24,7 @@ describe('doctor command', () => {
   beforeEach(() => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sbdoc-'));
     homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(tmp);
+    resetListCache();
     delete process.env.SWITCHBOT_TOKEN;
     delete process.env.SWITCHBOT_SECRET;
     // DEFAULT_POLICY_PATH is evaluated at module load time using the real homedir,
@@ -32,6 +35,7 @@ describe('doctor command', () => {
     vi.mocked(execSync).mockReset().mockImplementation(() => { throw new Error('not found'); });
   });
   afterEach(() => {
+    resetListCache();
     homedirSpy.mockRestore();
     delete process.env.SWITCHBOT_POLICY_PATH;
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -138,7 +142,16 @@ describe('doctor command', () => {
     process.env.SWITCHBOT_SECRET = 's';
     const res = await runCli(registerDoctorCommand, ['--json', 'doctor']);
     const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
-    const data = payload.data;
+    const data = expectJsonEnvelopeShape(payload as Record<string, unknown>, [
+      'ok',
+      'overall',
+      'maturityScore',
+      'maturityLabel',
+      'generatedAt',
+      'schemaVersion',
+      'summary',
+      'checks',
+    ]);
     expect(typeof data.ok).toBe('boolean');
     expect(['ok', 'warn', 'fail']).toContain(data.overall);
     expect(typeof data.generatedAt).toBe('string');
@@ -321,6 +334,7 @@ describe('doctor command', () => {
     expect(names).toContain('credentials');
     expect(names).toContain('mcp');
     expect(names).toContain('catalog-schema');
+    expect(names).toContain('inventory');
     expect(names).toContain('audit');
     // Should NOT include check results — just registry entries with description.
     expect(payload.data.summary).toBeUndefined();
@@ -676,5 +690,49 @@ describe('doctor command', () => {
       const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
       expect(Number.isInteger(payload.data.maturityScore)).toBe(true);
     });
+  });
+
+  it('inventory check warns when a cached device points at a missing hubDeviceId', async () => {
+    process.env.SWITCHBOT_TOKEN = 't';
+    process.env.SWITCHBOT_SECRET = 's';
+    updateCacheFromDeviceList({
+      deviceList: [
+        {
+          deviceId: 'METER-1',
+          deviceName: 'Bedroom Meter',
+          deviceType: 'Meter',
+          hubDeviceId: 'HUB-MISSING',
+          enableCloudService: true,
+        },
+      ],
+      infraredRemoteList: [],
+    });
+    const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--section', 'inventory']);
+    const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    const inventory = payload.data.checks.find((c: { name: string }) => c.name === 'inventory');
+    expect(inventory.status).toBe('warn');
+    expect(inventory.detail.message).toMatch(/hubDeviceId/);
+    expect(inventory.detail.dangling[0]).toMatchObject({
+      deviceId: 'METER-1',
+      hubDeviceId: 'HUB-MISSING',
+    });
+  });
+
+  it('release-notes check is ok when RELEASE_METADATA carries no breaking notice for the current release', async () => {
+    // The release-notes check is a contract between doctor and
+    // src/version-notes.ts RELEASE_METADATA. When no entry exists for
+    // the running version (or the entry has `breaking: false`), the
+    // check must report 'ok'. The 3.3.0 envelope-breaking entry that
+    // previously lit this path up was removed in 3.3.1 after we
+    // verified the envelope actually shipped in 2.0.0 (commit 33d3825),
+    // not 3.3.0 — it was a false breaking claim.
+    process.env.SWITCHBOT_TOKEN = 't';
+    process.env.SWITCHBOT_SECRET = 's';
+    const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--section', 'release-notes']);
+    const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    const note = payload.data.checks.find((c: { name: string }) => c.name === 'release-notes');
+    expect(note).toBeDefined();
+    expect(note.status).toBe('ok');
+    expect(String(note.detail.message)).toMatch(/no known breaking-change notice/i);
   });
 });

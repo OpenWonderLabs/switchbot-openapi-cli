@@ -24,6 +24,7 @@ vi.mock('../../src/api/client.js', () => ({
 import { registerDevicesCommand } from '../../src/commands/devices.js';
 import { runCli } from '../helpers/cli.js';
 import { updateCacheFromDeviceList, resetListCache } from '../../src/devices/cache.js';
+import { expectJsonEnvelopeContainingKeys } from '../helpers/contracts.js';
 
 const AC_ID = 'AC-001';
 const CURTAIN_ID = 'CURTAIN-001';
@@ -197,8 +198,9 @@ describe('devices expand', () => {
       'devices', 'expand', AC_ID, 'setAll',
       '--temp', '26', '--mode', 'cool', '--fan', 'low', '--power', 'on', '--json',
     ]);
-    const out = JSON.parse(res.stdout.join('\n'));
-    expect(out.data.subKind).toBe('ir-no-feedback');
+    const out = JSON.parse(res.stdout.join('\n')) as Record<string, unknown>;
+    const data = expectJsonEnvelopeContainingKeys(out, ['ok', 'deviceId', 'command', 'parameter', 'subKind']);
+    expect(data.subKind).toBe('ir-no-feedback');
   });
 
   it('rejects unsupported command', async () => {
@@ -218,6 +220,26 @@ describe('devices expand', () => {
     expect(apiMock.__instance.post).toHaveBeenCalledWith(
       `/v1.1/devices/${CURTAIN_ID}/commands`,
       expect.objectContaining({ command: 'setPosition' })
+    );
+  });
+
+  it('--name-category and --name-room are forwarded to name resolution', async () => {
+    updateCacheFromDeviceList({
+      deviceList: [
+        { deviceId: 'CURTAIN-LR', deviceName: 'Curtain', deviceType: 'Curtain', hubDeviceId: 'H1', enableCloudService: true, roomName: 'Living Room' },
+        { deviceId: 'CURTAIN-BR', deviceName: 'Curtain', deviceType: 'Curtain', hubDeviceId: 'H1', enableCloudService: true, roomName: 'Bedroom' },
+      ],
+      infraredRemoteList: [],
+    });
+
+    const res = await runCli(registerDevicesCommand, [
+      'devices', 'expand', '--name', 'Curtain', '--name-category', 'physical', '--name-room', 'Bed', 'setPosition',
+      '--position', '50',
+    ]);
+    expect(res.exitCode).toBe(null);
+    expect(apiMock.__instance.post).toHaveBeenCalledWith(
+      '/v1.1/devices/CURTAIN-BR/commands',
+      expect.objectContaining({ command: 'setPosition' }),
     );
   });
 });

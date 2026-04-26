@@ -59,6 +59,13 @@ export interface StartStatusSyncOptions {
   topic?: string;
   stateDir?: string;
   force?: boolean;
+  probe?: boolean;
+}
+
+export interface StatusSyncProbeResult {
+  openclawUrl: string;
+  mqttBrokerUrl: string;
+  mqttRegion: string;
 }
 
 export interface StatusSyncStatusOptions {
@@ -105,11 +112,125 @@ function resolveStatusSyncRuntime(options: {
     );
   }
 
+  const openclawUrl = options.openclawUrl ?? process.env.OPENCLAW_URL ?? DEFAULT_OPENCLAW_URL;
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(openclawUrl);
+  } catch {
+    throw new UsageError(
+      [
+        `OpenClaw URL is invalid: ${openclawUrl}`,
+        'Provide a full http:// or https:// URL via one of:',
+        '  1. --openclaw-url <url>',
+        '  2. OPENCLAW_URL=<url> in the environment',
+        '',
+        'After fixing it, re-run the command and verify with `switchbot status-sync status`.',
+      ].join('\n'),
+    );
+  }
+  if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+    throw new UsageError(
+      [
+        `OpenClaw URL must use http:// or https:// (received ${parsedUrl.protocol})`,
+        'Provide a full http:// or https:// URL via one of:',
+        '  1. --openclaw-url <url>',
+        '  2. OPENCLAW_URL=<url> in the environment',
+      ].join('\n'),
+    );
+  }
+
   return {
-    openclawUrl: options.openclawUrl ?? process.env.OPENCLAW_URL ?? DEFAULT_OPENCLAW_URL,
+    openclawUrl,
     openclawToken,
     openclawModel,
     ...(options.topic ? { topic: options.topic } : {}),
+  };
+}
+
+export async function probeStatusSyncStart(
+  options: Pick<StartStatusSyncOptions, 'openclawUrl' | 'openclawToken' | 'openclawModel' | 'topic'> = {},
+): Promise<StatusSyncProbeResult> {
+  const runtime = resolveStatusSyncRuntime(options);
+  const config = tryLoadConfig();
+  if (!config) {
+    throw new UsageError(
+      'No credentials found. Run \'switchbot config set-token\' or set SWITCHBOT_TOKEN and SWITCHBOT_SECRET.',
+    );
+  }
+
+  const { fetchMqttCredential } = await import('../mqtt/credential.js');
+
+  let mqttBrokerUrl = '';
+  let mqttRegion = '';
+  try {
+    const cred = await fetchMqttCredential(config.token, config.secret);
+    mqttBrokerUrl = cred.brokerUrl;
+    mqttRegion = cred.region;
+  } catch (err) {
+    throw new UsageError(
+      [
+        'SwitchBot MQTT credential probe failed.',
+        `Reason: ${err instanceof Error ? err.message : String(err)}`,
+        'Verify SWITCHBOT_TOKEN / SWITCHBOT_SECRET first, then re-run `switchbot status-sync start --probe`.',
+      ].join('\n'),
+    );
+  }
+
+  // Probe the actual write endpoint (/v1/chat/completions), not the base
+  // URL. Mirrors the POST the sink does at runtime in src/sinks/openclaw.ts
+  // so misconfigurations (wrong token, wrong base URL that needs the path
+  // appended, model not registered) surface at `--probe` time instead of
+  // after the daemon has started and is silently dropping writes.
+  const probeUrl = `${runtime.openclawUrl.replace(/\/$/, '')}/v1/chat/completions`;
+  let res: Response;
+  try {
+    res = await fetch(probeUrl, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${runtime.openclawToken}`,
+      },
+      body: JSON.stringify({
+        model: runtime.openclawModel,
+        messages: [{ role: 'user', content: 'status-sync probe' }],
+      }),
+      signal: AbortSignal.timeout(5000),
+    });
+  } catch (err) {
+    throw new UsageError(
+      [
+        `OpenClaw probe failed for ${probeUrl}.`,
+        `Reason: ${err instanceof Error ? err.message : String(err)}`,
+        'Check URL reachability, TLS/certificate trust, and whether the OpenClaw server is listening.',
+      ].join('\n'),
+    );
+  }
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    const preview = body ? ` — ${body.slice(0, 200).replace(/\s+/g, ' ').trim()}` : '';
+    const hint =
+      res.status === 401 || res.status === 403
+        ? 'OpenClaw rejected the token. Verify --openclaw-token / OPENCLAW_TOKEN against the server admin.'
+        : res.status === 404
+          ? 'OpenClaw returned 404 for /v1/chat/completions. Confirm the base URL does not already include that path, and that the server exposes an OpenAI-compatible endpoint.'
+          : res.status === 400 || res.status === 422
+            ? 'OpenClaw rejected the request body. The model name may not be registered; verify --openclaw-model / OPENCLAW_MODEL.'
+            : res.status >= 500
+              ? 'OpenClaw returned a server error. Retry, and if it persists check the server logs.'
+              : 'Unexpected status; inspect the response body above for details.';
+    throw new UsageError(
+      [
+        `OpenClaw probe failed for ${probeUrl}.`,
+        `Reason: HTTP ${res.status} ${res.statusText}${preview}`,
+        hint,
+      ].join('\n'),
+    );
+  }
+
+  return {
+    openclawUrl: runtime.openclawUrl,
+    mqttBrokerUrl,
+    mqttRegion,
   };
 }
 

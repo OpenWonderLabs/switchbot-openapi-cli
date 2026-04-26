@@ -13,6 +13,7 @@ vi.mock('../../src/devices/cache.js', () => cacheMock);
 import { COMMAND_META } from '../../src/commands/capabilities.js';
 import { registerCapabilitiesCommand } from '../../src/commands/capabilities.js';
 import { runCli } from '../helpers/cli.js';
+import { expectJsonEnvelopeContainingKeys } from '../helpers/contracts.js';
 
 // ── comprehensive list of every CLI leaf command ──────────────────────────────
 // Regression guard: when a new subcommand is added to the CLI, it MUST be added
@@ -86,9 +87,17 @@ describe('capabilities command — regression output tests', () => {
     expect(res.stderr.join('')).not.toMatch(/coverage error/i);
     const out = res.stdout.join('');
     expect(out.length).toBeGreaterThan(50);
-    const parsed = JSON.parse(out) as { data: { commands: Array<{ name: string }> } };
-    expect(parsed).toHaveProperty('data');
-    expect(parsed.data).toHaveProperty('commands');
+    const parsed = JSON.parse(out) as Record<string, unknown>;
+    const data = expectJsonEnvelopeContainingKeys(parsed, [
+      'schemaVersion',
+      'agentGuide',
+      'identity',
+      'surfaces',
+      'commands',
+      'commandMeta',
+      'resources',
+    ]) as { commands: Array<{ name: string }> };
+    expect(data.commands).toBeDefined();
   });
 
   it('COMMAND_META has rules explain entry with READ_LOCAL tier', () => {
@@ -102,8 +111,20 @@ describe('capabilities command — regression output tests', () => {
   it('full output catalog is a pointer note referencing schema export', async () => {
     const res = await runCli(registerCapabilitiesCommand, ['capabilities']);
     expect(res.exitCode).toBeNull();
-    const parsed = JSON.parse(res.stdout.join('')) as { data: { catalog?: { note: string } } };
-    const catalog = parsed.data.catalog;
+    const parsed = JSON.parse(res.stdout.join('')) as Record<string, unknown>;
+    const data = expectJsonEnvelopeContainingKeys(parsed, [
+      'schemaVersion',
+      'agentGuide',
+      'identity',
+      'surfaces',
+      'commands',
+      'commandMeta',
+      'globalFlags',
+      'catalog',
+      'resources',
+      'generatedAt',
+    ]) as { catalog?: { note: string } };
+    const catalog = data.catalog;
     expect(catalog).toBeDefined();
     expect(catalog).toHaveProperty('note');
     expect(catalog!.note).toContain('schema export');

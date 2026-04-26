@@ -5,6 +5,7 @@ import path from 'node:path';
 
 import { registerHistoryCommand } from '../../src/commands/history.js';
 import { runCli } from '../helpers/cli.js';
+import { expectJsonEnvelopeContainingKeys } from '../helpers/contracts.js';
 
 const apiMock = vi.hoisted(() => {
   const instance = { get: vi.fn(), post: vi.fn() };
@@ -100,9 +101,13 @@ describe('history command', () => {
       const res = await runCli(registerHistoryCommand, [
         '--json', 'history', 'show', '--file', auditFile,
       ]);
-      const out = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
-      expect(out.data.total).toBe(1);
-      expect(out.data.entries[0].deviceId).toBe('A');
+      const out = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join('')) as Record<string, unknown>;
+      const data = expectJsonEnvelopeContainingKeys(out, ['file', 'total', 'entries']) as {
+        total: number;
+        entries: Array<{ deviceId: string }>;
+      };
+      expect(data.total).toBe(1);
+      expect(data.entries[0].deviceId).toBe('A');
     });
   });
 
@@ -266,10 +271,15 @@ describe('history range / stats (D3)', () => {
     const res = await runCli(registerHistoryCommand, [
       '--json', 'history', 'range', 'DEV1', '--since', '5m',
     ]);
-    const envelope = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
-    expect(envelope.data.deviceId).toBe('DEV1');
-    expect(envelope.data.count).toBe(2);
-    expect(envelope.data.records.length).toBe(2);
+    const envelope = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join('')) as Record<string, unknown>;
+    const data = expectJsonEnvelopeContainingKeys(envelope, ['deviceId', 'count', 'records']) as {
+      deviceId: string;
+      count: number;
+      records: unknown[];
+    };
+    expect(data.deviceId).toBe('DEV1');
+    expect(data.count).toBe(2);
+    expect(data.records.length).toBe(2);
   });
 
   it('--field can be repeated to project payload subset', async () => {
@@ -301,10 +311,15 @@ describe('history range / stats (D3)', () => {
       { t: '2026-04-10T00:00:00Z', topic: 't', payload: {} },
     ]);
     const res = await runCli(registerHistoryCommand, ['--json', 'history', 'stats', 'DEV1']);
-    const env = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
-    expect(env.data.deviceId).toBe('DEV1');
-    expect(env.data.recordCount).toBe(1);
-    expect(env.data.oldest).toBe('2026-04-10T00:00:00.000Z');
+    const env = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join('')) as Record<string, unknown>;
+    const data = expectJsonEnvelopeContainingKeys(env, ['deviceId', 'recordCount', 'jsonlFiles', 'oldest', 'newest']) as {
+      deviceId: string;
+      recordCount: number;
+      oldest: string;
+    };
+    expect(data.deviceId).toBe('DEV1');
+    expect(data.recordCount).toBe(1);
+    expect(data.oldest).toBe('2026-04-10T00:00:00.000Z');
   });
 });
 
@@ -341,9 +356,12 @@ describe('history aggregate (D7)', () => {
       '--metric', 'temperature',
       '--agg', 'count,avg',
     ]);
-    const parsed = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
-    expect(parsed.data.buckets[0].metrics.temperature.count).toBe(2);
-    expect(parsed.data.buckets[0].metrics.temperature.avg).toBe(22);
+    const parsed = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join('')) as Record<string, unknown>;
+    const data = expectJsonEnvelopeContainingKeys(parsed, ['deviceId', 'from', 'to', 'metrics', 'aggs', 'buckets', 'partial', 'notes']) as {
+      buckets: Array<{ metrics: { temperature: { count: number; avg: number } } }>;
+    };
+    expect(data.buckets[0].metrics.temperature.count).toBe(2);
+    expect(data.buckets[0].metrics.temperature.avg).toBe(22);
   });
 
   it('exits with error when --metric is missing (requiredOption enforcement, bug #42)', async () => {
