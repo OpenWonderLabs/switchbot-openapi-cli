@@ -61,21 +61,28 @@ export function createHealthHandler(auditLogPath?: string): http.RequestListener
 }
 
 export function registerHealthCommand(program: Command): void {
+  // Check options are declared on the root `health` command only, so that
+  // `switchbot health --prometheus` (the documented fallback form) parses
+  // the same flags as `switchbot health check --prometheus`. The subcommand
+  // picks the values up via `cmd.optsWithGlobals()`. Declaring options on
+  // BOTH parent and child causes commander v12 to route parsing to the
+  // parent and leave the child's action with empty opts — don't go that
+  // route.
   const health = program
     .command('health')
-    .description('Report process health: quota, audit error rate, circuit breaker state.');
+    .description('Report process health: quota, audit error rate, circuit breaker state.')
+    .option('--prometheus', 'Emit Prometheus text format.')
+    .option('--audit-log <path>', 'Audit log path (default: ~/.switchbot/audit.log).');
 
-  health.action(() => {
-    runHealthCheck({});
+  health.action((opts: { prometheus?: boolean; auditLog?: string }) => {
+    runHealthCheck(opts);
   });
 
   health
     .command('check')
     .description('Print a one-shot health report.')
-    .option('--prometheus', 'Emit Prometheus text format.')
-    .option('--audit-log <path>', 'Audit log path (default: ~/.switchbot/audit.log).')
-    .action((opts: { prometheus?: boolean; auditLog?: string }) => {
-      runHealthCheck(opts);
+    .action((_opts: Record<string, unknown>, cmd: Command) => {
+      runHealthCheck(cmd.optsWithGlobals() as { prometheus?: boolean; auditLog?: string });
     });
 
   // switchbot health serve [--port <n>]
@@ -84,7 +91,6 @@ export function registerHealthCommand(program: Command): void {
     .description('Start an HTTP server exposing /healthz (JSON) and /metrics (Prometheus).')
     .option('--port <n>', 'Port to listen on.', intArg('--port'), '3100')
     .option('--host <host>', 'Bind address.', '127.0.0.1')
-    .option('--audit-log <path>', 'Audit log path.')
     .addHelpText('after', `
 Endpoints:
   GET /healthz   JSON health report (HTTP 200 ok/degraded, 503 when circuit is open).
@@ -94,7 +100,10 @@ Example:
   $ switchbot health serve --port 3100
   $ curl http://127.0.0.1:3100/healthz
 `)
-    .action((opts: { port: string; host: string; auditLog?: string }) => {
+    .action((_opts: Record<string, unknown>, cmd: Command) => {
+      // --audit-log is inherited from the root `health` command; --port / --host
+      // are serve-local. optsWithGlobals() merges both.
+      const opts = cmd.optsWithGlobals() as { port: string; host: string; auditLog?: string };
       const port = parseInt(opts.port, 10);
       const handler = createHealthHandler(opts.auditLog);
       const server = http.createServer(handler);

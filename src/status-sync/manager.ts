@@ -176,21 +176,53 @@ export async function probeStatusSyncStart(
     );
   }
 
+  // Probe the actual write endpoint (/v1/chat/completions), not the base
+  // URL. Mirrors the POST the sink does at runtime in src/sinks/openclaw.ts
+  // so misconfigurations (wrong token, wrong base URL that needs the path
+  // appended, model not registered) surface at `--probe` time instead of
+  // after the daemon has started and is silently dropping writes.
+  const probeUrl = `${runtime.openclawUrl.replace(/\/$/, '')}/v1/chat/completions`;
+  let res: Response;
   try {
-    await fetch(runtime.openclawUrl, {
-      method: 'GET',
+    res = await fetch(probeUrl, {
+      method: 'POST',
       headers: {
-        Authorization: `Bearer ${runtime.openclawToken}`,
-        'X-OpenClaw-Model': runtime.openclawModel,
+        'content-type': 'application/json',
+        authorization: `Bearer ${runtime.openclawToken}`,
       },
+      body: JSON.stringify({
+        model: runtime.openclawModel,
+        messages: [{ role: 'user', content: 'status-sync probe' }],
+      }),
       signal: AbortSignal.timeout(5000),
     });
   } catch (err) {
     throw new UsageError(
       [
-        `OpenClaw probe failed for ${runtime.openclawUrl}.`,
+        `OpenClaw probe failed for ${probeUrl}.`,
         `Reason: ${err instanceof Error ? err.message : String(err)}`,
         'Check URL reachability, TLS/certificate trust, and whether the OpenClaw server is listening.',
+      ].join('\n'),
+    );
+  }
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    const preview = body ? ` — ${body.slice(0, 200).replace(/\s+/g, ' ').trim()}` : '';
+    const hint =
+      res.status === 401 || res.status === 403
+        ? 'OpenClaw rejected the token. Verify --openclaw-token / OPENCLAW_TOKEN against the server admin.'
+        : res.status === 404
+          ? 'OpenClaw returned 404 for /v1/chat/completions. Confirm the base URL does not already include that path, and that the server exposes an OpenAI-compatible endpoint.'
+          : res.status === 400 || res.status === 422
+            ? 'OpenClaw rejected the request body. The model name may not be registered; verify --openclaw-model / OPENCLAW_MODEL.'
+            : res.status >= 500
+              ? 'OpenClaw returned a server error. Retry, and if it persists check the server logs.'
+              : 'Unexpected status; inspect the response body above for details.';
+    throw new UsageError(
+      [
+        `OpenClaw probe failed for ${probeUrl}.`,
+        `Reason: HTTP ${res.status} ${res.statusText}${preview}`,
+        hint,
       ].join('\n'),
     );
   }

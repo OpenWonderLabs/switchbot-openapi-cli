@@ -87,7 +87,12 @@ describe('status-sync manager', () => {
       qos: 1,
       tls: { enabled: true, caBase64: 'ca', certBase64: 'cert', keyBase64: 'key' },
     });
-    globalThis.fetch = vi.fn().mockResolvedValue({ status: 401, ok: false }) as typeof fetch;
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      status: 200,
+      ok: true,
+      statusText: 'OK',
+      text: () => Promise.resolve(''),
+    }) as typeof fetch;
   });
 
   afterEach(() => {
@@ -260,21 +265,71 @@ describe('status-sync manager', () => {
     const result = await probeStatusSyncStart({});
 
     expect(fetchMqttCredentialMock).toHaveBeenCalledWith('token', 'secret');
+    // Probe must hit the actual write endpoint (/v1/chat/completions),
+    // not the base URL, so misconfigurations surface at --probe time
+    // instead of after the daemon is running.
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      'http://localhost:18789',
+      'http://localhost:18789/v1/chat/completions',
       expect.objectContaining({
-        method: 'GET',
+        method: 'POST',
         headers: expect.objectContaining({
-          Authorization: 'Bearer env-token',
-          'X-OpenClaw-Model': 'env-model',
+          authorization: 'Bearer env-token',
+          'content-type': 'application/json',
         }),
       }),
     );
+    const [, init] = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    const body = JSON.parse((init as { body: string }).body);
+    expect(body.model).toBe('env-model');
+    expect(body.messages).toEqual([{ role: 'user', content: 'status-sync probe' }]);
     expect(result).toEqual({
       openclawUrl: 'http://localhost:18789',
       mqttBrokerUrl: 'mqtts://broker.example',
       mqttRegion: 'us-east-1',
     });
+  });
+
+  it('rejects with an auth hint when OpenClaw returns 401', async () => {
+    process.env.OPENCLAW_TOKEN = 'env-token';
+    process.env.OPENCLAW_MODEL = 'env-model';
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      status: 401,
+      ok: false,
+      statusText: 'Unauthorized',
+      text: () => Promise.resolve('{"error":"invalid token"}'),
+    }) as typeof fetch;
+
+    await expect(probeStatusSyncStart({})).rejects.toThrow(
+      /OpenClaw probe failed[\s\S]*HTTP 401[\s\S]*token/i,
+    );
+  });
+
+  it('rejects with a URL-path hint when OpenClaw returns 404', async () => {
+    process.env.OPENCLAW_TOKEN = 'env-token';
+    process.env.OPENCLAW_MODEL = 'env-model';
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      status: 404,
+      ok: false,
+      statusText: 'Not Found',
+      text: () => Promise.resolve(''),
+    }) as typeof fetch;
+
+    await expect(probeStatusSyncStart({})).rejects.toThrow(
+      /HTTP 404[\s\S]*\/v1\/chat\/completions/,
+    );
+  });
+
+  it('trims trailing slash on base URL before appending the probe path', async () => {
+    process.env.OPENCLAW_TOKEN = 'env-token';
+    process.env.OPENCLAW_MODEL = 'env-model';
+    process.env.OPENCLAW_URL = 'http://host.example:9000/';
+
+    await probeStatusSyncStart({});
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'http://host.example:9000/v1/chat/completions',
+      expect.anything(),
+    );
   });
 
   it('turns MQTT credential probe failures into a usage error', async () => {

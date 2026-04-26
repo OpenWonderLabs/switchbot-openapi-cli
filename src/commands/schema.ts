@@ -212,17 +212,16 @@ function runSchemaExport(options: { type?: string; types?: string; role?: string
 export function registerSchemaCommand(program: Command): void {
   const ROLES = ['lighting', 'security', 'sensor', 'climate', 'media', 'cleaning', 'curtain', 'fan', 'power', 'hub', 'other'] as const;
   const CATEGORIES = ['physical', 'ir'] as const;
+
+  // Export options are declared on the root `schema` command only, so that
+  // `switchbot schema --type Bot` (the documented fallback form) parses the
+  // same flags as `switchbot schema export --type Bot`. The subcommand picks
+  // the values up via `cmd.optsWithGlobals()`. Declaring options on BOTH
+  // parent and child causes commander v12 to route parsing to the parent and
+  // leave the child's action with empty opts — don't go that route.
   const schema = program
     .command('schema')
-    .description('Export the SwitchBot device catalog as structured JSON (for AI agent prompts / tooling)');
-
-  schema.action(async () => {
-    await runSchemaExport({});
-  });
-
-  schema
-    .command('export')
-    .description('Print the catalog as structured JSON (one object per type)')
+    .description('Export the SwitchBot device catalog as structured JSON (for AI agent prompts / tooling)')
     .option('--type <type>', 'Restrict to a single device type (e.g. "Strip Light")', stringArg('--type'))
     .option('--types <csv>', 'Restrict to multiple device types (comma-separated)', stringArg('--types'))
     .option('--role <role>', 'Restrict to a functional role: lighting, security, sensor, climate, media, cleaning, curtain, fan, power, hub, other', enumArg('--role', ROLES))
@@ -230,7 +229,15 @@ export function registerSchemaCommand(program: Command): void {
     .option('--compact', 'Drop descriptions/aliases/example params — emit ~60% smaller payload. Useful for agent prompts.')
     .option('--used', 'Restrict to device types present in the local devices cache (run "devices list" first)')
     .option('--project <csv>', 'Project per-type fields (e.g. --project type,commands,statusFields)', stringArg('--project'))
-    .option('--capabilities', 'Annotate each device type with CLI command safety metadata (agentSafetyTier, mutating, consumesQuota)')
+    .option('--capabilities', 'Annotate each device type with CLI command safety metadata (agentSafetyTier, mutating, consumesQuota)');
+
+  schema.action(async (options: { type?: string; types?: string; role?: string; category?: string; compact?: boolean; used?: boolean; project?: string; capabilities?: boolean }) => {
+    await runSchemaExport(options);
+  });
+
+  schema
+    .command('export')
+    .description('Print the catalog as structured JSON (one object per type)')
     .addHelpText('after', `
 Output is always JSON (this command ignores --format). The output is a
 catalog export — not a formal JSON Schema standard document — suitable for
@@ -261,7 +268,9 @@ Examples:
   $ switchbot schema export --role security --category physical
   $ switchbot schema export --project type,commands,statusFields
 `)
-    .action(async (options: { type?: string; types?: string; role?: string; category?: string; compact?: boolean; used?: boolean; project?: string; capabilities?: boolean }) => {
-      await runSchemaExport(options);
+    .action(async (_options: Record<string, unknown>, cmd: Command) => {
+      // See comment above: options are declared on the parent, so the
+      // subcommand reads them via optsWithGlobals() instead of the local opts.
+      await runSchemaExport(cmd.optsWithGlobals() as { type?: string; types?: string; role?: string; category?: string; compact?: boolean; used?: boolean; project?: string; capabilities?: boolean });
     });
 }
