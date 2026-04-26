@@ -4,13 +4,17 @@ export interface ReleaseMetadata {
   summary: string;
 }
 
-export const RELEASE_METADATA: ReleaseMetadata[] = [
-  {
-    version: '3.3.0',
-    breaking: true,
-    summary: 'JSON output now wraps command payloads in a top-level {schemaVersion,data} envelope; 3.2.x consumers that expected bare payloads must update.',
-  },
-];
+// Registry of past releases that carry user-visible breaking changes. Consumed
+// by `upgrade-check` (to warn operators crossing the boundary) and by `doctor`
+// (to surface a notice when the running version itself is a known breaking
+// release). Only add entries here for genuine contract breaks — wrong entries
+// either cry wolf or mask real breaks.
+//
+// Historical note: the {schemaVersion,data} JSON envelope is a 2.0.0 change
+// (commit 33d3825 "fix!(output): wrap json responses ..."). 3.x callers have
+// been consuming the envelope for the entire 3.x line; it is NOT a 3.3.0
+// break and must not be listed here.
+export const RELEASE_METADATA: ReleaseMetadata[] = [];
 
 function semverParts(v: string): [number, number, number] {
   const [maj, min, pat] = v.replace(/-.*$/, '').split('.').map((n) => Number.parseInt(n, 10));

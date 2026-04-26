@@ -595,4 +595,84 @@ describe('policy validator (v0.2)', () => {
     expect(err).toBeDefined();
     expect(err!.path).toBe('/automation/rules/0/then/0/command');
   });
+
+  // Contract guard for the C-1 concern from the 3.3.1 review.
+  //
+  // `validateLoadedPolicyAgainstInventory` skips rules whose effective
+  // device ref is undefined, empty, or the literal `<id>` placeholder
+  // (via `resolveInventoryDeviceId` → null → `continue`). That is only
+  // safe because the offline base pass (`validateLoadedPolicy`) is
+  // expected to catch those same pathological refs first.
+  //
+  // This test pins the coupling: if any future edit weakens the offline
+  // catch for these shapes, the live path will silently accept a broken
+  // rule at validation time and the rule will blow up at execution time.
+  // Keep BOTH passes true — the live validator must never be the sole
+  // defender of these cases.
+  it.each([
+    {
+      label: 'rule with `<id>` slot but no `device:` field',
+      command: 'devices command <id> turnOn',
+      deviceField: undefined as string | undefined,
+    },
+    {
+      label: 'rule with empty string in `device:`',
+      command: 'devices command <id> turnOn',
+      deviceField: '',
+    },
+    {
+      label: 'rule with literal `<id>` in `device:`',
+      command: 'devices command <id> turnOn',
+      deviceField: '<id>',
+    },
+  ])(
+    'live inventory validation — offline pass catches pathological device ref ($label)',
+    ({ command, deviceField }) => {
+      const action =
+        deviceField === undefined
+          ? `        - command: "${command}"`
+          : [
+              `        - command: "${command}"`,
+              `          device: ${JSON.stringify(deviceField)}`,
+            ].join('\n');
+      const loaded = writeAndLoad(
+        tmpDir,
+        [
+          'version: "0.2"',
+          'automation:',
+          '  rules:',
+          '    - name: "pathological ref"',
+          '      when:',
+          '        source: mqtt',
+          '        event: x.y',
+          '      then:',
+          action,
+          '',
+        ].join('\n'),
+      );
+      const result = validateLoadedPolicyAgainstInventory(loaded, {
+        deviceList: [
+          {
+            deviceId: '01-202407090924-26354212',
+            deviceName: 'Bedroom Meter',
+            deviceType: 'Meter',
+            enableCloudService: true,
+            hubDeviceId: '',
+          },
+        ],
+        infraredRemoteList: [],
+      });
+      // The rule must not silently pass. Either the offline `missing-device`
+      // / `unknown-device-ref` keyword fires, or a dedicated live keyword
+      // does — but SOMETHING must error on this rule's action path.
+      expect(result.valid).toBe(false);
+      const ruleActionErrs = result.errors.filter((e) =>
+        e.path.startsWith('/automation/rules/0/then/0/'),
+      );
+      expect(
+        ruleActionErrs.length,
+        `expected at least one error on the rule action, got none. errors:\n${JSON.stringify(result.errors, null, 2)}`,
+      ).toBeGreaterThan(0);
+    },
+  );
 });

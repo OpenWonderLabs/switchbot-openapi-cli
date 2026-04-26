@@ -718,14 +718,21 @@ describe('doctor command', () => {
     });
   });
 
-  it('release-notes check warns when the current release has a breaking-change notice', async () => {
+  it('release-notes check is ok when RELEASE_METADATA carries no breaking notice for the current release', async () => {
+    // The release-notes check is a contract between doctor and
+    // src/version-notes.ts RELEASE_METADATA. When no entry exists for
+    // the running version (or the entry has `breaking: false`), the
+    // check must report 'ok'. The 3.3.0 envelope-breaking entry that
+    // previously lit this path up was removed in 3.3.1 after we
+    // verified the envelope actually shipped in 2.0.0 (commit 33d3825),
+    // not 3.3.0 — it was a false breaking claim.
     process.env.SWITCHBOT_TOKEN = 't';
     process.env.SWITCHBOT_SECRET = 's';
     const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--section', 'release-notes']);
     const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
     const note = payload.data.checks.find((c: { name: string }) => c.name === 'release-notes');
     expect(note).toBeDefined();
-    expect(note.status).toBe('warn');
-    expect(String(note.detail.message)).toMatch(/schemaVersion,data|envelope/i);
+    expect(note.status).toBe('ok');
+    expect(String(note.detail.message)).toMatch(/no known breaking-change notice/i);
   });
 });

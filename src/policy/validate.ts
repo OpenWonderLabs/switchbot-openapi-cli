@@ -51,6 +51,14 @@ const POLICY_VALIDATION_LIVE_LIMITATIONS = [
   'Does not verify commands against live capabilities or current firmware.',
 ] as const;
 
+// Offline plausibility checks for a raw device-ID string in a policy file.
+// Deliberately permissive: we accept anything that *could* be a deviceId on
+// any SwitchBot account without asking the API. The real authorization gate
+// is `validateLoadedPolicyAgainstInventory` / `alias-live-device-not-found`
+// / `rule-live-device-not-found`, which cross-checks against the current
+// account's inventory. If you tighten these patterns too far, valid IR
+// remote IDs or future SKU conventions start failing offline `policy
+// validate` even when they're fine on the account.
 const HEX_MAC_DEVICE_ID_RE = /^[A-Fa-f0-9]{12}(?:-[A-Za-z0-9]{2,16})?$/;
 const HYPHENATED_DEVICE_ID_RE = /^[A-Za-z0-9]{2,32}(?:-[A-Za-z0-9]{2,32}){1,4}$/;
 
@@ -534,6 +542,15 @@ export function validateLoadedPolicyAgainstInventory(
           continue;
         }
 
+        // Only reached once the target device is resolved in the live
+        // inventory, so `target.typeName` came straight from the live API
+        // and is a canonical catalog key — `findCatalogEntry` almost always
+        // returns the exact entry. The `Array.isArray` branch would only
+        // fire if the live API ever returns a type that substring-matches
+        // multiple catalog rows (catalog drift / new upstream type). When
+        // that happens we'd rather stay silent than emit a false
+        // `rule-live-unsupported-command` against an ambiguous match —
+        // verb-support for the unknown type is simply not checkable here.
         const match = target.typeName ? findCatalogEntry(target.typeName) : null;
         const entry = !match || Array.isArray(match) ? null : match;
         if (!entry) continue;
