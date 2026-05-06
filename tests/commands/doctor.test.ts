@@ -735,4 +735,52 @@ describe('doctor command', () => {
     expect(note.status).toBe('ok');
     expect(String(note.detail.message)).toMatch(/no known breaking-change notice/i);
   });
+
+  it('notify-connectivity check appears in --list output', async () => {
+    const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--list']);
+    const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    const names = payload.data.checks.map((c: { name: string }) => c.name);
+    expect(names).toContain('notify-connectivity');
+  });
+
+  it('notify-connectivity check is ok with webhookCount:0 when policy has no notify actions', async () => {
+    const policyDir = path.join(tmp, '.config', 'openclaw', 'switchbot');
+    const policyPath = path.join(policyDir, 'policy.yaml');
+    fs.mkdirSync(policyDir, { recursive: true });
+    fs.writeFileSync(policyPath, [
+      'version: "0.2"',
+      'automation:',
+      '  enabled: false',
+      '  rules: []',
+    ].join('\n') + '\n');
+    process.env.SWITCHBOT_POLICY_PATH = policyPath;
+    process.env.SWITCHBOT_TOKEN = 't';
+    process.env.SWITCHBOT_SECRET = 's';
+    try {
+      const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--section', 'notify-connectivity']);
+      const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+      const check = payload.data.checks.find((c: { name: string }) => c.name === 'notify-connectivity');
+      expect(check).toBeDefined();
+      expect(check.status).toBe('ok');
+      expect(check.detail.webhookCount).toBe(0);
+    } finally {
+      delete process.env.SWITCHBOT_POLICY_PATH;
+    }
+  });
+
+  it('notify-connectivity check is ok with present:false when no policy file exists', async () => {
+    process.env.SWITCHBOT_POLICY_PATH = path.join(tmp, 'nonexistent-policy.yaml');
+    process.env.SWITCHBOT_TOKEN = 't';
+    process.env.SWITCHBOT_SECRET = 's';
+    try {
+      const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--section', 'notify-connectivity']);
+      const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+      const check = payload.data.checks.find((c: { name: string }) => c.name === 'notify-connectivity');
+      expect(check).toBeDefined();
+      expect(check.status).toBe('ok');
+      expect(check.detail.present).toBe(false);
+    } finally {
+      delete process.env.SWITCHBOT_POLICY_PATH;
+    }
+  });
 });
