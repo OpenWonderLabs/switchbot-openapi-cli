@@ -1,4 +1,4 @@
-import { stringify as yamlStringify, parse as yamlParse } from 'yaml';
+import { stringify as yamlStringify, parse as yamlParse, parseDocument, LineCounter, type Document } from 'yaml';
 import { containsCjk, inferCommandFromIntent } from '../lib/command-keywords.js';
 import { UsageError } from '../utils/output.js';
 import { writeAudit } from '../utils/audit.js';
@@ -117,6 +117,7 @@ async function suggestRuleWithLlm(opts: SuggestRuleOptions, backend: Exclude<LLM
   const { createLLMProvider } = await import('../llm/index.js');
   const { buildRuleSuggestSystemPrompt } = await import('../llm/rule-prompt.js');
   const { lintRules } = await import('./engine.js');
+  const { validateLoadedPolicy } = await import('../policy/validate.js');
 
   const provider = createLLMProvider(backend);
   const systemPrompt = buildRuleSuggestSystemPrompt(opts.devices ?? [], opts.aliases ?? {});
@@ -129,9 +130,117 @@ async function suggestRuleWithLlm(opts: SuggestRuleOptions, backend: Exclude<LLM
   if (opts.webhookPath)    userMessage += `\nConstraint — webhook path: ${opts.webhookPath}`;
 
   const start = Date.now();
-  const rawYaml = await provider.generateYaml(systemPrompt, userMessage);
-  const latencyMs = Date.now() - start;
+  let auditError: string | undefined;
+  let result: SuggestRuleResult | undefined;
+  let outcomeError: unknown;
 
+  try {
+    const rawYaml = await provider.generateYaml(systemPrompt, userMessage);
+
+    if (rawYaml.trimStart().startsWith('# ERROR:')) {
+      throw new UsageError(`LLM could not generate rule: ${rawYaml.replace(/^#\s*ERROR:\s*/i, '').trim()}`);
+    }
+
+    const parsed = yamlParse(rawYaml);
+    if (
+      parsed === null ||
+      typeof parsed !== 'object' ||
+      Array.isArray(parsed) ||
+      !('when' in parsed) ||
+      !('then' in parsed)
+    ) {
+      throw new UsageError('LLM returned unexpected output structure (expected a rule object with when/then fields)');
+    }
+    const ruleObj = parsed as Rule;
+    const warnings: string[] = [];
+
+    // Enforce explicit caller constraints — fail on conflicting trigger source,
+    // override mismatched fields within the same trigger.
+    if (opts.trigger && ruleObj.when?.source !== opts.trigger) {
+      throw new UsageError(
+        `LLM ignored --trigger ${opts.trigger}, returned ${ruleObj.when?.source ?? 'unknown'}`,
+      );
+    }
+    if (opts.trigger === 'mqtt' && ruleObj.when.source === 'mqtt') {
+      if (opts.event && (ruleObj.when as MqttTrigger).event !== opts.event) {
+        warnings.push(
+          `LLM returned event "${(ruleObj.when as MqttTrigger).event}" but --event "${opts.event}" was specified; overriding to caller's value.`,
+        );
+        (ruleObj.when as MqttTrigger).event = opts.event;
+      }
+    }
+    if (opts.trigger === 'cron' && ruleObj.when.source === 'cron') {
+      const cronWhen = ruleObj.when as CronTrigger;
+      if (opts.schedule && cronWhen.schedule !== opts.schedule) {
+        warnings.push(
+          `LLM returned schedule "${cronWhen.schedule}" but --schedule "${opts.schedule}" was specified; overriding to caller's value.`,
+        );
+        cronWhen.schedule = opts.schedule;
+      }
+      if (opts.days && opts.days.length > 0) {
+        const llmDays = (cronWhen.days ?? []).slice().sort();
+        const wantedDays = opts.days.slice().sort();
+        const sameDays = llmDays.length === wantedDays.length && llmDays.every((d, i) => d === wantedDays[i]);
+        if (!sameDays) {
+          warnings.push(
+            `LLM returned days "${llmDays.join(',') || '(none)'}" but --days "${opts.days.join(',')}" was specified; overriding to caller's value.`,
+          );
+          cronWhen.days = opts.days as never;
+        }
+      }
+    }
+    if (opts.trigger === 'webhook' && ruleObj.when.source === 'webhook') {
+      const webhookWhen = ruleObj.when as WebhookTrigger;
+      if (opts.webhookPath && webhookWhen.path !== opts.webhookPath) {
+        warnings.push(
+          `LLM returned webhook path "${webhookWhen.path}" but --webhook-path "${opts.webhookPath}" was specified; overriding to caller's value.`,
+        );
+        webhookWhen.path = opts.webhookPath;
+      }
+    }
+
+    // Force dry_run:true regardless of LLM output — never auto-arm a generated rule.
+    if (ruleObj.dry_run !== true) {
+      warnings.push(
+        'LLM proposed dry_run:false or omitted; forced to dry_run:true for safety. Review before arming.',
+      );
+    }
+    const rule: Rule = { ...ruleObj, dry_run: true };
+
+    // Schema validation — wrap the single rule into a minimal v0.2 policy
+    // and run it through the same Ajv validator as `policy validate`.
+    // This catches structural issues (wrong types, missing required fields,
+    // unknown enum values) that lintRules cannot easily detect.
+    const wrapped = { version: '0.2', automation: { enabled: true, rules: [rule] } };
+    const wrappedYaml = yamlStringify(wrapped, { lineWidth: 0 });
+    const lc = new LineCounter();
+    const probeDoc = parseDocument(wrappedYaml, { lineCounter: lc, keepSourceTokens: true }) as Document.Parsed;
+    const schemaValidation = validateLoadedPolicy({
+      path: '<llm-suggest>',
+      source: wrappedYaml,
+      doc: probeDoc,
+      lineCounter: lc,
+      data: probeDoc.toJS({ maxAliasCount: 100 }),
+    });
+    if (!schemaValidation.valid) {
+      const firstErr = schemaValidation.errors[0]?.message ?? 'unknown schema error';
+      throw new UsageError(`LLM-generated rule failed policy schema: ${firstErr}`);
+    }
+
+    const lintResult = lintRules({ enabled: true, rules: [rule] });
+    if (!lintResult.valid) {
+      const errors = lintResult.rules[0]?.issues.filter(i => i.severity === 'error').map(i => i.message).join('; ');
+      throw new UsageError(`LLM-generated rule failed lint: ${errors}`);
+    }
+
+    const ruleYaml = yamlStringify(rule, { lineWidth: 0 });
+    result = { rule, ruleYaml, warnings };
+  } catch (e) {
+    outcomeError = e;
+    auditError = e instanceof Error ? e.message : String(e);
+  }
+
+  const latencyMs = Date.now() - start;
   writeAudit({
     t: new Date().toISOString(),
     kind: 'llm-suggest',
@@ -140,90 +249,15 @@ async function suggestRuleWithLlm(opts: SuggestRuleOptions, backend: Exclude<LLM
     parameter: opts.intent.slice(0, 200),
     commandType: 'command',
     dryRun: false,
-    result: 'ok',
+    result: outcomeError ? 'error' : 'ok',
+    error: auditError,
     llmBackend: backend,
     llmModel: provider.model,
     llmLatencyMs: latencyMs,
   });
 
-  if (rawYaml.trimStart().startsWith('# ERROR:')) {
-    throw new UsageError(`LLM could not generate rule: ${rawYaml.replace(/^#\s*ERROR:\s*/i, '').trim()}`);
-  }
-
-  const parsed = yamlParse(rawYaml);
-  if (
-    parsed === null ||
-    typeof parsed !== 'object' ||
-    Array.isArray(parsed) ||
-    !('when' in parsed) ||
-    !('then' in parsed)
-  ) {
-    throw new UsageError('LLM returned unexpected output structure (expected a rule object with when/then fields)');
-  }
-  const ruleObj = parsed as Rule;
-  const warnings: string[] = [];
-
-  // Enforce explicit caller constraints — fail on conflicting trigger source,
-  // override mismatched fields within the same trigger.
-  if (opts.trigger && ruleObj.when?.source !== opts.trigger) {
-    throw new UsageError(
-      `LLM ignored --trigger ${opts.trigger}, returned ${ruleObj.when?.source ?? 'unknown'}`,
-    );
-  }
-  if (opts.trigger === 'mqtt' && ruleObj.when.source === 'mqtt') {
-    if (opts.event && (ruleObj.when as MqttTrigger).event !== opts.event) {
-      warnings.push(
-        `LLM returned event "${(ruleObj.when as MqttTrigger).event}" but --event "${opts.event}" was specified; overriding to caller's value.`,
-      );
-      (ruleObj.when as MqttTrigger).event = opts.event;
-    }
-  }
-  if (opts.trigger === 'cron' && ruleObj.when.source === 'cron') {
-    const cronWhen = ruleObj.when as CronTrigger;
-    if (opts.schedule && cronWhen.schedule !== opts.schedule) {
-      warnings.push(
-        `LLM returned schedule "${cronWhen.schedule}" but --schedule "${opts.schedule}" was specified; overriding to caller's value.`,
-      );
-      cronWhen.schedule = opts.schedule;
-    }
-    if (opts.days && opts.days.length > 0) {
-      const llmDays = (cronWhen.days ?? []).slice().sort();
-      const wantedDays = opts.days.slice().sort();
-      const sameDays = llmDays.length === wantedDays.length && llmDays.every((d, i) => d === wantedDays[i]);
-      if (!sameDays) {
-        warnings.push(
-          `LLM returned days "${llmDays.join(',') || '(none)'}" but --days "${opts.days.join(',')}" was specified; overriding to caller's value.`,
-        );
-        cronWhen.days = opts.days as never;
-      }
-    }
-  }
-  if (opts.trigger === 'webhook' && ruleObj.when.source === 'webhook') {
-    const webhookWhen = ruleObj.when as WebhookTrigger;
-    if (opts.webhookPath && webhookWhen.path !== opts.webhookPath) {
-      warnings.push(
-        `LLM returned webhook path "${webhookWhen.path}" but --webhook-path "${opts.webhookPath}" was specified; overriding to caller's value.`,
-      );
-      webhookWhen.path = opts.webhookPath;
-    }
-  }
-
-  // Force dry_run:true regardless of LLM output — never auto-arm a generated rule.
-  if (ruleObj.dry_run !== true) {
-    warnings.push(
-      'LLM proposed dry_run:false or omitted; forced to dry_run:true for safety. Review before arming.',
-    );
-  }
-  const rule: Rule = { ...ruleObj, dry_run: true };
-
-  const lintResult = lintRules({ enabled: true, rules: [rule] });
-  if (!lintResult.valid) {
-    const errors = lintResult.rules[0]?.issues.filter(i => i.severity === 'error').map(i => i.message).join('; ');
-    throw new UsageError(`LLM-generated rule failed lint: ${errors}`);
-  }
-
-  const ruleYaml = yamlStringify(rule, { lineWidth: 0 });
-  return { rule, ruleYaml, warnings };
+  if (outcomeError) throw outcomeError;
+  return result!;
 }
 
 function suggestRuleHeuristic(opts: SuggestRuleOptions): SuggestRuleResult {

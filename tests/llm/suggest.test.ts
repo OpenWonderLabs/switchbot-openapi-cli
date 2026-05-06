@@ -1,12 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
+const METER_ID = '28372F4C9C4A';
+const AC_ID = '11AABB223344';
+const LIGHT_ID = '55EEFF667788';
+
 const VALID_RULE_YAML = `name: ac-on-when-hot
 when:
   source: mqtt
   event: meter.temperature_changed
-  device: METER_001
+  device: ${METER_ID}
 then:
-  - command: devices command AC_001 turnOn
+  - command: devices command ${AC_ID} turnOn
 dry_run: true`;
 
 vi.mock('../../src/llm/providers/openai.js', () => ({
@@ -46,7 +50,7 @@ describe('suggestRule — LLM backend', () => {
   it('returns LLM-generated rule when llm=openai', async () => {
     const result = await suggestRule({
       intent: 'when temperature above 28 and humidity over 70 turn on AC',
-      devices: [{ id: 'METER_001', name: 'Meter', type: 'MeterPro' }, { id: 'AC_001', name: 'AC' }],
+      devices: [{ id: METER_ID, name: 'Meter', type: 'MeterPro' }, { id: AC_ID, name: 'AC' }],
       llm: 'openai',
     });
     expect(result.rule.name).toBe('ac-on-when-hot');
@@ -61,7 +65,7 @@ describe('suggestRule — LLM backend', () => {
     try {
       result = await suggestRule({
         intent: 'on weekdays if someone opens the door and room temp is below 20 turn on AC but skip if already on',
-        devices: [{ id: 'AC_001' }],
+        devices: [{ id: AC_ID }],
         llm: 'auto',
       });
     } finally {
@@ -114,7 +118,7 @@ when:
   source: mqtt
   event: meter.temperature_changed
 then:
-  - command: devices command AC_001 turnOn
+  - command: devices command ${AC_ID} turnOn
 dry_run: false`;
     const { OpenAIProvider } = await import('../../src/llm/providers/openai.js');
     (OpenAIProvider as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
@@ -125,7 +129,7 @@ dry_run: false`;
 
     const result = await suggestRule({
       intent: 'force dry run',
-      devices: [{ id: 'AC_001' }],
+      devices: [{ id: AC_ID }],
       llm: 'openai',
     });
 
@@ -138,7 +142,7 @@ dry_run: false`;
     await expect(
       suggestRule({
         intent: 'turn on at 8am',
-        devices: [{ id: 'LIGHT_001' }],
+        devices: [{ id: LIGHT_ID }],
         trigger: 'cron',
         schedule: '0 8 * * *',
         llm: 'openai',
@@ -152,7 +156,7 @@ when:
   source: cron
   schedule: '0 8 * * *'
 then:
-  - command: devices command LIGHT_001 turnOff
+  - command: devices command ${LIGHT_ID} turnOff
 dry_run: true`;
     const { OpenAIProvider } = await import('../../src/llm/providers/openai.js');
     (OpenAIProvider as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
@@ -163,7 +167,7 @@ dry_run: true`;
 
     const result = await suggestRule({
       intent: 'turn off at 10pm',
-      devices: [{ id: 'LIGHT_001' }],
+      devices: [{ id: LIGHT_ID }],
       trigger: 'cron',
       schedule: '0 22 * * *',
       llm: 'openai',
@@ -180,7 +184,7 @@ when:
   source: mqtt
   event: device.shadow
 then:
-  - command: devices command LIGHT_001 turnOn
+  - command: devices command ${LIGHT_ID} turnOn
 dry_run: true`;
     const { OpenAIProvider } = await import('../../src/llm/providers/openai.js');
     (OpenAIProvider as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
@@ -191,7 +195,7 @@ dry_run: true`;
 
     const result = await suggestRule({
       intent: 'on motion turn on light',
-      devices: [{ id: 'LIGHT_001' }],
+      devices: [{ id: LIGHT_ID }],
       trigger: 'mqtt',
       event: 'motion.detected',
       llm: 'openai',
@@ -199,5 +203,60 @@ dry_run: true`;
 
     expect((result.rule.when as { event: string }).event).toBe('motion.detected');
     expect(result.warnings.some(w => w.includes('--event "motion.detected"'))).toBe(true);
+  });
+
+  it('rejects LLM rule that violates the policy schema', async () => {
+    const RULE_INVALID_SCHEMA = `name: missing-action-fields
+when:
+  source: mqtt
+  event: motion.detected
+then:
+  - { not_a_command: true }
+dry_run: true`;
+    const { OpenAIProvider } = await import('../../src/llm/providers/openai.js');
+    (OpenAIProvider as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
+      name: 'openai',
+      model: 'gpt-4o-mini',
+      generateYaml: () => Promise.resolve(RULE_INVALID_SCHEMA),
+    }));
+
+    await expect(
+      suggestRule({
+        intent: 'bad rule',
+        devices: [{ id: 'AC_001' }],
+        llm: 'openai',
+      }),
+    ).rejects.toThrow(/policy schema|failed lint/i);
+  });
+
+  it('records audit with result=error and the error message when LLM provider rejects', async () => {
+    const auditMod = await import('../../src/utils/audit.js');
+    const auditSpy = vi.spyOn(auditMod, 'writeAudit').mockImplementation(() => {});
+
+    const { OpenAIProvider } = await import('../../src/llm/providers/openai.js');
+    (OpenAIProvider as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
+      name: 'openai',
+      model: 'gpt-4o-mini',
+      generateYaml: () => Promise.reject(new Error('boom from provider')),
+    }));
+
+    try {
+      await expect(
+        suggestRule({
+          intent: 'audit error path',
+          devices: [{ id: 'AC_001' }],
+          llm: 'openai',
+        }),
+      ).rejects.toThrow(/boom from provider/);
+
+      const errorEntries = auditSpy.mock.calls
+        .map(c => c[0] as Record<string, unknown>)
+        .filter(e => e.kind === 'llm-suggest');
+      expect(errorEntries).toHaveLength(1);
+      expect(errorEntries[0].result).toBe('error');
+      expect(errorEntries[0].error).toContain('boom from provider');
+    } finally {
+      auditSpy.mockRestore();
+    }
   });
 });
