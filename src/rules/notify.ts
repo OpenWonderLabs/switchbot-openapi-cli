@@ -62,6 +62,10 @@ async function sendWebhook(url: string, body: string): Promise<void> {
       return;
     }
 
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      reject(new Error(`unsupported protocol "${parsed.protocol}" — only http: and https: are allowed`));
+      return;
+    }
     const isHttps = parsed.protocol === 'https:';
     const options = {
       hostname: parsed.hostname,

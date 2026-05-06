@@ -115,8 +115,16 @@ async function suggestRuleWithLlm(opts: SuggestRuleOptions, backend: Exclude<LLM
 
   const provider = createLLMProvider(backend);
   const systemPrompt = buildRuleSuggestSystemPrompt(opts.devices ?? [], opts.aliases ?? {});
+
+  let userMessage = opts.intent;
+  if (opts.trigger)        userMessage += `\nConstraint — trigger type: ${opts.trigger}`;
+  if (opts.event)          userMessage += `\nConstraint — trigger event: ${opts.event}`;
+  if (opts.schedule)       userMessage += `\nConstraint — cron schedule: ${opts.schedule}`;
+  if (opts.days?.length)   userMessage += `\nConstraint — days filter: ${opts.days.join(', ')}`;
+  if (opts.webhookPath)    userMessage += `\nConstraint — webhook path: ${opts.webhookPath}`;
+
   const start = Date.now();
-  const rawYaml = await provider.generateYaml(systemPrompt, opts.intent);
+  const rawYaml = await provider.generateYaml(systemPrompt, userMessage);
   const latencyMs = Date.now() - start;
 
   writeAudit({
@@ -137,7 +145,17 @@ async function suggestRuleWithLlm(opts: SuggestRuleOptions, backend: Exclude<LLM
     throw new UsageError(`LLM could not generate rule: ${rawYaml.replace(/^#\s*ERROR:\s*/i, '').trim()}`);
   }
 
-  const rule = yamlParse(rawYaml) as Rule;
+  const parsed = yamlParse(rawYaml);
+  if (
+    parsed === null ||
+    typeof parsed !== 'object' ||
+    Array.isArray(parsed) ||
+    !('when' in parsed) ||
+    !('then' in parsed)
+  ) {
+    throw new UsageError('LLM returned unexpected output structure (expected a rule object with when/then fields)');
+  }
+  const rule = parsed as Rule;
   const lintResult = lintRules({ enabled: true, rules: [rule] });
   if (!lintResult.valid) {
     const errors = lintResult.rules[0]?.issues.filter(i => i.severity === 'error').map(i => i.message).join('; ');
