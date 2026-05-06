@@ -97,6 +97,11 @@ export async function suggestRule(opts: SuggestRuleOptions): Promise<SuggestRule
         return heuristic;
       }
     }
+    const heuristic = suggestRuleHeuristic(opts);
+    heuristic.warnings.unshift(
+      'intent complexity below LLM threshold; used heuristic. Pass --llm openai|anthropic to force LLM.',
+    );
+    return heuristic;
   }
   return suggestRuleHeuristic(opts);
 }

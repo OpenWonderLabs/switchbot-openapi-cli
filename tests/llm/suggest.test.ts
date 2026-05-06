@@ -79,6 +79,7 @@ describe('suggestRule — LLM backend', () => {
     // heuristic path — no LLM called, rule uses the intent as name
     expect(result.rule.when.source).toBe('cron');
     expect(result.rule.name).toBe('turn off lights at 10pm');
+    expect(result.warnings.some(w => w.includes('intent complexity below LLM threshold'))).toBe(true);
   });
 
   it('auto mode falls back to heuristic when LLM throws', async () => {

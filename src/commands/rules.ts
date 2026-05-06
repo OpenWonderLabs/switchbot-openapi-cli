@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { isJsonMode, printJson, exitWithError, printTable, handleError } from '../utils/output.js';
+import { isJsonMode, printJson, exitWithError, printTable, handleError, UsageError } from '../utils/output.js';
 import {
   loadPolicyFile,
   resolvePolicyPath,
@@ -650,6 +650,9 @@ function registerSuggest(rules: Command): void {
         llm?: string;
       }) => {
         try {
+          if (opts.llm !== undefined && !['auto', 'openai', 'anthropic'].includes(opts.llm)) {
+            throw new UsageError(`--llm must be one of: auto, openai, anthropic (got "${opts.llm}")`);
+          }
           const trigger = opts.trigger as 'mqtt' | 'cron' | 'webhook' | undefined;
           const days = opts.days ? opts.days.split(',').map((d) => d.trim()) : undefined;
           const devices = opts.device.map((ref) => {
