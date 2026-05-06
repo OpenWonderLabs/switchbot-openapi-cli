@@ -24,7 +24,8 @@ export type AuditEntryKind =
   | 'rule-fire-dry'
   | 'rule-throttled'
   | 'rule-webhook-rejected'
-  | 'rule-notify';
+  | 'rule-notify'
+  | 'llm-suggest';
 
 export interface AuditRuleContext {
   /** Rule.name from policy.yaml. */
@@ -64,6 +65,12 @@ export interface AuditEntry {
   notifyChannel?: string;
   /** Round-trip delivery latency in milliseconds, present on rule-notify entries. */
   notifyLatencyMs?: number;
+  /** LLM backend used for suggestion (e.g. "openai", "anthropic"). */
+  llmBackend?: string;
+  /** Model name returned by the LLM provider. */
+  llmModel?: string;
+  /** Round-trip LLM latency in milliseconds. */
+  llmLatencyMs?: number;
 }
 
 function resolveAuditPath(): string | null {

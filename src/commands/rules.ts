@@ -636,7 +636,7 @@ function registerSuggest(rules: Command): void {
     .option('--webhook-path <path>', 'Webhook path override (default: /action)')
     .option('--out <file>', 'Write YAML to file instead of stdout')
     .action(
-      (opts: {
+      async (opts: {
         intent: string;
         trigger?: string;
         device: string[];
@@ -653,7 +653,7 @@ function registerSuggest(rules: Command): void {
             const cached = getCachedDevice(ref);
             return { id: ref, name: cached?.name, type: cached?.type };
           });
-          const { rule, ruleYaml, warnings } = suggestRule({
+          const { rule, ruleYaml, warnings } = await suggestRule({
             intent: opts.intent,
             trigger,
             devices,

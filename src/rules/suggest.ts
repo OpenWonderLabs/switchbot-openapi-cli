@@ -1,7 +1,9 @@
-import { stringify as yamlStringify } from 'yaml';
+import { stringify as yamlStringify, parse as yamlParse } from 'yaml';
 import { containsCjk, inferCommandFromIntent } from '../lib/command-keywords.js';
 import { UsageError } from '../utils/output.js';
+import { writeAudit } from '../utils/audit.js';
 import type { Rule, MqttTrigger, CronTrigger, WebhookTrigger, Action } from './types.js';
+import type { LLMBackend } from '../llm/index.js';
 
 export interface SuggestRuleOptions {
   intent: string;
@@ -11,6 +13,8 @@ export interface SuggestRuleOptions {
   schedule?: string;
   days?: string[];
   webhookPath?: string;
+  llm?: LLMBackend;
+  aliases?: Record<string, string>;
 }
 
 export interface SuggestRuleResult {
@@ -76,7 +80,75 @@ function inferCommand(intent: string, warnings: string[]): string {
   return 'turnOn';
 }
 
-export function suggestRule(opts: SuggestRuleOptions): SuggestRuleResult {
+export async function suggestRule(opts: SuggestRuleOptions): Promise<SuggestRuleResult> {
+  // LLM path
+  if (opts.llm && opts.llm !== 'auto') {
+    return suggestRuleWithLlm(opts, opts.llm as Exclude<LLMBackend, 'auto'>);
+  }
+  if (opts.llm === 'auto') {
+    const { scoreIntentComplexity, LLM_AUTO_THRESHOLD } = await import('../llm/index.js');
+    if (scoreIntentComplexity(opts.intent) >= LLM_AUTO_THRESHOLD) {
+      try {
+        return await suggestRuleWithLlm(opts, detectLlmBackend());
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        const heuristic = suggestRuleHeuristic(opts);
+        heuristic.warnings.unshift(`LLM backend failed (${msg}), fell back to heuristic`);
+        return heuristic;
+      }
+    }
+  }
+  return suggestRuleHeuristic(opts);
+}
+
+function detectLlmBackend(): Exclude<LLMBackend, 'auto'> {
+  if (process.env.ANTHROPIC_API_KEY) return 'anthropic';
+  if (process.env.OPENAI_API_KEY) return 'openai';
+  if (process.env.LLM_API_KEY) return 'openai';
+  throw new UsageError('No LLM API key found. Set OPENAI_API_KEY, ANTHROPIC_API_KEY, or LLM_API_KEY to use --llm auto.');
+}
+
+async function suggestRuleWithLlm(opts: SuggestRuleOptions, backend: Exclude<LLMBackend, 'auto'>): Promise<SuggestRuleResult> {
+  const { createLLMProvider } = await import('../llm/index.js');
+  const { buildRuleSuggestSystemPrompt } = await import('../llm/rule-prompt.js');
+  const { lintRules } = await import('./engine.js');
+
+  const provider = createLLMProvider(backend);
+  const systemPrompt = buildRuleSuggestSystemPrompt(opts.devices ?? [], opts.aliases ?? {});
+  const start = Date.now();
+  const rawYaml = await provider.generateYaml(systemPrompt, opts.intent);
+  const latencyMs = Date.now() - start;
+
+  writeAudit({
+    t: new Date().toISOString(),
+    kind: 'llm-suggest',
+    deviceId: '',
+    command: `llm-suggest:${backend}`,
+    parameter: opts.intent.slice(0, 200),
+    commandType: 'command',
+    dryRun: false,
+    result: 'ok',
+    llmBackend: backend,
+    llmModel: provider.model,
+    llmLatencyMs: latencyMs,
+  });
+
+  if (rawYaml.trimStart().startsWith('# ERROR:')) {
+    throw new UsageError(`LLM could not generate rule: ${rawYaml.replace(/^#\s*ERROR:\s*/i, '').trim()}`);
+  }
+
+  const rule = yamlParse(rawYaml) as Rule;
+  const lintResult = lintRules({ enabled: true, rules: [rule] });
+  if (!lintResult.valid) {
+    const errors = lintResult.rules[0]?.issues.filter(i => i.severity === 'error').map(i => i.message).join('; ');
+    throw new UsageError(`LLM-generated rule failed lint: ${errors}`);
+  }
+
+  const ruleYaml = yamlStringify(rule, { lineWidth: 0 });
+  return { rule, ruleYaml, warnings: [] };
+}
+
+function suggestRuleHeuristic(opts: SuggestRuleOptions): SuggestRuleResult {
   const warnings: string[] = [];
   const cjkIntent = containsCjk(opts.intent);
 

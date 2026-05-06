@@ -1945,13 +1945,13 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         warnings: z.array(z.string()).describe('Informational warnings (e.g. unrecognized intent defaulted).'),
       },
     },
-    ({ intent, trigger, device_ids, event, schedule, days, webhook_path }) => {
+    async ({ intent, trigger, device_ids, event, schedule, days, webhook_path }) => {
       const devices = (device_ids ?? []).map((id) => {
         const cached = getCachedDevice(id);
         return { id, name: cached?.name, type: cached?.type };
       });
       try {
-        const { rule, ruleYaml, warnings } = suggestRule({
+        const { rule, ruleYaml, warnings } = await suggestRule({
           intent,
           trigger,
           devices,
