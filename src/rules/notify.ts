@@ -10,12 +10,14 @@ export interface NotifyContext {
   fireId: string;
   eventPayload?: unknown;
   deviceId?: string;
+  globalDryRun?: boolean;
 }
 
 export interface NotifyResult {
   ok: boolean;
   channel: string;
   latencyMs: number;
+  dryRun?: boolean;
   error?: string;
 }
 
@@ -104,11 +106,34 @@ export async function executeNotifyAction(
   action: NotifyAction,
   ctx: NotifyContext,
 ): Promise<NotifyResult> {
+  const dryRun = ctx.globalDryRun === true || ctx.rule.dry_run === true;
   const start = Date.now();
   const vars = buildTemplateVars(action, ctx);
   const body = action.template
     ? renderNotifyTemplate(action.template, vars)
     : buildDefaultBody(action, ctx);
+
+  if (dryRun) {
+    const latencyMs = Date.now() - start;
+    writeAudit({
+      t: new Date().toISOString(),
+      kind: 'rule-notify',
+      deviceId: ctx.deviceId ?? '',
+      command: `notify:${action.channel}`,
+      parameter: action.to,
+      commandType: 'command',
+      dryRun: true,
+      result: 'ok',
+      notifyChannel: action.channel,
+      notifyLatencyMs: latencyMs,
+      rule: {
+        name: ctx.rule.name,
+        triggerSource: ctx.rule.when.source,
+        fireId: ctx.fireId,
+      },
+    });
+    return { ok: true, channel: action.channel, latencyMs, dryRun: true };
+  }
 
   let error: string | undefined;
   try {
@@ -156,5 +181,5 @@ export async function executeNotifyAction(
     },
   });
 
-  return { ok, channel: action.channel, latencyMs, error };
+  return { ok, channel: action.channel, latencyMs, dryRun: false, error };
 }

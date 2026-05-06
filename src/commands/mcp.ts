@@ -1911,7 +1911,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         return mcpError('usage', 2, err instanceof Error ? err.message : 'invalid filter options');
       }
       const bounded = entries.slice(-limit).reverse();
-      const out = { entries: bounded, total: bounded.length };
+      const out = { entries: bounded, total: entries.length };
       return {
         content: [{ type: 'text' as const, text: JSON.stringify(out, null, 2) }],
         structuredContent: out,
@@ -1926,7 +1926,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
       title: 'Draft a SwitchBot automation rule from intent',
       description:
         'Generate a candidate automation rule YAML from a natural language intent. ' +
-        'Uses keyword heuristics (no LLM) to infer trigger, schedule, and command. ' +
+        'Uses keyword heuristics by default; pass llm to use an LLM backend (auto | openai | anthropic). ' +
         'Always emits dry_run: true — the rule must be reviewed before arming. ' +
         'Pass the returned rule_yaml to policy_add_rule to inject it into policy.yaml.',
       _meta: { agentSafetyTier: 'read' },
@@ -1938,6 +1938,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         schedule: z.string().optional().describe('5-field cron expression override (e.g. "0 22 * * *").'),
         days: z.array(z.string()).optional().describe('Weekday filter (e.g. ["mon","tue","wed","thu","fri"]).'),
         webhook_path: z.string().optional().describe('Webhook path override (default /action).'),
+        llm: z.enum(['auto', 'openai', 'anthropic']).optional().describe('LLM backend (auto | openai | anthropic). Omit to use keyword heuristics.'),
       }).strict(),
       outputSchema: {
         rule: z.unknown().describe('Rule object matching the v0.2 policy schema.'),
@@ -1945,7 +1946,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         warnings: z.array(z.string()).describe('Informational warnings (e.g. unrecognized intent defaulted).'),
       },
     },
-    async ({ intent, trigger, device_ids, event, schedule, days, webhook_path }) => {
+    async ({ intent, trigger, device_ids, event, schedule, days, webhook_path, llm }) => {
       const devices = (device_ids ?? []).map((id) => {
         const cached = getCachedDevice(id);
         return { id, name: cached?.name, type: cached?.type };
@@ -1959,6 +1960,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
           schedule,
           days,
           webhookPath: webhook_path,
+          llm,
         });
         return {
           content: [{ type: 'text' as const, text: ruleYaml }],

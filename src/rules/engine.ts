@@ -884,8 +884,9 @@ export class RulesEngine {
           fireId,
           eventPayload: event.payload,
           deviceId: event.deviceId,
+          globalDryRun: this.opts.globalDryRun,
         });
-        result = { ok: nr.ok, error: nr.error };
+        result = { ok: nr.ok, dryRun: nr.dryRun, error: nr.error };
       } else {
         result = await executeRuleAction(action, {
           rule,

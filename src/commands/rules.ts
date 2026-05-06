@@ -24,6 +24,7 @@ import { fetchMqttCredential } from '../mqtt/credential.js';
 import { SwitchBotMqttClient } from '../mqtt/client.js';
 import { WebhookTokenStore } from '../rules/webhook-token.js';
 import { suggestRule } from '../rules/suggest.js';
+import type { LLMBackend } from '../llm/index.js';
 import { getCachedDevice } from '../devices/cache.js';
 import {
   getDefaultPidFilePaths,
@@ -621,7 +622,7 @@ function registerWebhookShowToken(rules: Command): void {
 function registerSuggest(rules: Command): void {
   rules
     .command('suggest')
-    .description('Generate a candidate rule YAML from intent + devices (heuristic, no LLM)')
+    .description('Generate a candidate rule YAML from intent + devices')
     .requiredOption('--intent <text>', 'Natural language description of the automation')
     .option('--trigger <type>', 'mqtt | cron | webhook (inferred from intent if omitted)')
     .option(
@@ -635,6 +636,7 @@ function registerSuggest(rules: Command): void {
     .option('--days <days>', 'Weekday filter, comma-separated (e.g. mon,tue,wed,thu,fri)')
     .option('--webhook-path <path>', 'Webhook path override (default: /action)')
     .option('--out <file>', 'Write YAML to file instead of stdout')
+    .option('--llm <backend>', 'LLM backend for suggestion: auto | openai | anthropic')
     .action(
       async (opts: {
         intent: string;
@@ -645,6 +647,7 @@ function registerSuggest(rules: Command): void {
         days?: string;
         webhookPath?: string;
         out?: string;
+        llm?: string;
       }) => {
         try {
           const trigger = opts.trigger as 'mqtt' | 'cron' | 'webhook' | undefined;
@@ -661,6 +664,7 @@ function registerSuggest(rules: Command): void {
             schedule: opts.schedule,
             days,
             webhookPath: opts.webhookPath,
+            llm: opts.llm as LLMBackend | undefined,
           });
           for (const w of warnings) process.stderr.write(`warning: ${w}\n`);
           if (opts.out) {
