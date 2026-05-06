@@ -147,12 +147,21 @@ export function lintRules(automation: AutomationBlock | null | undefined): LintR
           message: `then[${i}] notify action is missing required field "to".`,
         });
       } else if (action.channel === 'webhook' || action.channel === 'openclaw') {
-        try { new URL(to); } catch {
+        let parsedUrl: URL | undefined;
+        try { parsedUrl = new URL(to); } catch { /* parsedUrl stays undefined */ }
+        if (!parsedUrl) {
           issues.push({
             rule: r.name,
             severity: 'error',
             code: 'notify-invalid-url',
             message: `then[${i}] notify action "to" field "${to}" is not a valid URL.`,
+          });
+        } else if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+          issues.push({
+            rule: r.name,
+            severity: 'error',
+            code: 'notify-unsupported-protocol',
+            message: `then[${i}] notify URL "${to}" uses unsupported protocol "${parsedUrl.protocol}" — only http: and https: are allowed.`,
           });
         }
       }

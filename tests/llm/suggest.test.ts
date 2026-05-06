@@ -106,4 +106,97 @@ describe('suggestRule — LLM backend', () => {
 
     expect(result!.warnings.some(w => w.includes('fell back to heuristic'))).toBe(true);
   });
+
+  it('forces dry_run:true when LLM proposes dry_run:false', async () => {
+    const RULE_NO_DRY_RUN = `name: forced-dry-run
+when:
+  source: mqtt
+  event: meter.temperature_changed
+then:
+  - command: devices command AC_001 turnOn
+dry_run: false`;
+    const { OpenAIProvider } = await import('../../src/llm/providers/openai.js');
+    (OpenAIProvider as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
+      name: 'openai',
+      model: 'gpt-4o-mini',
+      generateYaml: () => Promise.resolve(RULE_NO_DRY_RUN),
+    }));
+
+    const result = await suggestRule({
+      intent: 'force dry run',
+      devices: [{ id: 'AC_001' }],
+      llm: 'openai',
+    });
+
+    expect(result.rule.dry_run).toBe(true);
+    expect(result.warnings.some(w => w.includes('forced to dry_run:true'))).toBe(true);
+  });
+
+  it('throws when LLM ignores --trigger constraint', async () => {
+    // Default mock returns mqtt rule; ask for cron
+    await expect(
+      suggestRule({
+        intent: 'turn on at 8am',
+        devices: [{ id: 'LIGHT_001' }],
+        trigger: 'cron',
+        schedule: '0 8 * * *',
+        llm: 'openai',
+      }),
+    ).rejects.toThrow(/ignored --trigger cron/);
+  });
+
+  it('overrides LLM cron schedule with caller --schedule and emits warning', async () => {
+    const RULE_WRONG_SCHEDULE = `name: wrong-schedule
+when:
+  source: cron
+  schedule: '0 8 * * *'
+then:
+  - command: devices command LIGHT_001 turnOff
+dry_run: true`;
+    const { OpenAIProvider } = await import('../../src/llm/providers/openai.js');
+    (OpenAIProvider as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
+      name: 'openai',
+      model: 'gpt-4o-mini',
+      generateYaml: () => Promise.resolve(RULE_WRONG_SCHEDULE),
+    }));
+
+    const result = await suggestRule({
+      intent: 'turn off at 10pm',
+      devices: [{ id: 'LIGHT_001' }],
+      trigger: 'cron',
+      schedule: '0 22 * * *',
+      llm: 'openai',
+    });
+
+    expect(result.rule.when.source).toBe('cron');
+    expect((result.rule.when as { schedule: string }).schedule).toBe('0 22 * * *');
+    expect(result.warnings.some(w => w.includes('--schedule "0 22 * * *"') && w.includes('overriding'))).toBe(true);
+  });
+
+  it('overrides LLM mqtt event with caller --event and emits warning', async () => {
+    const RULE_WRONG_EVENT = `name: wrong-event
+when:
+  source: mqtt
+  event: device.shadow
+then:
+  - command: devices command LIGHT_001 turnOn
+dry_run: true`;
+    const { OpenAIProvider } = await import('../../src/llm/providers/openai.js');
+    (OpenAIProvider as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
+      name: 'openai',
+      model: 'gpt-4o-mini',
+      generateYaml: () => Promise.resolve(RULE_WRONG_EVENT),
+    }));
+
+    const result = await suggestRule({
+      intent: 'on motion turn on light',
+      devices: [{ id: 'LIGHT_001' }],
+      trigger: 'mqtt',
+      event: 'motion.detected',
+      llm: 'openai',
+    });
+
+    expect((result.rule.when as { event: string }).event).toBe('motion.detected');
+    expect(result.warnings.some(w => w.includes('--event "motion.detected"'))).toBe(true);
+  });
 });

@@ -155,7 +155,62 @@ async function suggestRuleWithLlm(opts: SuggestRuleOptions, backend: Exclude<LLM
   ) {
     throw new UsageError('LLM returned unexpected output structure (expected a rule object with when/then fields)');
   }
-  const rule = parsed as Rule;
+  const ruleObj = parsed as Rule;
+  const warnings: string[] = [];
+
+  // Enforce explicit caller constraints — fail on conflicting trigger source,
+  // override mismatched fields within the same trigger.
+  if (opts.trigger && ruleObj.when?.source !== opts.trigger) {
+    throw new UsageError(
+      `LLM ignored --trigger ${opts.trigger}, returned ${ruleObj.when?.source ?? 'unknown'}`,
+    );
+  }
+  if (opts.trigger === 'mqtt' && ruleObj.when.source === 'mqtt') {
+    if (opts.event && (ruleObj.when as MqttTrigger).event !== opts.event) {
+      warnings.push(
+        `LLM returned event "${(ruleObj.when as MqttTrigger).event}" but --event "${opts.event}" was specified; overriding to caller's value.`,
+      );
+      (ruleObj.when as MqttTrigger).event = opts.event;
+    }
+  }
+  if (opts.trigger === 'cron' && ruleObj.when.source === 'cron') {
+    const cronWhen = ruleObj.when as CronTrigger;
+    if (opts.schedule && cronWhen.schedule !== opts.schedule) {
+      warnings.push(
+        `LLM returned schedule "${cronWhen.schedule}" but --schedule "${opts.schedule}" was specified; overriding to caller's value.`,
+      );
+      cronWhen.schedule = opts.schedule;
+    }
+    if (opts.days && opts.days.length > 0) {
+      const llmDays = (cronWhen.days ?? []).slice().sort();
+      const wantedDays = opts.days.slice().sort();
+      const sameDays = llmDays.length === wantedDays.length && llmDays.every((d, i) => d === wantedDays[i]);
+      if (!sameDays) {
+        warnings.push(
+          `LLM returned days "${llmDays.join(',') || '(none)'}" but --days "${opts.days.join(',')}" was specified; overriding to caller's value.`,
+        );
+        cronWhen.days = opts.days as never;
+      }
+    }
+  }
+  if (opts.trigger === 'webhook' && ruleObj.when.source === 'webhook') {
+    const webhookWhen = ruleObj.when as WebhookTrigger;
+    if (opts.webhookPath && webhookWhen.path !== opts.webhookPath) {
+      warnings.push(
+        `LLM returned webhook path "${webhookWhen.path}" but --webhook-path "${opts.webhookPath}" was specified; overriding to caller's value.`,
+      );
+      webhookWhen.path = opts.webhookPath;
+    }
+  }
+
+  // Force dry_run:true regardless of LLM output — never auto-arm a generated rule.
+  if (ruleObj.dry_run !== true) {
+    warnings.push(
+      'LLM proposed dry_run:false or omitted; forced to dry_run:true for safety. Review before arming.',
+    );
+  }
+  const rule: Rule = { ...ruleObj, dry_run: true };
+
   const lintResult = lintRules({ enabled: true, rules: [rule] });
   if (!lintResult.valid) {
     const errors = lintResult.rules[0]?.issues.filter(i => i.severity === 'error').map(i => i.message).join('; ');
@@ -163,7 +218,7 @@ async function suggestRuleWithLlm(opts: SuggestRuleOptions, backend: Exclude<LLM
   }
 
   const ruleYaml = yamlStringify(rule, { lineWidth: 0 });
-  return { rule, ruleYaml, warnings: [] };
+  return { rule, ruleYaml, warnings };
 }
 
 function suggestRuleHeuristic(opts: SuggestRuleOptions): SuggestRuleResult {

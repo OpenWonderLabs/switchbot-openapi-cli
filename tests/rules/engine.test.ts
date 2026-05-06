@@ -1004,6 +1004,23 @@ describe('lintRules — notify actions', () => {
     expect(r.valid).toBe(false);
     expect(r.rules[0].issues.find(i => i.code === 'notify-invalid-url')).toBeDefined();
   });
+
+  it('errors on notify webhook action with non-http(s) URL (code: notify-unsupported-protocol)', () => {
+    const r = lintRules(automation([
+      { name: 'n5', when: { source: 'mqtt', event: 'motion.detected' }, then: [{ type: 'notify', channel: 'webhook', to: 'ftp://example.com/path' }] },
+    ]));
+    expect(r.valid).toBe(false);
+    const issue = r.rules[0].issues.find(i => i.code === 'notify-unsupported-protocol');
+    expect(issue).toBeDefined();
+    expect(issue?.message).toContain('ftp:');
+  });
+
+  it('accepts an http:// notify webhook URL', () => {
+    const r = lintRules(automation([
+      { name: 'n6', when: { source: 'mqtt', event: 'motion.detected' }, then: [{ type: 'notify', channel: 'webhook', to: 'http://example.com/hook' }] },
+    ]));
+    expect(r.valid).toBe(true);
+  });
 });
 
 describe('RulesEngine — notify action dispatch', () => {
