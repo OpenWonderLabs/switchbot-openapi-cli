@@ -42,7 +42,9 @@ import {
   isMqttTrigger,
   isWebhookTrigger,
   isCommandAction,
+  isNotifyAction,
 } from './types.js';
+import { executeNotifyAction } from './notify.js';
 import { Cron } from 'croner';
 import { writeAudit } from '../utils/audit.js';
 
@@ -129,6 +131,30 @@ export function lintRules(automation: AutomationBlock | null | undefined): LintR
           code: 'destructive-action',
           message: `then[${i}] uses a destructive verb — the engine will refuse to run this rule.`,
         });
+      }
+    }
+
+    // Notify action validation
+    for (let i = 0; i < r.then.length; i++) {
+      const action = r.then[i];
+      if (!isNotifyAction(action)) continue;
+      const to = (action as { to?: string }).to;
+      if (!to || to.trim().length === 0) {
+        issues.push({
+          rule: r.name,
+          severity: 'error',
+          code: 'notify-missing-to',
+          message: `then[${i}] notify action is missing required field "to".`,
+        });
+      } else if (action.channel === 'webhook' || action.channel === 'openclaw') {
+        try { new URL(to); } catch {
+          issues.push({
+            rule: r.name,
+            severity: 'error',
+            code: 'notify-invalid-url',
+            message: `then[${i}] notify action "to" field "${to}" is not a valid URL.`,
+          });
+        }
       }
     }
 
@@ -851,14 +877,25 @@ export class RulesEngine {
     let fired = false;
     let allDry = true;
     for (const action of rule.then) {
-      const result = await executeRuleAction(action, {
-        rule,
-        fireId,
-        aliases: this.aliases,
-        httpClient: this.opts.httpClient,
-        globalDryRun: this.opts.globalDryRun,
-        skipApiCall: this.opts.skipApiCall,
-      });
+      let result: { ok: boolean; error?: string; blocked?: boolean; dryRun?: boolean; deviceId?: string };
+      if (isNotifyAction(action)) {
+        const nr = await executeNotifyAction(action, {
+          rule,
+          fireId,
+          eventPayload: event.payload,
+          deviceId: event.deviceId,
+        });
+        result = { ok: nr.ok, error: nr.error };
+      } else {
+        result = await executeRuleAction(action, {
+          rule,
+          fireId,
+          aliases: this.aliases,
+          httpClient: this.opts.httpClient,
+          globalDryRun: this.opts.globalDryRun,
+          skipApiCall: this.opts.skipApiCall,
+        });
+      }
       if (result.blocked) {
         this.opts.onFire?.({ ruleName: rule.name, fireId, status: 'blocked', deviceId: result.deviceId, reason: result.error });
         if ((action.on_error ?? 'continue') === 'stop') break;
