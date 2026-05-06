@@ -1874,6 +1874,51 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
     },
   );
 
+  // ---- rule_notifications ---------------------------------------------------
+  server.registerTool(
+    'rule_notifications',
+    {
+      title: 'Query rule notification delivery history',
+      description:
+        'Returns audit entries for notify actions (kind: rule-notify). ' +
+        'Useful for confirming whether a notification rule fired and whether delivery succeeded. ' +
+        'Filter by rule name, time range, result, or channel.',
+      _meta: { agentSafetyTier: 'read' },
+      inputSchema: z.object({
+        file: z.string().optional().describe('Optional audit log path; defaults to ~/.switchbot/audit.log.'),
+        rule: z.string().optional().describe('Filter by rule name (exact match).'),
+        since: z.string().optional().describe('Relative window ending now (e.g. "30m", "24h").'),
+        from: z.string().optional().describe('Range start (ISO-8601).'),
+        to: z.string().optional().describe('Range end (ISO-8601).'),
+        result: z.enum(['ok', 'error']).optional().describe('Filter by delivery result.'),
+        channel: z.enum(['webhook', 'openclaw', 'file']).optional().describe('Filter by notify channel.'),
+        limit: z.number().int().min(1).max(500).default(100).describe('Max entries to return (newest first).'),
+      }).strict(),
+      outputSchema: {
+        entries: z.array(z.unknown()).describe('Matching audit entries, newest first.'),
+        total: z.number().int().describe('Count after filtering.'),
+      },
+    },
+    ({ file, rule: ruleName, since, from, to, result: resultFilter, channel, limit }) => {
+      const filePath = file ?? DEFAULT_AUDIT_LOG_FILE;
+      let entries = readAudit(filePath).filter(e => e.kind === 'rule-notify');
+      if (ruleName) entries = entries.filter(e => e.rule?.name === ruleName);
+      if (resultFilter) entries = entries.filter(e => e.result === resultFilter);
+      if (channel) entries = entries.filter(e => e.notifyChannel === channel);
+      try {
+        entries = filterAuditEntries(entries, { since, from, to });
+      } catch (err) {
+        return mcpError('usage', 2, err instanceof Error ? err.message : 'invalid filter options');
+      }
+      const bounded = entries.slice(-limit).reverse();
+      const out = { entries: bounded, total: bounded.length };
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(out, null, 2) }],
+        structuredContent: out,
+      };
+    },
+  );
+
   // ---- rules_suggest --------------------------------------------------------
   server.registerTool(
     'rules_suggest',
@@ -2039,6 +2084,7 @@ export function registerMcpCommand(program: Command): void {
   - plan_run                validate + execute a Plan JSON document
   - audit_query             filter audit log entries by time/device/rule/result
   - audit_stats             aggregate audit counts by kind/result/device/rule
+  - rule_notifications      query rule notify action delivery history
   - rules_suggest           draft an automation rule YAML from intent (heuristic, no LLM)
   - policy_add_rule         append a rule into automation.rules[] in policy.yaml
 
