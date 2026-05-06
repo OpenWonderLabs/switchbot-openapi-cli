@@ -282,9 +282,9 @@ Supported conditions: `time_between` (quiet hours) and `device_state`
 
 - `type: command` (default, no `type` field required) — sends a device command, e.g. `devices command <id> turnOn`
 - `type: notify` — delivers a payload to an external channel after the rule fires:
-  - `channel: webhook` — HTTP POST to a URL
+  - `channel: webhook` — HTTP POST to a URL (only `http://` and `https://` schemes are accepted; `rules lint` rejects others)
   - `channel: file` — appends a JSONL line to a local file
-  - `channel: openclaw` — HTTP POST to an OpenClaw endpoint
+  - `channel: openclaw` — HTTP POST to an OpenClaw endpoint (same protocol restriction)
   - Optional `template` field supports `{{ rule.name }}`, `{{ event.* }}`, `{{ device.id }}` placeholders
 
 ```yaml
@@ -334,6 +334,20 @@ switchbot rules suggest --intent "if door opens and temp below 20 turn on heater
 switchbot rules suggest --intent "..." --llm openai  # explicit backend
 # Set OPENAI_API_KEY or ANTHROPIC_API_KEY; auto mode falls back to heuristic on failure
 ```
+
+`rules suggest` enforces several guardrails on LLM output so a model can't quietly arm
+something unsafe:
+
+- **`dry_run` is forced to `true`** on every LLM-generated rule. Review the output and
+  flip it yourself before running the engine without `--dry-run`.
+- **Explicit overrides always win.** If you pass `--trigger`, the LLM's answer must match;
+  a mismatch fails fast. Within the same trigger, mismatched `--event` / `--schedule` /
+  `--days` / `--webhook-path` are rewritten to your value with a warning.
+- **`--llm` is enum-validated at the CLI** (`auto | openai | anthropic`) — junk values
+  exit non-zero instead of falling through.
+- **Notify URLs must be `http://` or `https://`.** `rules lint` and the runtime both
+  reject `file://`, `ftp://`, etc., so a generated webhook can't smuggle in a non-HTTP
+  scheme.
 
 When `quiet_hours` is configured in `policy.yaml`, `rules conflicts` additionally flags event-driven (MQTT / webhook) rules that lack a `time_between` condition — they would fire uninhibited during the quiet window. The hint in each finding includes a ready-to-paste `time_between` condition to add.
 
