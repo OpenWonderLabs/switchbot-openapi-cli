@@ -24,7 +24,7 @@
  */
 
 import type { Rule, Condition } from './types.js';
-import { isTimeBetween, isAllCondition, isAnyCondition, isNotCondition } from './types.js';
+import { isTimeBetween, isAllCondition, isAnyCondition, isNotCondition, isCommandAction } from './types.js';
 import { parseMaxPerMs } from './throttle.js';
 import { isDestructiveCommand } from './destructive.js';
 import { extractDeviceIdFromAction } from './action.js';
@@ -139,6 +139,7 @@ export function analyzeConflicts(rules: Rule[], quietHours?: QuietHours | null):
 
       for (const actionA of a.then) {
         for (const actionB of b.then) {
+          if (!isCommandAction(actionA) || !isCommandAction(actionB)) continue;
           const deviceA = extractDeviceIdFromAction(actionA);
           const deviceB = extractDeviceIdFromAction(actionB);
           // Skip if devices can't be compared.
@@ -191,7 +192,9 @@ export function analyzeConflicts(rules: Rule[], quietHours?: QuietHours | null):
   //    surface early with clear guidance).
   for (const rule of active) {
     for (let i = 0; i < rule.then.length; i++) {
-      const verb = extractCommandVerb(rule.then[i].command);
+      const action = rule.then[i];
+      if (!isCommandAction(action)) continue;
+      const verb = extractCommandVerb(action.command);
       if (isDestructiveCommand(verb)) {
         findings.push({
           severity: 'error',

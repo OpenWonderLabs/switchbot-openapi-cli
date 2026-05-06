@@ -23,7 +23,8 @@ export type AuditEntryKind =
   | 'rule-fire'
   | 'rule-fire-dry'
   | 'rule-throttled'
-  | 'rule-webhook-rejected';
+  | 'rule-webhook-rejected'
+  | 'rule-notify';
 
 export interface AuditRuleContext {
   /** Rule.name from policy.yaml. */

@@ -871,7 +871,10 @@ function registerExplain(rules: Command): void {
       console.log(`conditions:            ${detail.conditions.length === 0 ? '(none)' : JSON.stringify(detail.conditions)}`);
       console.log(`actions:               ${detail.actions.length}`);
       for (const a of detail.actions) {
-        console.log(`  - ${a.command}${a.device ? ` [${a.device}]` : ''}${a.on_error ? ` on_error=${a.on_error}` : ''}`);
+        const label = 'command' in a && a.command
+          ? `${a.command}${a.device ? ` [${a.device}]` : ''}${a.on_error ? ` on_error=${a.on_error}` : ''}`
+          : `type=notify channel=${(a as import('../rules/types.js').NotifyAction).channel} to=${(a as import('../rules/types.js').NotifyAction).to}`;
+        console.log(`  - ${label}`);
       }
       if (detail.cooldown) console.log(`cooldown:              ${detail.cooldown}`);
       if (detail.hysteresis) console.log(`hysteresis:            ${detail.hysteresis}`);

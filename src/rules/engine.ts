@@ -41,6 +41,7 @@ import {
   isCronTrigger,
   isMqttTrigger,
   isWebhookTrigger,
+  isCommandAction,
 } from './types.js';
 import { Cron } from 'croner';
 import { writeAudit } from '../utils/audit.js';
@@ -119,7 +120,9 @@ export function lintRules(automation: AutomationBlock | null | undefined): LintR
 
     // Destructive guard
     for (let i = 0; i < r.then.length; i++) {
-      if (isDestructiveCommand(r.then[i].command)) {
+      const action = r.then[i];
+      if (!isCommandAction(action)) continue;
+      if (isDestructiveCommand(action.command)) {
         issues.push({
           rule: r.name,
           severity: 'error',
@@ -714,7 +717,7 @@ export class RulesEngine {
           t: event.t.toISOString(),
           kind: 'rule-fire',
           deviceId: event.deviceId ?? 'unknown',
-          command: rule.then[0]?.command ?? '',
+          command: rule.then[0] && isCommandAction(rule.then[0]) ? rule.then[0].command : '',
           parameter: null,
           commandType: 'command',
           dryRun: true,
@@ -749,7 +752,7 @@ export class RulesEngine {
         t: event.t.toISOString(),
         kind: 'rule-throttled',
         deviceId: event.deviceId ?? 'unknown',
-        command: rule.then[0]?.command ?? '',
+        command: rule.then[0] && isCommandAction(rule.then[0]) ? rule.then[0].command : '',
         parameter: null,
         commandType: 'command',
         dryRun: true,
@@ -781,7 +784,7 @@ export class RulesEngine {
         this.hysteresisFirstSeen.set(hysteresisKey, now);
         writeAudit({
           t: event.t.toISOString(), kind: 'rule-throttled',
-          deviceId: event.deviceId ?? 'unknown', command: rule.then[0]?.command ?? '',
+          deviceId: event.deviceId ?? 'unknown', command: rule.then[0] && isCommandAction(rule.then[0]) ? rule.then[0].command : '',
           parameter: null, commandType: 'command', dryRun: true, result: 'ok',
           rule: { name: rule.name, triggerSource: rule.when.source, matchedDevice: event.deviceId, fireId, reason: `hysteresis — first observation, waiting ${hysteresisMs}ms for stability` },
         });
@@ -791,7 +794,7 @@ export class RulesEngine {
       if (now - firstSeen < hysteresisMs) {
         writeAudit({
           t: event.t.toISOString(), kind: 'rule-throttled',
-          deviceId: event.deviceId ?? 'unknown', command: rule.then[0]?.command ?? '',
+          deviceId: event.deviceId ?? 'unknown', command: rule.then[0] && isCommandAction(rule.then[0]) ? rule.then[0].command : '',
           parameter: null, commandType: 'command', dryRun: true, result: 'ok',
           rule: { name: rule.name, triggerSource: rule.when.source, matchedDevice: event.deviceId, fireId, reason: `hysteresis — stable for ${now - firstSeen}ms of required ${hysteresisMs}ms` },
         });
@@ -809,7 +812,7 @@ export class RulesEngine {
         this.stats.throttled++;
         writeAudit({
           t: event.t.toISOString(), kind: 'rule-throttled',
-          deviceId: event.deviceId ?? 'unknown', command: rule.then[0]?.command ?? '',
+          deviceId: event.deviceId ?? 'unknown', command: rule.then[0] && isCommandAction(rule.then[0]) ? rule.then[0].command : '',
           parameter: null, commandType: 'command', dryRun: true, result: 'ok',
           rule: { name: rule.name, triggerSource: rule.when.source, matchedDevice: event.deviceId, fireId, reason: `maxFiringsPerHour — ${countCheck.count}/${countCheck.max} in last hour` },
         });
@@ -821,10 +824,11 @@ export class RulesEngine {
     // suppressIfAlreadyDesired: skip if device's live state already matches the command outcome.
     if (rule.suppressIfAlreadyDesired) {
       const firstAction = rule.then[0];
-      const parsed = firstAction ? parseRuleCommand(firstAction.command) : null;
-      const verb = parsed?.verb ?? firstAction?.command;
-      if ((verb === 'turnOn' || verb === 'turnOff') && (firstAction?.device || event.deviceId)) {
-        const targetId = firstAction?.device ? (this.aliases[firstAction.device] ?? firstAction.device) : event.deviceId!;
+      const firstCmd = firstAction && isCommandAction(firstAction) ? firstAction : null;
+      const parsed = firstCmd ? parseRuleCommand(firstCmd.command) : null;
+      const verb = parsed?.verb ?? firstCmd?.command;
+      if ((verb === 'turnOn' || verb === 'turnOff') && (firstCmd?.device || event.deviceId)) {
+        const targetId = firstCmd?.device ? (this.aliases[firstCmd.device] ?? firstCmd.device) : event.deviceId!;
         try {
           const deviceStatus = await fetchStatus(targetId);
           const powerState = deviceStatus['powerState'] as string | undefined;

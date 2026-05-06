@@ -810,3 +810,155 @@ describe('policy validator (v0.2)', () => {
     },
   );
 });
+
+describe('policy validator — notify action (v0.2 schema extension)', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'switchbot-policy-notify-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('accepts a rule with a valid notify action (webhook channel)', () => {
+    const loaded = writeAndLoad(
+      tmpDir,
+      [
+        'version: "0.2"',
+        'automation:',
+        '  enabled: true',
+        '  rules:',
+        '    - name: "alert on motion"',
+        '      when:',
+        '        source: cron',
+        '        schedule: "0 8 * * *"',
+        '      then:',
+        '        - type: notify',
+        '          channel: webhook',
+        '          to: "https://example.com/hook"',
+        '',
+      ].join('\n'),
+    );
+    const result = validateLoadedPolicy(loaded);
+    expect(result.valid).toBe(true);
+    expect(result.errors).toHaveLength(0);
+  });
+
+  it('accepts a rule with a valid notify action (file channel)', () => {
+    const loaded = writeAndLoad(
+      tmpDir,
+      [
+        'version: "0.2"',
+        'automation:',
+        '  enabled: true',
+        '  rules:',
+        '    - name: "log motion"',
+        '      when:',
+        '        source: mqtt',
+        '        event: motion.detected',
+        '      then:',
+        '        - type: notify',
+        '          channel: file',
+        '          to: "/tmp/sb-events.jsonl"',
+        '',
+      ].join('\n'),
+    );
+    const result = validateLoadedPolicy(loaded);
+    expect(result.valid).toBe(true);
+    expect(result.errors).toHaveLength(0);
+  });
+
+  it('accepts a rule mixing command and notify actions', () => {
+    const loaded = writeAndLoad(
+      tmpDir,
+      [
+        'version: "0.2"',
+        'automation:',
+        '  enabled: true',
+        '  rules:',
+        '    - name: "turn on then notify"',
+        '      when:',
+        '        source: cron',
+        '        schedule: "0 8 * * *"',
+        '      then:',
+        '        - command: "devices command 01-202407090924-26354212 turnOn"',
+        '        - type: notify',
+        '          channel: webhook',
+        '          to: "https://example.com/hook"',
+        '',
+      ].join('\n'),
+    );
+    const result = validateLoadedPolicy(loaded);
+    expect(result.valid).toBe(true);
+    expect(result.errors).toHaveLength(0);
+  });
+
+  it('rejects a notify action with an unknown channel', () => {
+    const loaded = writeAndLoad(
+      tmpDir,
+      [
+        'version: "0.2"',
+        'automation:',
+        '  enabled: true',
+        '  rules:',
+        '    - name: "bad channel"',
+        '      when:',
+        '        source: cron',
+        '        schedule: "0 8 * * *"',
+        '      then:',
+        '        - type: notify',
+        '          channel: fax',
+        '          to: "https://example.com"',
+        '',
+      ].join('\n'),
+    );
+    const result = validateLoadedPolicy(loaded);
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects a notify action with missing required "to" field', () => {
+    const loaded = writeAndLoad(
+      tmpDir,
+      [
+        'version: "0.2"',
+        'automation:',
+        '  enabled: true',
+        '  rules:',
+        '    - name: "missing to"',
+        '      when:',
+        '        source: cron',
+        '        schedule: "0 8 * * *"',
+        '      then:',
+        '        - type: notify',
+        '          channel: webhook',
+        '',
+      ].join('\n'),
+    );
+    const result = validateLoadedPolicy(loaded);
+    expect(result.valid).toBe(false);
+  });
+
+  it('existing command actions still validate without type field', () => {
+    const loaded = writeAndLoad(
+      tmpDir,
+      [
+        'version: "0.2"',
+        'automation:',
+        '  enabled: true',
+        '  rules:',
+        '    - name: "legacy command action"',
+        '      when:',
+        '        source: cron',
+        '        schedule: "0 8 * * *"',
+        '      then:',
+        '        - command: "devices command 01-202407090924-26354212 turnOn"',
+        '',
+      ].join('\n'),
+    );
+    const result = validateLoadedPolicy(loaded);
+    expect(result.valid).toBe(true);
+    expect(result.errors).toHaveLength(0);
+  });
+});
