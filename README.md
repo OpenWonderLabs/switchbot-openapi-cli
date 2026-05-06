@@ -278,6 +278,24 @@ Supported conditions: `time_between` (quiet hours) and `device_state`
 `~/.switchbot/audit.log`. `rules run` is long-running; use
 `daemon start` / `daemon reload` for the managed background mode.
 
+**Actions** — each rule's `then` array accepts two action types:
+
+- `type: command` (default, no `type` field required) — sends a device command, e.g. `devices command <id> turnOn`
+- `type: notify` — delivers a payload to an external channel after the rule fires:
+  - `channel: webhook` — HTTP POST to a URL
+  - `channel: file` — appends a JSONL line to a local file
+  - `channel: openclaw` — HTTP POST to an OpenClaw endpoint
+  - Optional `template` field supports `{{ rule.name }}`, `{{ event.* }}`, `{{ device.id }}` placeholders
+
+```yaml
+then:
+  - command: devices command AC_001 turnOn
+  - type: notify
+    channel: webhook
+    to: https://your.host/hook
+    template: '{"rule":"{{ rule.name }}","fired":"{{ rule.fired_at }}"}'
+```
+
 ```bash
 # 1. Author rules under `automation.rules`. See examples/policies/automation.yaml
 #    for a walkthrough covering the three trigger sources.
@@ -308,6 +326,13 @@ switchbot rules last-fired -n 20           # 20 most recent fire entries
 switchbot rules conflicts                  # opposing actions, high-frequency MQTT,
                                            # destructive commands, quiet-hours gaps
 switchbot rules doctor --json              # lint + conflicts combined; exit 0 when clean
+
+# 8. Scaffold a new rule from natural language (heuristic or LLM-backed).
+switchbot rules suggest --intent "turn off AC at 11pm"
+switchbot rules suggest --intent "if door opens and temp below 20 turn on heater" \
+  --llm auto                               # routes complex intents to LLM automatically
+switchbot rules suggest --intent "..." --llm openai  # explicit backend
+# Set OPENAI_API_KEY or ANTHROPIC_API_KEY; auto mode falls back to heuristic on failure
 ```
 
 When `quiet_hours` is configured in `policy.yaml`, `rules conflicts` additionally flags event-driven (MQTT / webhook) rules that lack a `time_between` condition — they would fire uninhibited during the quiet window. The hint in each finding includes a ready-to-paste `time_between` condition to add.
@@ -842,8 +867,12 @@ Exposes MCP tools (`list_devices`, `describe_device`, `get_device_status`,
 `send_command`, `list_scenes`, `run_scene`, `search_catalog`,
 `account_overview`, `plan_suggest`, `plan_run`, `audit_query`,
 `audit_stats`, `policy_diff`, `policy_validate`, `policy_new`,
-`policy_migrate`) plus a `switchbot://events` resource for real-time
-shadow updates.
+`policy_migrate`, `rules_suggest`, `rule_notifications`) plus a
+`switchbot://events` resource for real-time shadow updates.
+`rules_suggest` accepts an optional `llm` parameter (`openai | anthropic | auto`)
+to generate YAML for complex intents via an LLM backend.
+`rule_notifications` returns `rule-notify` audit entries, filterable by rule
+name, time range, channel, and result.
 See [`docs/agent-guide.md`](./docs/agent-guide.md) for the full tool reference and safety rules (destructive-command guard).
 
 ### `doctor` — self-check
@@ -853,7 +882,7 @@ switchbot doctor
 switchbot doctor --json
 ```
 
-Runs local checks (Node version, credentials, profiles, catalog, cache, quota, clock, MQTT, policy, MCP) and exits 1 if any check fails. `warn` results exit 0. The MQTT check reports `ok` when REST credentials are configured (auto-provisioned on first use). Use this to diagnose connectivity or config issues before running automation.
+Runs local checks (Node version, credentials, profiles, catalog, cache, quota, clock, MQTT, policy, MCP, notify-connectivity) and exits 1 if any check fails. `warn` results exit 0. The MQTT check reports `ok` when REST credentials are configured (auto-provisioned on first use). The `notify-connectivity` check probes webhook URLs declared in `type: notify` actions. Use this to diagnose connectivity or config issues before running automation.
 
 `--json` output includes `maturityScore` (0–100) and `maturityLabel` (`production-ready` / `mostly-ready` / `needs-work` / `not-ready`) to give an at-a-glance readiness rating:
 
@@ -1165,8 +1194,16 @@ src/
 │   ├── audit-query.ts    # Audit log filtering + aggregation
 │   ├── conflict-analyzer.ts # Static conflict detection (opposing actions,
 │   │                     #   high-freq MQTT, destructive cmds, quiet-hours gaps)
-│   ├── suggest.ts        # Heuristic-based rule YAML generation
-│   └── types.ts          # Shared rule/trigger/condition/action types
+│   ├── suggest.ts        # Heuristic + LLM-backed rule YAML generation
+│   ├── notify.ts         # notify action executor (webhook / file / openclaw)
+│   └── types.ts          # Shared rule/trigger/condition/action types (CommandAction | NotifyAction)
+├── llm/
+│   ├── index.ts          # createLLMProvider factory + LLM_AUTO_THRESHOLD
+│   ├── complexity.ts     # Intent complexity scorer (0–10) for auto-routing
+│   ├── rule-prompt.ts    # System prompt builder (embeds v0.2 schema snippet)
+│   └── providers/
+│       ├── openai.ts     # OpenAI-compatible provider (uses Node.js https)
+│       └── anthropic.ts  # Anthropic provider
 ├── status-sync/
 │   └── manager.ts        # Spawn/stop logic, state file, OpenClaw bridge
 ├── lib/
