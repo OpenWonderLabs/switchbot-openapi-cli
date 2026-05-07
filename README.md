@@ -93,7 +93,7 @@ Under the hood every surface shares the same catalog, cache, and HMAC client —
 - 🎨 **Dual output modes** — colorized tables by default; `--json` passthrough for `jq` and scripting
 - 🔐 **Secure credentials** — HMAC-SHA256 signed requests; config file written with `0600`; env-var override for CI
 - 🔍 **Dry-run mode** — preview every mutating request before it hits the API
-- 🧪 **Fully tested** — 1959 Vitest tests, mocked axios, zero network in CI
+- 🧪 **Fully tested** — 2204 Vitest tests, mocked axios, zero network in CI
 - ⚡ **Shell completion** — Bash / Zsh / Fish / PowerShell
 
 ## Requirements
@@ -273,9 +273,9 @@ Five annotated starter files covering common setups live in
 With a policy.yaml (v0.2) you can declare automations that the CLI
 executes for you. Supported triggers: **MQTT** (device events),
 **cron** (schedule-driven), and **webhook** (local HTTP POST).
-Supported conditions: `time_between` (quiet hours) and `device_state`
-(live API check with per-tick dedup). Every fire is recorded in
-`~/.switchbot/audit.log`. `rules run` is long-running; use
+Supported conditions: `time_between` (quiet hours), `device_state`
+(live API check with per-tick dedup), and `llm` (AI decision — see
+below). Every fire is recorded in `~/.switchbot/audit.log`. `rules run` is long-running; use
 `daemon start` / `daemon reload` for the managed background mode.
 
 **Actions** — each rule's `then` array accepts two action types:
@@ -294,6 +294,35 @@ then:
     channel: webhook
     to: https://your.host/hook
     template: '{"rule":"{{ rule.name }}","fired":"{{ rule.fired_at }}"}'
+```
+
+**LLM condition** — add an AI judgement step before actions fire. The engine calls the
+configured LLM provider, passes the prompt plus recent event context, and gates execution
+on the model's yes/no answer:
+
+```yaml
+conditions:
+  - llm:
+      prompt: "Is the temperature above normal comfort range?"
+      provider: auto          # auto | openai | anthropic
+      cache_ttl: 5m           # skip redundant calls for identical context
+      budget:
+        max_calls_per_hour: 20
+      on_error: pass          # fail | pass | skip
+```
+
+Set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` (provider `auto` tries Anthropic first).
+`rules lint` flags misconfigured LLM conditions (no provider key, cache TTL too high for
+the trigger frequency, budget zero). Evaluation decisions are recorded in the trace log.
+
+**Decision trace** — enable `automation.audit.evaluate_trace` in `policy.yaml` to record
+every evaluation decision (why a rule fired or was blocked):
+
+```yaml
+automation:
+  audit:
+    evaluate_trace: sampled   # full | sampled | off (default: sampled)
+    evaluate_retention_days: 7
 ```
 
 ```bash
@@ -333,6 +362,16 @@ switchbot rules suggest --intent "if door opens and temp below 20 turn on heater
   --llm auto                               # routes complex intents to LLM automatically
 switchbot rules suggest --intent "..." --llm openai  # explicit backend
 # Set OPENAI_API_KEY or ANTHROPIC_API_KEY; auto mode falls back to heuristic on failure
+
+# 9. Explain why a specific evaluation fired or was blocked (requires evaluate_trace).
+switchbot rules trace-explain --rule "motion on" --last
+switchbot rules trace-explain --rule "motion on" --since 1h --json
+switchbot rules trace-explain <fireId>     # single evaluation by ID
+
+# 10. Simulate a rule against historical events without running the engine.
+switchbot rules simulate "motion on"       # replay last 24h from audit log
+switchbot rules simulate "motion on" --since 7d --json
+switchbot rules simulate policy.yaml --rule "night AC" --against events.jsonl
 ```
 
 `rules suggest` enforces several guardrails on LLM output so a model can't quietly arm
@@ -881,12 +920,16 @@ Exposes MCP tools (`list_devices`, `describe_device`, `get_device_status`,
 `send_command`, `list_scenes`, `run_scene`, `search_catalog`,
 `account_overview`, `plan_suggest`, `plan_run`, `audit_query`,
 `audit_stats`, `policy_diff`, `policy_validate`, `policy_new`,
-`policy_migrate`, `rules_suggest`, `rule_notifications`) plus a
+`policy_migrate`, `rules_suggest`, `rule_notifications`,
+`rules_explain`, `rules_simulate`) plus a
 `switchbot://events` resource for real-time shadow updates.
 `rules_suggest` accepts an optional `llm` parameter (`openai | anthropic | auto`)
 to generate YAML for complex intents via an LLM backend.
 `rule_notifications` returns `rule-notify` audit entries, filterable by rule
 name, time range, channel, and result.
+`rules_explain` returns the decision trace for a specific evaluation (why a rule
+fired or was blocked); `rules_simulate` replays historical events against a rule
+and reports would-fire / blocked / throttled outcomes.
 See [`docs/agent-guide.md`](./docs/agent-guide.md) for the full tool reference and safety rules (destructive-command guard).
 
 ### `doctor` — self-check
@@ -1166,7 +1209,7 @@ npm install
 
 npm run dev -- <args>       # Run from TypeScript sources via tsx
 npm run build               # Compile to dist/
-npm test                    # Run the Vitest suite (1959 tests)
+npm test                    # Run the Vitest suite (2204 tests)
 npm run test:watch          # Watch mode
 npm run test:coverage       # Coverage report (v8, HTML + text)
 ```
@@ -1232,7 +1275,8 @@ src/
 │   ├── install.ts        # `switchbot install` / `uninstall`
 │   ├── policy.ts         # `policy validate/new/migrate/diff/add-rule/backup/restore`
 │   ├── rules.ts          # `rules suggest/lint/list/explain/run/reload/tail/replay/
-│   │                     #   conflicts/doctor/summary/last-fired/webhook-*`
+│   │                     #   conflicts/doctor/summary/last-fired/webhook-*/
+│   │                     #   trace-explain/simulate`
 │   ├── scenes.ts
 │   ├── health.ts         # `health check/serve` — report + HTTP endpoints
 │   ├── upgrade-check.ts  # `upgrade-check` — npm registry version check
@@ -1256,7 +1300,7 @@ src/
     ├── format.ts         # renderRows / filterFields / output-format dispatch
     ├── audit.ts          # JSONL audit log writer
     └── quota.ts          # Local daily-quota counter
-tests/                    # Vitest suite (1959 tests, mocked axios, no network)
+tests/                    # Vitest suite (2204 tests, mocked axios, no network)
 ```
 
 ### Release flow

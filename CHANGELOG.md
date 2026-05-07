@@ -9,7 +9,19 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [3.3.3] - 2026-05-07
+## [3.4.0] - 2026-05-07
+
+### Added
+
+- **Decision trace** — `automation.audit.evaluate_trace` (`full | sampled | off`, default `sampled`) records every rule evaluation decision to the audit log with condition-level breakdown, LLM call results, and throttle state. `evaluate_retention_days` bounds how long records are kept.
+- **`rules trace-explain`** — inspect why a rule fired or was blocked. Reads trace records from the audit log; filter by rule name, fire ID, or time window. `--last` shows the most recent evaluation; `--json` outputs structured data for scripting.
+- **LLM condition** (`llm:`) — gates rule execution on an AI yes/no judgement. Supports `provider: auto | openai | anthropic`, `cache_ttl` (skip redundant calls for identical context), `budget.max_calls_per_hour`, and `on_error: fail | pass | skip`. Cache key is content-addressed so equivalent prompts + context always hit the cache. `rules lint` flags misconfigurations (missing provider key, TTL too high for trigger frequency, budget zero).
+- **`rules simulate`** — replay historical events from the audit log (or a `--against <file>` JSONL snapshot) against a rule and report would-fire / blocked-by-condition / throttled / error counts without starting the live engine. `--since <duration>` bounds the replay window.
+- **MCP tools** — `rules_explain` (decision trace lookup) and `rules_simulate` (offline rule replay) exposed via the MCP server alongside existing rule tools.
+
+### Changed
+
+- Test suite: 1959 → 2204 tests (+245, covering trace, explain, LLM condition, and simulate modules).
 
 ### Added
 
