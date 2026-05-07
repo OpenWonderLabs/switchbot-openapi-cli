@@ -304,10 +304,21 @@
     },
 
     "action": {
+      "oneOf": [
+        { "$ref": "#/$defs/commandAction" },
+        { "$ref": "#/$defs/notifyAction" }
+      ]
+    },
+
+    "commandAction": {
       "type": "object",
       "additionalProperties": false,
       "required": ["command"],
       "properties": {
+        "type": {
+          "enum": ["command"],
+          "description": "Optional discriminator. Omit for backwards compatibility."
+        },
         "command": {
           "type": "string",
           "description": "A CLI invocation fragment, e.g. `devices command <id> turnOn`. The engine prepends `switchbot` and appends `--audit-log`."
@@ -319,6 +330,38 @@
         "args": {
           "type": ["object", "null"],
           "description": "Extra key/value pairs rendered as `--key value` flags."
+        },
+        "on_error": {
+          "enum": ["continue", "stop"],
+          "default": "continue",
+          "description": "If this action fails, should the rule keep executing its remaining `then[]` entries?"
+        }
+      }
+    },
+
+    "notifyAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "channel", "to"],
+      "properties": {
+        "type": { "const": "notify" },
+        "channel": {
+          "enum": ["webhook", "openclaw", "file"],
+          "description": "Delivery channel."
+        },
+        "to": {
+          "type": "string",
+          "minLength": 1,
+          "description": "URL for webhook/openclaw; absolute file path for file channel."
+        },
+        "template": {
+          "type": "string",
+          "description": "Template string with {{ rule.name }}, {{ event.* }}, {{ device.id }} substitutions."
+        },
+        "on_failure": {
+          "enum": ["log", "retry", "ignore"],
+          "default": "log",
+          "description": "What to do when delivery fails."
         },
         "on_error": {
           "enum": ["continue", "stop"],

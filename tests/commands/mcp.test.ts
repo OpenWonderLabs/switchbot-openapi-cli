@@ -158,7 +158,7 @@ describe('mcp server', () => {
     delete process.env.SWITCHBOT_ALLOW_DIRECT_DESTRUCTIVE;
   });
 
-  it('exposes the twenty-one tools with titles and input schemas', async () => {
+  it('exposes the twenty-two tools with titles and input schemas', async () => {
     const { client } = await pair();
     const { tools } = await client.listTools();
 
@@ -182,6 +182,7 @@ describe('mcp server', () => {
         'policy_new',
         'policy_validate',
         'query_device_history',
+        'rule_notifications',
         'rules_suggest',
         'run_scene',
         'search_catalog',
@@ -863,6 +864,55 @@ describe('mcp server', () => {
       expect(topRules[0]).toMatchObject({ ruleName: 'night-off', count: 1 });
 
       fs.rmSync(tmp, { recursive: true, force: true });
+    });
+
+    it('rule_notifications returns only rule-notify entries', async () => {
+      const tmp2 = fs.mkdtempSync(path.join(os.tmpdir(), 'sbmcp-rn-'));
+      const auditPath = path.join(tmp2, 'audit.log');
+      const lines = [
+        JSON.stringify({ auditVersion: 2, t: '2026-04-24T01:00:00.000Z', kind: 'rule-notify', deviceId: '', command: 'notify:webhook', parameter: 'https://example.com', commandType: 'command', dryRun: false, result: 'ok', notifyChannel: 'webhook', rule: { name: 'rule-a', triggerSource: 'cron', fireId: 'f1' } }),
+        JSON.stringify({ auditVersion: 2, t: '2026-04-24T01:01:00.000Z', kind: 'rule-fire', deviceId: 'BOT1', command: 'turnOn', parameter: 'default', commandType: 'command', dryRun: false, result: 'ok' }),
+        JSON.stringify({ auditVersion: 2, t: '2026-04-24T01:02:00.000Z', kind: 'rule-notify', deviceId: '', command: 'notify:file', parameter: '/tmp/out', commandType: 'command', dryRun: false, result: 'error', error: 'ENOENT', notifyChannel: 'file', rule: { name: 'rule-b', triggerSource: 'mqtt', fireId: 'f2' } }),
+      ];
+      fs.writeFileSync(auditPath, lines.join('\n') + '\n', 'utf-8');
+
+      const { client } = await pair();
+      const res = await client.callTool({
+        name: 'rule_notifications',
+        arguments: { file: auditPath },
+      });
+
+      expect(res.isError).toBeFalsy();
+      const sc = (res as { structuredContent?: Record<string, unknown> }).structuredContent!;
+      const entries = sc.entries as Array<{ kind: string }>;
+      expect(sc.total).toBe(2);
+      expect(entries.every(e => e.kind === 'rule-notify')).toBe(true);
+
+      fs.rmSync(tmp2, { recursive: true, force: true });
+    });
+
+    it('rule_notifications filters by rule name', async () => {
+      const tmp2 = fs.mkdtempSync(path.join(os.tmpdir(), 'sbmcp-rn2-'));
+      const auditPath = path.join(tmp2, 'audit.log');
+      const lines = [
+        JSON.stringify({ auditVersion: 2, t: '2026-04-24T01:00:00.000Z', kind: 'rule-notify', deviceId: '', command: 'notify:file', parameter: '/tmp/out', commandType: 'command', dryRun: false, result: 'ok', notifyChannel: 'file', rule: { name: 'rule-a', triggerSource: 'cron', fireId: 'f1' } }),
+        JSON.stringify({ auditVersion: 2, t: '2026-04-24T01:01:00.000Z', kind: 'rule-notify', deviceId: '', command: 'notify:file', parameter: '/tmp/out', commandType: 'command', dryRun: false, result: 'ok', notifyChannel: 'file', rule: { name: 'rule-b', triggerSource: 'mqtt', fireId: 'f2' } }),
+      ];
+      fs.writeFileSync(auditPath, lines.join('\n') + '\n', 'utf-8');
+
+      const { client } = await pair();
+      const res = await client.callTool({
+        name: 'rule_notifications',
+        arguments: { file: auditPath, rule: 'rule-a' },
+      });
+
+      expect(res.isError).toBeFalsy();
+      const sc = (res as { structuredContent?: Record<string, unknown> }).structuredContent!;
+      expect(sc.total).toBe(1);
+      const entries = sc.entries as Array<{ rule?: { name: string } }>;
+      expect(entries[0].rule?.name).toBe('rule-a');
+
+      fs.rmSync(tmp2, { recursive: true, force: true });
     });
   });
 

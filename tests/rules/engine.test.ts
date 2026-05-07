@@ -970,3 +970,152 @@ describe('RulesEngine.reload', () => {
     });
   });
 });
+
+// ─── M3: notify action support ───────────────────────────────────────────────
+
+describe('lintRules — notify actions', () => {
+  it('accepts a rule with a valid file notify action', () => {
+    const r = lintRules(automation([
+      { name: 'n1', when: { source: 'mqtt', event: 'motion.detected' }, then: [{ type: 'notify', channel: 'file', to: '/tmp/out.jsonl' }] },
+    ]));
+    expect(r.valid).toBe(true);
+    expect(r.rules[0].status).toBe('ok');
+  });
+
+  it('accepts a rule with a valid webhook notify action', () => {
+    const r = lintRules(automation([
+      { name: 'n2', when: { source: 'mqtt', event: 'motion.detected' }, then: [{ type: 'notify', channel: 'webhook', to: 'https://example.com/hook' }] },
+    ]));
+    expect(r.valid).toBe(true);
+  });
+
+  it('errors on notify action missing to field (code: notify-missing-to)', () => {
+    const r = lintRules(automation([
+      { name: 'n3', when: { source: 'mqtt', event: 'motion.detected' }, then: [{ type: 'notify', channel: 'webhook' } as unknown as import('../../src/rules/types.js').Action] },
+    ]));
+    expect(r.valid).toBe(false);
+    expect(r.rules[0].issues.find(i => i.code === 'notify-missing-to')).toBeDefined();
+  });
+
+  it('errors on notify webhook action with invalid URL (code: notify-invalid-url)', () => {
+    const r = lintRules(automation([
+      { name: 'n4', when: { source: 'mqtt', event: 'motion.detected' }, then: [{ type: 'notify', channel: 'webhook', to: 'not-a-url' }] },
+    ]));
+    expect(r.valid).toBe(false);
+    expect(r.rules[0].issues.find(i => i.code === 'notify-invalid-url')).toBeDefined();
+  });
+
+  it('errors on notify webhook action with non-http(s) URL (code: notify-unsupported-protocol)', () => {
+    const r = lintRules(automation([
+      { name: 'n5', when: { source: 'mqtt', event: 'motion.detected' }, then: [{ type: 'notify', channel: 'webhook', to: 'ftp://example.com/path' }] },
+    ]));
+    expect(r.valid).toBe(false);
+    const issue = r.rules[0].issues.find(i => i.code === 'notify-unsupported-protocol');
+    expect(issue).toBeDefined();
+    expect(issue?.message).toContain('ftp:');
+  });
+
+  it('accepts an http:// notify webhook URL', () => {
+    const r = lintRules(automation([
+      { name: 'n6', when: { source: 'mqtt', event: 'motion.detected' }, then: [{ type: 'notify', channel: 'webhook', to: 'http://example.com/hook' }] },
+    ]));
+    expect(r.valid).toBe(true);
+  });
+
+  it('errors on notify file action with relative path (code: notify-relative-path)', () => {
+    const r = lintRules(automation([
+      { name: 'n7', when: { source: 'mqtt', event: 'motion.detected' }, then: [{ type: 'notify', channel: 'file', to: 'logs/x.jsonl' }] },
+    ]));
+    expect(r.valid).toBe(false);
+    const issue = r.rules[0].issues.find(i => i.code === 'notify-relative-path');
+    expect(issue).toBeDefined();
+    expect(issue?.message).toContain('logs/x.jsonl');
+    expect(issue?.message).toMatch(/must be absolute/);
+  });
+
+  it('errors on notify file action with leading-dot relative path', () => {
+    const r = lintRules(automation([
+      { name: 'n8', when: { source: 'mqtt', event: 'motion.detected' }, then: [{ type: 'notify', channel: 'file', to: './out.jsonl' }] },
+    ]));
+    expect(r.valid).toBe(false);
+    expect(r.rules[0].issues.find(i => i.code === 'notify-relative-path')).toBeDefined();
+  });
+
+  it('errors on notify file action with tilde-prefixed path (~ is not expanded)', () => {
+    const r = lintRules(automation([
+      { name: 'n9', when: { source: 'mqtt', event: 'motion.detected' }, then: [{ type: 'notify', channel: 'file', to: '~/notify.jsonl' }] },
+    ]));
+    expect(r.valid).toBe(false);
+    expect(r.rules[0].issues.find(i => i.code === 'notify-relative-path')).toBeDefined();
+  });
+});
+
+describe('RulesEngine — notify action dispatch', () => {
+  const originalArgv = process.argv;
+  let tmp: string;
+  let auditFile: string;
+  let mqtt: FakeMqttClient;
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sbengine-notify-'));
+    auditFile = path.join(tmp, 'audit.log');
+    process.argv = ['node', 'cli', '--audit-log', '--audit-log-path', auditFile];
+    mqtt = new FakeMqttClient();
+  });
+  afterEach(() => {
+    process.argv = originalArgv;
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('dispatches a file notify action and writes JSONL to target', async () => {
+    const targetFile = path.join(tmp, 'events.jsonl');
+    const fires: EngineFireEntry[] = [];
+    const engine = new RulesEngine({
+      automation: automation([{
+        name: 'notify-file-rule',
+        when: { source: 'mqtt', event: 'motion.detected' },
+        then: [{ type: 'notify', channel: 'file', to: targetFile }],
+      }]),
+      aliases: {},
+      mqttClient: mqtt as unknown as SwitchBotMqttClient,
+      mqttCredential: fakeCredential,
+      skipApiCall: true,
+      onFire: (e) => fires.push(e),
+    });
+    await engine.start();
+
+    mqtt.emitMessage({ context: { deviceMac: 'AABBCCDDEEFF', detectionState: 'DETECTED' } });
+    await engine.drainForTest();
+
+    expect(fires.at(-1)?.status).toBe('fired');
+    expect(fs.existsSync(targetFile)).toBe(true);
+    const line = JSON.parse(fs.readFileSync(targetFile, 'utf-8').trim());
+    expect(line.rule).toBe('notify-file-rule');
+
+    await engine.stop();
+  });
+
+  it('writes rule-notify audit entry when notify action fires', async () => {
+    const targetFile = path.join(tmp, 'events.jsonl');
+    const engine = new RulesEngine({
+      automation: automation([{
+        name: 'notify-audit-rule',
+        when: { source: 'mqtt', event: 'motion.detected' },
+        then: [{ type: 'notify', channel: 'file', to: targetFile }],
+      }]),
+      aliases: {},
+      mqttClient: mqtt as unknown as SwitchBotMqttClient,
+      mqttCredential: fakeCredential,
+      skipApiCall: true,
+    });
+    await engine.start();
+
+    mqtt.emitMessage({ context: { deviceMac: 'AABBCCDDEEFF', detectionState: 'DETECTED' } });
+    await engine.drainForTest();
+
+    const entries = readAudit(auditFile);
+    expect(entries.find(e => e.kind === 'rule-notify')).toBeDefined();
+
+    await engine.stop();
+  });
+});

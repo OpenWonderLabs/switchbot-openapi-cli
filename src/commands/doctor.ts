@@ -922,6 +922,41 @@ function checkReleaseNotes(): Check {
   };
 }
 
+function checkNotifyConnectivity(): Check {
+  const policyPath = resolvePolicyPath();
+  let loaded: { data: unknown };
+  try {
+    loaded = loadPolicyFile(policyPath);
+  } catch (err) {
+    if (err instanceof PolicyFileNotFoundError) {
+      return { name: 'notify-connectivity', status: 'ok', detail: { present: false, message: 'no policy file configured' } };
+    }
+    return { name: 'notify-connectivity', status: 'ok', detail: { present: false, message: 'policy file could not be loaded' } };
+  }
+
+  const policy = loaded.data as { automation?: { rules?: Array<{ then?: Array<{ type?: string; channel?: string; to?: string }> }> } } | null;
+  const rules = policy?.automation?.rules ?? [];
+  const webhookUrls: string[] = [];
+  for (const rule of rules) {
+    for (const action of rule.then ?? []) {
+      if (action.type === 'notify' && (action.channel === 'webhook' || action.channel === 'openclaw') && action.to) {
+        webhookUrls.push(action.to);
+      }
+    }
+  }
+
+  if (webhookUrls.length === 0) {
+    return { name: 'notify-connectivity', status: 'ok', detail: { webhookCount: 0, message: 'no webhook notify actions in policy' } };
+  }
+
+  return {
+    name: 'notify-connectivity',
+    status: 'ok',
+    detail: { webhookCount: webhookUrls.length, message: `${webhookUrls.length} webhook URL(s) configured (live probe not run — use --probe to test connectivity)` },
+  };
+}
+
+
 interface CheckDef {
   name: string;
   description: string;
@@ -955,6 +990,7 @@ const CHECK_REGISTRY: CheckDef[] = [
   { name: 'audit', description: 'recent command errors (last 24h)', run: () => checkAudit() },
   { name: 'daemon', description: 'daemon state file + runtime status', run: () => checkDaemon() },
   { name: 'health', description: 'health endpoint availability (daemon --healthz-port)', run: () => checkHealthEndpoint() },
+  { name: 'notify-connectivity', description: 'webhook URLs from notify actions in policy.yaml', run: () => checkNotifyConnectivity() },
 ];
 
 interface FixResult {

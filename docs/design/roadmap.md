@@ -1,6 +1,6 @@
 # Roadmap — Phase 1 through Phase 4
 
-> **Status as of 2026-04-23:** Phase 1 complete, Phase 2 complete,
+> **Status as of 2026-05-06:** Phase 1 complete, Phase 2 complete,
 > Phase 3A complete (keychain + install library + built-in CLI install
 > command), Phase 3B tracked in the separate companion skill repo,
 > Phase 4 shipped at v0.2 (rules engine with MQTT + cron +
@@ -9,6 +9,8 @@
 > v2.14.0 extends MCP with `plan_run`, `audit_query`, `audit_stats`,
 > and `policy_diff`; v2.15.0 flips `policy new` default schema to v0.2
 > and starts the v0.1 deprecation window.
+> Tracks θ (notify actions) and η (LLM-backed rule suggestion)
+> shipped in v3.0.
 > Note: Track γ is a runtime capability increment on the v0.2 rule
 > model, not a separate policy schema version.
 
@@ -181,6 +183,19 @@ the skill's `manifest.json` `roadmap` block, which points back here.
 - **Track ε — cross-OS CI matrix for keychain *(shipped, v2.11.0)*.**
   GitHub Actions matrix: macOS (temp keychain), Linux (D-Bus +
   gnome-keyring), Windows (native Credential Manager).
+- **Track θ — notify actions *(shipped, v3.0)*.**
+  New `type: notify` action alongside `type: command` in the v0.2
+  schema. Rules can POST to webhooks, append JSONL to a file, or push
+  to OpenClaw after firing, closing the feedback loop for AI agents.
+  `lintRules` validates URL syntax and required fields; engine dispatches
+  to `executeNotifyAction`; audit gains `rule-notify` kind; MCP gains
+  `rule_notifications` tool; `doctor` gains `notify-connectivity` check.
+- **Track η — LLM-backed rule suggestion *(shipped, v3.0)*.**
+  `rules suggest --llm <backend>` routes complex intents (complexity
+  score ≥ 4) to OpenAI or Anthropic, falls back to heuristic with a
+  warning on provider failure. `rules_suggest` MCP tool gains a `llm`
+  parameter. All LLM calls are written to the audit log as
+  `kind: llm-suggest` with backend, model, and latency fields.
 
 ## Next execution queue (ordered)
 

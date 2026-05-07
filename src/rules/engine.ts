@@ -19,6 +19,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 import type { AxiosInstance } from 'axios';
 import type { SwitchBotMqttClient } from '../mqtt/client.js';
 import type { MqttCredential } from '../mqtt/credential.js';
@@ -41,7 +42,10 @@ import {
   isCronTrigger,
   isMqttTrigger,
   isWebhookTrigger,
+  isCommandAction,
+  isNotifyAction,
 } from './types.js';
+import { executeNotifyAction } from './notify.js';
 import { Cron } from 'croner';
 import { writeAudit } from '../utils/audit.js';
 
@@ -119,13 +123,57 @@ export function lintRules(automation: AutomationBlock | null | undefined): LintR
 
     // Destructive guard
     for (let i = 0; i < r.then.length; i++) {
-      if (isDestructiveCommand(r.then[i].command)) {
+      const action = r.then[i];
+      if (!isCommandAction(action)) continue;
+      if (isDestructiveCommand(action.command)) {
         issues.push({
           rule: r.name,
           severity: 'error',
           code: 'destructive-action',
           message: `then[${i}] uses a destructive verb — the engine will refuse to run this rule.`,
         });
+      }
+    }
+
+    // Notify action validation
+    for (let i = 0; i < r.then.length; i++) {
+      const action = r.then[i];
+      if (!isNotifyAction(action)) continue;
+      const to = (action as { to?: string }).to;
+      if (!to || to.trim().length === 0) {
+        issues.push({
+          rule: r.name,
+          severity: 'error',
+          code: 'notify-missing-to',
+          message: `then[${i}] notify action is missing required field "to".`,
+        });
+      } else if (action.channel === 'webhook' || action.channel === 'openclaw') {
+        let parsedUrl: URL | undefined;
+        try { parsedUrl = new URL(to); } catch { /* parsedUrl stays undefined */ }
+        if (!parsedUrl) {
+          issues.push({
+            rule: r.name,
+            severity: 'error',
+            code: 'notify-invalid-url',
+            message: `then[${i}] notify action "to" field "${to}" is not a valid URL.`,
+          });
+        } else if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+          issues.push({
+            rule: r.name,
+            severity: 'error',
+            code: 'notify-unsupported-protocol',
+            message: `then[${i}] notify URL "${to}" uses unsupported protocol "${parsedUrl.protocol}" — only http: and https: are allowed.`,
+          });
+        }
+      } else if (action.channel === 'file') {
+        if (!path.isAbsolute(to)) {
+          issues.push({
+            rule: r.name,
+            severity: 'error',
+            code: 'notify-relative-path',
+            message: `then[${i}] notify file path "${to}" must be absolute (e.g. /var/log/switchbot/notify.jsonl on POSIX or C:\\path\\notify.jsonl on Windows). Tilde (~) is not expanded.`,
+          });
+        }
       }
     }
 
@@ -714,7 +762,7 @@ export class RulesEngine {
           t: event.t.toISOString(),
           kind: 'rule-fire',
           deviceId: event.deviceId ?? 'unknown',
-          command: rule.then[0]?.command ?? '',
+          command: rule.then[0] && isCommandAction(rule.then[0]) ? rule.then[0].command : '',
           parameter: null,
           commandType: 'command',
           dryRun: true,
@@ -749,7 +797,7 @@ export class RulesEngine {
         t: event.t.toISOString(),
         kind: 'rule-throttled',
         deviceId: event.deviceId ?? 'unknown',
-        command: rule.then[0]?.command ?? '',
+        command: rule.then[0] && isCommandAction(rule.then[0]) ? rule.then[0].command : '',
         parameter: null,
         commandType: 'command',
         dryRun: true,
@@ -781,7 +829,7 @@ export class RulesEngine {
         this.hysteresisFirstSeen.set(hysteresisKey, now);
         writeAudit({
           t: event.t.toISOString(), kind: 'rule-throttled',
-          deviceId: event.deviceId ?? 'unknown', command: rule.then[0]?.command ?? '',
+          deviceId: event.deviceId ?? 'unknown', command: rule.then[0] && isCommandAction(rule.then[0]) ? rule.then[0].command : '',
           parameter: null, commandType: 'command', dryRun: true, result: 'ok',
           rule: { name: rule.name, triggerSource: rule.when.source, matchedDevice: event.deviceId, fireId, reason: `hysteresis — first observation, waiting ${hysteresisMs}ms for stability` },
         });
@@ -791,7 +839,7 @@ export class RulesEngine {
       if (now - firstSeen < hysteresisMs) {
         writeAudit({
           t: event.t.toISOString(), kind: 'rule-throttled',
-          deviceId: event.deviceId ?? 'unknown', command: rule.then[0]?.command ?? '',
+          deviceId: event.deviceId ?? 'unknown', command: rule.then[0] && isCommandAction(rule.then[0]) ? rule.then[0].command : '',
           parameter: null, commandType: 'command', dryRun: true, result: 'ok',
           rule: { name: rule.name, triggerSource: rule.when.source, matchedDevice: event.deviceId, fireId, reason: `hysteresis — stable for ${now - firstSeen}ms of required ${hysteresisMs}ms` },
         });
@@ -809,7 +857,7 @@ export class RulesEngine {
         this.stats.throttled++;
         writeAudit({
           t: event.t.toISOString(), kind: 'rule-throttled',
-          deviceId: event.deviceId ?? 'unknown', command: rule.then[0]?.command ?? '',
+          deviceId: event.deviceId ?? 'unknown', command: rule.then[0] && isCommandAction(rule.then[0]) ? rule.then[0].command : '',
           parameter: null, commandType: 'command', dryRun: true, result: 'ok',
           rule: { name: rule.name, triggerSource: rule.when.source, matchedDevice: event.deviceId, fireId, reason: `maxFiringsPerHour — ${countCheck.count}/${countCheck.max} in last hour` },
         });
@@ -821,10 +869,11 @@ export class RulesEngine {
     // suppressIfAlreadyDesired: skip if device's live state already matches the command outcome.
     if (rule.suppressIfAlreadyDesired) {
       const firstAction = rule.then[0];
-      const parsed = firstAction ? parseRuleCommand(firstAction.command) : null;
-      const verb = parsed?.verb ?? firstAction?.command;
-      if ((verb === 'turnOn' || verb === 'turnOff') && (firstAction?.device || event.deviceId)) {
-        const targetId = firstAction?.device ? (this.aliases[firstAction.device] ?? firstAction.device) : event.deviceId!;
+      const firstCmd = firstAction && isCommandAction(firstAction) ? firstAction : null;
+      const parsed = firstCmd ? parseRuleCommand(firstCmd.command) : null;
+      const verb = parsed?.verb ?? firstCmd?.command;
+      if ((verb === 'turnOn' || verb === 'turnOff') && (firstCmd?.device || event.deviceId)) {
+        const targetId = firstCmd?.device ? (this.aliases[firstCmd.device] ?? firstCmd.device) : event.deviceId!;
         try {
           const deviceStatus = await fetchStatus(targetId);
           const powerState = deviceStatus['powerState'] as string | undefined;
@@ -847,14 +896,26 @@ export class RulesEngine {
     let fired = false;
     let allDry = true;
     for (const action of rule.then) {
-      const result = await executeRuleAction(action, {
-        rule,
-        fireId,
-        aliases: this.aliases,
-        httpClient: this.opts.httpClient,
-        globalDryRun: this.opts.globalDryRun,
-        skipApiCall: this.opts.skipApiCall,
-      });
+      let result: { ok: boolean; error?: string; blocked?: boolean; dryRun?: boolean; deviceId?: string };
+      if (isNotifyAction(action)) {
+        const nr = await executeNotifyAction(action, {
+          rule,
+          fireId,
+          eventPayload: event.payload,
+          deviceId: event.deviceId,
+          globalDryRun: this.opts.globalDryRun,
+        });
+        result = { ok: nr.ok, dryRun: nr.dryRun, error: nr.error };
+      } else {
+        result = await executeRuleAction(action, {
+          rule,
+          fireId,
+          aliases: this.aliases,
+          httpClient: this.opts.httpClient,
+          globalDryRun: this.opts.globalDryRun,
+          skipApiCall: this.opts.skipApiCall,
+        });
+      }
       if (result.blocked) {
         this.opts.onFire?.({ ruleName: rule.name, fireId, status: 'blocked', deviceId: result.deviceId, reason: result.error });
         if ((action.on_error ?? 'continue') === 'stop') break;

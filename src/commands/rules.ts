@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { isJsonMode, printJson, exitWithError, printTable, handleError } from '../utils/output.js';
+import { isJsonMode, printJson, exitWithError, printTable, handleError, UsageError } from '../utils/output.js';
 import {
   loadPolicyFile,
   resolvePolicyPath,
@@ -24,6 +24,7 @@ import { fetchMqttCredential } from '../mqtt/credential.js';
 import { SwitchBotMqttClient } from '../mqtt/client.js';
 import { WebhookTokenStore } from '../rules/webhook-token.js';
 import { suggestRule } from '../rules/suggest.js';
+import type { LLMBackend } from '../llm/index.js';
 import { getCachedDevice } from '../devices/cache.js';
 import {
   getDefaultPidFilePaths,
@@ -621,7 +622,7 @@ function registerWebhookShowToken(rules: Command): void {
 function registerSuggest(rules: Command): void {
   rules
     .command('suggest')
-    .description('Generate a candidate rule YAML from intent + devices (heuristic, no LLM)')
+    .description('Generate a candidate rule YAML from intent + devices')
     .requiredOption('--intent <text>', 'Natural language description of the automation')
     .option('--trigger <type>', 'mqtt | cron | webhook (inferred from intent if omitted)')
     .option(
@@ -635,8 +636,9 @@ function registerSuggest(rules: Command): void {
     .option('--days <days>', 'Weekday filter, comma-separated (e.g. mon,tue,wed,thu,fri)')
     .option('--webhook-path <path>', 'Webhook path override (default: /action)')
     .option('--out <file>', 'Write YAML to file instead of stdout')
+    .option('--llm <backend>', 'LLM backend for suggestion: auto | openai | anthropic')
     .action(
-      (opts: {
+      async (opts: {
         intent: string;
         trigger?: string;
         device: string[];
@@ -645,15 +647,19 @@ function registerSuggest(rules: Command): void {
         days?: string;
         webhookPath?: string;
         out?: string;
+        llm?: string;
       }) => {
         try {
+          if (opts.llm !== undefined && !['auto', 'openai', 'anthropic'].includes(opts.llm)) {
+            throw new UsageError(`--llm must be one of: auto, openai, anthropic (got "${opts.llm}")`);
+          }
           const trigger = opts.trigger as 'mqtt' | 'cron' | 'webhook' | undefined;
           const days = opts.days ? opts.days.split(',').map((d) => d.trim()) : undefined;
           const devices = opts.device.map((ref) => {
             const cached = getCachedDevice(ref);
             return { id: ref, name: cached?.name, type: cached?.type };
           });
-          const { rule, ruleYaml, warnings } = suggestRule({
+          const { rule, ruleYaml, warnings } = await suggestRule({
             intent: opts.intent,
             trigger,
             devices,
@@ -661,6 +667,7 @@ function registerSuggest(rules: Command): void {
             schedule: opts.schedule,
             days,
             webhookPath: opts.webhookPath,
+            llm: opts.llm as LLMBackend | undefined,
           });
           for (const w of warnings) process.stderr.write(`warning: ${w}\n`);
           if (opts.out) {
@@ -871,7 +878,10 @@ function registerExplain(rules: Command): void {
       console.log(`conditions:            ${detail.conditions.length === 0 ? '(none)' : JSON.stringify(detail.conditions)}`);
       console.log(`actions:               ${detail.actions.length}`);
       for (const a of detail.actions) {
-        console.log(`  - ${a.command}${a.device ? ` [${a.device}]` : ''}${a.on_error ? ` on_error=${a.on_error}` : ''}`);
+        const label = 'command' in a && a.command
+          ? `${a.command}${a.device ? ` [${a.device}]` : ''}${a.on_error ? ` on_error=${a.on_error}` : ''}`
+          : `type=notify channel=${(a as import('../rules/types.js').NotifyAction).channel} to=${(a as import('../rules/types.js').NotifyAction).to}`;
+        console.log(`  - ${label}`);
       }
       if (detail.cooldown) console.log(`cooldown:              ${detail.cooldown}`);
       if (detail.hysteresis) console.log(`hysteresis:            ${detail.hysteresis}`);

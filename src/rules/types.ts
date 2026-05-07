@@ -71,11 +71,31 @@ export interface NotCondition {
 
 export type Condition = TimeBetweenCondition | DeviceStateCondition | AllCondition | AnyCondition | NotCondition;
 
-export interface Action {
+export interface CommandAction {
+  type?: 'command';
   command: string;
   device?: string;
   args?: Record<string, unknown> | null;
   on_error?: 'continue' | 'stop';
+}
+
+export interface NotifyAction {
+  type: 'notify';
+  channel: 'webhook' | 'openclaw' | 'file';
+  to: string;
+  template?: string;
+  on_failure?: 'log' | 'retry' | 'ignore';
+  on_error?: 'continue' | 'stop';
+}
+
+export type Action = CommandAction | NotifyAction;
+
+export function isCommandAction(a: Action): a is CommandAction {
+  return (a as NotifyAction).type !== 'notify';
+}
+
+export function isNotifyAction(a: Action): a is NotifyAction {
+  return (a as NotifyAction).type === 'notify';
 }
 
 export interface Throttle {

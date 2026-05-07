@@ -1874,6 +1874,51 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
     },
   );
 
+  // ---- rule_notifications ---------------------------------------------------
+  server.registerTool(
+    'rule_notifications',
+    {
+      title: 'Query rule notification delivery history',
+      description:
+        'Returns audit entries for notify actions (kind: rule-notify). ' +
+        'Useful for confirming whether a notification rule fired and whether delivery succeeded. ' +
+        'Filter by rule name, time range, result, or channel.',
+      _meta: { agentSafetyTier: 'read' },
+      inputSchema: z.object({
+        file: z.string().optional().describe('Optional audit log path; defaults to ~/.switchbot/audit.log.'),
+        rule: z.string().optional().describe('Filter by rule name (exact match).'),
+        since: z.string().optional().describe('Relative window ending now (e.g. "30m", "24h").'),
+        from: z.string().optional().describe('Range start (ISO-8601).'),
+        to: z.string().optional().describe('Range end (ISO-8601).'),
+        result: z.enum(['ok', 'error']).optional().describe('Filter by delivery result.'),
+        channel: z.enum(['webhook', 'openclaw', 'file']).optional().describe('Filter by notify channel.'),
+        limit: z.number().int().min(1).max(500).default(100).describe('Max entries to return (newest first).'),
+      }).strict(),
+      outputSchema: {
+        entries: z.array(z.unknown()).describe('Matching audit entries, newest first.'),
+        total: z.number().int().describe('Count after filtering.'),
+      },
+    },
+    ({ file, rule: ruleName, since, from, to, result: resultFilter, channel, limit }) => {
+      const filePath = file ?? DEFAULT_AUDIT_LOG_FILE;
+      let entries = readAudit(filePath).filter(e => e.kind === 'rule-notify');
+      if (ruleName) entries = entries.filter(e => e.rule?.name === ruleName);
+      if (resultFilter) entries = entries.filter(e => e.result === resultFilter);
+      if (channel) entries = entries.filter(e => e.notifyChannel === channel);
+      try {
+        entries = filterAuditEntries(entries, { since, from, to });
+      } catch (err) {
+        return mcpError('usage', 2, err instanceof Error ? err.message : 'invalid filter options');
+      }
+      const bounded = entries.slice(-limit).reverse();
+      const out = { entries: bounded, total: entries.length };
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(out, null, 2) }],
+        structuredContent: out,
+      };
+    },
+  );
+
   // ---- rules_suggest --------------------------------------------------------
   server.registerTool(
     'rules_suggest',
@@ -1881,7 +1926,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
       title: 'Draft a SwitchBot automation rule from intent',
       description:
         'Generate a candidate automation rule YAML from a natural language intent. ' +
-        'Uses keyword heuristics (no LLM) to infer trigger, schedule, and command. ' +
+        'Uses keyword heuristics by default; pass llm to use an LLM backend (auto | openai | anthropic). ' +
         'Always emits dry_run: true — the rule must be reviewed before arming. ' +
         'Pass the returned rule_yaml to policy_add_rule to inject it into policy.yaml.',
       _meta: { agentSafetyTier: 'read' },
@@ -1893,6 +1938,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         schedule: z.string().optional().describe('5-field cron expression override (e.g. "0 22 * * *").'),
         days: z.array(z.string()).optional().describe('Weekday filter (e.g. ["mon","tue","wed","thu","fri"]).'),
         webhook_path: z.string().optional().describe('Webhook path override (default /action).'),
+        llm: z.enum(['auto', 'openai', 'anthropic']).optional().describe('LLM backend (auto | openai | anthropic). Omit to use keyword heuristics.'),
       }).strict(),
       outputSchema: {
         rule: z.unknown().describe('Rule object matching the v0.2 policy schema.'),
@@ -1900,13 +1946,13 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         warnings: z.array(z.string()).describe('Informational warnings (e.g. unrecognized intent defaulted).'),
       },
     },
-    ({ intent, trigger, device_ids, event, schedule, days, webhook_path }) => {
+    async ({ intent, trigger, device_ids, event, schedule, days, webhook_path, llm }) => {
       const devices = (device_ids ?? []).map((id) => {
         const cached = getCachedDevice(id);
         return { id, name: cached?.name, type: cached?.type };
       });
       try {
-        const { rule, ruleYaml, warnings } = suggestRule({
+        const { rule, ruleYaml, warnings } = await suggestRule({
           intent,
           trigger,
           devices,
@@ -1914,6 +1960,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
           schedule,
           days,
           webhookPath: webhook_path,
+          llm,
         });
         return {
           content: [{ type: 'text' as const, text: ruleYaml }],
@@ -2039,6 +2086,7 @@ export function registerMcpCommand(program: Command): void {
   - plan_run                validate + execute a Plan JSON document
   - audit_query             filter audit log entries by time/device/rule/result
   - audit_stats             aggregate audit counts by kind/result/device/rule
+  - rule_notifications      query rule notify action delivery history
   - rules_suggest           draft an automation rule YAML from intent (heuristic, no LLM)
   - policy_add_rule         append a rule into automation.rules[] in policy.yaml
 

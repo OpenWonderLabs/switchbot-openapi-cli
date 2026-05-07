@@ -7,6 +7,14 @@ All notable changes to `@switchbot/openapi-cli` are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- notify templates now expand nested event fields — dotted paths like `{{ event.context.deviceMac }}` and array indexes like `{{ event.list.0 }}` resolve instead of rendering literally.
+- `channel: file` notify actions reject relative paths (lint code `notify-relative-path`, also enforced at runtime); `~` is not expanded.
+- LLM rule-suggest prompt now embeds the `trigger` and `triggerWebhook` schema defs so `--trigger webhook` flows no longer produce dangling-`$ref` outputs.
+
 ## [3.3.2] - 2026-04-26
 
 ### Fixed

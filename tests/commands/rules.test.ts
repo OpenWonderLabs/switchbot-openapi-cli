@@ -896,4 +896,14 @@ describe('rules suggest', () => {
       fs.rmSync(outDir, { recursive: true, force: true });
     }
   });
+
+  it('rejects --llm with an unknown backend value', async () => {
+    const { stderr, exitCode } = await runCli([
+      'rules', 'suggest',
+      '--intent', 'turn on light when motion detected',
+      '--llm', 'garbage',
+    ]);
+    expect(exitCode).toBe(2);
+    expect(stderr.join('\n')).toMatch(/--llm must be one of: auto, openai, anthropic/);
+  });
 });

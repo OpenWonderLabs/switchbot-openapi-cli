@@ -21,6 +21,7 @@ import type { AxiosInstance } from 'axios';
 import { executeCommand } from '../lib/devices.js';
 import { writeAudit } from '../utils/audit.js';
 import { isDestructiveCommand } from './destructive.js';
+import { isCommandAction } from './types.js';
 import type { Action, Rule } from './types.js';
 
 export interface RuleActionContext {
@@ -102,6 +103,9 @@ export async function executeRuleAction(
   action: Action,
   ctx: RuleActionContext,
 ): Promise<RuleActionResult> {
+  if (!isCommandAction(action)) {
+    return { ok: false, error: 'notify-actions-require-executeNotifyAction', blocked: true };
+  }
   const parsed = parseRuleCommand(action.command);
   if (!parsed) {
     writeAudit({
@@ -258,7 +262,7 @@ export async function executeRuleAction(
  * Prefers `action.device` over the deviceId embedded in the command string.
  * Use resolveActionDevice() when alias resolution is needed.
  */
-export function extractDeviceIdFromAction(action: { command: string; device?: string }): string | null {
+export function extractDeviceIdFromAction(action: { command?: string; device?: string }): string | null {
   if (action.device) return action.device;
   const m = /\bdevices\s+command\s+(\S+)/.exec(action.command ?? '');
   return m ? m[1] : null;
