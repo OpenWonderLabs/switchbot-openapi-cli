@@ -38,6 +38,13 @@ import {
 } from '../rules/pid-file.js';
 import { readAudit, type AuditEntry } from '../utils/audit.js';
 import {
+  loadTraceRecords,
+  loadRelatedAudit,
+  formatExplainText,
+  formatExplainJson,
+} from '../rules/explain.js';
+import { simulateRule } from '../rules/simulate.js';
+import {
   aggregateRuleAudits,
   filterRuleAudits,
   RULE_AUDIT_KINDS,
@@ -892,6 +899,154 @@ function registerExplain(rules: Command): void {
     });
 }
 
+function registerTraceExplain(rules: Command): void {
+  rules
+    .command('trace-explain [fireId]')
+    .description('Show why a rule evaluation fired or was blocked (reads rule-evaluate trace records).')
+    .option('--rule <name>', 'Filter to a specific rule name.')
+    .option('--last', 'Show the most recent evaluation for the rule (requires --rule).')
+    .option('--since <duration>', 'Show evaluations in this window (e.g. 1h, 7d).')
+    .option('--all', 'Include evaluations that fired (default: show all evaluations).')
+    .option('--file <path>', `Audit log path (default ${DEFAULT_AUDIT_PATH}).`)
+    .action(
+      (
+        fireIdArg: string | undefined,
+        opts: { rule?: string; last?: boolean; since?: string; all?: boolean; file?: string },
+      ) => {
+        const auditFile = opts.file ?? DEFAULT_AUDIT_PATH;
+
+        if (!fs.existsSync(auditFile)) {
+          exitWithError({ code: 1, kind: 'usage', message: `Audit log not found: ${auditFile}. Make sure trace recording is enabled (automation.audit.evaluate_trace: sampled or full).` });
+          return;
+        }
+
+        const sinceIso = opts.since ? new Date(Date.now() - (parseDurationToMs(opts.since) ?? 0)).toISOString() : undefined;
+
+        let records = loadTraceRecords(auditFile, {
+          fireId: fireIdArg,
+          ruleName: opts.rule,
+          since: sinceIso,
+        });
+
+        if (records.length === 0) {
+          const hint = 'Check that automation.audit.evaluate_trace is set to "sampled" or "full".';
+          exitWithError({ code: 1, kind: 'usage', message: `No rule-evaluate trace records found. ${hint}` });
+          return;
+        }
+
+        if (opts.last) {
+          records = [records[records.length - 1]];
+        }
+
+        for (const record of records) {
+          const related = loadRelatedAudit(auditFile, record.fireId);
+          if (isJsonMode()) {
+            console.log(formatExplainJson(record, related));
+          } else {
+            console.log(formatExplainText(record, related));
+            if (records.length > 1) console.log('---');
+          }
+        }
+      },
+    );
+}
+
+function registerSimulate(rules: Command): void {
+  rules
+    .command('simulate <rule-or-policy>')
+    .description('Replay historical events against a rule and report would-fire / blocked outcomes.')
+    .option('--rule <name>', 'Rule name to simulate (when <rule-or-policy> is a policy file).')
+    .option('--since <duration>', 'Replay events from this window (e.g. 7d, 24h).')
+    .option('--against <file>', 'Replay from a JSONL file of EngineEvent objects instead of the audit log.')
+    .option('--live-llm', 'Allow live LLM calls for llm conditions (default: mark as would-call).')
+    .option('--audit-log <path>', `Audit log path (default ${DEFAULT_AUDIT_PATH}).`)
+    .option('--report-out <path>', 'Write the full JSON report to this file.')
+    .action(
+      async (
+        ruleOrPolicy: string,
+        opts: { rule?: string; since?: string; against?: string; liveLlm?: boolean; auditLog?: string; reportOut?: string },
+      ) => {
+        let rule: Rule | undefined;
+        const auditLog = opts.auditLog ?? DEFAULT_AUDIT_PATH;
+
+        if (!fs.existsSync(ruleOrPolicy)) {
+          exitWithError({ code: 2, kind: 'usage', message: `File not found: ${ruleOrPolicy}` });
+          return;
+        }
+
+        // Try to parse as standalone rule YAML
+        let parsed: unknown;
+        try {
+          const { parse: yamlParse } = await import('yaml');
+          parsed = yamlParse(fs.readFileSync(ruleOrPolicy, 'utf-8'));
+        } catch {
+          exitWithError({ code: 2, kind: 'usage', message: `Could not parse YAML file: ${ruleOrPolicy}` });
+          return;
+        }
+
+        const asRule = parsed as Record<string, unknown>;
+        if (asRule['name'] && asRule['when'] && asRule['then']) {
+          rule = asRule as unknown as Rule;
+        } else {
+          // Treat as policy file
+          const automation = loadAutomation(ruleOrPolicy);
+          if (!automation) return;
+          const ruleName = opts.rule;
+          if (!ruleName) {
+            exitWithError({ code: 1, kind: 'usage', message: 'Use --rule <name> to specify which rule to simulate from the policy file.' });
+            return;
+          }
+          rule = automation.automation?.rules?.find(r => r.name === ruleName);
+          if (!rule) {
+            exitWithError({ code: 1, kind: 'usage', message: `Rule "${ruleName}" not found in policy file.` });
+            return;
+          }
+        }
+
+        try {
+          const report = await simulateRule({
+            rule: rule!,
+            since: opts.since,
+            against: opts.against,
+            auditLog,
+            liveLlm: opts.liveLlm ?? false,
+          });
+
+          if (opts.reportOut) {
+            fs.writeFileSync(opts.reportOut, JSON.stringify(report, null, 2));
+            console.log(`Report written to ${opts.reportOut}`);
+          }
+
+          if (isJsonMode()) {
+            printJson(report);
+          } else {
+            console.log(`Rule: ${report.ruleName}  (version ${report.ruleVersion})`);
+            console.log(`Window: ${report.windowStart.toISOString()} → ${report.windowEnd.toISOString()}`);
+            console.log(`Source events: ${report.sourceEventCount}`);
+            console.log('');
+            console.log(`  Would fire:          ${report.wouldFire}`);
+            console.log(`  Blocked by condition:${report.blockedByCondition}`);
+            console.log(`  Throttled:           ${report.throttled}`);
+            console.log(`  Errored:             ${report.errored}`);
+            if (report.skippedLlm > 0) {
+              console.log(`  Skipped (llm):       ${report.skippedLlm} (use --live-llm to evaluate)`);
+            }
+            if (report.topBlockReason && report.topBlockCount !== undefined) {
+              const total = report.blockedByCondition;
+              const pct = total > 0 ? Math.round((report.topBlockCount / total) * 100) : 0;
+              if (pct >= 80) {
+                console.log('');
+                console.log(`Top block reason (${pct}%): ${report.topBlockReason}`);
+              }
+            }
+          }
+        } catch (err) {
+          handleError(err);
+        }
+      },
+    );
+}
+
 export function registerRulesCommand(program: Command): void {
   const rules = program
     .command('rules')
@@ -942,6 +1097,8 @@ Exit codes (lint):
   registerDoctor(rules);
   registerSummary(rules);
   registerLastFired(rules);
+  registerTraceExplain(rules);
+  registerSimulate(rules);
   registerWebhookRotateToken(rules);
   registerWebhookShowToken(rules);
 }

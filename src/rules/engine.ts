@@ -44,10 +44,12 @@ import {
   isWebhookTrigger,
   isCommandAction,
   isNotifyAction,
+  isLlmCondition,
 } from './types.js';
 import { executeNotifyAction } from './notify.js';
 import { Cron } from 'croner';
-import { writeAudit } from '../utils/audit.js';
+import { writeAudit, writeEvaluateTrace } from '../utils/audit.js';
+import { TraceBuilder, shouldWriteTrace, HIGH_FREQ_EVENTS, type EvaluateTraceMode } from './trace.js';
 
 export interface LintIssue {
   rule: string;
@@ -269,6 +271,54 @@ export function lintRules(automation: AutomationBlock | null | undefined): LintR
           severity: 'error',
           code: 'invalid-maxFiringsPerHour',
           message: `maxFiringsPerHour must be a positive integer (got ${r.maxFiringsPerHour}).`,
+        });
+      }
+    }
+
+    // LLM condition lint rules
+    for (const c of (r.conditions ?? [])) {
+      if (!isLlmCondition(c)) continue;
+      const llm = c.llm;
+
+      // condition-llm-no-provider: provider omitted → 'auto', which is fine, but missing API key cannot be validated statically → warning
+      if (!llm.provider || llm.provider === 'auto') {
+        if (!process.env.ANTHROPIC_API_KEY && !process.env.OPENAI_API_KEY && !process.env.LLM_API_KEY) {
+          issues.push({
+            rule: r.name,
+            severity: 'error',
+            code: 'condition-llm-no-provider',
+            message: 'llm condition uses provider "auto" but no LLM API key env var is set (ANTHROPIC_API_KEY, OPENAI_API_KEY, or LLM_API_KEY).',
+          });
+        }
+      }
+
+      // condition-llm-no-cache-ttl-high-freq: LLM condition on high-freq trigger without explicit cache_ttl
+      if (isMqttTrigger(r.when) && HIGH_FREQ_EVENTS.has(r.when.event) && !llm.cache_ttl) {
+        issues.push({
+          rule: r.name,
+          severity: 'warning',
+          code: 'condition-llm-no-cache-ttl-high-freq',
+          message: `llm condition on high-frequency event "${r.when.event}" without explicit cache_ttl — consider setting cache_ttl to reduce LLM calls.`,
+        });
+      }
+
+      // condition-llm-budget-zero: budget.max_calls_per_hour set to 0 makes condition always fail
+      if (llm.budget?.max_calls_per_hour === 0) {
+        issues.push({
+          rule: r.name,
+          severity: 'warning',
+          code: 'condition-llm-budget-zero',
+          message: 'llm condition budget.max_calls_per_hour is 0 — condition will always take the on_error path.',
+        });
+      }
+
+      // condition-llm-on-error-pass: on_error "pass" silently passes conditions when LLM is unavailable
+      if (llm.on_error === 'pass') {
+        issues.push({
+          rule: r.name,
+          severity: 'warning',
+          code: 'condition-llm-on-error-pass',
+          message: 'llm condition on_error is "pass" — the condition will silently pass when the LLM is unavailable or over-budget.',
         });
       }
     }
@@ -731,6 +781,14 @@ export class RulesEngine {
 
   private async dispatchRule(rule: Rule, event: EngineEvent): Promise<void> {
     const fireId = randomUUID();
+    const traceMode: EvaluateTraceMode = this.opts.automation?.audit?.evaluate_trace ?? 'sampled';
+    const trace = new TraceBuilder();
+    const emitTrace = (decision: import('./trace.js').TraceDecision): void => {
+      if (shouldWriteTrace(traceMode, event, decision)) {
+        writeEvaluateTrace(trace.build(rule, event, fireId, decision));
+      }
+    };
+
     // Per-tick status cache: one pipeline run through dispatchRule, one
     // cache. Multiple device_state conditions on the same deviceId share
     // a single round trip; subsequent pipeline runs see fresh status.
@@ -748,6 +806,7 @@ export class RulesEngine {
     const cond = await evaluateConditions(rule.conditions, event.t, {
       aliases: this.aliases,
       fetchStatus,
+      trace,
     });
     if (!cond.matched) {
       // If conditions are not met, the trigger is no longer "continuously stable" —
@@ -758,6 +817,7 @@ export class RulesEngine {
         this.hysteresisFirstSeen.delete(hysteresisKey);
       }
       if (cond.unsupported.length > 0) {
+        emitTrace('error');
         writeAudit({
           t: event.t.toISOString(),
           kind: 'rule-fire',
@@ -780,6 +840,7 @@ export class RulesEngine {
         return;
       }
       this.stats.conditionsFailed++;
+      emitTrace('blocked-by-condition');
       this.opts.onFire?.({ ruleName: rule.name, fireId, status: 'conditions-failed', deviceId: event.deviceId, reason: cond.failures.join('; ') });
       return;
     }
@@ -793,6 +854,7 @@ export class RulesEngine {
     const check = this.throttle.check(rule.name, effectiveMaxPerMs, event.t.getTime(), throttleKey, dedupeWindowMs);
     if (!check.allowed) {
       this.stats.throttled++;
+      emitTrace('throttled');
       writeAudit({
         t: event.t.toISOString(),
         kind: 'rule-throttled',
@@ -827,6 +889,7 @@ export class RulesEngine {
       const now = event.t.getTime();
       if (firstSeen === undefined) {
         this.hysteresisFirstSeen.set(hysteresisKey, now);
+        emitTrace('throttled');
         writeAudit({
           t: event.t.toISOString(), kind: 'rule-throttled',
           deviceId: event.deviceId ?? 'unknown', command: rule.then[0] && isCommandAction(rule.then[0]) ? rule.then[0].command : '',
@@ -837,6 +900,7 @@ export class RulesEngine {
         return;
       }
       if (now - firstSeen < hysteresisMs) {
+        emitTrace('throttled');
         writeAudit({
           t: event.t.toISOString(), kind: 'rule-throttled',
           deviceId: event.deviceId ?? 'unknown', command: rule.then[0] && isCommandAction(rule.then[0]) ? rule.then[0].command : '',
@@ -855,6 +919,7 @@ export class RulesEngine {
       const countCheck = this.throttle.checkMaxFirings(rule.name, rule.maxFiringsPerHour, 3_600_000, event.t.getTime(), event.deviceId);
       if (!countCheck.allowed) {
         this.stats.throttled++;
+        emitTrace('throttled');
         writeAudit({
           t: event.t.toISOString(), kind: 'rule-throttled',
           deviceId: event.deviceId ?? 'unknown', command: rule.then[0] && isCommandAction(rule.then[0]) ? rule.then[0].command : '',
@@ -878,6 +943,7 @@ export class RulesEngine {
           const deviceStatus = await fetchStatus(targetId);
           const powerState = deviceStatus['powerState'] as string | undefined;
           if ((verb === 'turnOn' && powerState === 'on') || (verb === 'turnOff' && powerState === 'off')) {
+            emitTrace('throttled');
             writeAudit({
               t: event.t.toISOString(), kind: 'rule-throttled',
               deviceId: targetId, command: verb ?? '',
@@ -927,6 +993,8 @@ export class RulesEngine {
     }
 
     if (fired) {
+      const decision = allDry ? 'dry' : 'fire';
+      emitTrace(decision);
       if (allDry) this.stats.dryFires++; else this.stats.fires++;
       this.throttle.record(rule.name, event.t.getTime(), throttleKey);
       if (rule.maxFiringsPerHour !== undefined) {
