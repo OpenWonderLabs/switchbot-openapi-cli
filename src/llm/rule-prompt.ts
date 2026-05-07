@@ -27,6 +27,9 @@ export interface DeviceSummary {
 }
 
 export function buildRuleSuggestSystemPrompt(devices: DeviceSummary[], aliases: Record<string, string>): string {
+  // NOTE: tests/llm/rule-prompt.test.ts extracts the embedded schema snippet
+  // by string-slicing between "JSON Schema:\n" and "\n\nRules:" — keep those
+  // two delimiters intact (or update that test) when reformatting this prompt.
   return `You are a SwitchBot automation rule generator.
 
 Output ONLY a valid YAML object for a single rule conforming to this JSON Schema:

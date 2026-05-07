@@ -131,7 +131,9 @@ async function sendWebhook(url: string, body: string): Promise<void> {
 
 function appendToFile(filePath: string, body: string): void {
   if (!path.isAbsolute(filePath)) {
-    throw new Error(`notify file path must be absolute, got "${filePath}"`);
+    throw new Error(
+      `notify file path must be absolute, got "${filePath}" — use e.g. /var/log/switchbot/notify.jsonl on POSIX or C:\\path\\notify.jsonl on Windows. Tilde (~) is not expanded.`,
+    );
   }
   const dir = path.dirname(filePath);
   if (!fs.existsSync(dir)) {
@@ -200,6 +202,9 @@ export async function executeNotifyAction(
   const latencyMs = Date.now() - start;
   const ok = error === undefined;
 
+  // `parameter` carries the raw `action.to` even when the path was rejected
+  // as relative — keeping the unsanitised value is intentional for forensics
+  // (operators need to see what bad input slipped past lint).
   writeAudit({
     t: new Date().toISOString(),
     kind: 'rule-notify',
