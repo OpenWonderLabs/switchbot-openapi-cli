@@ -9,11 +9,21 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [3.3.3] - 2026-05-07
+
+### Added
+
+- `type: notify` action — rules can POST to webhooks, append JSONL to a file, or push to OpenClaw after firing. Supports `{{ rule.name }}` / `{{ event.* }}` templates.
+- `rules suggest --llm <openai|anthropic|auto>` — complex intents routed to LLM; auto mode falls back to heuristic on failure.
+- `rules_suggest` MCP tool gains `llm` parameter; new `rule_notifications` MCP tool queries notify delivery history.
+- `doctor notify-connectivity` check probes webhook URLs declared in notify actions.
+- Audit log gains `rule-notify` and `llm-suggest` kinds with latency fields.
+
 ### Fixed
 
-- notify templates now expand nested event fields — dotted paths like `{{ event.context.deviceMac }}` and array indexes like `{{ event.list.0 }}` resolve instead of rendering literally.
-- `channel: file` notify actions reject relative paths (lint code `notify-relative-path`, also enforced at runtime); `~` is not expanded.
-- LLM rule-suggest prompt now embeds the `trigger` and `triggerWebhook` schema defs so `--trigger webhook` flows no longer produce dangling-`$ref` outputs.
+- notify templates expand nested event fields (`{{ event.context.deviceMac }}`, `{{ event.list.0 }}`).
+- `channel: file` rejects relative paths at lint and runtime.
+- LLM prompt embeds `triggerWebhook` schema def; `--trigger webhook` no longer produces dangling `$ref` output.
 
 ## [3.3.2] - 2026-04-26
 
