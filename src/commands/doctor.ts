@@ -934,11 +934,13 @@ function checkNotifyConnectivity(): Check {
     return { name: 'notify-connectivity', status: 'ok', detail: { present: false, message: 'policy file could not be loaded' } };
   }
 
-  const policy = loaded.data as { automation?: { rules?: Array<{ then?: Array<{ type?: string; channel?: string; to?: string }> }> } } | null;
-  const rules = policy?.automation?.rules ?? [];
+  const policy = loaded.data as { automation?: { rules?: unknown } } | null;
+  const rawRules = policy?.automation?.rules;
+  const rules = Array.isArray(rawRules) ? rawRules : [];
   const webhookUrls: string[] = [];
   for (const rule of rules) {
-    for (const action of rule.then ?? []) {
+    const then = (rule as { then?: unknown }).then;
+    for (const action of (Array.isArray(then) ? then : []) as Array<{ type?: string; channel?: string; to?: string }>) {
       if (action.type === 'notify' && (action.channel === 'webhook' || action.channel === 'openclaw') && action.to) {
         webhookUrls.push(action.to);
       }

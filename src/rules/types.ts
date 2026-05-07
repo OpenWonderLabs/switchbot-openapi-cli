@@ -69,7 +69,19 @@ export interface NotCondition {
   not: Condition;
 }
 
-export type Condition = TimeBetweenCondition | DeviceStateCondition | AllCondition | AnyCondition | NotCondition;
+export interface LlmCondition {
+  llm: {
+    prompt: string;
+    provider?: 'auto' | 'openai' | 'anthropic';
+    timeout_ms?: number;
+    cache_ttl?: string;
+    budget?: { max_calls_per_hour?: number };
+    on_error?: 'fail' | 'pass' | 'skip';
+    recent_events?: number;
+  };
+}
+
+export type Condition = TimeBetweenCondition | DeviceStateCondition | AllCondition | AnyCondition | NotCondition | LlmCondition;
 
 export interface CommandAction {
   type?: 'command';
@@ -124,9 +136,20 @@ export interface Rule {
   suppressIfAlreadyDesired?: boolean;
 }
 
+export interface AutomationAuditConfig {
+  evaluate_trace?: 'full' | 'sampled' | 'off';
+  evaluate_retention_days?: number;
+}
+
+export interface AutomationLlmBudgetConfig {
+  max_calls_per_hour?: number;
+}
+
 export interface AutomationBlock {
   enabled?: boolean;
   rules?: Rule[] | null;
+  audit?: AutomationAuditConfig | null;
+  llm_budget?: AutomationLlmBudgetConfig | null;
 }
 
 /**
@@ -169,6 +192,9 @@ export function isAnyCondition(c: Condition): c is AnyCondition {
 }
 export function isNotCondition(c: Condition): c is NotCondition {
   return (c as NotCondition).not !== undefined && !Array.isArray((c as NotCondition).not);
+}
+export function isLlmCondition(c: Condition): c is LlmCondition {
+  return (c as LlmCondition).llm !== undefined && typeof (c as LlmCondition).llm === 'object';
 }
 
 /** Re-export for consumers that want the single list without a second import. */

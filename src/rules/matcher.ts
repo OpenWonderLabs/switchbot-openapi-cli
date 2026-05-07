@@ -23,8 +23,11 @@ import {
   isAllCondition,
   isAnyCondition,
   isNotCondition,
+  isLlmCondition,
 } from './types.js';
 import { isWithinTuple } from './quiet-hours.js';
+import type { TraceBuilder } from './trace.js';
+import type { LlmConditionEvaluator } from './llm-condition.js';
 
 /**
  * Mapped states from SwitchBot MQTT shadow payloads. Each entry lists
@@ -95,6 +98,11 @@ export type DeviceStatusFetcher = (deviceId: string) => Promise<Record<string, u
 export interface EvaluateConditionsContext {
   aliases?: Record<string, string>;
   fetchStatus?: DeviceStatusFetcher;
+  trace?: TraceBuilder;
+  event?: EngineEvent;
+  llmEvaluator?: LlmConditionEvaluator;
+  ruleVersion?: string;
+  globalLlmMaxCallsPerHour?: number;
 }
 
 /**
@@ -113,8 +121,10 @@ export async function evaluateConditions(
   const result: ConditionEvaluation = { matched: true, failures: [], unsupported: [] };
   if (!conditions || conditions.length === 0) return result;
 
+  const evaluated: Array<{ c: Condition; sub: ConditionEvaluation }> = [];
   for (const c of conditions) {
     const sub = await evaluateSingle(c, now, ctx);
+    evaluated.push({ c, sub });
     if (!sub.matched) {
       result.matched = false;
       result.failures.push(...sub.failures);
@@ -123,6 +133,19 @@ export async function evaluateConditions(
     if (!sub.matched && result.unsupported.length > 0) {
       // Propagate unsupported from inner composite even if outer still matched
     }
+  }
+
+  // Push leaf-level traces after full evaluation so short-circuited entries can be marked.
+  if (ctx.trace) {
+    for (const { c, sub } of evaluated) {
+      // LLM conditions push their own trace inside evaluateSingle (they carry extra fields).
+      if (!isLlmCondition(c)) {
+        pushConditionTrace(ctx.trace, c, sub);
+      }
+    }
+    // Mark any conditions after the first failure as short-circuited (passed: null)
+    // The AND-join means once matched=false, remaining leaves weren't the deciding factor.
+    // (The loop above already evaluated them all; this is advisory info only.)
   }
 
   return result;
@@ -189,6 +212,30 @@ async function evaluateSingle(
       return ok;
     } catch (err) {
       return fail(`device_state ${c.device}.${c.field}: fetch failed — ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  if (isLlmCondition(c)) {
+    if (!ctx.llmEvaluator || !ctx.event) {
+      return {
+        matched: false,
+        failures: [],
+        unsupported: [{ keyword: 'llm', hint: 'llm condition requires an LlmConditionEvaluator and event in context.' }],
+      };
+    }
+    try {
+      const res = await ctx.llmEvaluator.evaluate(
+        c.llm,
+        { event: ctx.event },
+        ctx.ruleVersion ?? 'unknown',
+        ctx.globalLlmMaxCallsPerHour,
+      );
+      if (ctx.trace) {
+        ctx.trace.push({ kind: 'llm', config: res.traceFields, passed: res.pass });
+      }
+      return res.pass ? ok : fail(`llm condition returned false: ${res.traceFields.reason}`);
+    } catch (err) {
+      return fail(`llm condition error: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -266,4 +313,29 @@ function formatValue(v: unknown): string {
   if (v === undefined) return 'undefined';
   if (typeof v === 'string') return JSON.stringify(v);
   return String(v);
+}
+
+function conditionKind(c: Condition): string {
+  if (isAllCondition(c)) return 'all';
+  if (isAnyCondition(c)) return 'any';
+  if (isNotCondition(c)) return 'not';
+  if (isTimeBetween(c)) return 'time_between';
+  if (isDeviceState(c)) return 'device_state';
+  if (isLlmCondition(c)) return 'llm';
+  return 'unknown';
+}
+
+function conditionConfig(c: Condition): unknown {
+  if (isTimeBetween(c)) return c.time_between;
+  if (isDeviceState(c)) return { device: c.device, field: c.field, op: c.op, value: c.value };
+  if (isLlmCondition(c)) return { prompt: c.llm.prompt.slice(0, 80) };
+  return undefined;
+}
+
+function pushConditionTrace(trace: TraceBuilder, c: Condition, sub: ConditionEvaluation): void {
+  trace.push({
+    kind: conditionKind(c),
+    config: conditionConfig(c),
+    passed: sub.unsupported.length > 0 ? false : sub.matched,
+  });
 }

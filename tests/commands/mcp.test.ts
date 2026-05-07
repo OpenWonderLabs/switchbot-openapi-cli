@@ -158,7 +158,7 @@ describe('mcp server', () => {
     delete process.env.SWITCHBOT_ALLOW_DIRECT_DESTRUCTIVE;
   });
 
-  it('exposes the twenty-two tools with titles and input schemas', async () => {
+  it('exposes the twenty-four tools with titles and input schemas', async () => {
     const { client } = await pair();
     const { tools } = await client.listTools();
 
@@ -183,6 +183,8 @@ describe('mcp server', () => {
         'policy_validate',
         'query_device_history',
         'rule_notifications',
+        'rules_explain',
+        'rules_simulate',
         'rules_suggest',
         'run_scene',
         'search_catalog',

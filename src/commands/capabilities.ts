@@ -200,6 +200,8 @@ export const COMMAND_META: Record<string, CommandMeta> = {
   'rules summary': READ_LOCAL,
   'rules last-fired': READ_LOCAL,
   'rules explain': READ_LOCAL,
+  'rules trace-explain': READ_LOCAL,
+  'rules simulate': READ_LOCAL,
   'schema export': READ_LOCAL,
   'scenes list': READ_REMOTE,
   'scenes execute': ACTION_REMOTE,

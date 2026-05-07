@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { getAuditLog } from './flags.js';
+import type { RuleEvaluateRecord } from '../rules/trace.js';
 
 export const DEFAULT_AUDIT_PATH = path.join(os.homedir(), '.switchbot', 'audit.log');
 
@@ -25,7 +26,10 @@ export type AuditEntryKind =
   | 'rule-throttled'
   | 'rule-webhook-rejected'
   | 'rule-notify'
-  | 'llm-suggest';
+  | 'rule-evaluate'
+  | 'llm-suggest'
+  | 'llm-condition'
+  | 'llm-budget-exceeded';
 
 export interface AuditRuleContext {
   /** Rule.name from policy.yaml. */
@@ -90,6 +94,20 @@ export function writeAudit(entry: AuditEntry): void {
     }
     const stamped: AuditEntry = { auditVersion: AUDIT_VERSION, ...entry };
     fs.appendFileSync(file, JSON.stringify(stamped) + '\n');
+  } catch {
+    // Best-effort — never let audit failures break the actual command.
+  }
+}
+
+export function writeEvaluateTrace(record: RuleEvaluateRecord, filePath?: string): void {
+  const file = filePath ?? resolveAuditPath();
+  if (!file) return;
+  const dir = path.dirname(file);
+  try {
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.appendFileSync(file, JSON.stringify({ auditVersion: AUDIT_VERSION, ...record }) + '\n');
   } catch {
     // Best-effort — never let audit failures break the actual command.
   }

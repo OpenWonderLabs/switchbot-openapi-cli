@@ -78,6 +78,37 @@
         "rules": {
           "type": ["array", "null"],
           "items": { "$ref": "#/$defs/rule" }
+        },
+        "audit": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "description": "Controls rule-evaluate trace recording.",
+          "properties": {
+            "evaluate_trace": {
+              "enum": ["full", "sampled", "off"],
+              "default": "sampled",
+              "description": "full=every evaluation; sampled=skip high-freq blocked-by-condition; off=disabled."
+            },
+            "evaluate_retention_days": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 7,
+              "description": "Days to retain rule-evaluate records."
+            }
+          }
+        },
+        "llm_budget": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "description": "Global LLM call budget applied across all llm conditions.",
+          "properties": {
+            "max_calls_per_hour": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 60,
+              "description": "Maximum LLM condition calls per hour across all rules."
+            }
+          }
         }
       }
     },
@@ -297,6 +328,34 @@
             "not": {
               "$ref": "#/$defs/condition",
               "description": "Negates the sub-condition."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["llm"],
+          "properties": {
+            "llm": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["prompt"],
+              "description": "Evaluate the condition using an LLM decision call.",
+              "properties": {
+                "prompt": { "type": "string", "minLength": 1, "description": "Prompt template sent to the LLM." },
+                "provider": { "enum": ["auto", "openai", "anthropic"], "default": "auto" },
+                "timeout_ms": { "type": "integer", "minimum": 500, "maximum": 10000, "default": 5000 },
+                "cache_ttl": { "type": "string", "pattern": "^(none|\\d+[smh])$", "default": "5m" },
+                "budget": {
+                  "type": ["object", "null"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "max_calls_per_hour": { "type": "integer", "minimum": 0, "default": 10 }
+                  }
+                },
+                "on_error": { "enum": ["fail", "pass", "skip"], "default": "fail" },
+                "recent_events": { "type": "integer", "minimum": 0, "maximum": 20, "default": 5 }
+              }
             }
           }
         }

@@ -58,6 +58,12 @@ import { planMigration } from '../policy/migrate.js';
 import { suggestPlan } from './plan.js';
 import { suggestRule } from '../rules/suggest.js';
 import { addRuleToPolicyFile, AddRuleError } from '../policy/add-rule.js';
+import {
+  loadTraceRecords,
+  loadRelatedAudit,
+  formatExplainJson,
+} from '../rules/explain.js';
+import { simulateRule } from '../rules/simulate.js';
 import { allowsDirectDestructiveExecution, destructiveExecutionHint } from '../lib/destructive-mode.js';
 import { writeFileSync } from 'node:fs';
 import { readAudit, type AuditEntry } from '../utils/audit.js';
@@ -1968,6 +1974,152 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
         };
       } catch (err) {
         return apiErrorToMcpError(err);
+      }
+    },
+  );
+
+  // ---- rules_explain --------------------------------------------------------
+  server.registerTool(
+    'rules_explain',
+    {
+      title: 'Show why a rule evaluation fired or was blocked',
+      description:
+        'Read rule-evaluate trace records from the audit log and format them for inspection. ' +
+        'Pass fire_id to explain a specific evaluation; or pass rule_name with last:true for the ' +
+        'most recent evaluation; or pass rule_name + since for a window. ' +
+        'Returns trace records only when automation.audit.evaluate_trace is "sampled" or "full".',
+      _meta: { agentSafetyTier: 'read' },
+      inputSchema: z.object({
+        fire_id: z.string().optional().describe('Specific fireId to explain.'),
+        rule_name: z.string().optional().describe('Filter to this rule name.'),
+        since: z.string().optional().describe('Duration string (e.g. 1h, 7d) — show evaluations in this window.'),
+        last: z.boolean().optional().describe('Return only the most recent evaluation (requires rule_name).'),
+        audit_log: z.string().optional().describe(`Audit log path (default: ${pathJoin(os.homedir(), '.switchbot', 'audit.log')}).`),
+      }).strict(),
+      outputSchema: {
+        records: z.array(z.unknown()).describe('Array of trace + relatedAudit objects.'),
+        count: z.number().describe('Number of trace records returned.'),
+      },
+    },
+    async ({ fire_id, rule_name, since, last, audit_log }) => {
+      const DEFAULT_AUDIT_PATH = pathJoin(os.homedir(), '.switchbot', 'audit.log');
+      const auditFile = audit_log ?? DEFAULT_AUDIT_PATH;
+      const sinceIso = since
+        ? new Date(Date.now() - (parseDurationToMs(since) ?? 0)).toISOString()
+        : undefined;
+
+      let records = loadTraceRecords(auditFile, {
+        fireId: fire_id,
+        ruleName: rule_name,
+        since: sinceIso,
+      });
+
+      if (records.length === 0) {
+        return {
+          content: [{ type: 'text' as const, text: 'No rule-evaluate trace records found. Check that automation.audit.evaluate_trace is "sampled" or "full".' }],
+          structuredContent: { records: [], count: 0 },
+        };
+      }
+
+      if (last) {
+        records = [records[records.length - 1]];
+      }
+
+      const output = records.map((record) => {
+        const related = loadRelatedAudit(auditFile, record.fireId);
+        return JSON.parse(formatExplainJson(record, related)) as unknown;
+      });
+
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(output, null, 2) }],
+        structuredContent: { records: output, count: output.length },
+      };
+    },
+  );
+
+  // ---- rules_simulate -------------------------------------------------------
+  server.registerTool(
+    'rules_simulate',
+    {
+      title: 'Simulate a rule against historical events',
+      description:
+        'Replay historical events from the audit log or a JSONL file against a rule definition ' +
+        'and report would-fire / blocked-by-condition / throttled outcomes. ' +
+        'Useful for validating a new or modified rule before deployment. ' +
+        'Pass rule_yaml to test an unpublished rule, or rule_name + policy_path to test a deployed rule.',
+      _meta: { agentSafetyTier: 'read' },
+      inputSchema: z.object({
+        rule_yaml: z.string().optional().describe('Standalone rule YAML (takes precedence over policy_path + rule_name).'),
+        policy_path: z.string().optional().describe('Path to policy.yaml (defaults to ~/.switchbot/policy.yaml).'),
+        rule_name: z.string().optional().describe('Name of the rule in policy.yaml to simulate.'),
+        since: z.string().optional().describe('Replay events from this window (e.g. 7d, 24h).'),
+        against: z.string().optional().describe('JSONL file path of EngineEvent objects to replay.'),
+        live_llm: z.boolean().optional().describe('Allow live LLM calls for llm conditions (default: skip and report as would-call).'),
+        audit_log: z.string().optional().describe(`Audit log path (default: ${pathJoin(os.homedir(), '.switchbot', 'audit.log')}).`),
+      }).strict(),
+      outputSchema: {
+        report: z.unknown().describe('SimulateReport object.'),
+      },
+    },
+    async ({ rule_yaml, policy_path, rule_name, since, against, live_llm, audit_log }) => {
+      const DEFAULT_AUDIT_PATH = pathJoin(os.homedir(), '.switchbot', 'audit.log');
+      const auditFile = audit_log ?? DEFAULT_AUDIT_PATH;
+
+      let rule: Record<string, unknown> | undefined;
+
+      if (rule_yaml) {
+        try {
+          rule = yamlParse(rule_yaml) as Record<string, unknown>;
+        } catch (err) {
+          return {
+            content: [{ type: 'text' as const, text: `Failed to parse rule_yaml: ${String(err)}` }],
+            structuredContent: { report: null },
+          };
+        }
+      } else if (policy_path || rule_name) {
+        const { loadPolicyFile } = await import('../policy/load.js');
+        const policyFile = policy_path ?? pathJoin(os.homedir(), '.switchbot', 'policy.yaml');
+        try {
+          const policy = loadPolicyFile(policyFile);
+          const data = (policy.data ?? {}) as { automation?: { rules?: Array<{ name: string }> } };
+          const found = data.automation?.rules?.find((r) => r.name === rule_name);
+          if (!found) {
+            return {
+              content: [{ type: 'text' as const, text: `Rule "${rule_name}" not found in ${policyFile}.` }],
+              structuredContent: { report: null },
+            };
+          }
+          rule = found as unknown as Record<string, unknown>;
+        } catch (err) {
+          return {
+            content: [{ type: 'text' as const, text: `Failed to load policy: ${String(err)}` }],
+            structuredContent: { report: null },
+          };
+        }
+      } else {
+        return {
+          content: [{ type: 'text' as const, text: 'Provide rule_yaml or (policy_path + rule_name) to specify the rule to simulate.' }],
+          structuredContent: { report: null },
+        };
+      }
+
+      try {
+        const report = await simulateRule({
+          rule: rule as unknown as Parameters<typeof simulateRule>[0]['rule'],
+          since,
+          against,
+          auditLog: auditFile,
+          liveLlm: live_llm ?? false,
+        });
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(report, null, 2) }],
+          structuredContent: { report },
+        };
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: `Simulate error: ${String(err)}` }],
+          structuredContent: { report: null },
+        };
       }
     },
   );

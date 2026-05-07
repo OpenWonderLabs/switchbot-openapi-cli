@@ -48,7 +48,7 @@ const ALL_EXPECTED_LEAF_COMMANDS = [
   'rules suggest', 'rules lint', 'rules list', 'rules run', 'rules reload',
   'rules tail', 'rules replay', 'rules webhook-rotate-token', 'rules webhook-show-token',
   'rules conflicts', 'rules doctor', 'rules summary', 'rules last-fired',
-  'rules explain',
+  'rules explain', 'rules trace-explain', 'rules simulate',
   'schema export',
   'scenes list', 'scenes execute', 'scenes describe',
   'scenes validate', 'scenes simulate', 'scenes explain',

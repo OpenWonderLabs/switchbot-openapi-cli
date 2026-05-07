@@ -197,9 +197,10 @@ describe('RulesEngine', () => {
     expect(stats.dryFires).toBe(1);
     expect(fires[0].status).toBe('dry');
     const audit = readAudit(auditFile);
-    expect(audit).toHaveLength(1);
-    expect(audit[0].kind).toBe('rule-fire-dry');
-    expect(audit[0].deviceId).toBe('AA-BB-CC');
+    const fireAudit = audit.filter((e) => e.kind !== 'rule-evaluate');
+    expect(fireAudit).toHaveLength(1);
+    expect(fireAudit[0].kind).toBe('rule-fire-dry');
+    expect(fireAudit[0].deviceId).toBe('AA-BB-CC');
   });
 
   it('filters by trigger.device (alias-resolved) so only matching deviceIds fire', async () => {
@@ -323,9 +324,10 @@ describe('RulesEngine', () => {
     expect(fires[0].status).toBe('dry');
     expect(engine.getStats().dryFires).toBe(1);
     const audit = readAudit(auditFile);
-    expect(audit).toHaveLength(1);
-    expect(audit[0].kind).toBe('rule-fire-dry');
-    expect((audit[0] as { rule?: { triggerSource?: string } }).rule?.triggerSource).toBe('cron');
+    const fireAudit = audit.filter((e) => e.kind !== 'rule-evaluate');
+    expect(fireAudit).toHaveLength(1);
+    expect(fireAudit[0].kind).toBe('rule-fire-dry');
+    expect((fireAudit[0] as { rule?: { triggerSource?: string } }).rule?.triggerSource).toBe('cron');
   });
 
   it('getCronSchedule exposes the next planned run for a cron rule', async () => {
