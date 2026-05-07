@@ -28,17 +28,48 @@ export function renderNotifyTemplate(template: string, vars: Record<string, unkn
   });
 }
 
+function flattenForTemplate(prefix: string, value: unknown, out: Record<string, unknown>, depth = 0): void {
+  if (depth > 6) return;
+  if (value === null) {
+    out[prefix] = null;
+    return;
+  }
+  if (value instanceof Date) {
+    out[prefix] = value.toISOString();
+    return;
+  }
+  const t = typeof value;
+  if (t === 'string' || t === 'number' || t === 'boolean') {
+    out[prefix] = value;
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) {
+      flattenForTemplate(`${prefix}.${i}`, value[i], out, depth + 1);
+    }
+    return;
+  }
+  if (t === 'object') {
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      flattenForTemplate(`${prefix}.${k}`, v, out, depth + 1);
+    }
+  }
+  // undefined / function / symbol / bigint — skip silently
+}
+
 function buildTemplateVars(action: NotifyAction, ctx: NotifyContext): Record<string, unknown> {
-  const payload = (ctx.eventPayload ?? {}) as Record<string, unknown>;
-  return {
+  const vars: Record<string, unknown> = {
     'rule.name': ctx.rule.name,
     'rule.fired_at': new Date().toISOString(),
     'device.id': ctx.deviceId ?? '',
     'action.channel': action.channel,
     'action.to': action.to,
     'fireId': ctx.fireId,
-    ...Object.fromEntries(Object.entries(payload).map(([k, v]) => [`event.${k}`, v])),
   };
+  if (ctx.eventPayload !== undefined && ctx.eventPayload !== null) {
+    flattenForTemplate('event', ctx.eventPayload, vars);
+  }
+  return vars;
 }
 
 function buildDefaultBody(action: NotifyAction, ctx: NotifyContext): string {
@@ -99,6 +130,9 @@ async function sendWebhook(url: string, body: string): Promise<void> {
 }
 
 function appendToFile(filePath: string, body: string): void {
+  if (!path.isAbsolute(filePath)) {
+    throw new Error(`notify file path must be absolute, got "${filePath}"`);
+  }
   const dir = path.dirname(filePath);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });

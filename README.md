@@ -283,9 +283,9 @@ Supported conditions: `time_between` (quiet hours) and `device_state`
 - `type: command` (default, no `type` field required) — sends a device command, e.g. `devices command <id> turnOn`
 - `type: notify` — delivers a payload to an external channel after the rule fires:
   - `channel: webhook` — HTTP POST to a URL (only `http://` and `https://` schemes are accepted; `rules lint` rejects others)
-  - `channel: file` — appends a JSONL line to a local file
+  - `channel: file` — appends a JSONL line to a local file. `to` must be an absolute path; relative or `~`-prefixed paths are rejected by `rules lint` (code `notify-relative-path`) and at runtime
   - `channel: openclaw` — HTTP POST to an OpenClaw endpoint (same protocol restriction)
-  - Optional `template` field supports `{{ rule.name }}`, `{{ event.* }}`, `{{ device.id }}` placeholders
+  - Optional `template` field supports `{{ rule.name }}`, `{{ event.* }}`, `{{ device.id }}` placeholders. Nested fields use dot paths, e.g. `{{ event.context.deviceMac }}`; arrays index numerically, e.g. `{{ event.list.0 }}`
 
 ```yaml
 then:

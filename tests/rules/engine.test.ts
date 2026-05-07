@@ -1021,6 +1021,33 @@ describe('lintRules — notify actions', () => {
     ]));
     expect(r.valid).toBe(true);
   });
+
+  it('errors on notify file action with relative path (code: notify-relative-path)', () => {
+    const r = lintRules(automation([
+      { name: 'n7', when: { source: 'mqtt', event: 'motion.detected' }, then: [{ type: 'notify', channel: 'file', to: 'logs/x.jsonl' }] },
+    ]));
+    expect(r.valid).toBe(false);
+    const issue = r.rules[0].issues.find(i => i.code === 'notify-relative-path');
+    expect(issue).toBeDefined();
+    expect(issue?.message).toContain('logs/x.jsonl');
+    expect(issue?.message).toMatch(/must be absolute/);
+  });
+
+  it('errors on notify file action with leading-dot relative path', () => {
+    const r = lintRules(automation([
+      { name: 'n8', when: { source: 'mqtt', event: 'motion.detected' }, then: [{ type: 'notify', channel: 'file', to: './out.jsonl' }] },
+    ]));
+    expect(r.valid).toBe(false);
+    expect(r.rules[0].issues.find(i => i.code === 'notify-relative-path')).toBeDefined();
+  });
+
+  it('errors on notify file action with tilde-prefixed path (~ is not expanded)', () => {
+    const r = lintRules(automation([
+      { name: 'n9', when: { source: 'mqtt', event: 'motion.detected' }, then: [{ type: 'notify', channel: 'file', to: '~/notify.jsonl' }] },
+    ]));
+    expect(r.valid).toBe(false);
+    expect(r.rules[0].issues.find(i => i.code === 'notify-relative-path')).toBeDefined();
+  });
 });
 
 describe('RulesEngine — notify action dispatch', () => {

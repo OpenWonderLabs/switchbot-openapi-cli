@@ -13,8 +13,10 @@ function loadSchemaSnippet(): string {
     commandAction: defs?.commandAction,
     notifyAction: defs?.notifyAction,
     condition: defs?.condition,
+    trigger: defs?.trigger,
     triggerMqtt: defs?.triggerMqtt,
     triggerCron: defs?.triggerCron,
+    triggerWebhook: defs?.triggerWebhook,
   }, null, 2);
 }
 
@@ -35,6 +37,7 @@ Rules:
 - Always include dry_run: true.
 - MQTT trigger events: device.shadow, motion.detected, motion.cleared, contact.opened, contact.closed, button.pressed.
 - For cron use standard 5-field cron in local timezone.
+- Webhook trigger uses { source: webhook, path: "/your-path" } where path matches ^/[a-z0-9/_-]+$.
 - Device commands: "devices command <deviceId> <verb>". Valid verbs: turnOn, turnOff, open, close, lock, unlock, press, pause.
 - Set on_error: continue unless the intent explicitly requires stopping.
 - If you cannot generate a valid rule, output: # ERROR: <reason>

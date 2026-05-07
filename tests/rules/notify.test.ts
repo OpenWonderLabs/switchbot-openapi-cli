@@ -44,6 +44,14 @@ describe('renderNotifyTemplate', () => {
     const result = renderNotifyTemplate('plain text', { 'rule.name': 'x' });
     expect(result).toBe('plain text');
   });
+
+  it('substitutes nested dot-path keys (event.context.deviceMac)', () => {
+    const result = renderNotifyTemplate('{{ event.context.deviceMac }}@{{ event.list.0 }}', {
+      'event.context.deviceMac': 'AA:BB:CC',
+      'event.list.0': 'first',
+    });
+    expect(result).toBe('AA:BB:CC@first');
+  });
 });
 
 describe('executeNotifyAction — file channel', () => {
@@ -115,6 +123,25 @@ describe('executeNotifyAction — file channel', () => {
     expect(line).toBe('motion-alert:DEV_ABC');
   });
 
+  it('renders nested event.* paths and array indexes from payload', async () => {
+    const target = path.join(tmpDir, 'events.jsonl');
+    await executeNotifyAction(
+      fileAction(target, { template: '{{ event.context.deviceMac }}-{{ event.list.0 }}-{{ event.context.detectionState }}' }),
+      {
+        rule: baseRule,
+        fireId: 'f-nested',
+        eventPayload: {
+          context: { deviceMac: 'AA:BB:CC:DD:EE:FF', detectionState: 'DETECTED' },
+          list: ['alpha', 'beta'],
+        },
+        deviceId: 'DEV_NEST',
+      },
+    );
+
+    const line = fs.readFileSync(target, 'utf-8').trim();
+    expect(line).toBe('AA:BB:CC:DD:EE:FF-alpha-DETECTED');
+  });
+
   it('writes a rule-notify audit entry on success', async () => {
     const target = path.join(tmpDir, 'events.jsonl');
     await executeNotifyAction(fileAction(target), {
@@ -152,6 +179,23 @@ describe('executeNotifyAction — file channel', () => {
 
     const entries = readAudit(auditLog);
     const entry = entries.find(e => e.kind === 'rule-notify');
+    expect(entry).toBeDefined();
+    expect(entry!.result).toBe('error');
+  });
+
+  it('rejects a relative path at runtime with a clear error', async () => {
+    const result = await executeNotifyAction(fileAction('logs/relative.jsonl'), {
+      rule: baseRule,
+      fireId: 'fire-rel',
+      eventPayload: {},
+      deviceId: 'DEV_001',
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/must be absolute/);
+
+    const entries = readAudit(auditLog);
+    const entry = entries.find(e => e.kind === 'rule-notify' && e.rule?.fireId === 'fire-rel');
     expect(entry).toBeDefined();
     expect(entry!.result).toBe('error');
   });

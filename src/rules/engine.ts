@@ -19,6 +19,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 import type { AxiosInstance } from 'axios';
 import type { SwitchBotMqttClient } from '../mqtt/client.js';
 import type { MqttCredential } from '../mqtt/credential.js';
@@ -162,6 +163,15 @@ export function lintRules(automation: AutomationBlock | null | undefined): LintR
             severity: 'error',
             code: 'notify-unsupported-protocol',
             message: `then[${i}] notify URL "${to}" uses unsupported protocol "${parsedUrl.protocol}" — only http: and https: are allowed.`,
+          });
+        }
+      } else if (action.channel === 'file') {
+        if (!path.isAbsolute(to)) {
+          issues.push({
+            rule: r.name,
+            severity: 'error',
+            code: 'notify-relative-path',
+            message: `then[${i}] notify file path "${to}" must be absolute (e.g. /var/log/switchbot/notify.jsonl on POSIX or C:\\path\\notify.jsonl on Windows). Tilde (~) is not expanded.`,
           });
         }
       }
