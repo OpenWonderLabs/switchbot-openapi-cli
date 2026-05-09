@@ -238,7 +238,7 @@ describe('switchbot rules (commander surface)', () => {
       delete process.env.SWITCHBOT_SECRET;
     });
 
-    it('exits 0 early when automation.enabled is false', async () => {
+    it('exits 1 early when automation.enabled is false', async () => {
       const p = path.join(tmpDir, 'policy.yaml');
       fs.writeFileSync(
         p,
@@ -253,7 +253,7 @@ describe('switchbot rules (commander surface)', () => {
         'utf-8',
       );
       const { stderr, exitCode } = await runCli(['rules', 'run', p]);
-      expect(exitCode).toBe(0);
+      expect(exitCode).toBe(1);
       expect(stderr.join('\n')).toContain('automation.enabled is not true');
     });
   });

@@ -135,6 +135,10 @@ describe('mcp server', () => {
     expect(Object.keys(out.data)).toEqual(['tools', 'resources']);
     expect(Array.isArray(out.data.tools)).toBe(true);
     expect(out.data.tools.some((t: { name: string }) => t.name === 'list_devices')).toBe(true);
+    for (const tool of out.data.tools) {
+      expect(tool.description).toBeTypeOf('string');
+      expect(tool.inputSchema).toBeDefined();
+    }
     expect(Array.isArray(out.data.resources)).toBe(true);
     expect(out.data.resources.some((r: { uri: string }) => r.uri === 'switchbot://events')).toBe(true);
   });

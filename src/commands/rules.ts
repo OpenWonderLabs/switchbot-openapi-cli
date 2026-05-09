@@ -209,13 +209,13 @@ function registerRun(rules: Command): void {
       if (!loaded) return;
 
       if (loaded.automation?.enabled !== true) {
-        const msg = 'automation.enabled is not true — nothing to run.';
+        const msg = 'automation.enabled is not true — set it to true in your policy file to start the daemon.';
         if (isJsonMode()) {
           printJson({ kind: 'control', controlKind: 'disabled', message: msg });
         } else {
           console.error(msg);
         }
-        process.exit(0);
+        process.exit(1);
       }
 
       const lint = lintRules(loaded.automation);

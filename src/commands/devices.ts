@@ -327,7 +327,7 @@ Examples:
           const fetchedAt = new Date().toISOString();
           const batch = results.map((r, i) =>
             r.status === 'fulfilled'
-              ? { deviceId: ids[i], ok: true, _fetchedAt: fetchedAt, ...annotateStatusPayload(ids[i], r.value as Record<string, unknown>) }
+              ? { deviceId: ids[i], ok: true, fetchedAt: fetchedAt, ...annotateStatusPayload(ids[i], r.value as Record<string, unknown>) }
               : { deviceId: ids[i], ok: false, error: (r.reason as Error)?.message ?? String(r.reason) },
           );
           const batchFmt = resolveFormat();
@@ -340,7 +340,7 @@ Examples:
           } else {
             const rawFields = resolveFields();
             for (const entry of batch) {
-              const { deviceId, ok, error, _fetchedAt: ts, ...status } = entry as Record<string, unknown>;
+              const { deviceId, ok, error, fetchedAt: ts, ...status } = entry as Record<string, unknown>;
               console.log(`\n─── ${String(deviceId)} ───`);
               if (!ok) {
                 console.error(`  error: ${String(error)}`);
@@ -371,12 +371,12 @@ Examples:
         const fmt = resolveFormat();
 
         if (fmt === 'json' && process.argv.includes('--json')) {
-          printJson({ ...(body as object), _fetchedAt: fetchedAt });
+          printJson({ ...(body as object), fetchedAt: fetchedAt });
           return;
         }
 
         if (fmt !== 'table') {
-          const statusWithTs = { ...(body as Record<string, unknown>), _fetchedAt: fetchedAt };
+          const statusWithTs = { ...(body as Record<string, unknown>), fetchedAt: fetchedAt };
           const allHeaders = Object.keys(statusWithTs);
           const allRows = [Object.values(statusWithTs) as unknown[]];
           const rawFields = resolveFields();
@@ -777,7 +777,7 @@ Examples:
         const joinedMatch = findCatalogEntry(joined);
         if (joinedMatch && !Array.isArray(joinedMatch)) {
           if (isJsonMode()) {
-            printJson(normalizeCatalogForJson(joinedMatch));
+            printJson([normalizeCatalogForJson(joinedMatch)]);
           } else {
             renderCatalogEntry(joinedMatch);
           }

@@ -212,7 +212,9 @@ The daemon reads the same policy file as \`switchbot rules run\`.
       }
 
       const thisFile = fileURLToPath(import.meta.url);
-      const cliEntry = path.resolve(path.dirname(thisFile), '..', 'index.js');
+      const cliEntry = path.basename(thisFile) === 'index.js'
+        ? thisFile
+        : path.resolve(path.dirname(thisFile), '..', 'index.js');
       const args = ['rules', 'run'];
       if (opts.policy) args.push(opts.policy);
 

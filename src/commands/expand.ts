@@ -11,6 +11,9 @@ import {
   buildCurtainSetPosition,
   buildBlindTiltSetPosition,
   buildRelaySetMode,
+  buildBrightnessSet,
+  buildColorSet,
+  buildColorTemperatureSet,
 } from '../devices/param-validator.js';
 
 // ---- Registration ----------------------------------------------------------
@@ -20,7 +23,7 @@ export function registerExpandCommand(devices: Command): void {
     .command('expand')
     .description('Send a command with semantic flags instead of raw positional parameters')
     .argument('[deviceId]', 'Target device ID from "devices list" (or use --name)')
-    .argument('[command]', 'Command name: setAll (AC), setPosition (Curtain/Blind Tilt), setMode (Relay Switch 2)')
+    .argument('[command]', 'Command name: setAll (AC), setPosition (Curtain/Blind Tilt), setMode (Relay Switch 2), setBrightness/setColor/setColorTemperature (lighting)')
     .option('--name <query>', 'Resolve device by fuzzy name instead of deviceId', stringArg('--name'))
     .option('--name-strategy <s>', `Name match strategy: ${ALL_STRATEGIES.join('|')} (default: require-unique)`, stringArg('--name-strategy'))
     .option('--name-type <type>', 'Narrow --name by device type (e.g. "Curtain", "Air Conditioner")', stringArg('--name-type'))
@@ -34,6 +37,9 @@ export function registerExpandCommand(devices: Command): void {
     .option('--direction <dir>', 'Blind Tilt setPosition: up|down', stringArg('--direction'))
     .option('--angle <percent>', 'Blind Tilt setPosition: 0-100 (0=closed, 100=open)', intArg('--angle', { min: 0, max: 100 }))
     .option('--channel <n>', 'Relay Switch 2 setMode: channel 1 or 2', intArg('--channel', { min: 1, max: 2 }))
+    .option('--brightness <percent>', 'setBrightness: 1-100 percent', intArg('--brightness', { min: 1, max: 100 }))
+    .option('--color <value>', 'setColor: R:G:B, #RRGGBB, or named color (red, blue, etc.)', stringArg('--color'))
+    .option('--color-temp <kelvin>', 'setColorTemperature: 2700-6500 Kelvin', intArg('--color-temp', { min: 2700, max: 6500 }))
     .option('--yes', 'Confirm destructive commands')
     .addHelpText('after', `
 Translates semantic flags into the wire parameter format, then sends the command.
@@ -56,12 +62,25 @@ Supported expansions:
     --channel 1 --mode edge  →  "1;1"
     --mode values: toggle (0) | edge (1) | detached (2) | momentary (3)
 
+  Color Bulb / Strip Light / Ceiling Light — setBrightness
+    --brightness 80  →  "80"
+
+  Color Bulb / Strip Light / Ceiling Light — setColor
+    --color "255:0:0"  →  "255:0:0"
+    --color "#FF0000"  →  "255:0:0"
+    --color red        →  "255:0:0"
+
+  Color Bulb / Strip Light / Ceiling Light — setColorTemperature
+    --color-temp 4000  →  "4000"
+
 Examples:
-  $ switchbot devices expand <acId>      setAll       --temp 26 --mode cool --fan low --power on
-  $ switchbot devices expand <curtainId> setPosition  --position 50 --mode silent
-  $ switchbot devices expand <blindId>   setPosition  --direction up --angle 50
-  $ switchbot devices expand <relayId>   setMode      --channel 1 --mode edge
-  $ switchbot devices expand <acId>      setAll       --temp 22 --mode heat --fan auto --power on --dry-run
+  $ switchbot devices expand <acId>      setAll               --temp 26 --mode cool --fan low --power on
+  $ switchbot devices expand <curtainId> setPosition          --position 50 --mode silent
+  $ switchbot devices expand <blindId>   setPosition          --direction up --angle 50
+  $ switchbot devices expand <relayId>   setMode              --channel 1 --mode edge
+  $ switchbot devices expand <stripId>   setBrightness        --brightness 80
+  $ switchbot devices expand <bulbId>    setColor             --color "#FF0000"
+  $ switchbot devices expand <bulbId>    setColorTemperature  --color-temp 4000
   $ switchbot devices expand --name "Living Room AC" setAll --temp 26 --mode cool --fan low --power on
 `)
     .action(async (
@@ -75,7 +94,8 @@ Examples:
         nameRoom?: string;
         temp?: string; mode?: string; fan?: string; power?: string;
         position?: string; direction?: string; angle?: string;
-        channel?: string; yes?: boolean;
+        channel?: string; brightness?: string; color?: string;
+        colorTemp?: string; yes?: boolean;
       }
     ) => {
       let deviceId = '';
@@ -96,7 +116,7 @@ Examples:
           category: options.nameCategory,
           room: options.nameRoom,
         });
-        if (!effectiveCommand) throw new UsageError('A command argument is required (setAll, setPosition, setMode).');
+        if (!effectiveCommand) throw new UsageError('A command argument is required (setAll, setPosition, setMode, setBrightness, setColor, setColorTemperature).');
 
         command = effectiveCommand;
         const cached = getCachedDevice(deviceId);
@@ -118,9 +138,16 @@ Examples:
             : buildCurtainSetPosition(options);
         } else if (command === 'setMode' && deviceType.startsWith('Relay Switch')) {
           parameter = buildRelaySetMode(options);
+        } else if (command === 'setBrightness') {
+          parameter = buildBrightnessSet(options);
+        } else if (command === 'setColor') {
+          parameter = buildColorSet(options);
+        } else if (command === 'setColorTemperature') {
+          parameter = buildColorTemperatureSet(options);
         } else {
           throw new UsageError(
             `'expand' does not support "${command}" for device type "${deviceType || 'unknown'}". ` +
+            `Supported: setAll (AC), setPosition (Curtain/Blind Tilt), setMode (Relay Switch), setBrightness/setColor/setColorTemperature (lighting). ` +
             `Use 'switchbot devices command' to send raw parameters instead.`
           );
         }

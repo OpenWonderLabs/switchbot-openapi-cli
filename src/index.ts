@@ -208,11 +208,18 @@ try {
   // Mirror the root mapping so all usage errors surface as exit 2.
   if (err instanceof CommanderError) {
     if (err.code === 'commander.helpDisplayed') {
-      if (isJsonMode()) {
-        const target = resolveTargetCommand(program, process.argv.slice(2));
-        printJson(commandToJson(target, { includeIdentity: target === program }));
+      const helpRequested = process.argv.includes('--help') || process.argv.includes('-h');
+      if (helpRequested) {
+        if (isJsonMode()) {
+          const target = resolveTargetCommand(program, process.argv.slice(2));
+          printJson(commandToJson(target, { includeIdentity: target === program }));
+        }
+        process.exit(0);
       }
-      process.exit(0);
+      if (isJsonMode()) {
+        emitJsonError({ code: 2, kind: 'usage', message: err.message });
+      }
+      process.exit(2);
     }
     if (err.code === 'commander.version') {
       process.exit(0);

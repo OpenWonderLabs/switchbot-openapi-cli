@@ -82,6 +82,29 @@ export function buildRelaySetMode(opts: {
   return `${ch};${modeInt}`;
 }
 
+export function buildBrightnessSet(opts: { brightness?: string }): string {
+  if (!opts.brightness) throw new UsageError('--brightness is required (1-100)');
+  const b = parseInt(opts.brightness, 10);
+  if (!Number.isFinite(b) || b < 1 || b > 100) {
+    throw new UsageError(`--brightness must be an integer between 1 and 100 (got "${opts.brightness}")`);
+  }
+  return String(b);
+}
+
+export function buildColorSet(opts: { color?: string }): string {
+  if (!opts.color) throw new UsageError('--color is required (e.g. "255:0:0", "#FF0000", "red")');
+  const result = validateSetColor(opts.color);
+  if (!result.ok) throw new UsageError(result.error);
+  return result.normalized ?? opts.color;
+}
+
+export function buildColorTemperatureSet(opts: { colorTemp?: string }): string {
+  if (!opts.colorTemp) throw new UsageError('--color-temp is required (2700-6500)');
+  const result = validateSetColorTemperature(opts.colorTemp);
+  if (!result.ok) throw new UsageError(result.error);
+  return result.normalized ?? opts.colorTemp;
+}
+
 // ---- Raw-parameter validator (used by `devices command`) ------------------
 
 export type ValidateResult =
