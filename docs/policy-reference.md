@@ -8,7 +8,7 @@ edit the generated file — every block in it is commented with a
 summary.
 
 The JSON Schema that backs this document lives at
-`src/policy/schema/v0.1.json` (Draft 2020-12). It is also mirrored to
+`src/policy/schema/v0.2.json` (Draft 2020-12). It is also mirrored to
 `examples/policy.schema.json` for editor autocomplete.
 
 ---
@@ -37,22 +37,26 @@ memory, and writes back.
 The top-level `version` field is **required**. The CLI currently
 supports two schemas:
 
-| Version | Emitted by `policy new` | What it adds |
+| Version | Status | What it adds |
 |---|---|---|
-| `"0.1"` | Default (today) | aliases, confirmations, quiet_hours, audit, cli |
-| `"0.2"` | Opt-in via `policy migrate` | typed `automation.rules[]` for the preview rules engine |
+| `"0.1"` | Legacy — migrate with `policy migrate` | aliases, confirmations, quiet_hours, audit, cli |
+| `"0.2"` | **Current (required)** | typed `automation.rules[]` for the rules engine |
 
 A file with anything other than `"0.1"` or `"0.2"` fails validation
-with a named `unsupported-version` error. When the rules engine exits
-preview and v0.2 becomes the default, `switchbot policy migrate` will
-continue to be an opt-in upgrade — comments and non-version blocks
-are preserved verbatim, and the command refuses to rewrite the file
-if the upgraded document would not validate (exit code 7).
+with a named `unsupported-version` error. v0.2 is the default emitted
+by `switchbot policy new`. Existing v0.1 files can be upgraded in-place:
+
+```bash
+switchbot policy migrate   # in-place upgrade, preserves comments
+```
+
+`policy migrate` applies additive changes only (new optional fields,
+tighter types on reserved blocks), rewrites the `version` constant, and
+refuses to migrate if any user edits would conflict (exit code 7).
 
 ```yaml
-version: "0.1"  # stable today
-# or
-version: "0.2"  # opt-in for rules engine preview
+version: "0.2"  # current default
+# version: "0.1"  # legacy — upgrade with `switchbot policy migrate`
 ```
 
 ---
@@ -175,11 +179,10 @@ PowerShell scheduled task, etc.) should honour the value.
 
 ### `automation`
 
-Rule engine block. In **v0.1** this is a reserved stub — set
-`enabled: false` (the default) and ignore it; the CLI prints a warning
-and skips the block if you flip `enabled: true` on v0.1. In **v0.2**
-this block drives the preview rules engine exposed by
-`switchbot rules run`.
+Rule engine block. Available in **v0.2** — set `enabled: true` to activate
+`switchbot rules run`. In **v0.1** this block is a reserved stub; flip
+`enabled: true` on v0.1 and the CLI prints a warning and skips the block.
+Run `switchbot policy migrate` first to unlock the rules engine.
 
 ```yaml
 automation:
@@ -277,7 +280,7 @@ Exit codes:
 
 | Code | Meaning |
 |---|---|
-| 0 | File is valid and matches schema v0.1 |
+| 0 | File is valid and matches schema v0.2 |
 | 1 | File is missing |
 | 2 | YAML is malformed (parse error, with line/col) |
 | 3 | Schema violation (line-accurate error with hint) |
@@ -297,7 +300,7 @@ For machine consumption, pass `--json`. The envelope is the standard
 
 ```json
 {
-  "schemaVersion": "1.1",
+  "schemaVersion": "1.2",
   "error": {
     "kind": "usage",
     "message": "lowercase deviceId at policy.yaml:12:14",
@@ -316,8 +319,9 @@ For machine consumption, pass `--json`. The envelope is the standard
 
 | Error | Trigger | Fix |
 |---|---|---|
-| `missing version` | Top-level `version` is absent | Add `version: "0.1"` |
-| `wrong version` | `version` is anything but `"0.1"` | Run `switchbot policy migrate` |
+| `missing version` | Top-level `version` is absent | Add `version: "0.2"` |
+| `unsupported version` | `version` is not `"0.1"` or `"0.2"` | Check spelling; run `switchbot policy migrate` to upgrade from v0.1 |
+| `wrong version` | `version: "0.1"` on a CLI that requires v0.2 | Run `switchbot policy migrate` |
 | `lowercase deviceId` | `aliases` value isn't UPPERCASE | Uppercase the ID (it is in `devices list`) |
 | `destructive in never_confirm` | `lock`/`unlock`/etc in `confirmations.never_confirm` | Remove it; intentional by design |
 | `quiet_hours.start without end` | Only one of the two times is set | Set both, or remove the block |
@@ -331,19 +335,24 @@ machine-readable `rule` field so tooling can suggest fixes.
 
 ## Migrating between schema versions
 
-v0.1 is the only published schema today. v0.2 (Phase 4) will add a
-structured `rules[]` definition under `automation`. When it ships,
-`switchbot policy migrate` will:
+v0.2 is the current required schema. If you have a v0.1 file from an
+earlier release, upgrade it:
 
-1. Detect your current `version` field.
-2. Apply additive changes only (new optional fields, tighter types on
+```bash
+switchbot policy migrate   # in-place upgrade, preserves comments
+```
+
+`policy migrate`:
+
+1. Detects your current `version` field.
+2. Applies additive changes only (new optional fields, tighter types on
    reserved blocks).
-3. Rewrite the file with the new `version` constant.
-4. Refuse to migrate if any user edits conflict, and explain what
-   conflicts.
+3. Rewrites the file with the new `version` constant.
+4. Refuses to migrate if any user edits conflict, and explains what
+   conflicts (exit code 7).
 
-Until then, `policy migrate` is a no-op that verifies the file is
-already current.
+After migrating, run `switchbot policy validate` to confirm the file is
+valid before using the rules engine.
 
 ---
 

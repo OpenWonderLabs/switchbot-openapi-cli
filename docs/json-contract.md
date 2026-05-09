@@ -20,7 +20,7 @@ stdout.
 
 ```json
 {
-  "schemaVersion": "1.1",
+  "schemaVersion": "1.2",
   "data": <command-specific payload>
 }
 ```
@@ -34,7 +34,7 @@ stdout.
 
 ```json
 {
-  "schemaVersion": "1.1",
+  "schemaVersion": "1.2",
   "error": {
     "code": 2,
     "kind": "usage" | "guard" | "api" | "runtime",
@@ -125,7 +125,7 @@ envelope:
 
 ```json
 {
-  "schemaVersion": "1.1",
+  "schemaVersion": "1.2",
   "data": {
     "t": "2026-04-21T14:23:45.012Z",
     "tick": 1,
@@ -184,7 +184,7 @@ switchbot devices status BOT1 --json | jq -e '.error' && exit 1
 
 ## 4. Versioning
 
-- The non-streaming envelope is versioned as `schemaVersion: "1.1"`.
+- The non-streaming envelope is versioned as `schemaVersion: "1.2"`.
 - The streaming header and event envelope are versioned as
   `schemaVersion: "1"`.
 - The two axes are deliberately separate: adding a field inside `data`

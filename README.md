@@ -93,7 +93,7 @@ Under the hood every surface shares the same catalog, cache, and HMAC client —
 - 🎨 **Dual output modes** — colorized tables by default; `--json` passthrough for `jq` and scripting
 - 🔐 **Secure credentials** — HMAC-SHA256 signed requests; config file written with `0600`; env-var override for CI
 - 🔍 **Dry-run mode** — preview every mutating request before it hits the API
-- 🧪 **Fully tested** — 2204 Vitest tests, mocked axios, zero network in CI
+- 🧪 **Fully tested** — 2216 Vitest tests, mocked axios, zero network in CI
 - ⚡ **Shell completion** — Bash / Zsh / Fish / PowerShell
 
 ## Requirements
@@ -596,9 +596,14 @@ switchbot devices expand <blindId> setPosition --direction up --angle 50
 
 # Relay Switch — setMode
 switchbot devices expand <relayId> setMode --channel 1 --mode edge
+
+# Color Bulb / Strip Light / Floor Lamp / Ceiling Light — setBrightness / setColor / setColorTemperature
+switchbot devices expand <bulbId> setBrightness --brightness 80
+switchbot devices expand <bulbId> setColor --color "#FF0000"
+switchbot devices expand <bulbId> setColorTemperature --color-temp 4000
 ```
 
-Run `switchbot devices expand <id> <command> --help` to see the available flags for any device command. `expand` is only meaningful for multi-parameter commands (the four above); single-parameter commands like `setBrightness 50` or `setColor "#FF0000"` are already flag-free at the CLI level.
+Run `switchbot devices expand <id> <command> --help` to see the available flags for any device command.
 
 #### `devices explain` — one-shot device summary
 
@@ -1104,7 +1109,7 @@ The default policy schema shipped with the CLI (`src/policy/schema/v0.2.json`) i
 ## Output modes
 
 - **Default** — ANSI-colored tables for `list`/`status`, key-value tables for details.
-- **`--json`** — raw API payload passthrough. Output is the exact JSON the SwitchBot API returned, ideal for `jq` and scripting. Errors are also JSON on stderr: `{ "error": { "code", "kind", "message", "hint?" } }`.
+- **`--json`** — raw API payload passthrough. Output is the exact JSON the SwitchBot API returned, ideal for `jq` and scripting. Errors are also JSON on **stdout**: `{ "schemaVersion": "1.2", "error": { "code", "kind", "message", "hint?" } }`.
 - **`--format=json`** — projected row view. Same JSON structure but built from the CLI's column model (`--fields` applies). Use this when you only want specific fields.
 - **`--format=tsv|yaml|jsonl|id`** — tabular text formats; `--fields` filters columns.
 
@@ -1209,7 +1214,7 @@ npm install
 
 npm run dev -- <args>       # Run from TypeScript sources via tsx
 npm run build               # Compile to dist/
-npm test                    # Run the Vitest suite (2204 tests)
+npm test                    # Run the Vitest suite (2216 tests)
 npm run test:watch          # Watch mode
 npm run test:coverage       # Coverage report (v8, HTML + text)
 ```
@@ -1300,7 +1305,7 @@ src/
     ├── format.ts         # renderRows / filterFields / output-format dispatch
     ├── audit.ts          # JSONL audit log writer
     └── quota.ts          # Local daily-quota counter
-tests/                    # Vitest suite (2204 tests, mocked axios, no network)
+tests/                    # Vitest suite (2216 tests, mocked axios, no network)
 ```
 
 ### Release flow
