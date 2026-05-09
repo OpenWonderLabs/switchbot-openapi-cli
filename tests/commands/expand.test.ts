@@ -30,12 +30,16 @@ const AC_ID = 'AC-001';
 const CURTAIN_ID = 'CURTAIN-001';
 const BLIND_ID = 'BLIND-001';
 const RELAY_ID = 'RELAY-001';
+const BULB_ID = 'BULB-001';
+const BOT_ID = 'BOT-001';
 
 const sampleBody = {
   deviceList: [
     { deviceId: CURTAIN_ID, deviceName: 'Living Curtain', deviceType: 'Curtain', hubDeviceId: 'H1', enableCloudService: true },
     { deviceId: BLIND_ID,   deviceName: 'Bedroom Blind',  deviceType: 'Blind Tilt', hubDeviceId: 'H1', enableCloudService: true },
     { deviceId: RELAY_ID,   deviceName: 'Kitchen Switch', deviceType: 'Relay Switch 2PM', hubDeviceId: 'H1', enableCloudService: true },
+    { deviceId: BULB_ID,    deviceName: 'Bedroom Bulb',   deviceType: 'Color Bulb', hubDeviceId: 'H1', enableCloudService: true },
+    { deviceId: BOT_ID,     deviceName: 'Door Bot',       deviceType: 'Bot',        hubDeviceId: 'H1', enableCloudService: true },
   ],
   infraredRemoteList: [
     { deviceId: AC_ID, deviceName: 'Living AC', remoteType: 'Air Conditioner', hubDeviceId: 'H1', controlType: 'Air Conditioner' },
@@ -241,5 +245,75 @@ describe('devices expand', () => {
       '/v1.1/devices/CURTAIN-BR/commands',
       expect.objectContaining({ command: 'setPosition' }),
     );
+  });
+
+  it('setBrightness on Color Bulb sends correct parameter', async () => {
+    const res = await runCli(registerDevicesCommand, [
+      'devices', 'expand', BULB_ID, 'setBrightness', '--brightness', '50',
+    ]);
+    expect(res.exitCode).toBe(null);
+    expect(apiMock.__instance.post).toHaveBeenCalledWith(
+      `/v1.1/devices/${BULB_ID}/commands`,
+      { command: 'setBrightness', parameter: '50', commandType: 'command' },
+    );
+  });
+
+  it('setColor on Color Bulb sends correct parameter', async () => {
+    const res = await runCli(registerDevicesCommand, [
+      'devices', 'expand', BULB_ID, 'setColor', '--color', '255:0:0',
+    ]);
+    expect(res.exitCode).toBe(null);
+    expect(apiMock.__instance.post).toHaveBeenCalledWith(
+      `/v1.1/devices/${BULB_ID}/commands`,
+      { command: 'setColor', parameter: '255:0:0', commandType: 'command' },
+    );
+  });
+
+  it('setColorTemperature on Color Bulb sends correct parameter', async () => {
+    const res = await runCli(registerDevicesCommand, [
+      'devices', 'expand', BULB_ID, 'setColorTemperature', '--color-temp', '4000',
+    ]);
+    expect(res.exitCode).toBe(null);
+    expect(apiMock.__instance.post).toHaveBeenCalledWith(
+      `/v1.1/devices/${BULB_ID}/commands`,
+      { command: 'setColorTemperature', parameter: '4000', commandType: 'command' },
+    );
+  });
+
+  it('setBrightness on unsupported type (Bot) → UsageError', async () => {
+    const res = await runCli(registerDevicesCommand, [
+      'devices', 'expand', BOT_ID, 'setBrightness', '--brightness', '50',
+    ]);
+    expect(res.exitCode).toBe(2);
+    expect(res.stderr.join('\n')).toMatch(/Bot.*does not support setBrightness/);
+  });
+
+  it('setColor on unsupported type (Curtain) → UsageError', async () => {
+    const res = await runCli(registerDevicesCommand, [
+      'devices', 'expand', CURTAIN_ID, 'setColor', '--color', '255:0:0',
+    ]);
+    expect(res.exitCode).toBe(2);
+    expect(res.stderr.join('\n')).toMatch(/Curtain.*does not support setColor/);
+  });
+
+  it('setBrightness on uncached device ID → UsageError asking to run devices list', async () => {
+    const res = await runCli(registerDevicesCommand, [
+      'devices', 'expand', 'UNKNOWN-999', 'setBrightness', '--brightness', '50',
+    ]);
+    expect(res.exitCode).toBe(2);
+    expect(res.stderr.join('\n')).toMatch(/not in the local cache/);
+  });
+
+  it('setBrightness on Color Bulb emits valid JSON envelope in --json mode', async () => {
+    const res = await runCli(registerDevicesCommand, [
+      'devices', 'expand', BULB_ID, 'setBrightness', '--brightness', '75', '--json',
+    ]);
+    expect(res.exitCode).toBe(null);
+    const parsed = JSON.parse(res.stdout.join('\n')) as Record<string, unknown>;
+    const data = parsed.data as Record<string, unknown>;
+    expect(data.ok).toBe(true);
+    expect(data.command).toBe('setBrightness');
+    expect(data.parameter).toBe('75');
+    expect(data.deviceId).toBe(BULB_ID);
   });
 });

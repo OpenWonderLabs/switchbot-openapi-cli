@@ -83,12 +83,37 @@ export async function runCli(
       // Mirror production exitOverride in src/index.ts: non-help/version
       // Commander errors surface as usage errors (exit 2).
       if (errAsCommander.code === 'commander.helpDisplayed') {
-        // Mirror production: emit JSON help when --json is in argv.
+        const helpRequested = argv.includes('--help') || argv.includes('-h');
+        if (helpRequested) {
+          // Mirror production: emit JSON help when --json is in argv.
+          if (argv.includes('--json')) {
+            const target = resolveTargetCommand(program, argv);
+            stdout.push(JSON.stringify({ schemaVersion: '1.2', data: commandToJson(target) }, null, 2));
+          }
+          exitCode = 0;
+        } else {
+          // Parent command called without a required subcommand — mirror production exit 2.
+          if (argv.includes('--json')) {
+            const target = resolveTargetCommand(program, argv);
+            const subNames = target.commands.map((c: Command) => c.name()).join(', ');
+            const msg = subNames
+              ? `${target.name()}: a subcommand is required. Available: ${subNames}`
+              : '(outputHelp)';
+            stdout.push(JSON.stringify({ schemaVersion: '1.2', error: { code: 2, kind: 'usage', message: msg } }, null, 2));
+          }
+          exitCode = 2;
+        }
+      } else if (errAsCommander.code === 'commander.help') {
+        // Parent command invoked without a subcommand (Commander 12: 'commander.help').
         if (argv.includes('--json')) {
           const target = resolveTargetCommand(program, argv);
-          stdout.push(JSON.stringify({ schemaVersion: '1.2', data: commandToJson(target) }, null, 2));
+          const subNames = target.commands.map((c: Command) => c.name()).join(', ');
+          const msg = subNames
+            ? `${target.name()}: a subcommand is required. Available: ${subNames}`
+            : '(outputHelp)';
+          stdout.push(JSON.stringify({ schemaVersion: '1.2', error: { code: 2, kind: 'usage', message: msg } }, null, 2));
         }
-        exitCode = 0;
+        exitCode = 2;
       } else if (errAsCommander.code === 'commander.version') {
         exitCode = 0;
       } else {

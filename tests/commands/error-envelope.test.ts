@@ -19,6 +19,8 @@ import {
   exitWithError,
   SCHEMA_VERSION,
 } from '../../src/utils/output.js';
+import { runCli } from '../helpers/cli.js';
+import { registerCacheCommand } from '../../src/commands/cache.js';
 
 describe('error envelope contract (P5)', () => {
   let stdoutSpy: ReturnType<typeof vi.spyOn>;
@@ -178,6 +180,28 @@ describe('error envelope contract (P5)', () => {
       offenders,
       `command files still pair emitJsonError() with process.exit():\n  ${offenders.join('\n  ')}`,
     ).toEqual([]);
+  });
+});
+
+describe('parent command without subcommand (--json)', () => {
+  it('exits 2 and emits structured error with useful message', async () => {
+    const res = await runCli(registerCacheCommand, ['--json', 'cache']);
+    expect(res.exitCode).toBe(2);
+    const parsed = JSON.parse(res.stdout.join('\n'));
+    expect(parsed.schemaVersion).toBe(SCHEMA_VERSION);
+    expect(parsed.error.code).toBe(2);
+    expect(parsed.error.kind).toBe('usage');
+    expect(parsed.error.message).toMatch(/cache.*subcommand.*required/i);
+    expect(parsed.error.message).toContain('Available:');
+  });
+
+  it('exits 0 and emits help JSON when --help is passed', async () => {
+    const res = await runCli(registerCacheCommand, ['--json', 'cache', '--help']);
+    expect(res.exitCode).toBe(0);
+    const parsed = JSON.parse(res.stdout.join('\n'));
+    expect(parsed.schemaVersion).toBe(SCHEMA_VERSION);
+    expect(parsed.data.name).toBe('cache');
+    expect(Array.isArray(parsed.data.subcommands)).toBe(true);
   });
 });
 

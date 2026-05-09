@@ -230,7 +230,16 @@ try {
       process.exit(0);
     }
     if (isJsonMode()) {
-      emitJsonError({ code: 2, kind: 'usage', message: err.message });
+      const errorMessage = err.code === 'commander.help'
+        ? (() => {
+            const target = resolveTargetCommand(program, process.argv.slice(2));
+            const subNames = target.commands.map((c: Command) => c.name()).join(', ');
+            return subNames
+              ? `${target.name()}: a subcommand is required. Available: ${subNames}`
+              : err.message;
+          })()
+        : err.message;
+      emitJsonError({ code: 2, kind: 'usage', message: errorMessage });
     }
     process.exit(2);
   }
