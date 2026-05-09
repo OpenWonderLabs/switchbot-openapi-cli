@@ -34,6 +34,7 @@ const BULB_ID = 'BULB-001';
 const BOT_ID = 'BOT-001';
 const LAMP_ID = 'LAMP-001';
 const STRIP_ID = 'STRIP-001';
+const CEILING_ID = 'CEILING-001';
 
 const sampleBody = {
   deviceList: [
@@ -44,6 +45,7 @@ const sampleBody = {
     { deviceId: BOT_ID,     deviceName: 'Door Bot',       deviceType: 'Bot',          hubDeviceId: 'H1', enableCloudService: true },
     { deviceId: LAMP_ID,    deviceName: 'Desk Lamp',      deviceType: 'Floor Lamp',   hubDeviceId: 'H1', enableCloudService: true },
     { deviceId: STRIP_ID,   deviceName: 'TV Strip',       deviceType: 'Light Strip',  hubDeviceId: 'H1', enableCloudService: true },
+    { deviceId: CEILING_ID, deviceName: 'Living Ceiling', deviceType: 'Ceiling Light', hubDeviceId: 'H1', enableCloudService: true },
   ],
   infraredRemoteList: [
     { deviceId: AC_ID, deviceName: 'Living AC', remoteType: 'Air Conditioner', hubDeviceId: 'H1', controlType: 'Air Conditioner' },
@@ -340,6 +342,25 @@ describe('devices expand', () => {
     expect(apiMock.__instance.post).toHaveBeenCalledWith(
       `/v1.1/devices/${STRIP_ID}/commands`,
       { command: 'setColor', parameter: '0:255:0', commandType: 'command' },
+    );
+  });
+
+  it('setColor on Ceiling Light (in catalog, no RGB) → UsageError', async () => {
+    const res = await runCli(registerDevicesCommand, [
+      'devices', 'expand', CEILING_ID, 'setColor', '--color', '255:0:0',
+    ]);
+    expect(res.exitCode).toBe(2);
+    expect(res.stderr.join('\n')).toMatch(/Ceiling Light.*does not support setColor/);
+  });
+
+  it('setBrightness on Ceiling Light (in catalog, supports it) → succeeds', async () => {
+    const res = await runCli(registerDevicesCommand, [
+      'devices', 'expand', CEILING_ID, 'setBrightness', '--brightness', '60',
+    ]);
+    expect(res.exitCode).toBe(null);
+    expect(apiMock.__instance.post).toHaveBeenCalledWith(
+      `/v1.1/devices/${CEILING_ID}/commands`,
+      { command: 'setBrightness', parameter: '60', commandType: 'command' },
     );
   });
 });

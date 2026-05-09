@@ -172,8 +172,6 @@ function isColorDevice(deviceType: string): boolean {
     deviceType === 'Color Bulb' ||
     deviceType === 'Strip Light' ||
     deviceType === 'Strip Light 3' ||
-    deviceType === 'Ceiling Light' ||
-    deviceType === 'Ceiling Light Pro' ||
     deviceType === 'Floor Lamp' ||
     deviceType === 'Light Strip' ||
     deviceType === 'Fill Light'
