@@ -86,7 +86,7 @@ export async function runCli(
         // Mirror production: emit JSON help when --json is in argv.
         if (argv.includes('--json')) {
           const target = resolveTargetCommand(program, argv);
-          stdout.push(JSON.stringify({ schemaVersion: '1.1', data: commandToJson(target) }, null, 2));
+          stdout.push(JSON.stringify({ schemaVersion: '1.2', data: commandToJson(target) }, null, 2));
         }
         exitCode = 0;
       } else if (errAsCommander.code === 'commander.version') {

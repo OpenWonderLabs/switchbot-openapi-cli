@@ -19,6 +19,7 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed (Breaking)
 
+- **`schemaVersion` bumped from `1.1` to `1.2`**: all `--json` responses now carry `schemaVersion: "1.2"`. Consumers that pin on the exact string must update their check. Parsers that only read `data`/`error` are unaffected.
 - **`catalog show <Type> --json`**: `data` is now always an array (single-entry array when filtering by type). Previously was a bare object for single-type queries.
 - **`devices commands <Type> --json`**: same change — `data` is always an array.
 - **`_fetchedAt` renamed to `fetchedAt`**: removed underscore prefix from the CLI-added timestamp field in `devices status` JSON output.

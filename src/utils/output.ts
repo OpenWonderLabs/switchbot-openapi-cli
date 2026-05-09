@@ -4,7 +4,7 @@ import { ApiError, DryRunSignal } from '../api/client.js';
 
 import { getFormat, getTableStyle, type TableStyle } from './flags.js';
 
-export const SCHEMA_VERSION = '1.1';
+export const SCHEMA_VERSION = '1.2';
 
 export function isJsonMode(): boolean {
   return process.argv.includes('--json') || getFormat() === 'json';

@@ -31,7 +31,7 @@ export function expectStreamHeaderShape(
   eventKind: 'tick' | 'event',
   cadence: 'poll' | 'push',
 ): void {
-  expect(header.schemaVersion).toBe('1.1');
+  expect(header.schemaVersion).toBe('1.2');
   expect(header.stream).toBe(true);
   expect(header.eventKind).toBe(eventKind);
   expect(header.cadence).toBe(cadence);
@@ -43,7 +43,7 @@ export function expectStreamJsonEnvelopeShape(
   dataKeys: string[],
 ): Record<string, unknown> {
   expect(Object.keys(payload)).toEqual(['schemaVersion', 'data']);
-  expect(payload.schemaVersion).toBe('1.1');
+  expect(payload.schemaVersion).toBe('1.2');
   const data = payload.data as Record<string, unknown>;
   expect(Object.keys(data)).toEqual(dataKeys);
   return data;
@@ -54,7 +54,7 @@ export function expectStreamJsonEnvelopeContainingKeys(
   requiredDataKeys: string[],
 ): Record<string, unknown> {
   expect(Object.keys(payload)).toEqual(['schemaVersion', 'data']);
-  expect(payload.schemaVersion).toBe('1.1');
+  expect(payload.schemaVersion).toBe('1.2');
   const data = payload.data as Record<string, unknown>;
   expect(Object.keys(data)).toEqual(expect.arrayContaining(requiredDataKeys));
   return data;

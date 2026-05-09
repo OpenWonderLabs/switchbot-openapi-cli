@@ -2565,7 +2565,7 @@ describe('devices command', () => {
       const out = res.stdout.join('\n');
       expect(out).toBeTruthy();
       const parsed = JSON.parse(out);
-      expect(parsed.schemaVersion).toBe('1.1');
+      expect(parsed.schemaVersion).toBe('1.2');
       expect(parsed.data.dryRun).toBe(true);
       expect(parsed.data.wouldSend.deviceId).toBe(DRY_ID);
       expect(parsed.data.wouldSend.command).toBe('turnOff');
@@ -2592,7 +2592,7 @@ describe('devices command', () => {
       const res = await runCli(registerDevicesCommand, ['--json', 'devices', 'list', '--help']);
       expect(res.exitCode).toBe(0);
       const parsed = JSON.parse(res.stdout.join('\n'));
-      expect(parsed.schemaVersion).toBe('1.1');
+      expect(parsed.schemaVersion).toBe('1.2');
       expect(parsed.data.name).toBe('list');
       expect(Array.isArray(parsed.data.options)).toBe(true);
       expect(Array.isArray(parsed.data.arguments)).toBe(true);
