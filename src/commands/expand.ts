@@ -15,6 +15,7 @@ import {
   buildBrightnessSet,
   buildColorSet,
   buildColorTemperatureSet,
+  isLightingCommandSupported,
 } from '../devices/param-validator.js';
 
 // ---- Registration ----------------------------------------------------------
@@ -147,10 +148,11 @@ Examples:
           }
           const catalogResult = findCatalogEntry(cached.type);
           const catalogEntry = Array.isArray(catalogResult) ? catalogResult[0] : catalogResult;
-          if (!catalogEntry || !catalogEntry.commands.some((c: { command: string }) => c.command === command)) {
+          const supportedByCatalog = catalogEntry?.commands.some((c: { command: string }) => c.command === command) ?? false;
+          if (!supportedByCatalog && !isLightingCommandSupported(cached.type, command)) {
             throw new UsageError(
               `Device type "${cached.type}" does not support ${command}. ` +
-              `Supported on: Color Bulb, Strip Light, Ceiling Light, and similar lighting devices.`
+              `Supported on: Color Bulb, Strip Light, Ceiling Light, Floor Lamp, and similar lighting devices.`
             );
           }
           if (command === 'setBrightness') {

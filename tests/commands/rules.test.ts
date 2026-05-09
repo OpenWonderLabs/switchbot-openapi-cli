@@ -256,6 +256,30 @@ describe('switchbot rules (commander surface)', () => {
       expect(exitCode).toBe(1);
       expect(stderr.join('\n')).toContain('automation.enabled is not true');
     });
+
+    it('--json: exits 1 with error envelope when automation.enabled is false', async () => {
+      const p = path.join(tmpDir, 'policy.yaml');
+      fs.writeFileSync(
+        p,
+        v02Policy(
+          [
+            'automation:',
+            '  enabled: false',
+            '  rules: []',
+            '',
+          ].join('\n'),
+        ),
+        'utf-8',
+      );
+      const { stdout, exitCode } = await runCli(['--json', 'rules', 'run', p]);
+      expect(exitCode).toBe(1);
+      const parsed = JSON.parse(stdout.join('\n'));
+      expect(parsed.error).toBeDefined();
+      expect(parsed.error.code).toBe(1);
+      expect(parsed.error.kind).toBe('runtime');
+      expect(parsed.error.message).toContain('automation.enabled is not true');
+      expect(parsed.data).toBeUndefined();
+    });
   });
 
   describe('rules reload', () => {

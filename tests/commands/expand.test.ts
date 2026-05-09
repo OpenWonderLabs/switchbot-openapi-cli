@@ -32,14 +32,18 @@ const BLIND_ID = 'BLIND-001';
 const RELAY_ID = 'RELAY-001';
 const BULB_ID = 'BULB-001';
 const BOT_ID = 'BOT-001';
+const LAMP_ID = 'LAMP-001';
+const STRIP_ID = 'STRIP-001';
 
 const sampleBody = {
   deviceList: [
     { deviceId: CURTAIN_ID, deviceName: 'Living Curtain', deviceType: 'Curtain', hubDeviceId: 'H1', enableCloudService: true },
     { deviceId: BLIND_ID,   deviceName: 'Bedroom Blind',  deviceType: 'Blind Tilt', hubDeviceId: 'H1', enableCloudService: true },
     { deviceId: RELAY_ID,   deviceName: 'Kitchen Switch', deviceType: 'Relay Switch 2PM', hubDeviceId: 'H1', enableCloudService: true },
-    { deviceId: BULB_ID,    deviceName: 'Bedroom Bulb',   deviceType: 'Color Bulb', hubDeviceId: 'H1', enableCloudService: true },
-    { deviceId: BOT_ID,     deviceName: 'Door Bot',       deviceType: 'Bot',        hubDeviceId: 'H1', enableCloudService: true },
+    { deviceId: BULB_ID,    deviceName: 'Bedroom Bulb',   deviceType: 'Color Bulb',   hubDeviceId: 'H1', enableCloudService: true },
+    { deviceId: BOT_ID,     deviceName: 'Door Bot',       deviceType: 'Bot',          hubDeviceId: 'H1', enableCloudService: true },
+    { deviceId: LAMP_ID,    deviceName: 'Desk Lamp',      deviceType: 'Floor Lamp',   hubDeviceId: 'H1', enableCloudService: true },
+    { deviceId: STRIP_ID,   deviceName: 'TV Strip',       deviceType: 'Light Strip',  hubDeviceId: 'H1', enableCloudService: true },
   ],
   infraredRemoteList: [
     { deviceId: AC_ID, deviceName: 'Living AC', remoteType: 'Air Conditioner', hubDeviceId: 'H1', controlType: 'Air Conditioner' },
@@ -315,5 +319,27 @@ describe('devices expand', () => {
     expect(data.command).toBe('setBrightness');
     expect(data.parameter).toBe('75');
     expect(data.deviceId).toBe(BULB_ID);
+  });
+
+  it('setBrightness on Floor Lamp (not in catalog, supported by validator) succeeds', async () => {
+    const res = await runCli(registerDevicesCommand, [
+      'devices', 'expand', LAMP_ID, 'setBrightness', '--brightness', '40',
+    ]);
+    expect(res.exitCode).toBe(null);
+    expect(apiMock.__instance.post).toHaveBeenCalledWith(
+      `/v1.1/devices/${LAMP_ID}/commands`,
+      { command: 'setBrightness', parameter: '40', commandType: 'command' },
+    );
+  });
+
+  it('setColor on Light Strip (not in catalog, supported by validator) succeeds', async () => {
+    const res = await runCli(registerDevicesCommand, [
+      'devices', 'expand', STRIP_ID, 'setColor', '--color', '0:255:0',
+    ]);
+    expect(res.exitCode).toBe(null);
+    expect(apiMock.__instance.post).toHaveBeenCalledWith(
+      `/v1.1/devices/${STRIP_ID}/commands`,
+      { command: 'setColor', parameter: '0:255:0', commandType: 'command' },
+    );
   });
 });

@@ -23,6 +23,7 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`catalog show <Type> --json`**: `data` is now always an array (single-entry array when filtering by type). Previously was a bare object for single-type queries.
 - **`devices commands <Type> --json`**: same change — `data` is always an array.
 - **`_fetchedAt` renamed to `fetchedAt`**: removed underscore prefix from the CLI-added timestamp field in `devices status` JSON output.
+- **`rules run --json` when `automation.enabled` is false**: previously emitted `{data: {kind:"control", controlKind:"disabled"}}` (success envelope) with exit 1. Now emits `{error: {code:1, kind:"runtime", message:"..."}}` (error envelope) — consistent with the JSON protocol.
 
 ### Added
 

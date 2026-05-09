@@ -180,6 +180,12 @@ function isColorDevice(deviceType: string): boolean {
   );
 }
 
+export function isLightingCommandSupported(deviceType: string, command: string): boolean {
+  if (command === 'setBrightness' || command === 'setColorTemperature') return isBrightnessDevice(deviceType);
+  if (command === 'setColor') return isColorDevice(deviceType);
+  return false;
+}
+
 function validateSetBrightness(raw: string | undefined): ValidateResult {
   if (raw === undefined || raw === '' || raw === 'default') {
     return {
