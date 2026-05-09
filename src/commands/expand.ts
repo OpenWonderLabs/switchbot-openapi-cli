@@ -3,6 +3,7 @@ import { intArg, stringArg, enumArg } from '../utils/arg-parsers.js';
 import { handleError, isJsonMode, printJson, UsageError, exitWithError } from '../utils/output.js';
 import { getCachedDevice } from '../devices/cache.js';
 import { executeCommand, isDestructiveCommand, getDestructiveReason } from '../lib/devices.js';
+import { findCatalogEntry } from '../devices/catalog.js';
 import { isDryRun } from '../utils/flags.js';
 import { resolveDeviceId, ALL_STRATEGIES, type NameResolveStrategy } from '../utils/name-resolver.js';
 import { DryRunSignal } from '../api/client.js';
@@ -138,12 +139,27 @@ Examples:
             : buildCurtainSetPosition(options);
         } else if (command === 'setMode' && deviceType.startsWith('Relay Switch')) {
           parameter = buildRelaySetMode(options);
-        } else if (command === 'setBrightness') {
-          parameter = buildBrightnessSet(options);
-        } else if (command === 'setColor') {
-          parameter = buildColorSet(options);
-        } else if (command === 'setColorTemperature') {
-          parameter = buildColorTemperatureSet(options);
+        } else if (command === 'setBrightness' || command === 'setColor' || command === 'setColorTemperature') {
+          if (!cached) {
+            throw new UsageError(
+              `Device "${deviceId}" is not in the local cache — run 'switchbot devices list' first so 'expand' can verify this device supports ${command}.`
+            );
+          }
+          const catalogResult = findCatalogEntry(cached.type);
+          const catalogEntry = Array.isArray(catalogResult) ? catalogResult[0] : catalogResult;
+          if (!catalogEntry || !catalogEntry.commands.some((c: { command: string }) => c.command === command)) {
+            throw new UsageError(
+              `Device type "${cached.type}" does not support ${command}. ` +
+              `Supported on: Color Bulb, Strip Light, Ceiling Light, and similar lighting devices.`
+            );
+          }
+          if (command === 'setBrightness') {
+            parameter = buildBrightnessSet(options);
+          } else if (command === 'setColor') {
+            parameter = buildColorSet(options);
+          } else {
+            parameter = buildColorTemperatureSet(options);
+          }
         } else {
           throw new UsageError(
             `'expand' does not support "${command}" for device type "${deviceType || 'unknown'}". ` +
