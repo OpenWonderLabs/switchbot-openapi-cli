@@ -31,6 +31,7 @@ const DEFAULT_STATUS_GC_TTL_MS = 24 * 60 * 60 * 1000; // 24 h
 
 export interface CachedDevice {
   type: string;
+  typeSource?: 'deviceType' | 'controlType' | 'remoteType';
   name: string;
   category: 'physical' | 'ir';
   hubDeviceId?: string;
@@ -152,6 +153,7 @@ export function updateCacheFromDeviceList(body: DeviceListBodyShape): void {
     if (!d.deviceId) continue;
     devices[d.deviceId] = {
       type: d.deviceType || d.controlType || 'Unknown Device',
+      typeSource: d.deviceType ? 'deviceType' : d.controlType ? 'controlType' : 'deviceType',
       name: d.deviceName,
       category: 'physical',
       hubDeviceId: d.hubDeviceId,
@@ -166,6 +168,7 @@ export function updateCacheFromDeviceList(body: DeviceListBodyShape): void {
     if (!d.deviceId) continue;
     devices[d.deviceId] = {
       type: d.remoteType,
+      typeSource: 'remoteType',
       name: d.deviceName,
       category: 'ir',
       hubDeviceId: d.hubDeviceId,

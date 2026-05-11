@@ -129,10 +129,16 @@ export async function fetchDeviceList(
       const infraredRemoteList: InfraredDevice[] = [];
       for (const [deviceId, entry] of Object.entries(cached.devices)) {
         if (entry.category === 'physical') {
+          const cachedDeviceType =
+            entry.typeSource === 'deviceType'
+              ? entry.type
+              : entry.typeSource === undefined && entry.type !== entry.controlType
+                ? entry.type
+                : undefined;
           deviceList.push({
             deviceId,
             deviceName: entry.name,
-            ...(entry.type && entry.type !== 'Unknown Device' ? { deviceType: entry.type } : {}),
+            ...(cachedDeviceType && cachedDeviceType !== 'Unknown Device' ? { deviceType: cachedDeviceType } : {}),
             enableCloudService: entry.enableCloudService ?? true,
             hubDeviceId: entry.hubDeviceId ?? '',
             roomID: entry.roomID,

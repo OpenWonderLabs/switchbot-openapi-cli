@@ -513,7 +513,7 @@ against the live API without executing any mutations.
             try {
               raw = JSON.parse(options.plan);
             } catch (err) {
-              throw new Error(`--plan is not valid JSON: ${(err as Error).message}`);
+              throw new UsageError(`--plan is not valid JSON: ${(err as Error).message}`);
             }
           } else {
             raw = await readPlanSource(file);

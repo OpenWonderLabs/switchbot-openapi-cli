@@ -277,6 +277,35 @@ describe('devices command', () => {
       expect(apiMock.__instance.get).toHaveBeenCalledTimes(1);
     });
 
+    it('cached controlType fallback remains a fallback for describe warnings', async () => {
+      apiMock.__instance.get.mockResolvedValueOnce({
+        data: {
+          body: {
+            deviceList: [
+              {
+                deviceId: 'AI-FALLBACK',
+                deviceName: 'AI MindClip',
+                hubDeviceId: '',
+                enableCloudService: true,
+                controlType: 'MindClip',
+              },
+            ],
+            infraredRemoteList: [],
+          },
+        },
+      });
+
+      const first = await runCli(registerDevicesCommand, ['--json', 'devices', 'list']);
+      expect(first.exitCode).toBeNull();
+      expect(apiMock.__instance.get).toHaveBeenCalledTimes(1);
+
+      const second = await runCli(registerDevicesCommand, ['devices', 'describe', 'AI-FALLBACK']);
+      expect(second.exitCode).toBeNull();
+      expect(second.stderr.join('\n')).toContain('deviceType not reported by API');
+      expect(second.stdout.join('\n')).toContain('MindClip');
+      expect(apiMock.__instance.get).toHaveBeenCalledTimes(1);
+    });
+
     it('renders roomID column for physical devices with --wide', async () => {
       apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
       const res = await runCli(registerDevicesCommand, ['devices', 'list', '--wide']);
@@ -724,6 +753,28 @@ describe('devices command', () => {
         expect(out.data.deviceType).toBe('Color Bulb');
         expect(out.data.power).toBe('on');
         expect(out.data.brightness).toBe(80);
+      });
+
+      it('keeps injected status identity authoritative over raw API fields', async () => {
+        updateCacheFromDeviceList({
+          deviceList: [{
+            deviceId: 'FALLBACK-01',
+            deviceName: 'MindClip',
+            controlType: 'MindClip',
+            enableCloudService: true,
+            hubDeviceId: '',
+          }],
+          infraredRemoteList: [],
+        });
+        apiMock.__instance.get.mockResolvedValue({
+          data: { body: { deviceId: 'STALE-ID', deviceType: '', power: 'on' } },
+        });
+
+        const res = await runCli(registerDevicesCommand, ['devices', 'status', 'FALLBACK-01', '--json']);
+        const out = JSON.parse(res.stdout.join('\n'));
+        expect(out.data.deviceId).toBe('FALLBACK-01');
+        expect(out.data.deviceType).toBe('MindClip');
+        expect(out.data.power).toBe('on');
       });
     });
 

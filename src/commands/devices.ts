@@ -51,6 +51,8 @@ function annotateStatusPayload(
   const cached = getCachedDevice(deviceId);
   const deviceType = cached?.type ?? '';
   const annotated: Record<string, unknown> = { deviceId, deviceType, ...body };
+  annotated.deviceId = deviceId;
+  annotated.deviceType = deviceType;
   if (Object.keys(body).length === 0) {
     annotated.supported = false;
     annotated.note = 'this device does not expose cloud status';
