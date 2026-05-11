@@ -322,6 +322,30 @@ describe('plan command', () => {
       expect(entries[0].result).toBe('ok');
       expect(entries[0].planId).toBe(data.planId);
     });
+
+    it('--plan accepts inline JSON string', async () => {
+      flagsMock.dryRun = true;
+      apiMock.__instance.post.mockImplementation(async () => {
+        throw new apiMock.DryRunSignal('POST', '/v1.1/devices/DEV001/commands');
+      });
+      const inlinePlan = JSON.stringify({
+        version: '1.0',
+        description: 'inline test',
+        steps: [{ type: 'command', deviceId: 'DEV001', command: 'turnOn' }],
+      });
+      const res = await runCli(registerPlanCommand, ['--dry-run', 'plan', 'run', '--plan', inlinePlan]);
+      expect(res.exitCode).toBeNull();
+    });
+
+    it('--plan and file argument are mutually exclusive', async () => {
+      const res = await runCli(registerPlanCommand, ['plan', 'run', '--plan', '{}', 'somefile.json']);
+      expect(res.exitCode).not.toBeNull();
+    });
+
+    it('--plan with invalid JSON produces error', async () => {
+      const res = await runCli(registerPlanCommand, ['plan', 'run', '--plan', 'not-json']);
+      expect(res.exitCode).not.toBeNull();
+    });
   });
 
   describe('plan suggest', () => {
