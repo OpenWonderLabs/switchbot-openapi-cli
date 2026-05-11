@@ -891,6 +891,11 @@ Examples:
           return;
         }
 
+        if (result.typeSource === 'controlType') {
+          const deviceName = (device as Device).deviceName ?? deviceId;
+          console.error(`warning: ${deviceName} (${deviceId}): deviceType not reported by API, using controlType "${result.controlType}". Capabilities may be limited.`);
+        }
+
         if (isPhysical) {
           const physical = device as Device;
           printKeyValue({

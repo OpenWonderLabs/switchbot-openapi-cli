@@ -55,6 +55,7 @@ vi.mock('../../src/utils/flags.js', () => ({
   getConfigPath: vi.fn(() => undefined),
   getProfile: vi.fn(() => undefined),
   getAuditLog: vi.fn(() => null),
+  getFormat: vi.fn(() => undefined),
 }));
 
 vi.mock('../../src/utils/audit.js', () => ({
@@ -62,6 +63,8 @@ vi.mock('../../src/utils/audit.js', () => ({
 }));
 
 import { describeDevice } from '../../src/lib/devices.js';
+import { registerDevicesCommand } from '../../src/commands/devices.js';
+import { runCli } from '../helpers/cli.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -174,5 +177,99 @@ describe('describeDevice — typeSource signal', () => {
 
     expect(result.typeName).toBe('Air Conditioner');
     expect(result.typeSource).toBe('remoteType');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CLI integration: describe command warning
+// ---------------------------------------------------------------------------
+
+describe('devices describe — controlType fallback warning', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('emits a warning to stderr in human mode when typeSource is controlType', async () => {
+    apiMock.__instance.get.mockResolvedValue({
+      data: {
+        statusCode: 100,
+        body: {
+          deviceList: [
+            {
+              deviceId: 'AI-WARN-001',
+              deviceName: 'MindClip Device',
+              deviceType: '',
+              controlType: 'MindClip',
+              enableCloudService: true,
+              hubDeviceId: 'HUB-1',
+            },
+          ],
+          infraredRemoteList: [],
+        },
+      },
+    });
+
+    const res = await runCli(registerDevicesCommand, ['devices', 'describe', 'AI-WARN-001']);
+    const err = res.stderr.join('\n');
+
+    expect(err).toContain('warning:');
+    expect(err).toContain('AI-WARN-001');
+    expect(err).toContain('deviceType not reported by API');
+    expect(err).toContain('controlType');
+    expect(err).toContain('MindClip');
+  });
+
+  it('does not emit a warning to stderr in --json mode when typeSource is controlType', async () => {
+    apiMock.__instance.get.mockResolvedValue({
+      data: {
+        statusCode: 100,
+        body: {
+          deviceList: [
+            {
+              deviceId: 'AI-WARN-002',
+              deviceName: 'PinNote Device',
+              deviceType: '',
+              controlType: 'PinNote',
+              enableCloudService: true,
+              hubDeviceId: 'HUB-1',
+            },
+          ],
+          infraredRemoteList: [],
+        },
+      },
+    });
+
+    const res = await runCli(registerDevicesCommand, ['--json', 'devices', 'describe', 'AI-WARN-002']);
+    const err = res.stderr.join('\n');
+
+    expect(err).not.toContain('warning:');
+    expect(err).not.toContain('deviceType not reported by API');
+  });
+
+  it('does not emit a warning when typeSource is deviceType', async () => {
+    apiMock.__instance.get.mockResolvedValue({
+      data: {
+        statusCode: 100,
+        body: {
+          deviceList: [
+            {
+              deviceId: 'BOT-NORMAL',
+              deviceName: 'Normal Bot',
+              deviceType: 'Bot',
+              controlType: 'Bot',
+              enableCloudService: true,
+              hubDeviceId: 'HUB-1',
+            },
+          ],
+          infraredRemoteList: [],
+        },
+      },
+    });
+
+    const res = await runCli(registerDevicesCommand, ['devices', 'describe', 'BOT-NORMAL']);
+    const err = res.stderr.join('\n');
+
+    expect(err).not.toContain('warning:');
+    expect(err).not.toContain('deviceType not reported by API');
   });
 });
