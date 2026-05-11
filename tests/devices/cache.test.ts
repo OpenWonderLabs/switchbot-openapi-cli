@@ -63,25 +63,44 @@ describe('device cache', () => {
 
     const raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
     expect(raw.lastUpdated).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-    expect(raw.devices['PHY-1']).toEqual({ type: 'Bot', name: 'Living Bot', category: 'physical' });
-    expect(raw.devices['PHY-2']).toEqual({ type: 'Color Bulb', name: 'Bedroom Bulb', category: 'physical' });
-    expect(raw.devices['IR-1']).toEqual({ type: 'TV', name: 'TV Remote', category: 'ir' });
+    expect(raw.devices['PHY-1']).toEqual({ type: 'Bot', typeSource: 'deviceType', name: 'Living Bot', category: 'physical' });
+    expect(raw.devices['PHY-2']).toEqual({ type: 'Color Bulb', typeSource: 'deviceType', name: 'Bedroom Bulb', category: 'physical' });
+    expect(raw.devices['IR-1']).toEqual({ type: 'TV', typeSource: 'remoteType', name: 'TV Remote', category: 'ir' });
   });
 
   it('keeps physical devices even when deviceType is missing', () => {
     updateCacheFromDeviceList(sampleBody);
     const cache = loadCache();
-    expect(cache?.devices['PHY-3']).toEqual({
-      type: '',
-      name: 'AI',
+    const entry = cache?.devices['PHY-3'];
+    expect(entry).toBeDefined();
+    expect(entry!.type).toBe('Unknown Device');
+    expect(entry!.typeSource).toBe('deviceType');
+    expect(entry!.name).toBe('AI');
+    expect(entry!.category).toBe('physical');
+  });
+
+  it('records when physical type came from controlType fallback', () => {
+    updateCacheFromDeviceList({
+      deviceList: [{
+        deviceId: 'PHY-CTRL',
+        deviceName: 'MindClip',
+        controlType: 'MindClip',
+      }],
+      infraredRemoteList: [],
+    });
+
+    expect(getCachedDevice('PHY-CTRL')).toMatchObject({
+      type: 'MindClip',
+      typeSource: 'controlType',
+      controlType: 'MindClip',
       category: 'physical',
     });
   });
 
   it('getCachedDevice returns cached entry', () => {
     updateCacheFromDeviceList(sampleBody);
-    expect(getCachedDevice('PHY-1')).toEqual({ type: 'Bot', name: 'Living Bot', category: 'physical' });
-    expect(getCachedDevice('IR-1')).toEqual({ type: 'TV', name: 'TV Remote', category: 'ir' });
+    expect(getCachedDevice('PHY-1')).toEqual({ type: 'Bot', typeSource: 'deviceType', name: 'Living Bot', category: 'physical' });
+    expect(getCachedDevice('IR-1')).toEqual({ type: 'TV', typeSource: 'remoteType', name: 'TV Remote', category: 'ir' });
     expect(getCachedDevice('missing')).toBeNull();
   });
 

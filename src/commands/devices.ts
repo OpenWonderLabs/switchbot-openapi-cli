@@ -44,15 +44,21 @@ const EXPAND_HINTS: Record<string, { command: string; flags: string }> = {
   'Relay Switch 2PM': { command: 'setMode',      flags: '--channel 1 --mode edge' },
 };
 
-function annotateStatusPayload(deviceId: string, body: Record<string, unknown>): Record<string, unknown> {
-  const annotated = { ...body };
+function annotateStatusPayload(
+  deviceId: string,
+  body: Record<string, unknown>,
+): Record<string, unknown> {
+  const cached = getCachedDevice(deviceId);
+  const deviceType = cached?.type ?? '';
+  const annotated: Record<string, unknown> = { deviceId, deviceType, ...body };
+  annotated.deviceId = deviceId;
+  annotated.deviceType = deviceType;
   if (Object.keys(body).length === 0) {
     annotated.supported = false;
     annotated.note = 'this device does not expose cloud status';
     return annotated;
   }
 
-  const cached = getCachedDevice(deviceId);
   const looksLikeMeter = cached?.type?.toLowerCase().includes('meter') ?? false;
   const staleZeroReading =
     looksLikeMeter &&
@@ -221,7 +227,7 @@ Examples:
           rows.push([
             d.deviceId,
             d.deviceName,
-            d.deviceType || '—',
+            d.deviceType || d.controlType || 'Unknown Device',
             'physical',
             d.controlType || '—',
             d.familyName || '—',
@@ -887,12 +893,20 @@ Examples:
           return;
         }
 
+        if (result.typeSource === 'controlType') {
+          const deviceName = (device as Device).deviceName ?? deviceId;
+          console.error(`warning: ${deviceName} (${deviceId}): deviceType not reported by API, using controlType "${result.controlType}". Capabilities may be limited.`);
+        } else if (typeName === 'Unknown Device') {
+          const deviceName = (device as Device).deviceName ?? deviceId;
+          console.error(`warning: ${deviceName} (${deviceId}): neither deviceType nor controlType reported by API. Capabilities may be limited.`);
+        }
+
         if (isPhysical) {
           const physical = device as Device;
           printKeyValue({
             deviceId: physical.deviceId,
             deviceName: physical.deviceName,
-            deviceType: physical.deviceType || '—',
+            deviceType: physical.deviceType || physical.controlType || 'Unknown Device',
             controlType: physical.controlType || '—',
             family: physical.familyName || '—',
             roomID: physical.roomID || '—',

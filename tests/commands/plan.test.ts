@@ -322,6 +322,40 @@ describe('plan command', () => {
       expect(entries[0].result).toBe('ok');
       expect(entries[0].planId).toBe(data.planId);
     });
+
+    it('--plan accepts inline JSON string', async () => {
+      flagsMock.dryRun = true;
+      apiMock.__instance.post.mockImplementation(async () => {
+        throw new apiMock.DryRunSignal('POST', '/v1.1/devices/DEV001/commands');
+      });
+      const inlinePlan = JSON.stringify({
+        version: '1.0',
+        description: 'inline test',
+        steps: [{ type: 'command', deviceId: 'DEV001', command: 'turnOn' }],
+      });
+      const res = await runCli(registerPlanCommand, ['--dry-run', 'plan', 'run', '--plan', inlinePlan]);
+      expect(res.exitCode).toBeNull();
+    });
+
+    it('--plan and file argument are mutually exclusive', async () => {
+      const res = await runCli(registerPlanCommand, ['plan', 'run', '--plan', '{}', 'somefile.json']);
+      expect(res.exitCode).toBe(2);
+    });
+
+    it('--plan with invalid JSON produces error', async () => {
+      const res = await runCli(registerPlanCommand, ['plan', 'run', '--plan', 'not-json']);
+      expect(res.exitCode).toBe(2);
+      expect(res.stderr.join('\n')).toContain('--plan is not valid JSON');
+    });
+
+    it('--plan with invalid JSON reports usage error in --json mode', async () => {
+      const res = await runCli(registerPlanCommand, ['--json', 'plan', 'run', '--plan', 'not-json']);
+      expect(res.exitCode).toBe(2);
+      const parsed = JSON.parse(res.stdout.join('\n'));
+      expect(parsed.error.kind).toBe('usage');
+      expect(parsed.error.code).toBe(2);
+      expect(parsed.error.message).toContain('--plan is not valid JSON');
+    });
   });
 
   describe('plan suggest', () => {

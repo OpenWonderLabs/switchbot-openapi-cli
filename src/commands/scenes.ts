@@ -51,6 +51,7 @@ Examples:
   // switchbot scenes execute <sceneId>
   scenes
     .command('execute')
+    .alias('run')
     .description('Execute a manual scene by its ID')
     .argument('<sceneId>', 'Scene ID from "scenes list"')
     .addHelpText('after', `

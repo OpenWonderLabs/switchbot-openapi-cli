@@ -91,6 +91,7 @@ export function registerWatchCommand(devices: Command): void {
       '30s',
     )
     .option('--max <n>', 'Stop after N ticks (default: run until Ctrl-C)', intArg('--max', { min: 1 }))
+    .option('--once', 'Stop after one tick (shorthand for --max 1)')
     .option('--for <dur>', 'Stop after elapsed time (e.g. "5m", "30s"). Combines with --max: first limit wins.', durationArg('--for'))
     .option('--include-unchanged', 'Emit a tick even when no field changed')
     .option('--initial <mode>', 'How to handle the first poll: snapshot | emit | skip (default: snapshot)', enumArg('--initial', INITIAL_MODES), 'snapshot')
@@ -128,12 +129,20 @@ Examples:
           name?: string;
           interval: string;
           max?: string;
+          once?: boolean;
           for?: string;
           includeUnchanged?: boolean;
           initial: 'snapshot' | 'emit' | 'skip';
         },
       ) => {
         try {
+          if (options.once && options.max !== undefined) {
+            throw new UsageError('--once and --max are mutually exclusive.');
+          }
+          if (options.once) {
+            options.max = '1';
+          }
+
           const allIds = [...deviceIds];
           if (options.name) {
             const resolved = resolveDeviceId(undefined, options.name);

@@ -234,8 +234,10 @@ describe('devices command', () => {
       const row = res.stdout.join('\n').split('\n').find((l) => l.includes('AI-DEV'));
       expect(row).toBeDefined();
       expect(row).not.toContain('undefined');
-      // type column (position 3) and controlType column (position 5) should both render as em-dash
-      expect(row!.match(/—/g)?.length).toBeGreaterThanOrEqual(2);
+      // type column shows 'Unknown Device' when both deviceType and controlType are empty
+      expect(row).toContain('Unknown Device');
+      // controlType column (position 5) should render as em-dash
+      expect(row!.match(/—/g)?.length).toBeGreaterThanOrEqual(1);
     });
 
     it('cache hit in --json keeps physical devices whose deviceType is missing', async () => {
@@ -272,6 +274,35 @@ describe('devices command', () => {
       expect(secondParsed.data.deviceList).toHaveLength(1);
       expect(secondParsed.data.deviceList[0].deviceId).toBe('AI-DEV');
       expect(secondParsed.data.deviceList[0].deviceType).toBeUndefined();
+      expect(apiMock.__instance.get).toHaveBeenCalledTimes(1);
+    });
+
+    it('cached controlType fallback remains a fallback for describe warnings', async () => {
+      apiMock.__instance.get.mockResolvedValueOnce({
+        data: {
+          body: {
+            deviceList: [
+              {
+                deviceId: 'AI-FALLBACK',
+                deviceName: 'AI MindClip',
+                hubDeviceId: '',
+                enableCloudService: true,
+                controlType: 'MindClip',
+              },
+            ],
+            infraredRemoteList: [],
+          },
+        },
+      });
+
+      const first = await runCli(registerDevicesCommand, ['--json', 'devices', 'list']);
+      expect(first.exitCode).toBeNull();
+      expect(apiMock.__instance.get).toHaveBeenCalledTimes(1);
+
+      const second = await runCli(registerDevicesCommand, ['devices', 'describe', 'AI-FALLBACK']);
+      expect(second.exitCode).toBeNull();
+      expect(second.stderr.join('\n')).toContain('deviceType not reported by API');
+      expect(second.stdout.join('\n')).toContain('MindClip');
       expect(apiMock.__instance.get).toHaveBeenCalledTimes(1);
     });
 
@@ -679,6 +710,74 @@ describe('devices command', () => {
       expect(out.data.hint).toMatch(/batteries|hub connectivity/i);
     });
 
+    // P2 — identity injection
+    describe('identity injection (P2)', () => {
+      it('injects deviceId and deviceType into unsupported (empty body) status response', async () => {
+        updateCacheFromDeviceList({
+          deviceList: [{
+            deviceId: 'IR-FAKE',
+            deviceName: 'Fake IR',
+            deviceType: 'DIY IR Remote',
+            enableCloudService: true,
+            hubDeviceId: 'HUB-1',
+          }],
+          infraredRemoteList: [],
+        });
+        apiMock.__instance.get.mockResolvedValue({
+          data: { body: {} },
+        });
+        const res = await runCli(registerDevicesCommand, ['devices', 'status', 'IR-FAKE', '--json']);
+        const out = JSON.parse(res.stdout.join('\n'));
+        expect(out.data.deviceId).toBe('IR-FAKE');
+        expect(out.data.deviceType).toBe('DIY IR Remote');
+        expect(out.data.supported).toBe(false);
+      });
+
+      it('injects deviceId and deviceType into a normal (supported) status response', async () => {
+        updateCacheFromDeviceList({
+          deviceList: [{
+            deviceId: 'BULB-01',
+            deviceName: 'Office Bulb',
+            deviceType: 'Color Bulb',
+            enableCloudService: true,
+            hubDeviceId: '',
+          }],
+          infraredRemoteList: [],
+        });
+        apiMock.__instance.get.mockResolvedValue({
+          data: { body: { power: 'on', brightness: 80 } },
+        });
+        const res = await runCli(registerDevicesCommand, ['devices', 'status', 'BULB-01', '--json']);
+        const out = JSON.parse(res.stdout.join('\n'));
+        expect(out.data.deviceId).toBe('BULB-01');
+        expect(out.data.deviceType).toBe('Color Bulb');
+        expect(out.data.power).toBe('on');
+        expect(out.data.brightness).toBe(80);
+      });
+
+      it('keeps injected status identity authoritative over raw API fields', async () => {
+        updateCacheFromDeviceList({
+          deviceList: [{
+            deviceId: 'FALLBACK-01',
+            deviceName: 'MindClip',
+            controlType: 'MindClip',
+            enableCloudService: true,
+            hubDeviceId: '',
+          }],
+          infraredRemoteList: [],
+        });
+        apiMock.__instance.get.mockResolvedValue({
+          data: { body: { deviceId: 'STALE-ID', deviceType: '', power: 'on' } },
+        });
+
+        const res = await runCli(registerDevicesCommand, ['devices', 'status', 'FALLBACK-01', '--json']);
+        const out = JSON.parse(res.stdout.join('\n'));
+        expect(out.data.deviceId).toBe('FALLBACK-01');
+        expect(out.data.deviceType).toBe('MindClip');
+        expect(out.data.power).toBe('on');
+      });
+    });
+
     it('exits 1 when the API throws', async () => {
       apiMock.__instance.get.mockRejectedValue(new Error('device offline'));
       const res = await runCli(registerDevicesCommand, ['devices', 'status', 'BLE']);
@@ -698,14 +797,15 @@ describe('devices command', () => {
       expect(out).toContain('on\t87\t22');
     });
 
-    it('exits 2 for --format id (status has no deviceId column)', async () => {
+    it('--format id outputs the injected deviceId', async () => {
       apiMock.__instance.get.mockResolvedValue({
         data: { body: { power: 'on', battery: 87 } },
       });
       const res = await runCli(registerDevicesCommand, [
         'devices', 'status', 'DEV123', '--format', 'id',
       ]);
-      expect(res.exitCode).toBe(2);
+      expect(res.exitCode).toBeNull();
+      expect(res.stdout.join('\n')).toContain('DEV123');
     });
 
     it('supports --format json (array of objects)', async () => {
@@ -774,8 +874,10 @@ describe('devices command', () => {
         'devices', 'status', 'DEV3', '--format', 'tsv',
       ]);
       const lines = res.stdout.join('\n').split('\n');
+      // deviceId and deviceType are now injected before the body fields
       // null maps to empty string in cellToString; fetchedAt column is also present
-      expect(lines[1]).toMatch(/^on\t\t/);
+      expect(lines[0]).toContain('deviceId\tdeviceType\tpower\tbattery');
+      expect(lines[1]).toContain('DEV3\t\ton\t');
     });
 
     // P1 — FIELD_ALIASES dispatch on --fields

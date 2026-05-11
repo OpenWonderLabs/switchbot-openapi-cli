@@ -1,5 +1,5 @@
 import type { AxiosInstance } from 'axios';
-import { createClient } from '../api/client.js';
+import { createClient, ApiError } from '../api/client.js';
 import { idempotencyCache, fingerprintIdempotencyKey } from './idempotency.js';
 import {
   findCatalogEntry,
@@ -59,6 +59,7 @@ export interface DescribeResult {
   device: Device | InfraredDevice;
   isPhysical: boolean;
   typeName: string;
+  typeSource: 'deviceType' | 'controlType' | 'remoteType';
   controlType: string | null;
   catalog: DeviceCatalogEntry | null;
   capabilities: DescribeCapabilities | { liveStatus: Record<string, unknown> } | null;
@@ -128,10 +129,16 @@ export async function fetchDeviceList(
       const infraredRemoteList: InfraredDevice[] = [];
       for (const [deviceId, entry] of Object.entries(cached.devices)) {
         if (entry.category === 'physical') {
+          const cachedDeviceType =
+            entry.typeSource === 'deviceType'
+              ? entry.type
+              : entry.typeSource === undefined && entry.type !== entry.controlType
+                ? entry.type
+                : undefined;
           deviceList.push({
             deviceId,
             deviceName: entry.name,
-            ...(entry.type ? { deviceType: entry.type } : {}),
+            ...(cachedDeviceType && cachedDeviceType !== 'Unknown Device' ? { deviceType: cachedDeviceType } : {}),
             enableCloudService: entry.enableCloudService ?? true,
             hubDeviceId: entry.hubDeviceId ?? '',
             roomID: entry.roomID,
@@ -223,10 +230,12 @@ export async function executeCommand(
       if (err instanceof Error && err.name === 'DryRunSignal') {
         writeAudit({ ...baseAudit, result: 'dry-run' });
       } else {
+        const statusCode = err instanceof ApiError ? err.code : undefined;
         writeAudit({
           ...baseAudit,
           result: 'error',
           error: err instanceof Error ? err.message : String(err),
+          ...(statusCode !== undefined ? { statusCode } : {}),
         });
       }
       throw err;
@@ -408,7 +417,23 @@ export async function describeDevice(
 
   if (!physical && !ir) throw new DeviceNotFoundError(deviceId);
 
-  const typeName = physical ? (physical.deviceType ?? '') : ir!.remoteType;
+  let typeName: string;
+  let typeSource: DescribeResult['typeSource'];
+  if (physical) {
+    if (physical.deviceType) {
+      typeName = physical.deviceType;
+      typeSource = 'deviceType';
+    } else if (physical.controlType) {
+      typeName = physical.controlType;
+      typeSource = 'controlType';
+    } else {
+      typeName = 'Unknown Device';
+      typeSource = 'deviceType';
+    }
+  } else {
+    typeName = ir!.remoteType;
+    typeSource = 'remoteType';
+  }
   const match = typeName ? findCatalogEntry(typeName) : null;
   const catalogEntry = !match || Array.isArray(match) ? null : match;
 
@@ -459,6 +484,7 @@ export async function describeDevice(
     device: selectedDevice,
     isPhysical: Boolean(physical),
     typeName,
+    typeSource,
     controlType: physical?.controlType ?? ir?.controlType ?? null,
     catalog: catalogEntry,
     capabilities,

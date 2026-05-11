@@ -317,9 +317,46 @@ describe('devices batch', () => {
 
     expect(result.exitCode).toBeNull();
     const combined = result.stdout.join('\n');
-    expect(combined).toMatch(/✓ BOT1/);
-    expect(combined).toMatch(/✓ BOT2/);
+    expect(combined).toMatch(/\[1\/2\] ✓ BOT1/);
+    expect(combined).toMatch(/\[2\/2\] ✓ BOT2/);
     expect(combined).toMatch(/Summary: 2 ok, 0 failed/);
+  });
+
+  it('human output includes [n/total] progress prefix', async () => {
+    cacheMock.map.set('D1', { type: 'Bot', name: 'Device1', category: 'physical' });
+    cacheMock.map.set('D2', { type: 'Bot', name: 'Device2', category: 'physical' });
+    apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body: {} } });
+
+    const result = await runCli(registerDevicesCommand, [
+      'devices',
+      'batch',
+      'turnOn',
+      '--ids',
+      'D1,D2',
+    ]);
+
+    expect(result.exitCode).toBeNull();
+    const combined = result.stdout.join('\n');
+    expect(combined).toMatch(/\[1\/2\]/);
+    expect(combined).toMatch(/\[2\/2\]/);
+  });
+
+  it('JSON output does not include [n/total] progress prefix', async () => {
+    cacheMock.map.set('D1', { type: 'Bot', name: 'Device1', category: 'physical' });
+    apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body: {} } });
+
+    const result = await runCli(registerDevicesCommand, [
+      '--json',
+      'devices',
+      'batch',
+      'turnOn',
+      '--ids',
+      'D1',
+    ]);
+
+    expect(result.exitCode).toBeNull();
+    const combined = result.stdout.join('\n');
+    expect(combined).not.toMatch(/\[\d+\/\d+\]/);
   });
 
   it('reports zero matches without calling POST', async () => {

@@ -350,7 +350,9 @@ describe('devices expand', () => {
       'devices', 'expand', CEILING_ID, 'setColor', '--color', '255:0:0',
     ]);
     expect(res.exitCode).toBe(2);
-    expect(res.stderr.join('\n')).toMatch(/Ceiling Light.*does not support setColor/);
+    const err = res.stderr.join('\n');
+    expect(err).toMatch(/Ceiling Light.*does not support setColor/);
+    expect(err).not.toMatch(/Supported on: .*Ceiling Light/);
   });
 
   it('setBrightness on Ceiling Light (in catalog, supports it) → succeeds', async () => {

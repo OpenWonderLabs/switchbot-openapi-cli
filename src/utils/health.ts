@@ -15,6 +15,7 @@ import { apiCircuitBreaker } from '../api/client.js';
 
 const DEFAULT_AUDIT_PATH = path.join(os.homedir(), '.switchbot', 'audit.log');
 const AUDIT_ERROR_WINDOW_MS = 24 * 60 * 60 * 1000; // 24h
+const EXPECTED_ERROR_CODES = new Set([161, 171, 190]);
 
 export interface QuotaHealth {
   used: number;
@@ -29,6 +30,10 @@ export interface AuditHealth {
   recentErrors: number;
   recentTotal: number;
   errorRatePercent: number;
+  expectedErrors: number;
+  unexpectedErrors: number;
+  unexpectedRatePercent: number;
+  breakdown: Record<string, number>;
   status: 'ok' | 'warn';
 }
 
@@ -82,20 +87,48 @@ export function getHealthReport(auditPath = DEFAULT_AUDIT_PATH): HealthReport {
   // Audit error rate (last 24h)
   let auditHealth: AuditHealth;
   if (!fs.existsSync(auditPath)) {
-    auditHealth = { present: false, recentErrors: 0, recentTotal: 0, errorRatePercent: 0, status: 'ok' };
+    auditHealth = {
+      present: false,
+      recentErrors: 0,
+      recentTotal: 0,
+      errorRatePercent: 0,
+      expectedErrors: 0,
+      unexpectedErrors: 0,
+      unexpectedRatePercent: 0,
+      breakdown: {},
+      status: 'ok',
+    };
   } else {
     const entries = readAudit(auditPath);
     const windowStart = now.getTime() - AUDIT_ERROR_WINDOW_MS;
     const recent = entries.filter((e) => new Date(e.t).getTime() >= windowStart);
-    const errors = recent.filter((e) => e.result === 'error').length;
+    const errorEntries = recent.filter((e) => e.result === 'error');
     const total = recent.length;
+    const errors = errorEntries.length;
     const errorRate = total > 0 ? Math.round((errors / total) * 100) : 0;
+
+    const breakdown: Record<string, number> = {};
+    let expectedErrors = 0;
+    for (const e of errorEntries) {
+      const code = e.statusCode !== undefined ? String(e.statusCode) : 'unknown';
+      breakdown[code] = (breakdown[code] ?? 0) + 1;
+      if (e.statusCode !== undefined && EXPECTED_ERROR_CODES.has(e.statusCode)) {
+        expectedErrors++;
+      }
+    }
+    const unexpectedErrors = errors - expectedErrors;
+    const unexpectedRatePercent = total > 0 ? Math.round((unexpectedErrors / total) * 100 * 10) / 10 : 0;
+
     auditHealth = {
       present: true,
       recentErrors: errors,
       recentTotal: total,
       errorRatePercent: errorRate,
-      status: errorRate >= 30 ? 'warn' : 'ok',
+      expectedErrors,
+      unexpectedErrors,
+      unexpectedRatePercent,
+      breakdown,
+      status: unexpectedRatePercent >= 30 ? 'warn' : 'ok',
     };
   }
 

@@ -17,7 +17,7 @@ const OK_REPORT: HealthReport = {
   overall: 'ok',
   process: { pid: 1234, uptimeSeconds: 60, platform: 'linux', nodeVersion: 'v18.0.0', memoryMb: 50 },
   quota: { used: 10, limit: 10000, percentUsed: 0, remaining: 9990, status: 'ok' },
-  audit: { present: false, recentErrors: 0, recentTotal: 0, errorRatePercent: 0, status: 'ok' },
+  audit: { present: false, recentErrors: 0, recentTotal: 0, errorRatePercent: 0, expectedErrors: 0, unexpectedErrors: 0, unexpectedRatePercent: 0, breakdown: {}, status: 'ok' },
   circuit: { name: 'switchbot-api', state: 'closed', failures: 0, status: 'ok' },
 };
 
@@ -104,5 +104,87 @@ describe('health check CLI', () => {
     }
     expect(healthMock.toPrometheusText).toHaveBeenCalledWith(OK_REPORT);
     expect(stdoutLines.join('')).toContain('switchbot_quota_used_total');
+  });
+});
+
+describe('audit health layering', () => {
+  beforeEach(() => {
+    healthMock.getHealthReport.mockReset().mockReturnValue(OK_REPORT);
+  });
+
+  it('expected error codes (161, 171, 190) do not trigger degraded when unexpected rate is low', async () => {
+    const report: HealthReport = {
+      ...OK_REPORT,
+      overall: 'ok',
+      audit: {
+        present: true,
+        recentErrors: 3,
+        recentTotal: 10,
+        errorRatePercent: 30,
+        expectedErrors: 3,
+        unexpectedErrors: 0,
+        unexpectedRatePercent: 0,
+        breakdown: { '161': 1, '171': 1, '190': 1 },
+        status: 'ok',
+      },
+    };
+    healthMock.getHealthReport.mockReturnValue(report);
+    const res = await runCli(registerHealthCommand, ['--json', 'health', 'check']);
+    expect(res.exitCode).toBeNull();
+    const body = JSON.parse(res.stdout.join('')) as { data: HealthReport };
+    expect(body.data.overall).toBe('ok');
+    expect(body.data.audit.expectedErrors).toBe(3);
+    expect(body.data.audit.unexpectedErrors).toBe(0);
+    expect(body.data.audit.breakdown).toEqual({ '161': 1, '171': 1, '190': 1 });
+  });
+
+  it('unexpected errors above 30% trigger degraded', async () => {
+    const report: HealthReport = {
+      ...OK_REPORT,
+      overall: 'degraded',
+      audit: {
+        present: true,
+        recentErrors: 4,
+        recentTotal: 10,
+        errorRatePercent: 40,
+        expectedErrors: 0,
+        unexpectedErrors: 4,
+        unexpectedRatePercent: 40,
+        breakdown: { 'unknown': 4 },
+        status: 'warn',
+      },
+    };
+    healthMock.getHealthReport.mockReturnValue(report);
+    const res = await runCli(registerHealthCommand, ['--json', 'health', 'check']);
+    expect(res.exitCode).toBeNull();
+    const body = JSON.parse(res.stdout.join('')) as { data: HealthReport };
+    expect(body.data.overall).toBe('degraded');
+    expect(body.data.audit.status).toBe('warn');
+    expect(body.data.audit.unexpectedRatePercent).toBe(40);
+  });
+
+  it('zero errors reports ok with empty breakdown', async () => {
+    const report: HealthReport = {
+      ...OK_REPORT,
+      overall: 'ok',
+      audit: {
+        present: true,
+        recentErrors: 0,
+        recentTotal: 5,
+        errorRatePercent: 0,
+        expectedErrors: 0,
+        unexpectedErrors: 0,
+        unexpectedRatePercent: 0,
+        breakdown: {},
+        status: 'ok',
+      },
+    };
+    healthMock.getHealthReport.mockReturnValue(report);
+    const res = await runCli(registerHealthCommand, ['--json', 'health', 'check']);
+    expect(res.exitCode).toBeNull();
+    const body = JSON.parse(res.stdout.join('')) as { data: HealthReport };
+    expect(body.data.audit.status).toBe('ok');
+    expect(body.data.audit.breakdown).toEqual({});
+    expect(body.data.audit.unexpectedErrors).toBe(0);
   });
 });

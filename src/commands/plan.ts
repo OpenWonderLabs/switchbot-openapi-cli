@@ -493,18 +493,31 @@ against the live API without executing any mutations.
     .option('--yes', 'Authorize destructive commands (e.g. Smart Lock unlock, Garage open)')
     .option('--require-approval', 'Prompt for confirmation before each destructive step (TTY only; mutually exclusive with --json)')
     .option('--continue-on-error', 'Keep running after a failed step (default: stop at first error)')
+    .option('--plan <json>', 'Inline plan JSON (alternative to file argument or stdin)')
     .action(
       async (
         file: string | undefined,
-        options: { yes?: boolean; requireApproval?: boolean; continueOnError?: boolean },
+        options: { yes?: boolean; requireApproval?: boolean; continueOnError?: boolean; plan?: string },
       ) => {
         if (options.requireApproval && isJsonMode()) {
           console.error('error: --require-approval cannot be used with --json (no TTY available for prompts)');
           process.exit(1);
         }
+        if (options.plan !== undefined && file !== undefined) {
+          console.error('error: --plan and a file argument are mutually exclusive.');
+          process.exit(2);
+        }
         let raw: unknown;
         try {
-          raw = await readPlanSource(file);
+          if (options.plan !== undefined) {
+            try {
+              raw = JSON.parse(options.plan);
+            } catch (err) {
+              throw new UsageError(`--plan is not valid JSON: ${(err as Error).message}`);
+            }
+          } else {
+            raw = await readPlanSource(file);
+          }
         } catch (err) {
           handleError(err);
         }
