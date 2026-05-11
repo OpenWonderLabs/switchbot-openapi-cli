@@ -386,9 +386,13 @@ Examples:
           return;
         }
 
+        const totalDevices = resolved.ids.length;
+        const deviceIndices = new Map(resolved.ids.map((id, i) => [id, i + 1]));
+
         const startedAt = Date.now();
 
         const outcomes = await runPool(resolved.ids, concurrency, staggerMs, async (id) => {
+          const stepIdx = deviceIndices.get(id)!;
           const stepStart = Date.now();
           const startedIso = new Date(stepStart).toISOString();
           try {
@@ -403,7 +407,7 @@ Examples:
             const replayed =
               typeof result === 'object' && result !== null && (result as { replayed?: boolean }).replayed === true;
             if (!isJsonMode()) {
-              console.log(`✓ ${id}: ${cmd}${replayed ? ' (replayed)' : ''}`);
+              console.log(`[${stepIdx}/${totalDevices}] ✓ ${id}: ${cmd}${replayed ? ' (replayed)' : ''}`);
             }
             return {
               ok: true as const,
@@ -428,7 +432,7 @@ Examples:
             }
             const errorPayload = buildErrorPayload(err);
             if (!isJsonMode()) {
-              console.error(`✗ ${id}: ${errorPayload.message}`);
+              console.error(`[${stepIdx}/${totalDevices}] ✗ ${id}: ${errorPayload.message}`);
             }
             return {
               ok: false as const,
