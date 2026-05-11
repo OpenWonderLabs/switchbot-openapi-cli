@@ -1,4 +1,5 @@
 import { UsageError } from '../utils/output.js';
+import { CSS_COLORS } from './css-colors.js';
 
 export const AC_MODE_MAP: Record<string, number> = { auto: 1, cool: 2, dry: 3, fan: 4, heat: 5 };
 export const AC_FAN_MAP: Record<string, number> = { auto: 1, low: 2, mid: 3, high: 4 };
@@ -212,33 +213,23 @@ function hintBrightnessRetry(): string {
   return `Ask the user whether they meant a percentage (1-100). Example: "50".`;
 }
 
-// B-12: setColor accepts R:G:B, R,G,B, #RRGGBB, #RGB, or a small CSS named color
-// palette. All forms are normalized to `R:G:B` (the only wire shape SwitchBot
+// B-12: setColor accepts R:G:B, R,G,B, #RRGGBB, #RGB, or a CSS Level 4 named
+// color. All forms are normalized to `R:G:B` (the only wire shape SwitchBot
 // accepts) so the caller can POST the result unchanged.
-const NAMED_COLORS: Record<string, [number, number, number]> = {
-  red: [255, 0, 0],
-  green: [0, 128, 0],
-  lime: [0, 255, 0],
-  blue: [0, 0, 255],
-  yellow: [255, 255, 0],
-  cyan: [0, 255, 255],
-  magenta: [255, 0, 255],
-  white: [255, 255, 255],
-  black: [0, 0, 0],
-  orange: [255, 165, 0],
-  purple: [128, 0, 128],
-  pink: [255, 192, 203],
-  brown: [165, 42, 42],
-  grey: [128, 128, 128],
-  gray: [128, 128, 128],
+const CUSTOM_COLORS: Record<string, [number, number, number]> = {
   warm: [255, 180, 100],
+};
+
+const NAMED_COLORS: Record<string, [number, number, number]> = {
+  ...CSS_COLORS,
+  ...CUSTOM_COLORS,
 };
 
 function validateSetColor(raw: string | undefined): ValidateResult {
   if (raw === undefined || raw === '' || raw === 'default') {
     return {
       ok: false,
-      error: `setColor requires a color. Expected one of: "R:G:B" (e.g. "255:0:0"), "#RRGGBB" (e.g. "#FF0000"), "#RGB", "R,G,B", or a named color (${Object.keys(NAMED_COLORS).slice(0, 8).join(', ')}, ...).`,
+      error: `setColor requires a color. Use a CSS color name (e.g. coral, teal, salmon), hex (#RRGGBB / #RGB), or R:G:B format.`,
     };
   }
   const trimmed = raw.trim();
