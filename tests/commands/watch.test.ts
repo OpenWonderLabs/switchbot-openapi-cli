@@ -485,4 +485,38 @@ describe('devices watch', () => {
     // Example block explicitly labels the --json form as agent-friendly.
     expect(out).toMatch(/agent-friendly/i);
   });
+
+  it('--once is accepted without error', async () => {
+    cacheMock.map.set('BOT1', { type: 'Bot', name: 'Kitchen', category: 'physical' });
+    apiMock.__instance.get.mockResolvedValueOnce({
+      data: { statusCode: 100, body: { power: 'on', battery: 90 } },
+    });
+
+    const res = await runCli(registerDevicesCommand, [
+      '--json', 'devices', 'watch', 'BOT1', '--interval', '5s', '--once',
+    ]);
+
+    expect(res.exitCode).toBeNull();
+    const lines = res.stdout.filter((l) => l.trim().startsWith('{'));
+    // Stream header + one event
+    expect(lines.length).toBe(2);
+    const ev = expectStreamJsonEnvelopeShape(JSON.parse(lines[1]) as Record<string, unknown>, [
+      't',
+      'tick',
+      'deviceId',
+      'type',
+      'changed',
+      'snapshot',
+    ]);
+    expect(ev.tick).toBe(1);
+  });
+
+  it('--once and --max together produce a usage error with exit 2', async () => {
+    const res = await runCli(registerDevicesCommand, [
+      'devices', 'watch', 'BOT1', '--interval', '5s', '--once', '--max', '5',
+    ]);
+
+    expect(res.exitCode).toBe(2);
+    expect(res.stderr.join('\n')).toMatch(/--once.*--max.*mutually exclusive|--max.*--once.*mutually exclusive/i);
+  });
 });
