@@ -30,8 +30,9 @@ export function expectStreamHeaderShape(
   header: Record<string, unknown>,
   eventKind: 'tick' | 'event',
   cadence: 'poll' | 'push',
+  expectedVersion = '1.2',
 ): void {
-  expect(header.schemaVersion).toBe('1.2');
+  expect(header.schemaVersion).toBe(expectedVersion);
   expect(header.stream).toBe(true);
   expect(header.eventKind).toBe(eventKind);
   expect(header.cadence).toBe(cadence);

@@ -208,7 +208,7 @@ try {
   // Mirror the root mapping so all usage errors surface as exit 2.
   if (err instanceof CommanderError) {
     if (err.code === 'commander.helpDisplayed') {
-      const helpRequested = process.argv.includes('--help') || process.argv.includes('-h');
+      const helpRequested = process.argv.includes('--help') || process.argv.includes('-h') || process.argv.includes('help');
       if (helpRequested) {
         if (isJsonMode()) {
           const target = resolveTargetCommand(program, process.argv.slice(2));

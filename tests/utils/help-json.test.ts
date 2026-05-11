@@ -147,4 +147,15 @@ describe('resolveTargetCommand', () => {
       resolveTargetCommand(root, ['--config', '/tmp/c.json', '--profile', 'home', 'cache']).name()
     ).toBe('cache');
   });
+
+  it('skips root-level value-consuming flags that appear after a subcommand token', () => {
+    const root = new Command('switchbot');
+    root.option('--config <path>', 'config path');
+    const devices = root.command('devices');
+    devices.command('list');
+
+    expect(
+      resolveTargetCommand(root, ['devices', '--config', '/tmp/c.json', 'list']).name()
+    ).toBe('list');
+  });
 });

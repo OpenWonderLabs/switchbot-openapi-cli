@@ -127,11 +127,27 @@ Examples:
         let parameter: string;
 
         if (command === 'setAll') {
+          if (!cached) {
+            throw new UsageError(
+              `Device ${deviceId} is not in the local cache — run 'switchbot devices list' first so 'expand' can verify this is an Air Conditioner.`
+            );
+          }
+          if (deviceType !== 'Air Conditioner') {
+            throw new UsageError(
+              `"setAll" is only supported on Air Conditioner devices, but "${cached.type}" was found.`
+            );
+          }
           parameter = buildAcSetAll(options);
         } else if (command === 'setPosition') {
           if (!cached) {
             throw new UsageError(
               `Device ${deviceId} is not in the local cache — run 'switchbot devices list' first so 'expand' knows whether this is a Curtain or a Blind Tilt.`
+            );
+          }
+          const positionTypes = ['Curtain', 'Curtain 3', 'Roller Shade', 'Blind Tilt'];
+          if (!positionTypes.some(t => deviceType.startsWith(t))) {
+            throw new UsageError(
+              `"setPosition" is only supported on Curtain, Roller Shade, and Blind Tilt devices, but "${cached.type}" was found.`
             );
           }
           const isBlind = deviceType.startsWith('Blind Tilt');

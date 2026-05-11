@@ -146,7 +146,7 @@ export function validateParameter(
   if (command === 'setColor' && isColorDevice(deviceType)) {
     return validateSetColor(raw);
   }
-  if (command === 'setColorTemperature' && isColorDevice(deviceType)) {
+  if (command === 'setColorTemperature' && isBrightnessDevice(deviceType)) {
     return validateSetColorTemperature(raw);
   }
 

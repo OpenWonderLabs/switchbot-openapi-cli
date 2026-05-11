@@ -363,4 +363,21 @@ describe('devices expand', () => {
       { command: 'setBrightness', parameter: '60', commandType: 'command' },
     );
   });
+
+  it('setAll on non-AC device (Bot) → UsageError', async () => {
+    const res = await runCli(registerDevicesCommand, [
+      'devices', 'expand', BOT_ID, 'setAll',
+      '--temp', '26', '--mode', 'cool', '--fan', 'low', '--power', 'on',
+    ]);
+    expect(res.exitCode).toBe(2);
+    expect(res.stderr.join('\n')).toMatch(/only supported on Air Conditioner/);
+  });
+
+  it('setPosition on non-Curtain/Blind device (Bot) → UsageError', async () => {
+    const res = await runCli(registerDevicesCommand, [
+      'devices', 'expand', BOT_ID, 'setPosition', '--position', '50',
+    ]);
+    expect(res.exitCode).toBe(2);
+    expect(res.stderr.join('\n')).toMatch(/only supported on Curtain/);
+  });
 });

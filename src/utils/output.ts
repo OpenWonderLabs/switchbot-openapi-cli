@@ -46,10 +46,11 @@ export function emitJsonError(errorPayload: Record<string, unknown>): void {
 export function emitStreamHeader(opts: {
   eventKind: 'tick' | 'event';
   cadence: 'poll' | 'push';
+  schemaVersion?: string;
 }): void {
   console.log(
     JSON.stringify({
-      schemaVersion: SCHEMA_VERSION,
+      schemaVersion: opts.schemaVersion ?? SCHEMA_VERSION,
       stream: true,
       eventKind: opts.eventKind,
       cadence: opts.cadence,
