@@ -36,6 +36,7 @@ Examples:
 
   history
     .command('show')
+    .alias('list')
     .description('Print recent audit entries')
     .option('--file <path>', `Path to the audit log (default ${DEFAULT_AUDIT})`, stringArg('--file'))
     .option('--limit <n>', 'Show only the last N entries', intArg('--limit', { min: 1 }))

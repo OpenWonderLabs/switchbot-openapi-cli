@@ -121,6 +121,17 @@ describe('scenes command', () => {
       expect(res.stdout.join('\n')).toContain('Scene executed: SCENE-1');
     });
 
+    it('"scenes run" invokes the same handler as "scenes execute"', async () => {
+      apiMock.__instance.get.mockResolvedValue({
+        data: { body: [{ sceneId: 'SCENE-1', sceneName: 'Morning' }] },
+      });
+      apiMock.__instance.post.mockResolvedValue({ data: {} });
+      const res = await runCli(registerScenesCommand, ['scenes', 'run', 'SCENE-1']);
+      expect(apiMock.__instance.post).toHaveBeenCalledWith('/v1.1/scenes/SCENE-1/execute');
+      expect(res.stdout.join('\n')).toContain('Scene executed: SCENE-1');
+      expect(res.exitCode).toBeNull();
+    });
+
     it('exits 1 when execution fails', async () => {
       apiMock.__instance.get.mockResolvedValue({
         data: { body: [{ sceneId: 'missing', sceneName: 'X' }] },

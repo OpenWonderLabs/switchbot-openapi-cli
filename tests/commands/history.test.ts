@@ -59,6 +59,14 @@ describe('history command', () => {
       expect(res.stderr.join('\n')).toMatch(/--file .* looks like another option/i);
     });
 
+    it('"history list" invokes the same handler as "history show"', async () => {
+      const res = await runCli(registerHistoryCommand, [
+        'history', 'list', '--file', auditFile,
+      ]);
+      expect(res.stdout.join('\n')).toMatch(/no entries/);
+      expect(res.exitCode).toBeNull();
+    });
+
     it('prints (no entries) when the log does not exist', async () => {
       const res = await runCli(registerHistoryCommand, [
         'history', 'show', '--file', auditFile,
