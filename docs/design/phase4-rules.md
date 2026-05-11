@@ -145,11 +145,24 @@ were folded into the composite nodes above).
 
 ## Actions
 
-Each `then[]` entry renders to:
+Each `then[]` entry is one of two types:
+
+**`type: command`** (default) — renders to:
 
 ```
 switchbot <command with <id> substituted> <args rendered as --key value> --audit-log
 ```
+
+**`type: notify`** — delivers a payload to an external channel:
+
+```yaml
+- type: notify
+  channel: webhook        # webhook | file | openclaw
+  to: https://your.host/hook
+  template: '{"rule":"{{ rule.name }}","fired":"{{ rule.fired_at }}"}'
+```
+
+Channels: `webhook` (HTTP POST), `file` (append JSONL), `openclaw` (HTTP POST). Template supports `{{ rule.name }}`, `{{ event.* }}`, `{{ device.id }}` placeholders. Audit gains `rule-notify` kind for every notify dispatch.
 
 Rules:
 

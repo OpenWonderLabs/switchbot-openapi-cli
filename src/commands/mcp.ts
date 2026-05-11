@@ -2243,7 +2243,7 @@ export function registerMcpCommand(program: Command): void {
     .command('mcp')
     .description('Run as a Model Context Protocol server so AI agents can call SwitchBot tools')
     .addHelpText('after', `
-  The MCP server exposes twenty-one tools:
+  The MCP server exposes twenty-four tools:
   - list_devices            fetch all physical + IR devices
   - get_device_status       live status for a physical device
   - send_command            control a device (destructive commands need confirm:true)
@@ -2266,6 +2266,8 @@ export function registerMcpCommand(program: Command): void {
   - audit_stats             aggregate audit counts by kind/result/device/rule
   - rule_notifications      query rule notify action delivery history
   - rules_suggest           draft an automation rule YAML from intent (heuristic, no LLM)
+  - rules_explain           show why a rule evaluation fired or was blocked
+  - rules_simulate          simulate a rule against historical events
   - policy_add_rule         append a rule into automation.rules[] in policy.yaml
 
 Resource (read-only):

@@ -43,7 +43,7 @@ Prefer the top-level `schemaVersion`. The nested copy may be removed in a future
 
 ## Current Versions
 
-- **v3.4.1**: schemaVersion "1.2"
+- **v3.4.0**: schemaVersion "1.2"
   - `catalog show <Type> --json`: `data` is now always an array (was bare object for single-type queries)
   - `devices commands <Type> --json`: same change — `data` is always an array
   - `fetchedAt` field renamed from `_fetchedAt` in `devices status` JSON output

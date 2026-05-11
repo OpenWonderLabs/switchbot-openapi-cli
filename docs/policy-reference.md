@@ -39,12 +39,13 @@ supports two schemas:
 
 | Version | Status | What it adds |
 |---|---|---|
-| `"0.1"` | Legacy — migrate with `policy migrate` | aliases, confirmations, quiet_hours, audit, cli |
+| `"0.1"` | **Removed in v3.0** — migrate with `policy migrate` (CLI ≤2.15) | aliases, confirmations, quiet_hours, audit, cli |
 | `"0.2"` | **Current (required)** | typed `automation.rules[]` for the rules engine |
 
-A file with anything other than `"0.1"` or `"0.2"` fails validation
+A file with anything other than `"0.2"` fails validation
 with a named `unsupported-version` error. v0.2 is the default emitted
-by `switchbot policy new`. Existing v0.1 files can be upgraded in-place:
+by `switchbot policy new`. Existing v0.1 files must be migrated using
+CLI ≤2.15 before upgrading to v3.0+:
 
 ```bash
 switchbot policy migrate   # in-place upgrade, preserves comments
@@ -95,10 +96,9 @@ Rules:
 
 - Keys are free-form strings. Quote them if they contain spaces or
   non-ASCII characters.
-- Values must match `^[A-Z0-9]{2,}-[A-Z0-9-]+$` — SwitchBot deviceIds
-  are uppercase. A lowercase deviceId is the #1 cause of validation
-  failures.
-- Get IDs from `switchbot devices list --format=tsv`.
+- Values must match `^[A-Za-z0-9][A-Za-z0-9_-]{1,63}$` — also accepts
+  hex MAC format and hyphenated multi-segment IDs.
+  Get IDs from `switchbot devices list --format=tsv`.
 
 ---
 
@@ -187,6 +187,11 @@ Run `switchbot policy migrate` first to unlock the rules engine.
 ```yaml
 automation:
   enabled: true             # must be true for `rules run` to do anything
+  audit:
+    evaluate_trace: sampled  # full | sampled | off (default sampled)
+    evaluate_retention_days: 7  # min 1 (default 7)
+  llm_budget:
+    max_calls_per_hour: 60   # global limit across all LLM conditions (default 60)
   rules:
     - name: hallway motion at night   # unique per file; audit label
       enabled: true                   # default true; false silences the rule
@@ -201,21 +206,32 @@ automation:
           device: hallway lamp        # alias resolves to deviceId at fire time
           args: null                  # optional map of verb arguments
           on_error: continue          # continue (default) | stop
+        - type: notify
+          channel: webhook            # webhook | file | openclaw
+          to: https://your.host/hook
+          template: '{"rule":"{{ rule.name }}","fired":"{{ rule.fired_at }}"}'
+          on_failure: log             # log | retry | ignore
       throttle:
         max_per: "10m"                # minimum spacing: \d+[smh]
+        dedupe_window: null           # event deduplication window
+      cooldown: null                  # shorthand for throttle.max_per
+      requires_stable_for: null       # hysteresis guard duration
+      maxFiringsPerHour: null         # per-hour rate limit
+      suppressIfAlreadyDesired: false # skip if device already in desired state
       dry_run: true                   # default true in v0.2; writes audit but skips the API call
 ```
 
 **Trigger sources (v0.2).**
 
-| `source`  | Required fields        | Status in PoC                    |
+| `source`  | Required fields        | Status                           |
 |-----------|------------------------|----------------------------------|
 | `mqtt`    | `event` (+ `device?`)  | **active** — fires on shadow MQTT |
-| `cron`    | `schedule` (5-field)   | parsed; `rules lint` flags `unsupported` |
-| `webhook` | `path`                 | parsed; `rules lint` flags `unsupported` |
+| `cron`    | `schedule` (5-field)   | **active** — local time, optional `days` weekday filter |
+| `webhook` | `path`                 | **active** — bearer-token HTTP ingest |
 
 MQTT event names classified today: `motion.detected`,
-`motion.cleared`, `contact.opened`, `contact.closed`. Unmatched
+`motion.cleared`, `contact.opened`, `contact.closed`,
+`button.pressed`. Unmatched
 payloads classify as `device.shadow` — you can match that catch-all
 too.
 
@@ -224,7 +240,28 @@ too.
 | Keyword         | Meaning                                                       | Status |
 |-----------------|---------------------------------------------------------------|--------|
 | `time_between`  | `[HH:MM, HH:MM]` local-time window, `start > end` → overnight | active |
-| `device_state`  | `{ device, field, op, value }` read device status inline      | parsed; reports as `condition-unsupported` until E3 |
+| `device_state`  | `{ device, field, op, value }` read device status inline      | active |
+| `all`           | AND-join multiple sub-conditions                               | active |
+| `any`           | OR-join multiple sub-conditions                                | active |
+| `not`           | Negate a sub-condition                                         | active |
+| `llm`           | AI judgement — prompt an LLM before firing (see below)         | active |
+
+**LLM condition fields:**
+
+```yaml
+conditions:
+  - llm:
+      prompt: "Is the temperature above normal comfort range?"
+      provider: auto          # auto | openai | anthropic
+      timeout_ms: 5000        # 500–10000 (default 5000)
+      cache_ttl: 5m           # none | \d+[smh] (default 5m)
+      recent_events: 5        # 0–20 (default 5) — recent events included in prompt
+      budget:
+        max_calls_per_hour: 10  # per-condition limit (default 10)
+      on_error: fail          # fail | pass | skip (default fail)
+```
+
+Set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. `rules lint` flags misconfigured LLM conditions. Global LLM budget can be set via `automation.llm_budget.max_calls_per_hour` (default 60).
 
 **Destructive verbs are refused upstream.** The v0.2 validator
 rejects `lock`, `unlock`, `deleteWebhook`, `deleteScene`,
@@ -281,9 +318,10 @@ Exit codes:
 | Code | Meaning |
 |---|---|
 | 0 | File is valid and matches schema v0.2 |
-| 1 | File is missing |
-| 2 | YAML is malformed (parse error, with line/col) |
-| 3 | Schema violation (line-accurate error with hint) |
+| 1 | Schema violation (line-accurate error with hint) |
+| 2 | File is missing |
+| 3 | YAML is malformed (parse error, with line/col) |
+| 4 | Internal error |
 
 Every non-zero exit prints a compiler-style block:
 
@@ -322,7 +360,7 @@ For machine consumption, pass `--json`. The envelope is the standard
 | `missing version` | Top-level `version` is absent | Add `version: "0.2"` |
 | `unsupported version` | `version` is not `"0.1"` or `"0.2"` | Check spelling; run `switchbot policy migrate` to upgrade from v0.1 |
 | `wrong version` | `version: "0.1"` on a CLI that requires v0.2 | Run `switchbot policy migrate` |
-| `lowercase deviceId` | `aliases` value isn't UPPERCASE | Uppercase the ID (it is in `devices list`) |
+| `lowercase deviceId` | `aliases` value doesn't match the accepted patterns | Copy the exact ID from `devices list` |
 | `destructive in never_confirm` | `lock`/`unlock`/etc in `confirmations.never_confirm` | Remove it; intentional by design |
 | `quiet_hours.start without end` | Only one of the two times is set | Set both, or remove the block |
 | `invalid retention` | `audit.retention` isn't `never` / `Nd` / `Nw` / `Nm` | Use one of the documented formats |

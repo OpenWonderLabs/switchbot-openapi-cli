@@ -63,7 +63,7 @@ Under the hood every surface shares the same catalog, cache, and HMAC client —
 - 🎨 **Dual output modes** — colorized tables by default; `--json` passthrough for `jq` and scripting
 - 🔐 **Secure credentials** — HMAC-SHA256 signed requests; config file written with `0600`; env-var override for CI
 - 🔍 **Dry-run mode** — preview every mutating request before it hits the API
-- 🧪 **Fully tested** — 2216 Vitest tests, mocked axios, zero network in CI
+- 🧪 **Fully tested** — 2225 Vitest tests, mocked axios, zero network in CI
 - ⚡ **Shell completion** — Bash / Zsh / Fish / PowerShell
 
 ## Requirements
@@ -610,10 +610,11 @@ switchbot mcp serve
 ```
 
 Exposes MCP tools (`list_devices`, `describe_device`, `get_device_status`,
+`get_device_history`, `query_device_history`, `aggregate_device_history`,
 `send_command`, `list_scenes`, `run_scene`, `search_catalog`,
 `account_overview`, `plan_suggest`, `plan_run`, `audit_query`,
 `audit_stats`, `policy_diff`, `policy_validate`, `policy_new`,
-`policy_migrate`, `rules_suggest`, `rule_notifications`,
+`policy_migrate`, `policy_add_rule`, `rules_suggest`, `rule_notifications`,
 `rules_explain`, `rules_simulate`) plus a
 `switchbot://events` resource for real-time shadow updates.
 `rules_suggest` accepts an optional `llm` parameter (`openai | anthropic | auto`)
@@ -632,7 +633,7 @@ switchbot doctor
 switchbot doctor --json
 ```
 
-Runs local checks (Node version, credentials, profiles, catalog, cache, quota, clock, MQTT, policy, MCP, notify-connectivity) and exits 1 if any check fails. `warn` results exit 0. The MQTT check reports `ok` when REST credentials are configured (auto-provisioned on first use). The `notify-connectivity` check probes webhook URLs declared in `type: notify` actions. Use this to diagnose connectivity or config issues before running automation.
+Runs local checks (Node version, credentials, profiles, catalog, catalog-schema, cache, quota, clock, MQTT, policy, MCP, keychain, path, inventory, audit, daemon, health, notify-connectivity, release-notes) and exits 1 if any check fails. `warn` results exit 0. The MQTT check reports `ok` when REST credentials are configured (auto-provisioned on first use). The `notify-connectivity` check probes webhook URLs declared in `type: notify` actions. Use this to diagnose connectivity or config issues before running automation.
 
 `--json` output includes `maturityScore` (0–100) and `maturityLabel` (`production-ready` / `mostly-ready` / `needs-work` / `not-ready`) to give an at-a-glance readiness rating:
 
@@ -806,7 +807,7 @@ npm install
 
 npm run dev -- <args>       # Run from TypeScript sources via tsx
 npm run build               # Compile to dist/
-npm test                    # Run the Vitest suite (2216 tests)
+npm test                    # Run the Vitest suite (2225 tests)
 npm run test:watch          # Watch mode
 npm run test:coverage       # Coverage report (v8, HTML + text)
 ```

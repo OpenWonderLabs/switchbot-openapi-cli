@@ -16,9 +16,9 @@ Every record is a JSON object with at least the following fields:
 
 | Field          | Type                 | Notes                                                                                  |
 |----------------|----------------------|----------------------------------------------------------------------------------------|
-| `auditVersion` | number               | Schema version. Current: `1`. Missing on records written before audit versioning.      |
+| `auditVersion` | number               | Schema version. Current: `2`. Missing on records written before audit versioning.      |
 | `t`            | string (ISO-8601)    | Timestamp when the record was written.                                                 |
-| `kind`         | `"command"`          | Record discriminator. Currently the only kind is `command`.                            |
+| `kind`         | string               | Record discriminator. Values: `command`, `rule-fire`, `rule-fire-dry`, `rule-throttled`, `rule-webhook-rejected`, `rule-notify`, `rule-evaluate`, `llm-suggest`, `llm-condition`, `llm-budget-exceeded`. |
 | `deviceId`     | string               | Target device ID.                                                                      |
 | `command`      | string               | SwitchBot command name (e.g. `turnOn`, `setColor`).                                    |
 | `parameter`    | string \| object     | Command parameter as sent — `"default"` when unused.                                   |
@@ -30,7 +30,7 @@ Every record is a JSON object with at least the following fields:
 ### Example
 
 ```json
-{"auditVersion":1,"t":"2026-04-20T01:23:45.123Z","kind":"command","deviceId":"ABC123","command":"turnOn","parameter":"default","commandType":"command","dryRun":false,"result":"ok"}
+{"auditVersion":2,"t":"2026-04-20T01:23:45.123Z","kind":"command","deviceId":"ABC123","command":"turnOn","parameter":"default","commandType":"command","dryRun":false,"result":"ok"}
 ```
 
 ## Crash safety
