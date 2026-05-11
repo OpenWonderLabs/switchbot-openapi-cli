@@ -67,7 +67,7 @@ Supported expansions:
   Color Bulb / Strip Light / Ceiling Light — setBrightness
     --brightness 80  →  "80"
 
-  Color Bulb / Strip Light / Ceiling Light — setColor
+  Color Bulb / Strip Light / Floor Lamp — setColor
     --color "255:0:0"  →  "255:0:0"
     --color "#FF0000"  →  "255:0:0"
     --color red        →  "255:0:0"
@@ -151,9 +151,15 @@ Examples:
             );
           }
           const isBlind = deviceType.startsWith('Blind Tilt');
-          parameter = isBlind
-            ? buildBlindTiltSetPosition(options)
-            : buildCurtainSetPosition(options);
+          const isRollerShade = deviceType.startsWith('Roller Shade');
+          if (isBlind) {
+            parameter = buildBlindTiltSetPosition(options);
+          } else if (isRollerShade) {
+            if (!options.position) throw new UsageError('--position is required (0-100)');
+            parameter = options.position;
+          } else {
+            parameter = buildCurtainSetPosition(options);
+          }
         } else if (command === 'setMode' && deviceType.startsWith('Relay Switch')) {
           parameter = buildRelaySetMode(options);
         } else if (command === 'setBrightness' || command === 'setColor' || command === 'setColorTemperature') {
