@@ -208,17 +208,38 @@ try {
   // Mirror the root mapping so all usage errors surface as exit 2.
   if (err instanceof CommanderError) {
     if (err.code === 'commander.helpDisplayed') {
+      const helpRequested = process.argv.includes('--help') || process.argv.includes('-h') || process.argv.includes('help');
+      if (helpRequested) {
+        if (isJsonMode()) {
+          const target = resolveTargetCommand(program, process.argv.slice(2));
+          printJson(commandToJson(target, { includeIdentity: target === program }));
+        }
+        process.exit(0);
+      }
       if (isJsonMode()) {
         const target = resolveTargetCommand(program, process.argv.slice(2));
-        printJson(commandToJson(target, { includeIdentity: target === program }));
+        const subNames = target.commands.map((c: Command) => c.name()).join(', ');
+        const usefulMessage = subNames
+          ? `${target.name()}: a subcommand is required. Available: ${subNames}`
+          : err.message;
+        emitJsonError({ code: 2, kind: 'usage', message: usefulMessage });
       }
-      process.exit(0);
+      process.exit(2);
     }
     if (err.code === 'commander.version') {
       process.exit(0);
     }
     if (isJsonMode()) {
-      emitJsonError({ code: 2, kind: 'usage', message: err.message });
+      const errorMessage = err.code === 'commander.help'
+        ? (() => {
+            const target = resolveTargetCommand(program, process.argv.slice(2));
+            const subNames = target.commands.map((c: Command) => c.name()).join(', ');
+            return subNames
+              ? `${target.name()}: a subcommand is required. Available: ${subNames}`
+              : err.message;
+          })()
+        : err.message;
+      emitJsonError({ code: 2, kind: 'usage', message: errorMessage });
     }
     process.exit(2);
   }

@@ -717,10 +717,10 @@ describe('devices command', () => {
       ]);
       const parsed = JSON.parse(res.stdout.join('\n'));
       expect(Array.isArray(parsed.data)).toBe(true);
-      // _fetchedAt is added by the CLI; verify other fields are present
+      // fetchedAt is added by the CLI; verify other fields are present
       expect(parsed.data[0].power).toBe('off');
       expect(parsed.data[0].battery).toBe(50);
-      expect(parsed.data[0]._fetchedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(parsed.data[0].fetchedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     });
 
     it('serializes nested objects to JSON strings in tsv output', async () => {
@@ -774,7 +774,7 @@ describe('devices command', () => {
         'devices', 'status', 'DEV3', '--format', 'tsv',
       ]);
       const lines = res.stdout.join('\n').split('\n');
-      // null maps to empty string in cellToString; _fetchedAt column is also present
+      // null maps to empty string in cellToString; fetchedAt column is also present
       expect(lines[1]).toMatch(/^on\t\t/);
     });
 
@@ -2565,7 +2565,7 @@ describe('devices command', () => {
       const out = res.stdout.join('\n');
       expect(out).toBeTruthy();
       const parsed = JSON.parse(out);
-      expect(parsed.schemaVersion).toBe('1.1');
+      expect(parsed.schemaVersion).toBe('1.2');
       expect(parsed.data.dryRun).toBe(true);
       expect(parsed.data.wouldSend.deviceId).toBe(DRY_ID);
       expect(parsed.data.wouldSend.command).toBe('turnOff');
@@ -2592,7 +2592,7 @@ describe('devices command', () => {
       const res = await runCli(registerDevicesCommand, ['--json', 'devices', 'list', '--help']);
       expect(res.exitCode).toBe(0);
       const parsed = JSON.parse(res.stdout.join('\n'));
-      expect(parsed.schemaVersion).toBe('1.1');
+      expect(parsed.schemaVersion).toBe('1.2');
       expect(parsed.data.name).toBe('list');
       expect(Array.isArray(parsed.data.options)).toBe(true);
       expect(Array.isArray(parsed.data.arguments)).toBe(true);
@@ -2616,7 +2616,7 @@ describe('devices command', () => {
       const res = await runCli(registerDevicesCommand, ['--json', 'devices', 'commands', 'Bot']);
       expect(res.exitCode).toBeNull();
       const parsed = JSON.parse(res.stdout.join('\n'));
-      const cmds: Array<{ safetyTier?: string }> = parsed.data.commands;
+      const cmds: Array<{ safetyTier?: string }> = parsed.data[0].commands;
       expect(cmds.length).toBeGreaterThan(0);
       for (const c of cmds) {
         expect(typeof c.safetyTier).toBe('string');
@@ -2627,7 +2627,7 @@ describe('devices command', () => {
       const res = await runCli(registerDevicesCommand, ['--json', 'devices', 'commands', 'Smart Lock']);
       expect(res.exitCode).toBeNull();
       const parsed = JSON.parse(res.stdout.join('\n'));
-      const cmds: Array<{ command: string; safetyTier: string }> = parsed.data.commands;
+      const cmds: Array<{ command: string; safetyTier: string }> = parsed.data[0].commands;
       const unlock = cmds.find((c) => c.command === 'unlock');
       const lock = cmds.find((c) => c.command === 'lock');
       expect(unlock?.safetyTier).toBe('destructive');

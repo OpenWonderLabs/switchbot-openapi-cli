@@ -32,7 +32,7 @@ points back to.
 | Capability | This repo (`switchbot-openapi-cli`) | Cross-repo (`+ companion skill repo`) | Notes |
 | --- | --- | --- | --- |
 | Phase 1 (manual orchestration) | Shipped | Shipped | Stable in v2.7.x |
-| Phase 2 (policy tooling) | Shipped | Shipped | v0.1 + v0.2 policy schema support |
+| Phase 2 (policy tooling) | Shipped | Shipped | v0.2 policy schema (v0.1 removed in v3.0) |
 | Phase 3A (keychain + install CLI) | Shipped | Shipped | `switchbot install` / `switchbot uninstall` |
 | Phase 3B (skill packaging + external registry) | External tracking only | In progress outside this repo | Owned by companion skill repo |
 | Phase 4 (rules engine, v0.2 model) | Shipped | Shipped | MQTT/cron/webhook + `days` + `all`/`any`/`not` |
@@ -81,7 +81,7 @@ reads it, the MCP server reads it, and `doctor` reports on it.
 
 Surfaces:
 
-- `policy new | validate | migrate | diff` (v0.1 and v0.2 schemas)
+- `policy new | validate | migrate | diff` (v0.2 schema; v0.1 removed in v3.0)
 - Default `policy.yaml` discovery rules
 - Aliases (human-readable device names)
 - Quiet hours (local-time windows, midnight-crossing supported)
@@ -199,23 +199,19 @@ the skill's `manifest.json` `roadmap` block, which points back here.
 
 ## Next execution queue (ordered)
 
-1. **v0.1 policy deprecation window (post-default-flip hardening).**
-  Keep validating v0.1, but emit explicit migration guidance in UX/docs.
-  Exit when: policy docs and CLI examples consistently steer new users to
-  v0.2, and migration guidance is visible in `policy migrate` help.
-2. **Daemon mode for repeated agent invocations.**
+1. **Daemon mode for repeated agent invocations.**
   Add a local long-lived process with Unix socket / named pipe transport.
   Exit when: repeated MCP + plan runs no longer pay fresh-process startup,
   and `doctor` can verify daemon health.
-3. **Standalone MCP package (`npx @switchbot/mcp-server`).**
+2. **Standalone MCP package (`npx @switchbot/mcp-server`).**
   Split MCP serve entrypoint into a tiny publishable package while
   preserving tool contract parity with the main CLI.
   Exit when: `npx @switchbot/mcp-server` boots and passes the same MCP
   contract tests as `switchbot mcp serve`.
-4. **`switchbot self-test` command.**
+3. **`switchbot self-test` command.**
   Add scripted go/no-go checks for credentials + one representative device.
   Exit when: CI can run a deterministic self-test job with pass/fail JSON.
-5. **Record/replay fixtures for deterministic integration tests.**
+4. **Record/replay fixtures for deterministic integration tests.**
   Capture request/response transcripts and replay offline in CI.
   Exit when: at least one full scenario (list → status → command guard)
   is replayable without live API calls.

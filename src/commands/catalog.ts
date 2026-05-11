@@ -136,7 +136,7 @@ Examples:
             throw new UsageError(`"${match.type}" exists in the effective catalog but not in source "${source}".`);
           }
           if (isJsonMode()) {
-            printJson(picked);
+            printJson([picked]);
             return;
           }
           renderEntry(picked);

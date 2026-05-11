@@ -109,4 +109,53 @@ describe('resolveTargetCommand', () => {
     const result = resolveTargetCommand(root, ['d', '--help']);
     expect(result.name()).toBe('devices');
   });
+
+  it('skips a value-consuming flag and its value (--config <path>)', () => {
+    const root = new Command('switchbot');
+    root.option('--json', 'json mode');
+    root.option('--config <path>', 'config path');
+    const cache = root.command('cache');
+    cache.command('show');
+
+    expect(resolveTargetCommand(root, ['--json', '--config', '/tmp/cfg.json', 'cache']).name()).toBe('cache');
+  });
+
+  it('skips --profile value before subcommand', () => {
+    const root = new Command('switchbot');
+    root.option('--json', 'json mode');
+    root.option('--profile <name>', 'profile');
+    root.command('history');
+
+    expect(resolveTargetCommand(root, ['--json', '--profile', 'default', 'history']).name()).toBe('history');
+  });
+
+  it('handles inline flag value (--config=path) without consuming next token', () => {
+    const root = new Command('switchbot');
+    root.option('--config <path>', 'config path');
+    root.command('cache');
+
+    expect(resolveTargetCommand(root, ['--config=/tmp/cfg.json', 'cache']).name()).toBe('cache');
+  });
+
+  it('skips multiple sequential value-consuming flags before subcommand', () => {
+    const root = new Command('switchbot');
+    root.option('--config <path>', 'config path');
+    root.option('--profile <name>', 'profile');
+    root.command('cache');
+
+    expect(
+      resolveTargetCommand(root, ['--config', '/tmp/c.json', '--profile', 'home', 'cache']).name()
+    ).toBe('cache');
+  });
+
+  it('skips root-level value-consuming flags that appear after a subcommand token', () => {
+    const root = new Command('switchbot');
+    root.option('--config <path>', 'config path');
+    const devices = root.command('devices');
+    devices.command('list');
+
+    expect(
+      resolveTargetCommand(root, ['devices', '--config', '/tmp/c.json', 'list']).name()
+    ).toBe('list');
+  });
 });

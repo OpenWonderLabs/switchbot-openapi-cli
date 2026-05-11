@@ -164,7 +164,7 @@ function runSchemaExport(options: { type?: string; types?: string; role?: string
       payload.resources = RESOURCE_CATALOG;
       payload.cliAddedFields = [
         {
-          field: '_fetchedAt',
+          field: 'fetchedAt',
           appliesTo: ['devices status', 'devices describe'],
           type: 'string (ISO-8601)',
           description:
@@ -256,7 +256,7 @@ Common top-level fields:
   schemaVersion             CLI schema version (stable for agent contracts)
   data.version              Catalog schema version
   data.types                Array of SchemaEntry (or CompactSchemaEntry with --compact)
-  data._fetchedAt           CLI-added; present on live-query responses ('devices status'),
+  data.fetchedAt            CLI-added; present on live-query responses ('devices status'),
                             not on this offline export.
 
 Examples:

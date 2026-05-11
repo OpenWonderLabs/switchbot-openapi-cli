@@ -132,7 +132,7 @@ describe('renderRows', () => {
     renderRows(headers, rows, 'json');
     const parsed = JSON.parse(logOutput.join('\n'));
     expect(parsed).toEqual({
-      schemaVersion: '1.1',
+      schemaVersion: '1.2',
       data: [
         { deviceId: 'DEV1', name: 'Light', type: 'Bot' },
         { deviceId: 'DEV2', name: 'Door', type: 'Smart Lock' },

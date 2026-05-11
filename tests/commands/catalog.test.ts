@@ -159,11 +159,12 @@ describe('catalog show', () => {
     expect(data.find((e) => e.type === 'Bot')).toBeDefined();
   });
 
-  it('emits a single-entry JSON object when a type is given', async () => {
+  it('emits a single-entry JSON array when a type is given', async () => {
     const { stdout } = await runCli(registerCatalogCommand, ['--json', 'catalog', 'show', 'Bot']);
     const parsed = JSON.parse(stdout.join('\n')) as Record<string, unknown>;
-    const data = expectJsonEnvelopeContainingKeys(parsed, ['type', 'category', 'description', 'role', 'commands', 'statusFields']);
-    expect(data.type).toBe('Bot');
+    const arr = expectJsonArrayEnvelope(parsed);
+    expect(arr).toHaveLength(1);
+    expect((arr[0] as Record<string, unknown>).type).toBe('Bot');
   });
 });
 

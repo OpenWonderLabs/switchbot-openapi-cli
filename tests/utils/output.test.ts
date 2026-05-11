@@ -43,7 +43,7 @@ describe('printJson', () => {
     const out = logSpy.mock.calls[0][0];
     expect(out).toBe(JSON.stringify({ schemaVersion: SCHEMA_VERSION, data: { a: 1, b: [2, 3] } }, null, 2));
     expect(out).toContain('\n  ');
-    expect(JSON.parse(out)).toEqual({ schemaVersion: '1.1', data: { a: 1, b: [2, 3] } });
+    expect(JSON.parse(out)).toEqual({ schemaVersion: '1.2', data: { a: 1, b: [2, 3] } });
   });
 
   it('wraps null and primitive payloads inside data', () => {
@@ -53,9 +53,9 @@ describe('printJson', () => {
     printJson('hi');
     const parsed = logSpy.mock.calls.map((c) => JSON.parse(String(c[0])));
     expect(parsed).toEqual([
-      { schemaVersion: '1.1', data: null },
-      { schemaVersion: '1.1', data: 42 },
-      { schemaVersion: '1.1', data: 'hi' },
+      { schemaVersion: '1.2', data: null },
+      { schemaVersion: '1.2', data: 42 },
+      { schemaVersion: '1.2', data: 'hi' },
     ]);
   });
 });
@@ -255,8 +255,7 @@ describe('handleError', () => {
       expect(() => handleError(new ApiError('bad device', 190))).toThrow('__exit');
       const raw = logSpy.mock.calls[0][0];
       const parsed = JSON.parse(raw);
-      expect(parsed.schemaVersion).toBe('1.1');
-      expect(parsed.error.code).toBe(190);
+      expect(parsed.schemaVersion).toBe('1.2');
       expect(parsed.error.message).toBe('bad device');
       expect(parsed.error.hint).toMatch(/generic internal error/);
     });

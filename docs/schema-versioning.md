@@ -15,24 +15,24 @@ The CLI emits structured JSON responses wrapped in a top-level envelope that car
 Every JSON response is one of:
 
 ```json
-{ "schemaVersion": "1.1", "data": { ... } }
+{ "schemaVersion": "1.2", "data": { ... } }
 ```
 
 ```json
-{ "schemaVersion": "1.1", "error": { "code": 1, "kind": "...", "message": "..." } }
+{ "schemaVersion": "1.2", "error": { "code": 1, "kind": "...", "message": "..." } }
 ```
 
 The payload your integration cares about is always nested under `data` (success) or `error` (failure). `schemaVersion` describes the *payload shape*, not the CLI version — the envelope itself is the structural signal introduced in CLI 2.0.
 
 ### Historical nested location: `batch.summary.schemaVersion`
 
-Before the top-level envelope existed, the `batch` command nested `schemaVersion` inside `summary`. That nested field is retained for back-compat — both of the following are set, and both equal `"1.1"`:
+Before the top-level envelope existed, the `batch` command nested `schemaVersion` inside `summary`. That nested field is retained for back-compat — both of the following are set, and both equal `"1.2"`:
 
 ```json
 {
-  "schemaVersion": "1.1",
+  "schemaVersion": "1.2",
   "data": {
-    "summary": { "schemaVersion": "1.1", "total": 3, "ok": 2, "error": 1, "skipped": 0 },
+    "summary": { "schemaVersion": "1.2", "total": 3, "ok": 2, "error": 1, "skipped": 0 },
     "succeeded": [ ... ],
     "failed": [ ... ]
   }
@@ -42,6 +42,11 @@ Before the top-level envelope existed, the `batch` command nested `schemaVersion
 Prefer the top-level `schemaVersion`. The nested copy may be removed in a future major.
 
 ## Current Versions
+
+- **v3.4.0**: schemaVersion "1.2"
+  - `catalog show <Type> --json`: `data` is now always an array (was bare object for single-type queries)
+  - `devices commands <Type> --json`: same change — `data` is always an array
+  - `fetchedAt` field renamed from `_fetchedAt` in `devices status` JSON output
 
 - **v2.0.0**: schemaVersion "1.1" inside a new top-level `{schemaVersion, data|error}` envelope
   - Every `--json` response now has a top-level `schemaVersion` (previously only `batch.summary` had it)
@@ -87,6 +92,6 @@ Prefer the top-level `schemaVersion`. The nested copy may be removed in a future
 Some tools allow pinning to exact schema versions. We recommend against this for `schemaVersion`, since:
 - The CLI rarely ships breaking changes
 - Pinning to `"1"` means you stay on 1.0-1.9x even when security fixes land in 1.5+
-- Pinning to `"1.1"` works until a future v2 of the payload shape, at which point you'd need to update anyway
+- Pinning to `"1.2"` works until a future v2 of the payload shape, at which point you'd need to update anyway
 
 Instead, test your integration against the current release and trust the semantic versioning signal.

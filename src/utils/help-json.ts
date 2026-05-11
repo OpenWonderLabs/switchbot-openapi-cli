@@ -81,11 +81,22 @@ export function commandToJson(cmd: Command, opts: CommandToJsonOptions = {}): Co
   return out;
 }
 
-/** Walk argv tokens (skipping flags) to find the deepest matching subcommand. */
+/** Walk argv tokens to find the deepest matching subcommand, skipping flags and their values. */
 export function resolveTargetCommand(root: Command, argv: string[]): Command {
   let cmd = root;
+  const rootOptions = root.options as import('commander').Option[];
+  let consumeNext = false;
   for (const token of argv) {
-    if (token.startsWith('-')) continue;
+    if (consumeNext) { consumeNext = false; continue; }
+    if (token.startsWith('-')) {
+      if (!token.includes('=')) {
+        const localOpts = cmd.options as import('commander').Option[];
+        const opt = localOpts.find((o) => o.short === token || o.long === token)
+          || rootOptions.find((o) => o.short === token || o.long === token);
+        if (opt && (opt.required || opt.optional)) consumeNext = true;
+      }
+      continue;
+    }
     const sub = cmd.commands.find(
       (c) => c.name() === token || (c.aliases() as string[]).includes(token)
     );

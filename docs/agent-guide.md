@@ -76,7 +76,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 }
 ```
 
-### Available tools (21)
+### Available tools (24)
 
 | Tool | Purpose | Safety tier |
 | --- | --- | --- |
@@ -100,6 +100,9 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 | `audit_query` | Filter audit log entries | read |
 | `audit_stats` | Aggregate audit stats by kind/result/device/rule | read |
 | `rules_suggest` | Draft automation rule YAML from intent | read |
+| `rule_notifications` | Query rule notification delivery history | read |
+| `rules_explain` | Show why a rule evaluation fired or was blocked | read |
+| `rules_simulate` | Simulate a rule against historical events | read |
 | `policy_add_rule` | Inject rule YAML into `automation.rules[]` with diff | action |
 
 The MCP server refuses destructive commands (Smart Lock `unlock`, Garage Door `open`, etc.) unless the tool call includes `confirm: true`, and the default safety profile still blocks direct destructive execution in favor of the reviewed CLI flow (`plan save` → `plan review` → `plan approve` → `plan execute`). The allowed list is the `destructive: true` commands in the catalog — `switchbot schema export | jq '[.data.types[].commands[] | select(.destructive)]'` shows every one.

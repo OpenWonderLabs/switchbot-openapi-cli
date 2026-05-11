@@ -262,7 +262,7 @@ Examples:
           : null;
         // P7: streaming JSON contract — first line under --json is the
         // stream header (webhook events arrive via push cadence).
-        if (isJsonMode()) emitStreamHeader({ eventKind: 'event', cadence: 'push' });
+        if (isJsonMode()) emitStreamHeader({ eventKind: 'event', cadence: 'push', schemaVersion: EVENTS_SCHEMA_VERSION });
         await new Promise<void>((resolve, reject) => {
           let server: http.Server | null = null;
           try {
@@ -459,7 +459,7 @@ Examples:
         // P7: streaming JSON contract — first line under --json is the stream
         // header (mqtt events arrive via push cadence). Must emit BEFORE
         // __session_start so header is always the very first line.
-        if (isJsonMode()) emitStreamHeader({ eventKind: 'event', cadence: 'push' });
+        if (isJsonMode()) emitStreamHeader({ eventKind: 'event', cadence: 'push', schemaVersion: EVENTS_SCHEMA_VERSION });
         // Emit a __session_start envelope immediately (before any credential
         // fetch) so JSON consumers can distinguish "connecting" from "never
         // connected" even when mqtt-tail exits before the broker connects.

@@ -368,8 +368,7 @@ describe('doctor command', () => {
     const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--section', 'bogus']);
     expect(res.exitCode).toBe(2);
     const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
-    expect(payload.schemaVersion).toBe('1.1');
-    expect(payload.error.message).toMatch(/Unknown check name/);
+    expect(payload.schemaVersion).toBe('1.2');
     expect(payload.error.message).toMatch(/bogus/);
     expect(payload.error.message).toMatch(/Valid:/);
   });

@@ -2188,13 +2188,38 @@ export function listRegisteredTools(server: McpServer): string[] {
   return Object.keys(internal._registeredTools).sort();
 }
 
+interface ToolDirectoryEntry {
+  name: string;
+  description?: string;
+  inputSchema?: Record<string, unknown>;
+}
+
+function listRegisteredToolsWithMeta(server: McpServer): ToolDirectoryEntry[] {
+  const internal = server as unknown as { _registeredTools?: Record<string, { description?: string; inputSchema?: z.ZodType }> };
+  if (!internal._registeredTools) return [];
+  return Object.entries(internal._registeredTools)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([name, reg]) => {
+      const entry: ToolDirectoryEntry = { name };
+      if (reg.description) entry.description = reg.description;
+      if (reg.inputSchema) {
+        try {
+          entry.inputSchema = z.toJSONSchema(reg.inputSchema) as Record<string, unknown>;
+        } catch {
+          // Fall back: emit the schema type name if conversion fails
+        }
+      }
+      return entry;
+    });
+}
+
 function listRegisteredResources(): string[] {
   return ['switchbot://events'];
 }
 
 function printMcpToolDirectory(): void {
   const server = createSwitchBotMcpServer();
-  const tools = listRegisteredTools(server).map((name) => ({ name }));
+  const tools = listRegisteredToolsWithMeta(server);
   const resources = listRegisteredResources().map((uri) => ({ uri }));
   if (isJsonMode()) {
     printJson({ tools, resources });
@@ -2202,7 +2227,8 @@ function printMcpToolDirectory(): void {
   }
   console.log('Tools:');
   for (const tool of tools) {
-    console.log(`  ${tool.name}`);
+    const desc = tool.description ? ` — ${tool.description.slice(0, 80)}` : '';
+    console.log(`  ${tool.name}${desc}`);
   }
   console.log('');
   console.log('Resources:');
@@ -2217,7 +2243,7 @@ export function registerMcpCommand(program: Command): void {
     .command('mcp')
     .description('Run as a Model Context Protocol server so AI agents can call SwitchBot tools')
     .addHelpText('after', `
-  The MCP server exposes twenty-one tools:
+  The MCP server exposes twenty-four tools:
   - list_devices            fetch all physical + IR devices
   - get_device_status       live status for a physical device
   - send_command            control a device (destructive commands need confirm:true)
@@ -2240,6 +2266,8 @@ export function registerMcpCommand(program: Command): void {
   - audit_stats             aggregate audit counts by kind/result/device/rule
   - rule_notifications      query rule notify action delivery history
   - rules_suggest           draft an automation rule YAML from intent (heuristic, no LLM)
+  - rules_explain           show why a rule evaluation fired or was blocked
+  - rules_simulate          simulate a rule against historical events
   - policy_add_rule         append a rule into automation.rules[] in policy.yaml
 
 Resource (read-only):

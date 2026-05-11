@@ -544,7 +544,7 @@ describe('events mqtt-tail', () => {
       eventKind: string;
       cadence: string;
     };
-    expectStreamHeaderShape(header as Record<string, unknown>, 'event', 'push');
+    expectStreamHeaderShape(header as Record<string, unknown>, 'event', 'push', '1');
   });
 
   it('P7: mqtt-tail JSON event lines keep the unified envelope and payloadVersion fields', async () => {

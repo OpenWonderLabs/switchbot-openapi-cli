@@ -155,7 +155,7 @@ describe('cache clear', () => {
     const result = await runCli(registerCacheCommand, ['--json', 'cache', 'clear', '--key', 'list']);
     expect(result.exitCode).toBeNull();
     const parsed = JSON.parse(result.stdout.join('\n'));
-    expect(parsed).toEqual({ schemaVersion: '1.1', data: { cleared: ['list'] } });
+    expect(parsed).toEqual({ schemaVersion: '1.2', data: { cleared: ['list'] } });
   });
 
   it('is a no-op when files do not exist', async () => {

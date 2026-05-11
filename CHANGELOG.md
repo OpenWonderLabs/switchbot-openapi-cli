@@ -9,6 +9,26 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Daemon start failed in bundled builds** (BUG-001): CLI entry path resolution navigated above the dist/ directory when running from the single-file bundle. Now correctly detects the bundled scenario.
+- **`rules run` exited 0 when `automation.enabled` was false** (BUG-002): daemon interpreted this as success. Now exits 1 with a clear message.
+- **Unknown subcommands exited 0** (BUG-005/BUG-008): `cache list`, `history list`, and other invalid subcommand inputs triggered Commander help display and exited 0. Now exits 2 (usage error).
+- **`mcp tools --json` omitted description and inputSchema** (BUG-007): tool directory only listed names. Now includes full tool metadata.
+- **Pino logger wrote to stdout** (BUG-009): redirected to stderr so it doesn't corrupt JSON/MCP output.
+
+### Changed (Breaking)
+
+- **`schemaVersion` bumped from `1.1` to `1.2`**: all `--json` responses now carry `schemaVersion: "1.2"`. Consumers that pin on the exact string must update their check. Parsers that only read `data`/`error` are unaffected.
+- **`catalog show <Type> --json`**: `data` is now always an array (single-entry array when filtering by type). Previously was a bare object for single-type queries.
+- **`devices commands <Type> --json`**: same change — `data` is always an array.
+- **`_fetchedAt` renamed to `fetchedAt`**: removed underscore prefix from the CLI-added timestamp field in `devices status` JSON output.
+- **`rules run --json` when `automation.enabled` is false**: previously emitted `{data: {kind:"control", controlKind:"disabled"}}` (success envelope) with exit 1. Now emits `{error: {code:1, kind:"runtime", message:"..."}}` (error envelope) — consistent with the JSON protocol.
+
+### Added
+
+- **`devices expand` supports lighting commands**: `setBrightness` (`--brightness`), `setColor` (`--color`), and `setColorTemperature` (`--color-temp`) flags now expand for Color Bulb, Strip Light, Ceiling Light, and similar devices.
+
 ## [3.4.0] - 2026-05-07
 
 ### Added

@@ -20,7 +20,7 @@ stdout.
 
 ```json
 {
-  "schemaVersion": "1.1",
+  "schemaVersion": "1.2",
   "data": <command-specific payload>
 }
 ```
@@ -34,7 +34,7 @@ stdout.
 
 ```json
 {
-  "schemaVersion": "1.1",
+  "schemaVersion": "1.2",
   "error": {
     "code": 2,
     "kind": "usage" | "guard" | "api" | "runtime",
@@ -82,12 +82,14 @@ envelope:
 ### Stream header (always the first line under `--json`)
 
 ```json
-{ "schemaVersion": "1", "stream": true, "eventKind": "tick" | "event", "cadence": "poll" | "push" }
+{ "schemaVersion": "1.2", "stream": true, "eventKind": "tick" | "event", "cadence": "poll" | "push" }
 ```
 
 - **Must always be the first line** on stdout under `--json`. Consumers
   should read one line, parse, and key on `{ "stream": true }` to confirm
   they are reading from a streaming command.
+- `schemaVersion` is `"1.2"` for `devices watch` and `"1"` for
+  `events tail` / `events mqtt-tail`.
 - `eventKind` picks the downstream parser. `tick` → `devices watch` shape
   with `{ t, tick, deviceId, changed, ... }`. `event` → unified event
   envelope (see below).
@@ -125,7 +127,7 @@ envelope:
 
 ```json
 {
-  "schemaVersion": "1.1",
+  "schemaVersion": "1.2",
   "data": {
     "t": "2026-04-21T14:23:45.012Z",
     "tick": 1,
@@ -184,9 +186,10 @@ switchbot devices status BOT1 --json | jq -e '.error' && exit 1
 
 ## 4. Versioning
 
-- The non-streaming envelope is versioned as `schemaVersion: "1.1"`.
+- The non-streaming envelope is versioned as `schemaVersion: "1.2"`.
 - The streaming header and event envelope are versioned as
-  `schemaVersion: "1"`.
+  `schemaVersion: "1"` for `events tail` / `events mqtt-tail`, and
+  `"1.2"` for `devices watch`.
 - The two axes are deliberately separate: adding a field inside `data`
   does **not** bump the envelope, but renaming / removing `data` would.
 - Breaking changes land on a major release. Additive fields land on a

@@ -3,6 +3,7 @@ import { intArg, stringArg, enumArg } from '../utils/arg-parsers.js';
 import { handleError, isJsonMode, printJson, UsageError, exitWithError } from '../utils/output.js';
 import { getCachedDevice } from '../devices/cache.js';
 import { executeCommand, isDestructiveCommand, getDestructiveReason } from '../lib/devices.js';
+import { findCatalogEntry } from '../devices/catalog.js';
 import { isDryRun } from '../utils/flags.js';
 import { resolveDeviceId, ALL_STRATEGIES, type NameResolveStrategy } from '../utils/name-resolver.js';
 import { DryRunSignal } from '../api/client.js';
@@ -11,6 +12,10 @@ import {
   buildCurtainSetPosition,
   buildBlindTiltSetPosition,
   buildRelaySetMode,
+  buildBrightnessSet,
+  buildColorSet,
+  buildColorTemperatureSet,
+  isLightingCommandSupported,
 } from '../devices/param-validator.js';
 
 // ---- Registration ----------------------------------------------------------
@@ -20,7 +25,7 @@ export function registerExpandCommand(devices: Command): void {
     .command('expand')
     .description('Send a command with semantic flags instead of raw positional parameters')
     .argument('[deviceId]', 'Target device ID from "devices list" (or use --name)')
-    .argument('[command]', 'Command name: setAll (AC), setPosition (Curtain/Blind Tilt), setMode (Relay Switch 2)')
+    .argument('[command]', 'Command name: setAll (AC), setPosition (Curtain/Blind Tilt), setMode (Relay Switch 2), setBrightness/setColor/setColorTemperature (lighting)')
     .option('--name <query>', 'Resolve device by fuzzy name instead of deviceId', stringArg('--name'))
     .option('--name-strategy <s>', `Name match strategy: ${ALL_STRATEGIES.join('|')} (default: require-unique)`, stringArg('--name-strategy'))
     .option('--name-type <type>', 'Narrow --name by device type (e.g. "Curtain", "Air Conditioner")', stringArg('--name-type'))
@@ -34,6 +39,9 @@ export function registerExpandCommand(devices: Command): void {
     .option('--direction <dir>', 'Blind Tilt setPosition: up|down', stringArg('--direction'))
     .option('--angle <percent>', 'Blind Tilt setPosition: 0-100 (0=closed, 100=open)', intArg('--angle', { min: 0, max: 100 }))
     .option('--channel <n>', 'Relay Switch 2 setMode: channel 1 or 2', intArg('--channel', { min: 1, max: 2 }))
+    .option('--brightness <percent>', 'setBrightness: 1-100 percent', intArg('--brightness', { min: 1, max: 100 }))
+    .option('--color <value>', 'setColor: R:G:B, #RRGGBB, or named color (red, blue, etc.)', stringArg('--color'))
+    .option('--color-temp <kelvin>', 'setColorTemperature: 2700-6500 Kelvin', intArg('--color-temp', { min: 2700, max: 6500 }))
     .option('--yes', 'Confirm destructive commands')
     .addHelpText('after', `
 Translates semantic flags into the wire parameter format, then sends the command.
@@ -56,12 +64,25 @@ Supported expansions:
     --channel 1 --mode edge  →  "1;1"
     --mode values: toggle (0) | edge (1) | detached (2) | momentary (3)
 
+  Color Bulb / Strip Light / Ceiling Light — setBrightness
+    --brightness 80  →  "80"
+
+  Color Bulb / Strip Light / Floor Lamp — setColor
+    --color "255:0:0"  →  "255:0:0"
+    --color "#FF0000"  →  "255:0:0"
+    --color red        →  "255:0:0"
+
+  Color Bulb / Strip Light / Ceiling Light — setColorTemperature
+    --color-temp 4000  →  "4000"
+
 Examples:
-  $ switchbot devices expand <acId>      setAll       --temp 26 --mode cool --fan low --power on
-  $ switchbot devices expand <curtainId> setPosition  --position 50 --mode silent
-  $ switchbot devices expand <blindId>   setPosition  --direction up --angle 50
-  $ switchbot devices expand <relayId>   setMode      --channel 1 --mode edge
-  $ switchbot devices expand <acId>      setAll       --temp 22 --mode heat --fan auto --power on --dry-run
+  $ switchbot devices expand <acId>      setAll               --temp 26 --mode cool --fan low --power on
+  $ switchbot devices expand <curtainId> setPosition          --position 50 --mode silent
+  $ switchbot devices expand <blindId>   setPosition          --direction up --angle 50
+  $ switchbot devices expand <relayId>   setMode              --channel 1 --mode edge
+  $ switchbot devices expand <stripId>   setBrightness        --brightness 80
+  $ switchbot devices expand <bulbId>    setColor             --color "#FF0000"
+  $ switchbot devices expand <bulbId>    setColorTemperature  --color-temp 4000
   $ switchbot devices expand --name "Living Room AC" setAll --temp 26 --mode cool --fan low --power on
 `)
     .action(async (
@@ -75,7 +96,8 @@ Examples:
         nameRoom?: string;
         temp?: string; mode?: string; fan?: string; power?: string;
         position?: string; direction?: string; angle?: string;
-        channel?: string; yes?: boolean;
+        channel?: string; brightness?: string; color?: string;
+        colorTemp?: string; yes?: boolean;
       }
     ) => {
       let deviceId = '';
@@ -96,7 +118,7 @@ Examples:
           category: options.nameCategory,
           room: options.nameRoom,
         });
-        if (!effectiveCommand) throw new UsageError('A command argument is required (setAll, setPosition, setMode).');
+        if (!effectiveCommand) throw new UsageError('A command argument is required (setAll, setPosition, setMode, setBrightness, setColor, setColorTemperature).');
 
         command = effectiveCommand;
         const cached = getCachedDevice(deviceId);
@@ -105,6 +127,16 @@ Examples:
         let parameter: string;
 
         if (command === 'setAll') {
+          if (!cached) {
+            throw new UsageError(
+              `Device ${deviceId} is not in the local cache — run 'switchbot devices list' first so 'expand' can verify this is an Air Conditioner.`
+            );
+          }
+          if (deviceType !== 'Air Conditioner') {
+            throw new UsageError(
+              `"setAll" is only supported on Air Conditioner devices, but "${cached.type}" was found.`
+            );
+          }
           parameter = buildAcSetAll(options);
         } else if (command === 'setPosition') {
           if (!cached) {
@@ -112,15 +144,61 @@ Examples:
               `Device ${deviceId} is not in the local cache — run 'switchbot devices list' first so 'expand' knows whether this is a Curtain or a Blind Tilt.`
             );
           }
+          const positionTypes = ['Curtain', 'Curtain 3', 'Roller Shade', 'Blind Tilt'];
+          if (!positionTypes.some(t => deviceType.startsWith(t))) {
+            throw new UsageError(
+              `"setPosition" is only supported on Curtain, Roller Shade, and Blind Tilt devices, but "${cached.type}" was found.`
+            );
+          }
           const isBlind = deviceType.startsWith('Blind Tilt');
-          parameter = isBlind
-            ? buildBlindTiltSetPosition(options)
-            : buildCurtainSetPosition(options);
+          const isRollerShade = deviceType.startsWith('Roller Shade');
+          if (isBlind) {
+            parameter = buildBlindTiltSetPosition(options);
+          } else if (isRollerShade) {
+            if (!options.position) throw new UsageError('--position is required (0-100)');
+            parameter = options.position;
+          } else {
+            parameter = buildCurtainSetPosition(options);
+          }
         } else if (command === 'setMode' && deviceType.startsWith('Relay Switch')) {
           parameter = buildRelaySetMode(options);
+        } else if (command === 'setBrightness' || command === 'setColor' || command === 'setColorTemperature') {
+          if (!cached) {
+            throw new UsageError(
+              `Device "${deviceId}" is not in the local cache — run 'switchbot devices list' first so 'expand' can verify this device supports ${command}.`
+            );
+          }
+          const catalogResult = findCatalogEntry(cached.type);
+          const catalogEntry = Array.isArray(catalogResult) ? catalogResult[0] : catalogResult;
+          const supportedHint = command === 'setColor'
+            ? 'Color Bulb, Strip Light, Floor Lamp, and similar RGB lighting devices'
+            : 'Color Bulb, Strip Light, Ceiling Light, Floor Lamp, and similar lighting devices';
+          if (catalogEntry !== null) {
+            // Device is in catalog — catalog is authoritative, no heuristic fallback
+            if (!catalogEntry.commands.some((c: { command: string }) => c.command === command)) {
+              throw new UsageError(
+                `Device type "${cached.type}" does not support ${command}. Supported on: ${supportedHint}.`
+              );
+            }
+          } else {
+            // Device not in catalog — fall back to param-validator whitelist
+            if (!isLightingCommandSupported(cached.type, command)) {
+              throw new UsageError(
+                `Device type "${cached.type}" does not support ${command}. Supported on: ${supportedHint}.`
+              );
+            }
+          }
+          if (command === 'setBrightness') {
+            parameter = buildBrightnessSet(options);
+          } else if (command === 'setColor') {
+            parameter = buildColorSet(options);
+          } else {
+            parameter = buildColorTemperatureSet(options);
+          }
         } else {
           throw new UsageError(
             `'expand' does not support "${command}" for device type "${deviceType || 'unknown'}". ` +
+            `Supported: setAll (AC), setPosition (Curtain/Blind Tilt), setMode (Relay Switch), setBrightness/setColor/setColorTemperature (lighting). ` +
             `Use 'switchbot devices command' to send raw parameters instead.`
           );
         }

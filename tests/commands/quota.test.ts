@@ -91,6 +91,6 @@ describe('quota command', () => {
     await seedQuota();
     const result = await runCli(registerQuotaCommand, ['--json', 'quota', 'reset']);
     expect(result.exitCode).toBeNull();
-    expect(JSON.parse(result.stdout[0])).toEqual({ schemaVersion: '1.1', data: { reset: true } });
+    expect(JSON.parse(result.stdout[0])).toEqual({ schemaVersion: '1.2', data: { reset: true } });
   });
 });
