@@ -44,15 +44,19 @@ const EXPAND_HINTS: Record<string, { command: string; flags: string }> = {
   'Relay Switch 2PM': { command: 'setMode',      flags: '--channel 1 --mode edge' },
 };
 
-function annotateStatusPayload(deviceId: string, body: Record<string, unknown>): Record<string, unknown> {
-  const annotated = { ...body };
+function annotateStatusPayload(
+  deviceId: string,
+  body: Record<string, unknown>,
+): Record<string, unknown> {
+  const cached = getCachedDevice(deviceId);
+  const deviceType = cached?.type ?? '';
+  const annotated: Record<string, unknown> = { deviceId, deviceType, ...body };
   if (Object.keys(body).length === 0) {
     annotated.supported = false;
     annotated.note = 'this device does not expose cloud status';
     return annotated;
   }
 
-  const cached = getCachedDevice(deviceId);
   const looksLikeMeter = cached?.type?.toLowerCase().includes('meter') ?? false;
   const staleZeroReading =
     looksLikeMeter &&
