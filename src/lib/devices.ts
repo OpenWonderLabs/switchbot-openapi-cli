@@ -59,6 +59,7 @@ export interface DescribeResult {
   device: Device | InfraredDevice;
   isPhysical: boolean;
   typeName: string;
+  typeSource: 'deviceType' | 'controlType' | 'remoteType';
   controlType: string | null;
   catalog: DeviceCatalogEntry | null;
   capabilities: DescribeCapabilities | { liveStatus: Record<string, unknown> } | null;
@@ -408,7 +409,23 @@ export async function describeDevice(
 
   if (!physical && !ir) throw new DeviceNotFoundError(deviceId);
 
-  const typeName = physical ? (physical.deviceType ?? '') : ir!.remoteType;
+  let typeName: string;
+  let typeSource: DescribeResult['typeSource'];
+  if (physical) {
+    if (physical.deviceType) {
+      typeName = physical.deviceType;
+      typeSource = 'deviceType';
+    } else if (physical.controlType) {
+      typeName = physical.controlType;
+      typeSource = 'controlType';
+    } else {
+      typeName = '';
+      typeSource = 'deviceType';
+    }
+  } else {
+    typeName = ir!.remoteType;
+    typeSource = 'remoteType';
+  }
   const match = typeName ? findCatalogEntry(typeName) : null;
   const catalogEntry = !match || Array.isArray(match) ? null : match;
 
@@ -459,6 +476,7 @@ export async function describeDevice(
     device: selectedDevice,
     isPhysical: Boolean(physical),
     typeName,
+    typeSource,
     controlType: physical?.controlType ?? ir?.controlType ?? null,
     catalog: catalogEntry,
     capabilities,
