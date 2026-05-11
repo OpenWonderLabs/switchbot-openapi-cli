@@ -164,20 +164,21 @@ Examples:
           }
           const catalogResult = findCatalogEntry(cached.type);
           const catalogEntry = Array.isArray(catalogResult) ? catalogResult[0] : catalogResult;
+          const supportedHint = command === 'setColor'
+            ? 'Color Bulb, Strip Light, Floor Lamp, and similar RGB lighting devices'
+            : 'Color Bulb, Strip Light, Ceiling Light, Floor Lamp, and similar lighting devices';
           if (catalogEntry !== null) {
             // Device is in catalog — catalog is authoritative, no heuristic fallback
             if (!catalogEntry.commands.some((c: { command: string }) => c.command === command)) {
               throw new UsageError(
-                `Device type "${cached.type}" does not support ${command}. ` +
-                `Supported on: Color Bulb, Strip Light, Ceiling Light, Floor Lamp, and similar lighting devices.`
+                `Device type "${cached.type}" does not support ${command}. Supported on: ${supportedHint}.`
               );
             }
           } else {
             // Device not in catalog — fall back to param-validator whitelist
             if (!isLightingCommandSupported(cached.type, command)) {
               throw new UsageError(
-                `Device type "${cached.type}" does not support ${command}. ` +
-                `Supported on: Color Bulb, Strip Light, Ceiling Light, Floor Lamp, and similar lighting devices.`
+                `Device type "${cached.type}" does not support ${command}. Supported on: ${supportedHint}.`
               );
             }
           }
