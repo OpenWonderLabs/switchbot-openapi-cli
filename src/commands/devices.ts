@@ -225,7 +225,7 @@ Examples:
           rows.push([
             d.deviceId,
             d.deviceName,
-            d.deviceType || '—',
+            d.deviceType || d.controlType || 'Unknown Device',
             'physical',
             d.controlType || '—',
             d.familyName || '—',
@@ -894,6 +894,9 @@ Examples:
         if (result.typeSource === 'controlType') {
           const deviceName = (device as Device).deviceName ?? deviceId;
           console.error(`warning: ${deviceName} (${deviceId}): deviceType not reported by API, using controlType "${result.controlType}". Capabilities may be limited.`);
+        } else if (typeName === 'Unknown Device') {
+          const deviceName = (device as Device).deviceName ?? deviceId;
+          console.error(`warning: ${deviceName} (${deviceId}): neither deviceType nor controlType reported by API. Capabilities may be limited.`);
         }
 
         if (isPhysical) {
@@ -901,7 +904,7 @@ Examples:
           printKeyValue({
             deviceId: physical.deviceId,
             deviceName: physical.deviceName,
-            deviceType: physical.deviceType || '—',
+            deviceType: physical.deviceType || physical.controlType || 'Unknown Device',
             controlType: physical.controlType || '—',
             family: physical.familyName || '—',
             roomID: physical.roomID || '—',

@@ -144,7 +144,7 @@ describe('describeDevice — typeSource signal', () => {
     expect(result.typeSource).toBe('controlType');
   });
 
-  it('sets typeSource to "deviceType" with empty typeName when neither deviceType nor controlType present', async () => {
+  it('sets typeName to "Unknown Device" when neither deviceType nor controlType present', async () => {
     mockDeviceList([
       {
         deviceId: 'UNKNOWN-001',
@@ -156,7 +156,7 @@ describe('describeDevice — typeSource signal', () => {
 
     const result = await describeDevice('UNKNOWN-001');
 
-    expect(result.typeName).toBe('');
+    expect(result.typeName).toBe('Unknown Device');
     expect(result.typeSource).toBe('deviceType');
   });
 
@@ -271,5 +271,31 @@ describe('devices describe — controlType fallback warning', () => {
 
     expect(err).not.toContain('warning:');
     expect(err).not.toContain('deviceType not reported by API');
+  });
+
+  it('emits a warning when neither deviceType nor controlType are available', async () => {
+    apiMock.__instance.get.mockResolvedValue({
+      data: {
+        statusCode: 100,
+        body: {
+          deviceList: [
+            {
+              deviceId: 'TYPELESS-001',
+              deviceName: 'AI MindClip',
+              enableCloudService: true,
+              hubDeviceId: 'HUB-1',
+            },
+          ],
+          infraredRemoteList: [],
+        },
+      },
+    });
+
+    const res = await runCli(registerDevicesCommand, ['devices', 'describe', 'TYPELESS-001']);
+    const err = res.stderr.join('\n');
+
+    expect(err).toContain('warning:');
+    expect(err).toContain('TYPELESS-001');
+    expect(err).toContain('neither deviceType nor controlType reported by API');
   });
 });

@@ -71,11 +71,11 @@ describe('device cache', () => {
   it('keeps physical devices even when deviceType is missing', () => {
     updateCacheFromDeviceList(sampleBody);
     const cache = loadCache();
-    expect(cache?.devices['PHY-3']).toEqual({
-      type: '',
-      name: 'AI',
-      category: 'physical',
-    });
+    const entry = cache?.devices['PHY-3'];
+    expect(entry).toBeDefined();
+    expect(entry!.type).toBe('Unknown Device');
+    expect(entry!.name).toBe('AI');
+    expect(entry!.category).toBe('physical');
   });
 
   it('getCachedDevice returns cached entry', () => {

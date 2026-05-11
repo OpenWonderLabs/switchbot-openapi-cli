@@ -132,7 +132,7 @@ export async function fetchDeviceList(
           deviceList.push({
             deviceId,
             deviceName: entry.name,
-            ...(entry.type ? { deviceType: entry.type } : {}),
+            ...(entry.type && entry.type !== 'Unknown Device' ? { deviceType: entry.type } : {}),
             enableCloudService: entry.enableCloudService ?? true,
             hubDeviceId: entry.hubDeviceId ?? '',
             roomID: entry.roomID,
@@ -421,7 +421,7 @@ export async function describeDevice(
       typeName = physical.controlType;
       typeSource = 'controlType';
     } else {
-      typeName = '';
+      typeName = 'Unknown Device';
       typeSource = 'deviceType';
     }
   } else {

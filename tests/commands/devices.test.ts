@@ -234,8 +234,10 @@ describe('devices command', () => {
       const row = res.stdout.join('\n').split('\n').find((l) => l.includes('AI-DEV'));
       expect(row).toBeDefined();
       expect(row).not.toContain('undefined');
-      // type column (position 3) and controlType column (position 5) should both render as em-dash
-      expect(row!.match(/—/g)?.length).toBeGreaterThanOrEqual(2);
+      // type column shows 'Unknown Device' when both deviceType and controlType are empty
+      expect(row).toContain('Unknown Device');
+      // controlType column (position 5) should render as em-dash
+      expect(row!.match(/—/g)?.length).toBeGreaterThanOrEqual(1);
     });
 
     it('cache hit in --json keeps physical devices whose deviceType is missing', async () => {

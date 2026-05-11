@@ -151,9 +151,7 @@ export function updateCacheFromDeviceList(body: DeviceListBodyShape): void {
   for (const d of body.deviceList) {
     if (!d.deviceId) continue;
     devices[d.deviceId] = {
-      // Some real devices omit deviceType entirely (for example AI accessories).
-      // Keep them in cache with an empty type string rather than dropping the row.
-      type: d.deviceType ?? '',
+      type: d.deviceType || d.controlType || 'Unknown Device',
       name: d.deviceName,
       category: 'physical',
       hubDeviceId: d.hubDeviceId,
