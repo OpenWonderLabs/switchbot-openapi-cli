@@ -1,5 +1,5 @@
 import type { AxiosInstance } from 'axios';
-import { createClient } from '../api/client.js';
+import { createClient, ApiError } from '../api/client.js';
 import { idempotencyCache, fingerprintIdempotencyKey } from './idempotency.js';
 import {
   findCatalogEntry,
@@ -224,10 +224,12 @@ export async function executeCommand(
       if (err instanceof Error && err.name === 'DryRunSignal') {
         writeAudit({ ...baseAudit, result: 'dry-run' });
       } else {
+        const statusCode = err instanceof ApiError ? err.code : undefined;
         writeAudit({
           ...baseAudit,
           result: 'error',
           error: err instanceof Error ? err.message : String(err),
+          ...(statusCode !== undefined ? { statusCode } : {}),
         });
       }
       throw err;

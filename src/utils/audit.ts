@@ -57,6 +57,8 @@ export interface AuditEntry {
   dryRun: boolean;
   result?: 'ok' | 'error' | 'dry-run';
   error?: string;
+  /** SwitchBot API status code (e.g. 161, 190) when available. */
+  statusCode?: number;
   /** True when a cached idempotent result was returned instead of executing again. */
   replayed?: boolean;
   /** Short SHA-256 fingerprint of the user-supplied idempotency key. */
