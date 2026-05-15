@@ -1,0 +1,61 @@
+tests/commands/install.test.ts
+  s_b19d3a3d4d8af6::t_b1448e780df2c4 37,39-44
+tests/commands/uninstall.test.ts
+  s_b19d3a3d4d8af6::t_98a8cdab24922b 28,30-33
+src/commands/rules.ts
+  s_b19d3a3d4d8af6::t_2fb92017af06fd 896
+src/commands/install.ts
+  s_b19d3a3d4d8af6::t_e577608b2352d7 111-117,119,121-122
+tests/commands/scenes.test.ts
+  s_b19d3a3d4d8af6::t_8f31649583a5e4 179,186
+scripts/lint-stdout.sh
+  s_b19d3a3d4d8af6::t_00d35d45b9add4 39,41-42
+  s_b19d3a3d4d8af6::t_55ba1548d8afe7 1-20,24,26,29-38,40,43-51
+  s_b19d3a3d4d8af6::t_5317c9776111c6 21-23,25,27-28
+package.json
+  s_b19d3a3d4d8af6::t_a46fefe29dcf5d 45
+  s_b19d3a3d4d8af6::t_33f6c9a7664ef5 55
+src/commands/uninstall.ts
+  s_b19d3a3d4d8af6::t_8d7d93b08b24c6 222-229
+src/commands/scenes.ts
+  s_b19d3a3d4d8af6::t_90bde1c6ebcb41 77
+  s_b19d3a3d4d8af6::t_af70d5f0312f24 263
+src/commands/policy.ts
+  s_b19d3a3d4d8af6::t_3c4823eaff2bc1 392-393
+  s_b19d3a3d4d8af6::t_1403bb1a0631fa 529
+src/devices/param-validator.ts
+  s_b19d3a3d4d8af6::t_b2054a7ee22ba7 900
+  s_b19d3a3d4d8af6::t_08aaf2c3b1939f 618-619,625
+  s_b19d3a3d4d8af6::t_21c47eea561b84 713
+  s_b19d3a3d4d8af6::t_d79ff0e6367afe 698-699,705-707
+  s_b19d3a3d4d8af6::t_5dabb19300bc81 821
+  s_b19d3a3d4d8af6::t_4be2f96bdb7fd4 851,858
+  s_b19d3a3d4d8af6::t_5b0d400f4d8d16 601-602,608
+  s_b19d3a3d4d8af6::t_74fa56117d74ac 1004,1017,1027
+  s_b19d3a3d4d8af6::t_88f46317199912 666-667,673
+  s_b19d3a3d4d8af6::t_128f687dd4a855 947,960,970
+  s_b19d3a3d4d8af6::t_2c3e479bfce8b6 495
+  s_b19d3a3d4d8af6::t_bd198e4386ea80 888
+  s_b19d3a3d4d8af6::t_3aed4ce21a7032 752
+  s_b19d3a3d4d8af6::t_0f1a4397a562e9 558-559,565-567,573-575,581
+  s_b19d3a3d4d8af6::t_867ecdab284c25 633-634,640
+scripts/verify-release.mjs
+  s_b19d3a3d4d8af6::t_c369b66d605aa9 1-42,44-113
+  s_b19d3a3d4d8af6::t_6b11627ba6faf9 43
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "fc16327a34fd22d5675f73741c7702f2ceb18204",
+  "prompts": {},
+  "sessions": {
+    "s_b19d3a3d4d8af6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1381414d-2711-4c09-945f-4bc062b6df44",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
