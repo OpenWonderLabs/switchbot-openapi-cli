@@ -1,0 +1,37 @@
+src/commands/mcp.ts
+  s_b19d3a3d4d8af6::t_a8bc56070e4721 2331,2340
+  s_b19d3a3d4d8af6::t_d515613f1fbc5b 2354
+src/commands/doctor.ts
+  s_b19d3a3d4d8af6::t_bc190c7dc68bbc 1088
+  s_b19d3a3d4d8af6::t_c63069628cbff2 1186,1188
+  s_b19d3a3d4d8af6::t_07b8c0ab5e1c83 425
+  s_b19d3a3d4d8af6::t_76976b4f1b09de 1076
+src/devices/catalog.ts
+  s_36c633869d9e8e::t_eeda1b7b79d0da 166-167,625-629,631-633,734-740,742-751
+  s_36c633869d9e8e::t_f247b6b834eb81 337,456,470,485,600-611,630,669,718-733,741
+  s_b19d3a3d4d8af6::t_49afdbf5ecd25c 310,313-315
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "3bfd83ebee4b8d729a1246cf6c06ec6354a0fdea",
+  "prompts": {},
+  "sessions": {
+    "s_36c633869d9e8e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e2b74-b529-73e2-b2a1-2c49b5106e27",
+        "model": "gpt-5.5"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    },
+    "s_b19d3a3d4d8af6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1381414d-2711-4c09-945f-4bc062b6df44",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
