@@ -3,6 +3,7 @@ import {
   buildAcSetAll,
   buildCurtainSetPosition,
   buildBlindTiltSetPosition,
+  buildBrightnessSet,
   buildRelaySetMode,
   parseParameterForWire,
   validateParameter,
@@ -75,6 +76,42 @@ describe('buildBlindTiltSetPosition', () => {
   it('rejects invalid direction and angle', () => {
     expect(() => buildBlindTiltSetPosition({ direction: 'left', angle: '50' })).toThrow(/"up" or "down"/);
     expect(() => buildBlindTiltSetPosition({ direction: 'up', angle: '150' })).toThrow(/0 and 100/);
+  });
+
+  it('rejects odd angles (must be multiple of 2)', () => {
+    expect(() => buildBlindTiltSetPosition({ direction: 'up', angle: '51' })).toThrow(/multiple of 2/);
+    expect(() => buildBlindTiltSetPosition({ direction: 'down', angle: '1' })).toThrow(/multiple of 2/);
+    expect(buildBlindTiltSetPosition({ direction: 'up', angle: '50' })).toBe('up;50');
+    expect(buildBlindTiltSetPosition({ direction: 'down', angle: '0' })).toBe('down;0');
+  });
+});
+
+describe('buildBrightnessSet', () => {
+  it('returns brightness string for default 1-100 range', () => {
+    expect(buildBrightnessSet({ brightness: '50' })).toBe('50');
+    expect(buildBrightnessSet({ brightness: '1' })).toBe('1');
+    expect(buildBrightnessSet({ brightness: '100' })).toBe('100');
+  });
+
+  it('rejects 0 for devices without 0-100 range', () => {
+    expect(() => buildBrightnessSet({ brightness: '0' })).toThrow(/between 1 and 100/);
+    expect(() => buildBrightnessSet({ brightness: '0' }, 'Color Bulb')).toThrow(/between 1 and 100/);
+  });
+
+  it('allows 0 for 0-100 devices (Floor Lamp, Strip Light 3, RGBICWW)', () => {
+    expect(buildBrightnessSet({ brightness: '0' }, 'Floor Lamp')).toBe('0');
+    expect(buildBrightnessSet({ brightness: '0' }, 'Strip Light 3')).toBe('0');
+    expect(buildBrightnessSet({ brightness: '0' }, 'RGBICWW Strip Light')).toBe('0');
+    expect(buildBrightnessSet({ brightness: '0' }, 'Candle Warmer Lamp')).toBe('0');
+  });
+
+  it('rejects values outside range', () => {
+    expect(() => buildBrightnessSet({ brightness: '101' })).toThrow(/between 1 and 100/);
+    expect(() => buildBrightnessSet({ brightness: '-1' }, 'Floor Lamp')).toThrow(/between 0 and 100/);
+  });
+
+  it('throws when --brightness is missing', () => {
+    expect(() => buildBrightnessSet({})).toThrow(/--brightness is required/);
   });
 });
 
@@ -425,6 +462,13 @@ describe('validateParameter — Humidifier2 setMode', () => {
   it('rejects out-of-range targetHumidify', () => {
     expect(validateParameter('Humidifier2', 'setMode', '{"mode":1,"targetHumidify":101}').ok).toBe(false);
   });
+
+  it('rejects non-numeric field types (boolean, array, object)', () => {
+    expect(validateParameter('Humidifier2', 'setMode', '{"mode":true,"targetHumidify":50}').ok).toBe(false);
+    expect(validateParameter('Humidifier2', 'setMode', '{"mode":1,"targetHumidify":false}').ok).toBe(false);
+    expect(validateParameter('Humidifier2', 'setMode', '{"mode":[7],"targetHumidify":50}').ok).toBe(false);
+    expect(validateParameter('Humidifier2', 'setMode', '{"mode":1,"targetHumidify":null}').ok).toBe(false);
+  });
 });
 
 describe('validateParameter — Humidifier2 setChildLock', () => {
@@ -558,6 +602,20 @@ describe('validateParameter — Vacuum changeParam', () => {
 
   it('rejects out-of-range waterLevel', () => {
     expect(validateParameter('Floor Cleaning Robot S10', 'changeParam', '{"waterLevel":3}').ok).toBe(false);
+  });
+
+  it('rejects waterLevel for all combo vacuum aliases', () => {
+    expect(validateParameter('K10+ Pro Combo', 'changeParam', '{"waterLevel":1}').ok).toBe(false);
+    expect(validateParameter('Robot Vacuum Cleaner K10+ Pro Combo', 'changeParam', '{"waterLevel":1}').ok).toBe(false);
+    expect(validateParameter('K20+ Pro', 'changeParam', '{"waterLevel":1}').ok).toBe(false);
+    expect(validateParameter('K11+', 'changeParam', '{"waterLevel":1}').ok).toBe(false);
+    expect(validateParameter('Robot Vacuum Cleaner K11+', 'changeParam', '{"waterLevel":1}').ok).toBe(false);
+  });
+
+  it('rejects non-numeric field types (boolean, array)', () => {
+    expect(validateParameter('Floor Cleaning Robot S10', 'changeParam', '{"fanLevel":true}').ok).toBe(false);
+    expect(validateParameter('Floor Cleaning Robot S10', 'changeParam', '{"waterLevel":[1]}').ok).toBe(false);
+    expect(validateParameter('Floor Cleaning Robot S10', 'changeParam', '{"times":false}').ok).toBe(false);
   });
 
   it('rejects non-JSON', () => {
