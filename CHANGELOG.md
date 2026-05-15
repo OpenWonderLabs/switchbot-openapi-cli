@@ -9,6 +9,10 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Catalog sync with upstream OpenAPI**: added `Weather Station` (deviceType `WeatherStation`, sensor with `atmosphericPressure` field), `Lock Vision` and `Lock Vision Pro` (video smart locks with the same lock/unlock/deadbolt safety semantics as Smart Lock Pro), the `Smart Lock Pro Wifi` Matter alias on the existing Smart Lock entry, and `uploadImage <imageUrl>` on AI Art Frame. The upload command parameter is documented as a single https URL pending upstream parameter-shape clarification.
+
 ### Fixed
 
 - **Daemon start failed in bundled builds** (BUG-001): CLI entry path resolution navigated above the dist/ directory when running from the single-file bundle. Now correctly detects the bundled scenario.
