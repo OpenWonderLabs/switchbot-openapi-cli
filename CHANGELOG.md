@@ -13,6 +13,19 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **Catalog sync with upstream OpenAPI**: added `Weather Station` (deviceType `WeatherStation`, sensor with `atmosphericPressure` field), `Lock Vision` and `Lock Vision Pro` (video smart locks with the same lock/unlock/deadbolt safety semantics as Smart Lock Pro), the `Smart Lock Pro Wifi` Matter alias on the existing Smart Lock entry, and `uploadImage <imageUrl>` on AI Art Frame. The upload command parameter is documented as a single https URL pending upstream parameter-shape clarification.
 - **LLM condition USD and token budgets**: per-rule and global `llm_budget` now accept `max_tokens_per_hour` (hourly window, aligned with `max_calls_per_hour`) and `max_cost_per_day_usd` (24h window). Costs are computed from per-model USD pricing in `src/llm/pricing.ts` and reported on `DecideResult.usage`. Audit entries for `llm-condition` now carry `llmUsage`, and `llm-budget-exceeded` records `budgetDimension` (`calls | tokens | cost`), `budgetLimit`, and `budgetObserved`. New lints: `condition-llm-tokens-budget-zero` (warns when token cap is 0) and `condition-llm-cost-without-known-model` (warns when a USD cap is set with `provider: auto` since the cost dimension silently skips models not in the pricing table).
+- **Cross-event aggregation in conditions**: new `event_count` condition counts how many events fired for a given device inside a rolling time window. Schema:
+
+  ```yaml
+  conditions:
+    - event_count:
+        device: front-door         # deviceId or alias
+        event: motion.detected     # optional canonical event filter
+        window: "5m"               # duration: 100ms | 30s | 5m | 1h | 1d
+        min: 3                     # required floor
+        max: 10                    # optional ceiling
+  ```
+
+  Backed by the same per-device JSONL ring at `~/.switchbot/device-history/<deviceId>.jsonl` used by `events history`, with rotation honored. The LLM-condition `recent_events` hook (declared in v0.2 schema since Track κ but unwired) now also pulls from this fetcher, populating `context.recent_events` with up to N most-recent matching events on the trigger device. Engine-level `LlmConditionEvaluator` is now wired into `RulesEngine` (previously only `simulate` had it). New lints: `condition-event-count-bad-window` and `condition-event-count-max-below-min`.
 
 ### Fixed
 

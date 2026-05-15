@@ -7,6 +7,7 @@ import { ThrottleGate, parseMaxPerMs } from './throttle.js';
 import { ruleVersion } from './trace.js';
 import { filterTraceRecords } from './trace.js';
 import { matchesMqttTrigger } from './matcher.js';
+import { defaultEventWindowFetcher } from './engine.js';
 import type { Rule, EngineEvent } from './types.js';
 import type { RuleEvaluateRecord } from './trace.js';
 
@@ -122,6 +123,7 @@ export async function simulateRule(opts: SimulateOptions): Promise<SimulateRepor
         fetchStatus: statusFetcher,
         event,
         ruleVersion: rv,
+        eventWindowFetcher: defaultEventWindowFetcher,
       });
     } catch (err) {
       counts.errored++;

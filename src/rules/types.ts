@@ -69,6 +69,26 @@ export interface NotCondition {
   not: Condition;
 }
 
+export interface EventCountCondition {
+  event_count: {
+    /** deviceId or alias resolved before counting. */
+    device: string;
+    /**
+     * Event-name filter. When set, only records whose classified event
+     * matches are counted. Matched against the history record's `topic`
+     * (which carries the canonical event name written by the matcher)
+     * via case-sensitive equality.
+     */
+    event?: string;
+    /** Rolling time window measured back from "now" — e.g. "5m", "1h". */
+    window: string;
+    /** Inclusive lower bound on count. Required. */
+    min: number;
+    /** Inclusive upper bound on count. Optional — omit for "at least min". */
+    max?: number;
+  };
+}
+
 export interface LlmCondition {
   llm: {
     prompt: string;
@@ -85,7 +105,7 @@ export interface LlmCondition {
   };
 }
 
-export type Condition = TimeBetweenCondition | DeviceStateCondition | AllCondition | AnyCondition | NotCondition | LlmCondition;
+export type Condition = TimeBetweenCondition | DeviceStateCondition | AllCondition | AnyCondition | NotCondition | LlmCondition | EventCountCondition;
 
 export interface CommandAction {
   type?: 'command';
@@ -201,6 +221,10 @@ export function isNotCondition(c: Condition): c is NotCondition {
 }
 export function isLlmCondition(c: Condition): c is LlmCondition {
   return (c as LlmCondition).llm !== undefined && typeof (c as LlmCondition).llm === 'object';
+}
+export function isEventCountCondition(c: Condition): c is EventCountCondition {
+  const ec = (c as EventCountCondition).event_count;
+  return ec !== undefined && typeof ec === 'object' && typeof ec.device === 'string';
 }
 
 /** Re-export for consumers that want the single list without a second import. */

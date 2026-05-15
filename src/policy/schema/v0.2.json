@@ -344,6 +344,26 @@
         {
           "type": "object",
           "additionalProperties": false,
+          "required": ["event_count"],
+          "properties": {
+            "event_count": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["device", "window", "min"],
+              "description": "Cross-event aggregation: count events from a device within a rolling window and assert against [min, max].",
+              "properties": {
+                "device": { "type": "string", "description": "deviceId or alias" },
+                "event": { "type": "string", "description": "Optional canonical event filter (e.g. motion.detected). Matched against the classified event of each history record." },
+                "window": { "type": "string", "pattern": "^\\d+(ms|s|m|h|d)$", "description": "Rolling window measured back from now, e.g. \"5m\", \"1h\"." },
+                "min": { "type": "integer", "minimum": 0, "description": "Inclusive minimum count required for the condition to match." },
+                "max": { "type": "integer", "minimum": 0, "description": "Optional inclusive maximum. Omit for \"at least min\"." }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
           "required": ["llm"],
           "properties": {
             "llm": {

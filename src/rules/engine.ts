@@ -45,11 +45,15 @@ import {
   isCommandAction,
   isNotifyAction,
   isLlmCondition,
+  isEventCountCondition,
 } from './types.js';
 import { executeNotifyAction } from './notify.js';
 import { Cron } from 'croner';
 import { writeAudit, writeEvaluateTrace } from '../utils/audit.js';
-import { TraceBuilder, shouldWriteTrace, HIGH_FREQ_EVENTS, type EvaluateTraceMode } from './trace.js';
+import { TraceBuilder, shouldWriteTrace, HIGH_FREQ_EVENTS, type EvaluateTraceMode, ruleVersion } from './trace.js';
+import { LlmConditionEvaluator } from './llm-condition.js';
+import { queryEventWindow } from '../devices/history-window.js';
+import type { EventWindowFetcher } from './matcher.js';
 
 export interface LintIssue {
   rule: string;
@@ -348,6 +352,32 @@ export function lintRules(automation: AutomationBlock | null | undefined): LintR
       }
     }
 
+    // event_count condition lints
+    for (const c of (r.conditions ?? [])) {
+      if (!isEventCountCondition(c)) continue;
+      const ec = c.event_count;
+
+      // event_count window must parse as a duration shortcut.
+      if (!/^\d+(ms|s|m|h|d)$/.test(String(ec.window ?? ''))) {
+        issues.push({
+          rule: r.name,
+          severity: 'error',
+          code: 'condition-event-count-bad-window',
+          message: `event_count.window "${ec.window}" must match \`<digits>(ms|s|m|h|d)\` — e.g. "5m", "1h".`,
+        });
+      }
+
+      // min/max sanity
+      if (ec.max !== undefined && ec.max < ec.min) {
+        issues.push({
+          rule: r.name,
+          severity: 'error',
+          code: 'condition-event-count-max-below-min',
+          message: `event_count.max (${ec.max}) must be ≥ min (${ec.min}).`,
+        });
+      }
+    }
+
     const enabled = r.enabled !== false;
     const hasError = issues.some((i) => i.severity === 'error');
     const hasUnsupported = issues.some((i) => i.code === 'trigger-unsupported');
@@ -401,6 +431,12 @@ export interface RulesEngineOptions {
    * axios client.
    */
   statusFetcher?: DeviceStatusFetcher;
+  /**
+   * Override the cross-event aggregation fetcher used by event_count
+   * conditions and the LLM `recent_events` hook. Test seam — production
+   * callers leave it unset and the engine reads from the JSONL ring.
+   */
+  eventWindowFetcher?: EventWindowFetcher;
 }
 
 export interface EngineFireEntry {
@@ -443,6 +479,8 @@ export class RulesEngine {
    * keeps the semantics of `max_per` honest.
    */
   private pendingChain: Promise<void> = Promise.resolve();
+  private readonly llmEvaluator = new LlmConditionEvaluator();
+  private readonly eventWindowFetcher: EventWindowFetcher = defaultEventWindowFetcher;
   private stats: EngineStats = {
     started: false,
     rulesLoaded: 0,
@@ -832,6 +870,11 @@ export class RulesEngine {
       aliases: this.aliases,
       fetchStatus,
       trace,
+      event,
+      llmEvaluator: this.llmEvaluator,
+      ruleVersion: ruleVersion(rule),
+      globalLlmMaxCallsPerHour: this.opts.automation?.llm_budget?.max_calls_per_hour,
+      eventWindowFetcher: this.opts.eventWindowFetcher ?? this.eventWindowFetcher,
     });
     if (!cond.matched) {
       // If conditions are not met, the trigger is no longer "continuously stable" —
@@ -1028,4 +1071,31 @@ export class RulesEngine {
       this.opts.onFire?.({ ruleName: rule.name, fireId, status: allDry ? 'dry' : 'fired', deviceId: event.deviceId });
     }
   }
+}
+
+/**
+ * Default cross-event aggregation fetcher used by the engine. Reads the
+ * append-only JSONL ring at ~/.switchbot/device-history/<deviceId>.jsonl
+ * for records inside the requested window, classifies each payload via
+ * the matcher's classifier, and (optionally) filters by canonical event.
+ */
+export async function defaultEventWindowFetcher(
+  deviceId: string,
+  opts: { sinceMs: number; untilMs: number; limit?: number; eventName?: string },
+): Promise<EngineEvent[]> {
+  const records = await queryEventWindow(deviceId, {
+    sinceMs: opts.sinceMs,
+    untilMs: opts.untilMs,
+    limit: opts.limit,
+    eventFilter: opts.eventName
+      ? (rec) => classifyMqttPayload(rec.payload).event === opts.eventName
+      : undefined,
+  });
+  return records.map((rec) => ({
+    source: 'mqtt' as const,
+    event: classifyMqttPayload(rec.payload).event,
+    t: new Date(rec.t),
+    deviceId,
+    payload: rec.payload,
+  }));
 }
