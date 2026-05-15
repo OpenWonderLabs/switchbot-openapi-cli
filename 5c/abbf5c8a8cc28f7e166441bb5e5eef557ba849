@@ -1,0 +1,28 @@
+src/devices/catalog.ts
+  s_609937a4e2becf::t_e4dc49871cea14 202
+  s_609937a4e2becf::t_e0beb6a7089a2c 576
+  s_609937a4e2becf::t_2c7cadadcad35a 207
+src/commands/expand.ts
+  s_609937a4e2becf::t_2eab89ce747bab 42
+  s_609937a4e2becf::t_0a7f5cbd8b41f2 192
+src/devices/param-validator.ts
+  s_609937a4e2becf::t_33cbf38d71aebc 67-69
+  s_609937a4e2becf::t_d143d8a618f4aa 275
+  s_609937a4e2becf::t_21e252ef6de6ef 89-91,93-94
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "5cabbf5c8a8cc28f7e166441bb5e5eef557ba849",
+  "prompts": {},
+  "sessions": {
+    "s_609937a4e2becf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "815adb82-2d53-4b9c-90fd-f2cca599d974",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
