@@ -22,8 +22,8 @@ import {
 import { validateLoadedPolicy } from '../policy/validate.js';
 import { selectCredentialStore } from '../credentials/keychain.js';
 import { getActiveProfile } from '../lib/request-context.js';
-import { readDaemonState } from '../lib/daemon-state.js';
-import { isPidAlive } from '../rules/pid-file.js';
+import { readDaemonState, DAEMON_PID_FILE } from '../lib/daemon-state.js';
+import { isPidAlive, readPidFile } from '../rules/pid-file.js';
 
 interface Check {
   name: string;
@@ -1059,6 +1059,40 @@ async function probeLocalLlmEndpoint(baseUrl: string): Promise<boolean> {
   });
 }
 
+async function checkDaemonIpc(): Promise<Check> {
+  // Probes the JSON-RPC IPC socket exposed by `switchbot rules run`. Treats
+  // the absence of a daemon process as 'ok' (informational): the daemon being
+  // stopped is a valid configuration. A reachable daemon must answer
+  // daemon.status within a short timeout for the check to pass.
+  const daemonPid = readPidFile(DAEMON_PID_FILE);
+  if (!daemonPid || !isPidAlive(daemonPid)) {
+    return { name: 'daemon-ipc', status: 'ok', detail: { applicable: false, message: 'daemon not running — check skipped' } };
+  }
+
+  try {
+    const { IpcDaemonClient } = await import('../daemon/client.js');
+    const client = new IpcDaemonClient({ timeoutMs: 1_500, connectTimeoutMs: 500 });
+    const start = Date.now();
+    const result = await client.ping();
+    const latencyMs = Date.now() - start;
+    return {
+      name: 'daemon-ipc',
+      status: 'ok',
+      detail: {
+        socketPath: client.getSocketPath(),
+        latencyMs,
+        ipcStatus: result.status,
+      },
+    };
+  } catch (err) {
+    return {
+      name: 'daemon-ipc',
+      status: 'fail',
+      detail: { message: err instanceof Error ? err.message : String(err) },
+    };
+  }
+}
+
 
 interface CheckDef {
   name: string;
@@ -1096,6 +1130,7 @@ const CHECK_REGISTRY: CheckDef[] = [
   { name: 'health', description: 'health endpoint availability (daemon --healthz-port)', run: () => checkHealthEndpoint() },
   { name: 'notify-connectivity', description: 'webhook URLs from notify actions in policy.yaml', run: () => checkNotifyConnectivity() },
   { name: 'local-llm-reachable', description: 'local LLM endpoint reachable (only when policy uses provider:local)', run: () => checkLocalLlmReachable() },
+  { name: 'daemon-ipc', description: 'daemon JSON-RPC IPC socket reachable (only when daemon is running)', run: () => checkDaemonIpc() },
 ];
 
 interface FixResult {
