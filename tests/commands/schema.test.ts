@@ -128,6 +128,30 @@ describe('schema export', () => {
     expect(hub3.role).toBe('hub');
     expect(hub3.statusFields).toEqual(['version', 'temperature', 'humidity', 'lightLevel']);
   });
+
+  it('exports official GitHub-documented device types observed in the real account', async () => {
+    const res = await runCli(registerSchemaCommand, ['schema', 'export', '--types', 'Pan/Tilt Cam Plus 3K,Presence Sensor,Remote']);
+    const parsed = JSON.parse(res.stdout.join('')).data;
+    const byType = new Map(parsed.types.map((t: { type: string }) => [t.type, t]));
+
+    expect([...byType.keys()].sort()).toEqual(['Pan/Tilt Cam Plus 3K', 'Presence Sensor', 'Remote']);
+    expect(byType.get('Pan/Tilt Cam Plus 3K')).toMatchObject({
+      role: 'security',
+      readOnly: true,
+      commands: [],
+    });
+    expect(byType.get('Remote')).toMatchObject({
+      role: 'other',
+      readOnly: true,
+      commands: [],
+    });
+    expect(byType.get('Presence Sensor')).toMatchObject({
+      role: 'sensor',
+      readOnly: true,
+      commands: [],
+      statusFields: ['version', 'battery', 'lightLevel', 'detected', 'hubDeviceId'],
+    });
+  });
 });
 
 describe('schema export B3 slim flags', () => {

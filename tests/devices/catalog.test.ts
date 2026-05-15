@@ -11,6 +11,166 @@ import {
   type SafetyTier,
 } from '../../src/devices/catalog.js';
 
+// Snapshot from OpenWonderLabs/SwitchBotAPI README.md:
+// "device type. *...*" fields in the device list / status sections.
+// Keep this list in sync when upstream documents new API deviceType strings.
+const OFFICIAL_API_DEVICE_TYPES = [
+  'AI Art Frame',
+  'AI Hub',
+  'Air Purifier PM2.5',
+  'Air Purifier Table PM2.5',
+  'Air Purifier Table VOC',
+  'Air Purifier VOC',
+  'Battery Circulator Fan',
+  'Blind Tilt',
+  'Bot',
+  'Candle Warmer Lamp',
+  'Ceiling Light',
+  'Ceiling Light Pro',
+  'Circulator Fan',
+  'Color Bulb',
+  'Contact Sensor',
+  'Curtain',
+  'Curtain3',
+  'Floor Lamp',
+  'Garage Door Opener',
+  'Home Climate Panel',
+  'Hub',
+  'Hub 2',
+  'Hub 3',
+  'Hub Mini',
+  'Hub Plus',
+  'Humidifier',
+  'Humidifier2',
+  'Indoor Cam',
+  'K10+',
+  'K10+ Pro',
+  'Keypad',
+  'Keypad Touch',
+  'Keypad Vision',
+  'Keypad Vision Pro',
+  'Lock Lite',
+  'Lock Ultra',
+  'Meter',
+  'MeterPlus',
+  'MeterPro',
+  'MeterPro(CO2)',
+  'Motion Sensor',
+  'Pan/Tilt Cam',
+  'Pan/Tilt Cam 2K',
+  'Pan/Tilt Cam Plus 2K',
+  'Pan/Tilt Cam Plus 3K',
+  'Plug',
+  'Plug Mini (EU)',
+  'Plug Mini (JP)',
+  'Plug Mini (US)',
+  'Presence Sensor',
+  'RGBIC Neon Rope Light',
+  'RGBIC Neon Wire Rope Light',
+  'RGBICWW Floor Lamp',
+  'RGBICWW Strip Light',
+  'Relay Switch 1',
+  'Relay Switch 1PM',
+  'Relay Switch 2PM',
+  'Remote',
+  'Robot Vacuum Cleaner K10+ Pro Combo',
+  'Robot Vacuum Cleaner K11+',
+  'Robot Vacuum Cleaner K20 Plus Pro',
+  'Robot Vacuum Cleaner S1',
+  'Robot Vacuum Cleaner S1 Plus',
+  'Robot Vacuum Cleaner S10',
+  'Robot Vacuum Cleaner S20',
+  'Roller Shade',
+  'Smart Lock',
+  'Smart Lock Pro',
+  'Smart Lock Ultra',
+  'Smart Radiator Thermostat',
+  'Standing Circulator Fan',
+  'Strip Light',
+  'Strip Light 3',
+  'Video Doorbell',
+  'Water Detector',
+  'WoIOSensor',
+] as const;
+
+// Snapshot from the same README's "Supported Device List" table. Some names
+// are product-table aliases rather than raw API deviceType strings.
+const OFFICIAL_SUPPORTED_DEVICE_LIST_NAMES = [
+  'Hub Mini',
+  'Hub Plus',
+  'Hub 2',
+  'Hub 3',
+  'Bot',
+  'Curtain',
+  'Curtain 3',
+  'Plug',
+  'Meter',
+  'Meter Plus (JP)',
+  'Meter Plus (US)',
+  'Outdoor Meter',
+  'Meter Pro',
+  'Meter Pro (CO2 Monitor)',
+  'Motion Sensor',
+  'Contact Sensor',
+  'Prensence Sensor',
+  'Water Leak Detector',
+  'Color Bulb',
+  'Strip Light',
+  'Plug Mini (US)',
+  'Plug Mini (JP)',
+  'Plug Mini (EU)',
+  'Lock',
+  'Lock Pro',
+  'Keypad',
+  'Keypad Touch',
+  'S1',
+  'S1 Plus',
+  'K10+',
+  'K10+ Pro',
+  'S10',
+  'S20',
+  'K10+ Pro Combo',
+  'K20+ Pro',
+  'Ceiling Light',
+  'Ceiling Light Pro',
+  'RGBICWW Strip Light',
+  'RGBICWW Floor Lamp',
+  'RGBIC Neon Rope Light',
+  'RGBIC Neon Wire Rope Light',
+  'Indoor Cam',
+  'Pan/Tilt Cam',
+  'Pan/Tilt Cam 2K',
+  'Blind Tilt',
+  'Battery Circulator Fan',
+  'Circulator Fan',
+  'Evaporative Humidifier',
+  'Evaporative Humidifier (Auto-refill)',
+  'Air Purifier PM2.5',
+  'Air Purifier Table PM2.5',
+  'Air Purifier VOC',
+  'Air Purifier Table VOC',
+  'Roller Shade',
+  'Relay Switch 1PM',
+  'Relay Switch 1',
+  'Relay Switch 2PM',
+  'Garage Door Opener',
+  'Floor Lamp',
+  'Strip Light 3',
+  'Lock Lite',
+  'Video Doorbell',
+  'Keypad Vision',
+  'Keypad Vision Pro',
+  'Lock Ultra',
+  'Standing Circulator Fan',
+  'Pan/Tilt Cam Plus 2K',
+  'Pan/Tilt Cam Plus 3K',
+  'AI Hub',
+  'Candle Warmer Lamp',
+  'Home Climate Panel',
+  'Smart Radiator Thermostat',
+  'AI Art Frame',
+] as const;
+
 describe('devices/catalog', () => {
   describe('schema integrity', () => {
     it('every entry has a type, category, and commands array', () => {
@@ -62,6 +222,22 @@ describe('devices/catalog', () => {
             ).toBeTypeOf('string');
           }
         }
+      }
+    });
+
+    it('resolves every official GitHub-documented API deviceType', () => {
+      for (const type of OFFICIAL_API_DEVICE_TYPES) {
+        const match = findCatalogEntry(type);
+        expect(match, `${type} is missing from catalog type/aliases`).not.toBeNull();
+        expect(Array.isArray(match), `${type} should resolve to one catalog entry`).toBe(false);
+      }
+    });
+
+    it('resolves every official GitHub Supported Device List name', () => {
+      for (const type of OFFICIAL_SUPPORTED_DEVICE_LIST_NAMES) {
+        const match = findCatalogEntry(type);
+        expect(match, `${type} is missing from catalog type/aliases`).not.toBeNull();
+        expect(Array.isArray(match), `${type} should resolve to one catalog entry`).toBe(false);
       }
     });
   });
@@ -216,14 +392,47 @@ describe('devices/catalog', () => {
       expect(security).toContain('Garage Door Opener');
       expect(security).toContain('Keypad');
       expect(security).toContain('Video Doorbell');
+      expect(security).toContain('Pan/Tilt Cam Plus 3K');
     });
 
     it('assigns sensor role + readOnly to Meter / Motion Sensor / Contact Sensor', () => {
-      for (const t of ['Meter', 'Motion Sensor', 'Contact Sensor', 'Water Leak Detector']) {
+      for (const t of ['Meter', 'Motion Sensor', 'Presence Sensor', 'Contact Sensor', 'Water Leak Detector']) {
         const entry = DEVICE_CATALOG.find((e) => e.type === t);
         expect(entry?.role).toBe('sensor');
         expect(entry?.readOnly).toBe(true);
       }
+    });
+
+    it('covers official GitHub-documented device types observed in the real account', () => {
+      const camera = DEVICE_CATALOG.find((e) => e.type === 'Pan/Tilt Cam Plus 3K');
+      const remote = DEVICE_CATALOG.find((e) => e.type === 'Remote');
+      const presence = DEVICE_CATALOG.find((e) => e.type === 'Presence Sensor');
+
+      expect(camera).toMatchObject({
+        category: 'physical',
+        role: 'security',
+        readOnly: true,
+        commands: [],
+      });
+      expect(camera?.statusFields).toBeUndefined();
+      expect(camera?.aliases).toContain('Pan/Tilt Cam Plus');
+
+      expect(remote).toMatchObject({
+        category: 'physical',
+        role: 'other',
+        readOnly: true,
+        commands: [],
+      });
+      expect(remote?.statusFields).toBeUndefined();
+      expect(remote?.aliases).toContain('Wireless Remote');
+
+      expect(presence).toMatchObject({
+        category: 'physical',
+        role: 'sensor',
+        readOnly: true,
+        commands: [],
+        statusFields: ['version', 'battery', 'lightLevel', 'detected', 'hubDeviceId'],
+      });
     });
   });
 

@@ -1008,13 +1008,20 @@ function renderCatalogEntry(entry: DeviceCatalogEntry): void {
   console.log(`Type:     ${entry.type}`);
   console.log(`Category: ${entry.category === 'ir' ? 'IR remote' : 'Physical device'}`);
   if (entry.role) console.log(`Role:     ${entry.role}`);
-  if (entry.readOnly) console.log(`ReadOnly: yes (status-only device, no control commands)`);
+  const hasStatusFields = (entry.statusFields?.length ?? 0) > 0;
+  if (entry.readOnly) {
+    console.log(hasStatusFields
+      ? `ReadOnly: yes (status-only device, no control commands)`
+      : `ReadOnly: yes (no cloud control commands cataloged)`);
+  }
   if (entry.aliases && entry.aliases.length > 0) {
     console.log(`Aliases:  ${entry.aliases.join(', ')}`);
   }
 
   if (entry.commands.length === 0) {
-    console.log('\nCommands: (none — status-only device)');
+    console.log(hasStatusFields
+      ? '\nCommands: (none — status-only device)'
+      : '\nCommands: (none — no cloud control commands cataloged)');
   } else {
     console.log('\nCommands:');
     const hasExamples = entry.commands.some((c) => c.exampleParams && c.exampleParams.length > 0);
