@@ -198,6 +198,15 @@ const lightControls: CommandSpec[] = [
   { command: 'setColor', parameter: 'R:G:B (0-255 each)', description: 'Set RGB color, e.g. "255:0:0"', idempotent: true, exampleParams: ['255:0:0', '255:255:255'] },
   { command: 'setColorTemperature', parameter: '2700-6500', description: 'Set color temperature (Kelvin)', idempotent: true, exampleParams: ['2700', '4000', '6500'] },
 ];
+const rgbLightControls0To100: CommandSpec[] = [
+  { command: 'setBrightness', parameter: '0-100', description: 'Set brightness percentage', idempotent: true, exampleParams: ['0', '50', '100'] },
+  { command: 'setColor', parameter: 'R:G:B (0-255 each)', description: 'Set RGB color, e.g. "255:0:0"', idempotent: true, exampleParams: ['255:0:0', '255:255:255'] },
+  { command: 'setColorTemperature', parameter: '2700-6500', description: 'Set color temperature (Kelvin)', idempotent: true, exampleParams: ['2700', '4000', '6500'] },
+];
+const rgbOnlyLightControls0To100: CommandSpec[] = [
+  { command: 'setBrightness', parameter: '0-100', description: 'Set brightness percentage', idempotent: true, exampleParams: ['0', '50', '100'] },
+  { command: 'setColor', parameter: 'R:G:B (0-255 each)', description: 'Set RGB color, e.g. "255:0:0"', idempotent: true, exampleParams: ['255:0:0', '255:255:255'] },
+];
 
 export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   // ---------- Physical devices ----------
@@ -231,7 +240,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     category: 'physical',
     description: 'Bluetooth/Wi-Fi electronic deadbolt that locks and unlocks a door via cloud API.',
     role: 'security',
-    aliases: ['Smart Lock Pro'],
+    aliases: ['Lock', 'Smart Lock Pro', 'Lock Pro'],
     commands: [
       { command: 'lock', parameter: '—', description: 'Lock the door', idempotent: true },
       { command: 'unlock', parameter: '—', description: 'Unlock the door', idempotent: true, safetyTier: 'destructive', safetyReason: 'Physically unlocks the door — anyone nearby can open it.' },
@@ -244,6 +253,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     category: 'physical',
     description: 'Compact electronic deadbolt with lock and unlock control; no deadbolt mode.',
     role: 'security',
+    aliases: ['Lock Lite'],
     commands: [
       { command: 'lock', parameter: '—', description: 'Lock the door', idempotent: true },
       { command: 'unlock', parameter: '—', description: 'Unlock the door', idempotent: true, safetyTier: 'destructive', safetyReason: 'Physically unlocks the door — anyone nearby can open it.' },
@@ -255,6 +265,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     category: 'physical',
     description: 'Premium electronic deadbolt with full lock, unlock, and deadbolt control.',
     role: 'security',
+    aliases: ['Lock Ultra'],
     commands: [
       { command: 'lock', parameter: '—', description: 'Lock the door', idempotent: true },
       { command: 'unlock', parameter: '—', description: 'Unlock the door', idempotent: true, safetyTier: 'destructive', safetyReason: 'Physically unlocks the door — anyone nearby can open it.' },
@@ -265,9 +276,9 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Plug',
     category: 'physical',
-    description: 'Smart wall outlet plug with on/off/toggle control and basic power status.',
+    description: 'Smart wall outlet plug with on/off control and basic power status.',
     role: 'power',
-    commands: onOffToggle,
+    commands: onOff,
     statusFields: ['power', 'version'],
   },
   {
@@ -275,7 +286,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     category: 'physical',
     description: 'Compact smart plug with voltage, current, and daily energy consumption reporting.',
     role: 'power',
-    aliases: ['Plug Mini (JP)'],
+    aliases: ['Plug Mini (JP)', 'Plug Mini (EU)'],
     commands: onOffToggle,
     statusFields: ['voltage', 'weight', 'electricityOfDay', 'electricCurrent', 'power', 'version'],
   },
@@ -353,11 +364,62 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Strip Light',
     category: 'physical',
-    description: 'Addressable LED strip with on/off, brightness, RGB color, and color temperature control.',
+    description: 'Addressable LED strip with on/off, brightness, and RGB color control.',
     role: 'lighting',
-    aliases: ['Strip Light 3'],
-    commands: [...onOffToggle, ...lightControls],
+    commands: [
+      ...onOffToggle,
+      { command: 'setBrightness', parameter: '1-100', description: 'Set brightness percentage', idempotent: true, exampleParams: ['50', '80'] },
+      { command: 'setColor', parameter: 'R:G:B (0-255 each)', description: 'Set RGB color, e.g. "255:0:0"', idempotent: true, exampleParams: ['255:0:0', '255:255:255'] },
+    ],
     statusFields: ['power', 'brightness', 'color', 'colorTemperature', 'version'],
+  },
+  {
+    type: 'Floor Lamp',
+    category: 'physical',
+    description: 'Smart floor lamp with 0-100 brightness, RGB color, and color temperature control.',
+    role: 'lighting',
+    commands: [...onOffToggle, ...rgbLightControls0To100],
+    statusFields: ['power', 'brightness', 'color', 'colorTemperature', 'version'],
+  },
+  {
+    type: 'Strip Light 3',
+    category: 'physical',
+    description: 'Third-generation strip light with 0-100 brightness, RGB color, and color temperature control.',
+    role: 'lighting',
+    commands: [...onOffToggle, ...rgbLightControls0To100],
+    statusFields: ['power', 'brightness', 'color', 'colorTemperature', 'version'],
+  },
+  {
+    type: 'RGBICWW Strip Light',
+    category: 'physical',
+    description: 'RGBICWW strip light with 0-100 brightness, RGB color, and color temperature control.',
+    role: 'lighting',
+    commands: [...onOffToggle, ...rgbLightControls0To100],
+    statusFields: ['power', 'brightness', 'color', 'colorTemperature', 'version'],
+  },
+  {
+    type: 'RGBICWW Floor Lamp',
+    category: 'physical',
+    description: 'RGBICWW floor lamp with 0-100 brightness, RGB color, and color temperature control.',
+    role: 'lighting',
+    commands: [...onOffToggle, ...rgbLightControls0To100],
+    statusFields: ['power', 'brightness', 'color', 'colorTemperature', 'version'],
+  },
+  {
+    type: 'RGBIC Neon Wire Rope Light',
+    category: 'physical',
+    description: 'RGBIC neon wire rope light with 0-100 brightness and RGB color control.',
+    role: 'lighting',
+    commands: [...onOffToggle, ...rgbOnlyLightControls0To100],
+    statusFields: ['power', 'brightness', 'color', 'version'],
+  },
+  {
+    type: 'RGBIC Neon Rope Light',
+    category: 'physical',
+    description: 'RGBIC neon rope light with 0-100 brightness and RGB color control.',
+    role: 'lighting',
+    commands: [...onOffToggle, ...rgbOnlyLightControls0To100],
+    statusFields: ['power', 'brightness', 'color', 'version'],
   },
   {
     type: 'Ceiling Light',
@@ -380,7 +442,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     commands: [
       ...onOff,
       { command: 'setMode', parameter: '0=schedule 1=manual 2=off 3=eco 4=comfort 5=quickHeat', description: 'Operating mode', idempotent: true, exampleParams: ['1', '3'] },
-      { command: 'setManualModeTemperature', parameter: '5-30 (°C)', description: 'Target temperature in manual mode', idempotent: true, exampleParams: ['20', '22'] },
+      { command: 'setManualModeTemperature', parameter: '4-35 (°C)', description: 'Target temperature in manual mode', idempotent: true, exampleParams: ['20', '22'] },
     ],
     statusFields: ['power', 'temperature', 'humidity', 'battery', 'version', 'mode', 'targetTemperature'],
   },
@@ -389,7 +451,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     category: 'physical',
     description: 'Entry-level robot vacuum with start/stop/dock and four suction power levels.',
     role: 'cleaning',
-    aliases: ['Robot Vacuum', 'Robot Vacuum Cleaner S1 Plus', 'K10+'],
+    aliases: ['Robot Vacuum', 'Robot Vacuum Cleaner S1 Plus', 'K10+', 'K10+ Pro'],
     commands: [
       { command: 'start', parameter: '—', description: 'Start cleaning', idempotent: true },
       { command: 'stop', parameter: '—', description: 'Stop cleaning', idempotent: true },
@@ -399,17 +461,17 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     statusFields: ['workingStatus', 'onlineStatus', 'battery', 'version'],
   },
   {
-    type: 'K10+ Pro Combo',
+    type: 'Robot Vacuum Cleaner K10+ Pro Combo',
     category: 'physical',
     description: 'Compact robot vacuum and mop combo with sweep/mop sessions, fan level, and water level.',
     role: 'cleaning',
-    aliases: ['K20+ Pro'],
+    aliases: ['K10+ Pro Combo', 'K20+ Pro', 'K11+', 'Robot Vacuum Cleaner K11+'],
     commands: [
       { command: 'startClean', parameter: '\'{"action":"sweep"|"mop","param":{"fanLevel":1-4,"times":1-2639999}}\'', description: 'Begin a cleaning session', idempotent: false, exampleParams: ['{"action":"sweep","param":{"fanLevel":2,"times":1}}'] },
       { command: 'pause', parameter: '—', description: 'Pause cleaning', idempotent: true },
       { command: 'dock', parameter: '—', description: 'Return to dock', idempotent: true },
       { command: 'setVolume', parameter: '0-100', description: 'Set voice volume', idempotent: true, exampleParams: ['0', '50', '100'] },
-      { command: 'changeParam', parameter: '\'{"fanLevel":1-4,"waterLevel":1-2,"times":1-2639999}\'', description: 'Change parameters mid-run', idempotent: true, exampleParams: ['{"fanLevel":3,"waterLevel":1,"times":1}'] },
+      { command: 'changeParam', parameter: '\'{"fanLevel":1-4,"times":1-2639999}\'', description: 'Change parameters mid-run', idempotent: true, exampleParams: ['{"fanLevel":3,"times":1}'] },
     ],
     statusFields: ['workingStatus', 'onlineStatus', 'battery', 'taskType'],
   },
@@ -418,7 +480,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     category: 'physical',
     description: 'Advanced floor cleaning robot with sweep/mop modes, self-wash dock, and humidifier refill.',
     role: 'cleaning',
-    aliases: ['Robot Vacuum Cleaner S10', 'Robot Vacuum Cleaner S20'],
+    aliases: ['Robot Vacuum Cleaner S10', 'Robot Vacuum Cleaner S20', 'S20'],
     commands: [
       { command: 'startClean', parameter: '\'{"action":"sweep"|"sweep_mop","param":{"fanLevel":1-4,"waterLevel":1-2,"times":1-2639999}}\'', description: 'Begin a cleaning session', idempotent: false, exampleParams: ['{"action":"sweep","param":{"fanLevel":2,"waterLevel":1,"times":1}}'] },
       { command: 'pause', parameter: '—', description: 'Pause cleaning', idempotent: true },
@@ -435,7 +497,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     category: 'physical',
     description: 'Rechargeable table/floor fan with wind modes, speed control, night-light, and auto-off timer.',
     role: 'fan',
-    aliases: ['Circulator Fan'],
+    aliases: ['Circulator Fan', 'Standing Circulator Fan'],
     commands: [
       ...onOffToggle,
       { command: 'setNightLightMode', parameter: 'off | 1 | 2', description: 'Night-light mode', idempotent: true, exampleParams: ['off', '1', '2'] },
@@ -497,7 +559,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     category: 'physical',
     description: 'PIN-pad access controller that creates and deletes door passcodes for a Smart Lock.',
     role: 'security',
-    aliases: ['Keypad Touch'],
+    aliases: ['Keypad Touch', 'Keypad Vision', 'Keypad Vision Pro'],
     commands: [
       { command: 'createKey', parameter: '\'{"name":"...","type":"permanent|timeLimit|disposable|urgent","password":"6-12 digits","startTime":<s>,"endTime":<s>}\'', description: 'Create a passcode (async; result via webhook)', idempotent: false, safetyTier: 'destructive', safetyReason: 'Provisions a new access credential — anyone with this passcode can unlock the door.' },
       { command: 'deleteKey', parameter: '\'{"id":<passcode_id>}\'', description: 'Delete a passcode (async; result via webhook)', idempotent: true, safetyTier: 'destructive', safetyReason: 'Permanently removes a passcode — the holder immediately loses door access.' },
@@ -507,14 +569,24 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Candle Warmer Lamp',
     category: 'physical',
-    description: 'Decorative candle-warmer lamp with adjustable brightness and color temperature.',
+    description: 'Decorative candle-warmer lamp with adjustable 0-100 brightness.',
     role: 'lighting',
     commands: [
       ...onOffToggle,
-      { command: 'setBrightness', parameter: '1-100', description: 'Set brightness percentage', idempotent: true, exampleParams: ['50', '80'] },
-      { command: 'setColorTemperature', parameter: '2700-6500', description: 'Set color temperature (Kelvin)', idempotent: true, exampleParams: ['2700', '4000'] },
+      { command: 'setBrightness', parameter: '0-100', description: 'Set brightness percentage', idempotent: true, exampleParams: ['0', '50', '100'] },
     ],
     statusFields: ['power', 'brightness', 'colorTemperature', 'version'],
+  },
+  {
+    type: 'AI Art Frame',
+    category: 'physical',
+    description: 'Digital art frame that can switch to the next or previous image.',
+    role: 'other',
+    commands: [
+      { command: 'next', parameter: '—', description: 'Switch to the next image', idempotent: false },
+      { command: 'previous', parameter: '—', description: 'Switch to the previous image', idempotent: false },
+    ],
+    statusFields: ['version'],
   },
   // Status-only devices (no commands)
   {
@@ -551,6 +623,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     description: 'Water sensor that reports leak status; read-only, no control commands.',
     role: 'sensor',
     readOnly: true,
+    aliases: ['Water Detector'],
     commands: [],
     statusFields: ['battery', 'version', 'status'],
   },
@@ -701,6 +774,16 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     ],
   },
 ];
+
+export function canonicalizeDeviceType(deviceType: string): string {
+  const catalog = getEffectiveCatalog();
+  const lower = deviceType.toLowerCase();
+  for (const entry of catalog) {
+    if (entry.type.toLowerCase() === lower) return entry.type;
+    if (entry.aliases?.some((a) => a.toLowerCase() === lower)) return entry.type;
+  }
+  return deviceType;
+}
 
 /** Find a catalog entry by exact name, alias, or case-insensitive substring. */
 export function findCatalogEntry(query: string): DeviceCatalogEntry | DeviceCatalogEntry[] | null {
@@ -894,4 +977,3 @@ export function getEffectiveCatalog(): DeviceCatalogEntry[] {
 
   return Array.from(byType.values());
 }
-

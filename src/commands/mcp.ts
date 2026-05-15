@@ -27,9 +27,10 @@ import {
   getCommandSafetyReason,
 } from '../devices/catalog.js';
 import { getCachedDevice } from '../devices/cache.js';
-import { validateParameter } from '../devices/param-validator.js';
+import { parseParameterForWire, validateParameter } from '../devices/param-validator.js';
 import { EventSubscriptionManager } from '../mcp/events-subscription.js';
 import { deviceHistoryStore } from '../mcp/device-history.js';
+import { type ToolProfile, TOOL_PROFILES, resolveToolProfile } from '../mcp/tool-profiles.js';
 import { queryDeviceHistory } from '../devices/history-query.js';
 import {
   aggregateDeviceHistory,
@@ -244,8 +245,10 @@ function buildRiskProfile(
   };
 }
 
-export function createSwitchBotMcpServer(options?: { eventManager?: EventSubscriptionManager }): McpServer {
+export function createSwitchBotMcpServer(options?: { eventManager?: EventSubscriptionManager; toolProfile?: ToolProfile }): McpServer {
   const eventManager = options?.eventManager;
+  const allowedTools = TOOL_PROFILES[options?.toolProfile ?? 'default'];
+  const profileName = options?.toolProfile ?? 'default';
   const server = new McpServer(
     {
       name: 'switchbot',
@@ -272,11 +275,16 @@ Recommended bootstrap sequence:
 2. search_catalog or describe_device → confirm supported commands offline/online
 3. send_command (with confirm:true for destructive commands)
 
-API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
+API docs: https://github.com/OpenWonderLabs/SwitchBotAPI
+
+Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !== 'all' ? ' Use --tools all to access admin tools (policy, audit, rules).' : ''}`,
     }
   );
 
+  const skip = (name: string) => !allowedTools.has(name);
+
   // ---- list_devices ---------------------------------------------------------
+  if (!skip('list_devices'))
   server.registerTool(
     'list_devices',
     {
@@ -319,6 +327,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
   );
 
   // ---- get_device_status ----------------------------------------------------
+  if (!skip('get_device_status'))
   server.registerTool(
     'get_device_status',
     {
@@ -348,6 +357,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
   );
 
   // ---- get_device_history ----------------------------------------------------
+  if (!skip('get_device_history'))
   server.registerTool(
     'get_device_history',
     {
@@ -389,6 +399,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
   );
 
   // ---- query_device_history --------------------------------------------------
+  if (!skip('query_device_history'))
   server.registerTool(
     'query_device_history',
     {
@@ -436,6 +447,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
   );
 
   // ---- send_command ---------------------------------------------------------
+  if (!skip('send_command'))
   server.registerTool(
     'send_command',
     {
@@ -560,7 +572,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
             });
           }
           if (pv.normalized !== undefined) {
-            effectiveParameter = pv.normalized;
+            effectiveParameter = parseParameterForWire(pv.normalized);
           }
         }
         const wouldSend = {
@@ -667,7 +679,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
           });
         }
         if (pv.normalized !== undefined) {
-          effectiveParameter = pv.normalized;
+          effectiveParameter = parseParameterForWire(pv.normalized);
         }
       }
 
@@ -718,6 +730,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
   );
 
   // ---- run_scene ------------------------------------------------------------
+  if (!skip('run_scene'))
   server.registerTool(
     'run_scene',
     {
@@ -777,6 +790,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
   );
 
   // ---- list_scenes (companion to run_scene) ---------------------------------
+  if (!skip('list_scenes'))
   server.registerTool(
     'list_scenes',
     {
@@ -798,6 +812,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
   );
 
   // ---- search_catalog -------------------------------------------------------
+  if (!skip('search_catalog'))
   server.registerTool(
     'search_catalog',
     {
@@ -863,6 +878,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
   );
 
   // ---- describe_device ------------------------------------------------------
+  if (!skip('describe_device'))
   server.registerTool(
     'describe_device',
     {
@@ -914,6 +930,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
   );
 
   // ---- aggregate_device_history --------------------------------------------
+  if (!skip('aggregate_device_history'))
   server.registerTool(
     'aggregate_device_history',
     {
@@ -1017,6 +1034,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
   );
 
   // ---- account_overview ---------------------------------------------------
+  if (!skip('account_overview'))
   server.registerTool(
     'account_overview',
     {
@@ -1114,6 +1132,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
   );
 
   // ---- policy_validate -----------------------------------------------------
+  if (!skip('policy_validate'))
   server.registerTool(
     'policy_validate',
     {
@@ -1224,6 +1243,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
   );
 
   // ---- policy_new ----------------------------------------------------------
+  if (!skip('policy_new'))
   server.registerTool(
     'policy_new',
     {
@@ -1269,6 +1289,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
   );
 
   // ---- policy_migrate ------------------------------------------------------
+  if (!skip('policy_migrate'))
   server.registerTool(
     'policy_migrate',
     {
@@ -1428,6 +1449,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
   );
 
   // ---- policy_diff ---------------------------------------------------------
+  if (!skip('policy_diff'))
   server.registerTool(
     'policy_diff',
     {
@@ -1539,6 +1561,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
   }
 
   // ---- plan_suggest ---------------------------------------------------------
+  if (!skip('plan_suggest'))
   server.registerTool(
     'plan_suggest',
     {
@@ -1576,6 +1599,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
   );
 
   // ---- plan_run -------------------------------------------------------------
+  if (!skip('plan_run'))
   server.registerTool(
     'plan_run',
     {
@@ -1749,6 +1773,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
   );
 
   // ---- audit_query ----------------------------------------------------------
+  if (!skip('audit_query'))
   server.registerTool(
     'audit_query',
     {
@@ -1806,6 +1831,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
   );
 
   // ---- audit_stats ----------------------------------------------------------
+  if (!skip('audit_stats'))
   server.registerTool(
     'audit_stats',
     {
@@ -1881,6 +1907,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
   );
 
   // ---- rule_notifications ---------------------------------------------------
+  if (!skip('rule_notifications'))
   server.registerTool(
     'rule_notifications',
     {
@@ -1926,6 +1953,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
   );
 
   // ---- rules_suggest --------------------------------------------------------
+  if (!skip('rules_suggest'))
   server.registerTool(
     'rules_suggest',
     {
@@ -1979,6 +2007,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
   );
 
   // ---- rules_explain --------------------------------------------------------
+  if (!skip('rules_explain'))
   server.registerTool(
     'rules_explain',
     {
@@ -2038,6 +2067,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
   );
 
   // ---- rules_simulate -------------------------------------------------------
+  if (!skip('rules_simulate'))
   server.registerTool(
     'rules_simulate',
     {
@@ -2125,6 +2155,7 @@ API docs: https://github.com/OpenWonderLabs/SwitchBotAPI`,
   );
 
   // ---- policy_add_rule ------------------------------------------------------
+  if (!skip('policy_add_rule'))
   server.registerTool(
     'policy_add_rule',
     {
@@ -2217,8 +2248,8 @@ function listRegisteredResources(): string[] {
   return ['switchbot://events'];
 }
 
-function printMcpToolDirectory(): void {
-  const server = createSwitchBotMcpServer();
+function printMcpToolDirectory(toolProfile?: ToolProfile): void {
+  const server = createSwitchBotMcpServer({ toolProfile });
   const tools = listRegisteredToolsWithMeta(server);
   const resources = listRegisteredResources().map((uri) => ({ uri }));
   if (isJsonMode()) {
@@ -2297,12 +2328,20 @@ Inspect locally:
   mcp
     .command('tools')
     .description('Print the registered MCP tools in human or JSON form')
-    .action(() => printMcpToolDirectory());
+    .option('--tools <profile>', 'Tool profile: default, readonly, all (default: all)', stringArg('--tools'), 'all')
+    .action((opts: { tools?: string }) => {
+      try { printMcpToolDirectory(resolveToolProfile(opts.tools)); }
+      catch (e) { handleError(e); }
+    });
 
   mcp
     .command('list-tools')
     .description('Alias of `mcp tools`')
-    .action(() => printMcpToolDirectory());
+    .option('--tools <profile>', 'Tool profile: default, readonly, all (default: all)', stringArg('--tools'), 'all')
+    .action((opts: { tools?: string }) => {
+      try { printMcpToolDirectory(resolveToolProfile(opts.tools)); }
+      catch (e) { handleError(e); }
+    });
 
   mcp
     .command('serve')
@@ -2312,15 +2351,18 @@ Inspect locally:
     .option('--auth-token <token>', 'Bearer token for HTTP requests (required for --bind 0.0.0.0; falls back to SWITCHBOT_MCP_TOKEN env var)', stringArg('--auth-token'))
     .option('--cors-origin <url>', 'Allowed CORS origin(s) for HTTP (repeatable)', stringArg('--cors-origin'))
     .option('--rate-limit <n>', 'Max requests per minute per profile (default 60)', intArg('--rate-limit', { min: 1 }), '60')
+    .option('--tools <profile>', 'Tool profile: default, readonly, all (default: default)', stringArg('--tools'), 'default')
     .addHelpText('after', `
 Examples:
   $ switchbot mcp serve
+  $ switchbot mcp serve --tools all
   $ switchbot mcp serve --port 8787
   $ switchbot mcp serve --port 8787 --bind 127.0.0.1 --auth-token your-token
   $ switchbot mcp serve --port 8787 --bind 0.0.0.0 --auth-token your-token
 `)
-    .action(async (options: { port?: string; bind?: string; authToken?: string; corsOrigin?: string | string[]; rateLimit?: string }) => {
+    .action(async (options: { port?: string; bind?: string; authToken?: string; corsOrigin?: string | string[]; rateLimit?: string; tools?: string }) => {
       try {
+        const toolProfile = resolveToolProfile(options.tools);
         if (options.port) {
           const port = Number(options.port);
           if (!Number.isFinite(port) || port < 1 || port > 65535) {
@@ -2499,7 +2541,7 @@ process_uptime_seconds ${Math.floor(process.uptime())}
 
             // Stateless mode: fresh transport+server per request (SDK requirement).
             const reqTransport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-            const reqServer = createSwitchBotMcpServer({ eventManager });
+            const reqServer = createSwitchBotMcpServer({ eventManager, toolProfile });
             // Register cleanup before any async work so it fires on both normal
             // close and error-path close (after the 500 response ends).
             res.on('close', () => {
@@ -2560,7 +2602,7 @@ process_uptime_seconds ${Math.floor(process.uptime())}
             console.error('MQTT initialization failed:', err instanceof Error ? err.message : String(err));
           });
         }
-        const server = createSwitchBotMcpServer({ eventManager });
+        const server = createSwitchBotMcpServer({ eventManager, toolProfile });
         const transport = new StdioServerTransport();
         await server.connect(transport);
 

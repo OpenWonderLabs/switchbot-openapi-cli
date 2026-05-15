@@ -78,8 +78,8 @@ import { ApiError } from '../../src/api/client.js';
 import { runCli } from '../helpers/cli.js';
 
 /** Connect a fresh server + client pair and return both. */
-async function pair() {
-  const server = createSwitchBotMcpServer();
+async function pair(toolProfile?: 'default' | 'readonly' | 'all') {
+  const server = createSwitchBotMcpServer({ toolProfile: toolProfile ?? 'all' });
   const client = new Client({ name: 'test', version: '0.0.1' });
   const [clientT, serverT] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(serverT), client.connect(clientT)]);
@@ -408,6 +408,40 @@ describe('mcp server', () => {
     expect(structured.wouldSend?.parameter).toBe('255:0:0');
   });
 
+  it('send_command parses Relay Switch 2PM normalized channel before dispatch', async () => {
+    cacheMock.map.set('RELAY1', { type: 'Relay Switch 2PM', name: 'Kitchen Relay', category: 'physical' });
+    apiMock.__instance.post.mockResolvedValueOnce({
+      data: { statusCode: 100, body: {} },
+    });
+    const { client } = await pair();
+
+    const res = await client.callTool({
+      name: 'send_command',
+      arguments: { deviceId: 'RELAY1', command: 'turnOff', parameter: '1' },
+    });
+
+    expect(res.isError).toBeFalsy();
+    expect(apiMock.__instance.post).toHaveBeenCalledTimes(1);
+    const [, body] = apiMock.__instance.post.mock.calls[0];
+    expect(body).toMatchObject({ command: 'turnOff', parameter: '1' });
+    expect(body).not.toMatchObject({ parameter: '"1"' });
+  });
+
+  it('send_command dry-run parses Relay Switch 2PM normalized channel in wouldSend', async () => {
+    cacheMock.map.set('RELAY1', { type: 'Relay Switch 2PM', name: 'Kitchen Relay', category: 'physical' });
+    const { client } = await pair();
+
+    const res = await client.callTool({
+      name: 'send_command',
+      arguments: { deviceId: 'RELAY1', command: 'turnOn', parameter: '2', dryRun: true },
+    });
+
+    expect(res.isError).toBeFalsy();
+    const structured = res.structuredContent as { wouldSend?: { parameter?: unknown } };
+    expect(structured.wouldSend?.parameter).toBe('2');
+    expect(structured.wouldSend?.parameter).not.toBe('"2"');
+  });
+
   it('send_command normalizes command casing (e.g. turnon → turnOn)', async () => {
     cacheMock.map.set('BOT1', { type: 'Bot', name: 'My Bot', category: 'physical' });
     apiMock.__instance.post.mockResolvedValueOnce({
@@ -516,7 +550,7 @@ describe('mcp server', () => {
     });
     const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
     expect(Array.isArray(parsed)).toBe(true);
-    expect(parsed.some((e: { type: string }) => e.type === 'Strip Light')).toBe(true);
+    expect(parsed.some((e: { type: string }) => e.type === 'Strip Light 3')).toBe(true);
   });
 
   it('search_catalog rejects an empty query with a usage error', async () => {

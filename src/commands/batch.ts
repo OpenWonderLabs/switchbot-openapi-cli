@@ -14,6 +14,7 @@ import { isDryRun } from '../utils/flags.js';
 import { DryRunSignal } from '../api/client.js';
 import { getCachedTypeMap, getCachedDevice, loadStatusCache } from '../devices/cache.js';
 import { allowsDirectDestructiveExecution, destructiveExecutionHint } from '../lib/destructive-mode.js';
+import { parseParameterForWire } from '../devices/param-validator.js';
 
 interface BatchStepTiming {
   startedAt: string;
@@ -337,15 +338,9 @@ Examples:
           });
         }
 
-        // parameter may be a JSON object string; mirror the single-command action.
-        let parsedParam: unknown = parameter ?? 'default';
-        if (parameter) {
-          try {
-            parsedParam = JSON.parse(parameter);
-          } catch {
-            // keep as string
-          }
-        }
+        // Mirror single-command dispatch: scalar parameters remain strings;
+        // JSON object/array parameter shapes are parsed for object-based commands.
+        const parsedParam = parseParameterForWire(parameter);
 
         const maxConcurrentRaw = options.maxConcurrent ?? options.concurrency;
         const concurrency = Math.max(1, Number.parseInt(maxConcurrentRaw, 10) || DEFAULT_CONCURRENCY);

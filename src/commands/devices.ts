@@ -25,7 +25,7 @@ import {
   type Device,
 } from '../lib/devices.js';
 import { parseFilterExpr, matchClause, FilterSyntaxError, type FilterClause } from '../utils/filter.js';
-import { validateParameter } from '../devices/param-validator.js';
+import { parseParameterForWire, validateParameter } from '../devices/param-validator.js';
 import { registerBatchCommand } from './batch.js';
 import { registerWatchCommand } from './watch.js';
 import { registerExplainCommand } from './explain.js';
@@ -645,15 +645,9 @@ Examples:
           console.error(`Note: --yes has no effect; "${cmd}" is not a destructive command.`);
         }
 
-        // parameter may be a JSON object string (e.g. S10 startClean) or a plain string
-        let parsedParam: unknown = parameter ?? 'default';
-        if (parameter) {
-          try {
-            parsedParam = JSON.parse(parameter);
-          } catch {
-            // keep as string
-          }
-        }
+        // API docs treat scalar command parameters as strings. Only JSON
+        // object/array parameter shapes are parsed before dispatch.
+        const parsedParam = parseParameterForWire(parameter);
         // Capture for DryRunSignal catch branch (which runs after executeCommand throws).
         _cmd = cmd;
         _parsedParam = parsedParam;

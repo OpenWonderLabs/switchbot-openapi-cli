@@ -132,7 +132,7 @@ async function runMcpPolicyNewSmoke({ workDir, mcpPolicyPath }) {
     ? path.join(workDir, 'node_modules', '.bin', 'switchbot.cmd')
     : path.join(workDir, 'node_modules', '.bin', 'switchbot');
 
-  const child = spawn(switchbotBin, ['mcp', 'serve'], {
+  const child = spawn(switchbotBin, ['mcp', 'serve', '--tools', 'all'], {
     cwd: workDir,
     stdio: ['pipe', 'pipe', 'pipe'],
     shell: process.platform === 'win32',

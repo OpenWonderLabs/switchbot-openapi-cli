@@ -1,5 +1,6 @@
 import { UsageError } from '../utils/output.js';
 import { CSS_COLORS } from './css-colors.js';
+import { canonicalizeDeviceType } from './catalog.js';
 
 export const AC_MODE_MAP: Record<string, number> = { auto: 1, cool: 2, dry: 3, fan: 4, heat: 5 };
 export const AC_FAN_MAP: Record<string, number> = { auto: 1, low: 2, mid: 3, high: 4 };
@@ -64,6 +65,9 @@ export function buildBlindTiltSetPosition(opts: {
   if (!Number.isFinite(angle) || angle < 0 || angle > 100) {
     throw new UsageError(`--angle must be an integer between 0 and 100 (got "${opts.angle}")`);
   }
+  if (angle % 2 !== 0) {
+    throw new UsageError(`--angle must be a multiple of 2 (got "${opts.angle}"). Example: --angle 50`);
+  }
   return `${dir};${angle}`;
 }
 
@@ -83,11 +87,12 @@ export function buildRelaySetMode(opts: {
   return `${ch};${modeInt}`;
 }
 
-export function buildBrightnessSet(opts: { brightness?: string }): string {
-  if (!opts.brightness) throw new UsageError('--brightness is required (1-100)');
+export function buildBrightnessSet(opts: { brightness?: string }, deviceType?: string): string {
+  const [min, max] = (deviceType && brightnessRange(deviceType)) || [1, 100];
+  if (!opts.brightness) throw new UsageError(`--brightness is required (${min}-${max})`);
   const b = parseInt(opts.brightness, 10);
-  if (!Number.isFinite(b) || b < 1 || b > 100) {
-    throw new UsageError(`--brightness must be an integer between 1 and 100 (got "${opts.brightness}")`);
+  if (!Number.isFinite(b) || b < min || b > max) {
+    throw new UsageError(`--brightness must be an integer between ${min} and ${max} (got "${opts.brightness}")`);
   }
   return String(b);
 }
@@ -112,6 +117,22 @@ export type ValidateResult =
   | { ok: true; normalized?: string }
   | { ok: false; error: string };
 
+export function parseParameterForWire(parameter: string | undefined): unknown {
+  if (parameter === undefined) return 'default';
+  const trimmed = parameter.trim();
+  if (
+    (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+    (trimmed.startsWith('[') && trimmed.endsWith(']'))
+  ) {
+    try {
+      return JSON.parse(parameter);
+    } catch {
+      return parameter;
+    }
+  }
+  return parameter;
+}
+
 /**
  * Validate a raw wire-format parameter string for (deviceType, command)
  * combos where the shape is well-defined. Unknown combos pass through so
@@ -128,44 +149,159 @@ export function validateParameter(
   raw: string | undefined,
 ): ValidateResult {
   if (!deviceType) return { ok: true };
+  const dt = canonicalizeDeviceType(deviceType);
 
-  if (deviceType === 'Air Conditioner' && command === 'setAll') {
+  // --- Air Conditioner ---
+  if (dt === 'Air Conditioner' && command === 'setAll') {
     return validateAcSetAll(raw);
   }
-  if (deviceType.startsWith('Curtain') && command === 'setPosition') {
+
+  // --- Curtain ---
+  if (dt.startsWith('Curtain') && command === 'setPosition') {
     return validateCurtainSetPosition(raw);
   }
-  if (deviceType.startsWith('Blind Tilt') && command === 'setPosition') {
+
+  // --- Blind Tilt ---
+  if (dt.startsWith('Blind Tilt') && command === 'setPosition') {
     return validateBlindTiltSetPosition(raw);
   }
-  if (deviceType.startsWith('Relay Switch') && command === 'setMode') {
-    return validateRelaySetMode(raw);
+
+  // --- Relay Switch ---
+  if ((dt === 'Relay Switch 1' || dt === 'Relay Switch 1PM') && command === 'setMode') {
+    return validateIntRange(raw, 'setMode', 0, 3, 'Relay Switch mode (0=toggle 1=edge 2=detached 3=momentary)');
   }
-  if (command === 'setBrightness' && isBrightnessDevice(deviceType)) {
-    return validateSetBrightness(raw);
+  if (dt === 'Relay Switch 2PM' && command === 'setMode') {
+    return validateRelay2PmSetMode(raw);
   }
-  if (command === 'setColor' && isColorDevice(deviceType)) {
+  if (dt === 'Relay Switch 2PM' && (command === 'turnOn' || command === 'turnOff' || command === 'toggle')) {
+    return validateRelayChannel(raw);
+  }
+  if (dt === 'Relay Switch 2PM' && command === 'setPosition') {
+    return validateIntRange(raw, 'setPosition', 0, 100, 'Relay Switch 2PM roller-shade percentage');
+  }
+
+  // --- Lighting ---
+  if (command === 'setBrightness' && isBrightnessDevice(dt)) {
+    return validateSetBrightness(raw, dt);
+  }
+  if (command === 'setColor' && isColorDevice(dt)) {
     return validateSetColor(raw);
   }
-  if (command === 'setColorTemperature' && isBrightnessDevice(deviceType)) {
+  if (command === 'setColorTemperature' && isColorTemperatureDevice(dt)) {
     return validateSetColorTemperature(raw);
+  }
+
+  // --- Humidifier ---
+  if (dt === 'Humidifier' && command === 'setMode') {
+    return validateHumidifierSetMode(raw);
+  }
+  if (dt === 'Humidifier2' && command === 'setMode') {
+    return validateHumidifier2SetMode(raw);
+  }
+  if (dt === 'Humidifier2' && command === 'setChildLock') {
+    return validateEnum(raw, 'setChildLock', ['true', 'false']);
+  }
+
+  // --- Air Purifier VOC ---
+  if (isAirPurifierDevice(dt) && command === 'setMode') {
+    return validateAirPurifierSetMode(raw);
+  }
+  if (isAirPurifierDevice(dt) && command === 'setChildLock') {
+    return validateEnum(raw, 'setChildLock', ['0', '1']);
+  }
+
+  // --- Robot Vacuums ---
+  if (isPowLevelVacuum(dt) && command === 'PowLevel') {
+    return validateIntRange(raw, 'PowLevel', 0, 3, 'suction level (0=Quiet 1=Standard 2=Strong 3=Max)');
+  }
+  if ((isComboVacuum(dt) || isFloorCleaningVacuum(dt)) && command === 'startClean') {
+    return validateVacuumStartClean(raw, dt);
+  }
+  if ((isComboVacuum(dt) || isFloorCleaningVacuum(dt)) && command === 'setVolume') {
+    return validateIntRange(raw, 'setVolume', 0, 100, 'volume percentage');
+  }
+  if ((isComboVacuum(dt) || isFloorCleaningVacuum(dt)) && command === 'changeParam') {
+    return validateVacuumChangeParam(raw, dt);
+  }
+  if (isFloorCleaningVacuum(dt) && command === 'selfClean') {
+    return validateEnum(raw, 'selfClean', ['1', '2', '3'], '1=wash mop, 2=dry, 3=terminate');
+  }
+
+  // --- Circulator Fan ---
+  if (isCirculatorFan(dt) && command === 'setNightLightMode') {
+    return validateEnum(raw, 'setNightLightMode', ['off', '1', '2']);
+  }
+  if (isCirculatorFan(dt) && command === 'setWindMode') {
+    return validateEnum(raw, 'setWindMode', ['direct', 'natural', 'sleep', 'baby']);
+  }
+  if (isCirculatorFan(dt) && command === 'setWindSpeed') {
+    return validateIntRange(raw, 'setWindSpeed', 1, 100, 'fan speed percentage');
+  }
+  if (isCirculatorFan(dt) && command === 'closeDelay') {
+    return validateIntRange(raw, 'closeDelay', 1, 36000, 'auto-off delay in seconds');
+  }
+
+  // --- Smart Radiator Thermostat ---
+  if (dt === 'Smart Radiator Thermostat' && command === 'setMode') {
+    return validateIntRange(raw, 'setMode', 0, 5, 'mode (0=schedule 1=manual 2=off 3=eco 4=comfort 5=quickHeat)');
+  }
+  if (dt === 'Smart Radiator Thermostat' && command === 'setManualModeTemperature') {
+    return validateIntRange(raw, 'setManualModeTemperature', 4, 35, 'temperature in °C');
+  }
+
+  // --- Keypad ---
+  if (dt.startsWith('Keypad') && command === 'createKey') {
+    return validateKeypadCreateKey(raw);
+  }
+  if (dt.startsWith('Keypad') && command === 'deleteKey') {
+    return validateKeypadDeleteKey(raw);
+  }
+
+  // --- TV (IR) ---
+  if (dt === 'TV' && command === 'SetChannel') {
+    return validateIntRange(raw, 'SetChannel', 1, 999, 'channel number');
+  }
+
+  // --- Roller Shade ---
+  if (dt === 'Roller Shade' && command === 'setPosition') {
+    return validateIntRange(raw, 'setPosition', 0, 100, 'position percentage (0=open, 100=closed)');
   }
 
   return { ok: true };
 }
 
 function isBrightnessDevice(deviceType: string): boolean {
-  return (
+  return brightnessRange(deviceType) !== null;
+}
+
+export function brightnessRange(deviceType: string): [number, number] | null {
+  if (
     deviceType === 'Color Bulb' ||
     deviceType === 'Strip Light' ||
-    deviceType === 'Strip Light 3' ||
     deviceType === 'Ceiling Light' ||
-    deviceType === 'Ceiling Light Pro' ||
+    deviceType === 'Ceiling Light Pro'
+  ) {
+    return [1, 100];
+  }
+  if (
     deviceType === 'Floor Lamp' ||
+    deviceType === 'Strip Light 3' ||
+    deviceType === 'RGBICWW Strip Light' ||
+    deviceType === 'RGBICWW Floor Lamp' ||
+    deviceType === 'RGBIC Neon Wire Rope Light' ||
+    deviceType === 'RGBIC Neon Rope Light' ||
+    deviceType === 'Candle Warmer Lamp'
+  ) {
+    return [0, 100];
+  }
+  if (
     deviceType === 'Light Strip' ||
     deviceType === 'Dimmer' ||
     deviceType === 'Fill Light'
-  );
+  ) {
+    return [1, 100];
+  }
+  return null;
 }
 
 function isColorDevice(deviceType: string): boolean {
@@ -174,43 +310,115 @@ function isColorDevice(deviceType: string): boolean {
     deviceType === 'Strip Light' ||
     deviceType === 'Strip Light 3' ||
     deviceType === 'Floor Lamp' ||
+    deviceType === 'RGBICWW Strip Light' ||
+    deviceType === 'RGBICWW Floor Lamp' ||
+    deviceType === 'RGBIC Neon Wire Rope Light' ||
+    deviceType === 'RGBIC Neon Rope Light' ||
     deviceType === 'Light Strip' ||
     deviceType === 'Fill Light'
   );
 }
 
+function isColorTemperatureDevice(deviceType: string): boolean {
+  return (
+    deviceType === 'Color Bulb' ||
+    deviceType === 'Floor Lamp' ||
+    deviceType === 'Strip Light 3' ||
+    deviceType === 'Ceiling Light' ||
+    deviceType === 'Ceiling Light Pro' ||
+    deviceType === 'RGBICWW Strip Light' ||
+    deviceType === 'RGBICWW Floor Lamp' ||
+    deviceType === 'Light Strip' ||
+    deviceType === 'Dimmer' ||
+    deviceType === 'Fill Light'
+  );
+}
+
+function isAirPurifierDevice(deviceType: string): boolean {
+  return (
+    deviceType === 'Air Purifier VOC' ||
+    deviceType === 'Air Purifier Table VOC' ||
+    deviceType === 'Air Purifier PM2.5' ||
+    deviceType === 'Air Purifier Table PM2.5'
+  );
+}
+
+function isPowLevelVacuum(deviceType: string): boolean {
+  return (
+    deviceType === 'Robot Vacuum Cleaner S1' ||
+    deviceType === 'Robot Vacuum Cleaner S1 Plus' ||
+    deviceType === 'K10+' ||
+    deviceType === 'K10+ Pro'
+  );
+}
+
+function isComboVacuum(deviceType: string): boolean {
+  return (
+    deviceType === 'K10+ Pro Combo' ||
+    deviceType === 'Robot Vacuum Cleaner K10+ Pro Combo' ||
+    deviceType === 'K20+ Pro' ||
+    deviceType === 'K11+' ||
+    deviceType === 'Robot Vacuum Cleaner K11+'
+  );
+}
+
+function isFloorCleaningVacuum(deviceType: string): boolean {
+  return (
+    deviceType === 'Floor Cleaning Robot S10' ||
+    deviceType === 'S20' ||
+    deviceType === 'Robot Vacuum Cleaner S20'
+  );
+}
+
+function isCirculatorFan(deviceType: string): boolean {
+  return (
+    deviceType === 'Battery Circulator Fan' ||
+    deviceType === 'Circulator Fan' ||
+    deviceType === 'Standing Circulator Fan'
+  );
+}
+
 export function isLightingCommandSupported(deviceType: string, command: string): boolean {
-  if (command === 'setBrightness' || command === 'setColorTemperature') return isBrightnessDevice(deviceType);
-  if (command === 'setColor') return isColorDevice(deviceType);
+  const dt = canonicalizeDeviceType(deviceType);
+  if (command === 'setBrightness') return isBrightnessDevice(dt);
+  if (command === 'setColorTemperature') return isColorTemperatureDevice(dt);
+  if (command === 'setColor') return isColorDevice(dt);
   return false;
 }
 
-function validateSetBrightness(raw: string | undefined): ValidateResult {
+function isNumericish(v: unknown): boolean {
+  if (typeof v === 'number') return true;
+  if (typeof v === 'string' && v.trim() !== '') return true;
+  return false;
+}
+
+function validateSetBrightness(raw: string | undefined, deviceType: string): ValidateResult {
+  const [min, max] = brightnessRange(deviceType) ?? [1, 100];
   if (raw === undefined || raw === '' || raw === 'default') {
     return {
       ok: false,
-      error: `setBrightness requires an integer 1-100 (percent). Example: "50".`,
+      error: `setBrightness requires an integer ${min}-${max} (percent). Example: "50".`,
     };
   }
-  const trimmed = raw.trim();
+  const trimmed = stripQuotes(raw.trim());
   if (!/^-?\d+$/.test(trimmed)) {
     return {
       ok: false,
-      error: `setBrightness must be an integer 1-100, got ${JSON.stringify(raw)}. ${hintBrightnessRetry()}`,
+      error: `setBrightness must be an integer ${min}-${max}, got ${JSON.stringify(raw)}. ${hintBrightnessRetry(min, max)}`,
     };
   }
   const n = Number(trimmed);
-  if (!Number.isInteger(n) || n < 1 || n > 100) {
+  if (!Number.isInteger(n) || n < min || n > max) {
     return {
       ok: false,
-      error: `setBrightness must be an integer 1-100, got "${raw}". ${hintBrightnessRetry()}`,
+      error: `setBrightness must be an integer ${min}-${max}, got "${raw}". ${hintBrightnessRetry(min, max)}`,
     };
   }
   return { ok: true, normalized: String(n) };
 }
 
-function hintBrightnessRetry(): string {
-  return `Ask the user whether they meant a percentage (1-100). Example: "50".`;
+function hintBrightnessRetry(min = 1, max = 100): string {
+  return `Ask the user whether they meant a percentage (${min}-${max}). Example: "50".`;
 }
 
 // B-12: setColor accepts R:G:B, R,G,B, #RRGGBB, #RGB, or a CSS Level 4 named
@@ -232,7 +440,7 @@ function validateSetColor(raw: string | undefined): ValidateResult {
       error: `setColor requires a color. Use a CSS color name (e.g. coral, teal, salmon), hex (#RRGGBB / #RGB), or R:G:B format.`,
     };
   }
-  const trimmed = raw.trim();
+  const trimmed = stripQuotes(raw.trim());
 
   // Named color.
   const named = NAMED_COLORS[trimmed.toLowerCase()];
@@ -307,7 +515,7 @@ function validateSetColorTemperature(raw: string | undefined): ValidateResult {
       error: `setColorTemperature requires an integer Kelvin value 2700-6500. Example: "4000".`,
     };
   }
-  const trimmed = raw.trim();
+  const trimmed = stripQuotes(raw.trim());
   if (!/^-?\d+$/.test(trimmed)) {
     return {
       ok: false,
@@ -331,13 +539,14 @@ function validateAcSetAll(raw: string | undefined): ValidateResult {
       error: `setAll requires a parameter "<temp>,<mode>,<fan>,<on|off>". Example: "26,2,2,on".`,
     };
   }
-  if (raw.startsWith('{') || raw.startsWith('[')) {
+  const stripped = stripQuotes(raw.trim());
+  if (stripped.startsWith('{') || stripped.startsWith('[')) {
     return {
       ok: false,
       error: `setAll parameter must be a CSV string like "26,2,2,on", not JSON (got ${JSON.stringify(raw)}).`,
     };
   }
-  const parts = raw.split(',');
+  const parts = stripped.split(',');
   if (parts.length !== 4) {
     return {
       ok: false,
@@ -384,8 +593,9 @@ function validateCurtainSetPosition(raw: string | undefined): ValidateResult {
       error: `setPosition requires a parameter. Expected: "<0-100>" or "<index>,<ff|0|1>,<0-100>". Example: "50" or "0,ff,50".`,
     };
   }
-  if (!raw.includes(',')) {
-    const pos = Number(raw);
+  const stripped = stripQuotes(raw.trim());
+  if (!stripped.includes(',')) {
+    const pos = Number(stripped);
     if (!Number.isInteger(pos) || pos < 0 || pos > 100) {
       return {
         ok: false,
@@ -394,7 +604,7 @@ function validateCurtainSetPosition(raw: string | undefined): ValidateResult {
     }
     return { ok: true, normalized: String(pos) };
   }
-  const parts = raw.split(',').map((s) => s.trim());
+  const parts = stripped.split(',').map((s) => s.trim());
   if (parts.length !== 3) {
     return {
       ok: false,
@@ -433,7 +643,8 @@ function validateBlindTiltSetPosition(raw: string | undefined): ValidateResult {
       error: `Blind Tilt setPosition requires a parameter. Expected: "<up|down>;<0-100>". Example: "up;50".`,
     };
   }
-  const parts = raw.split(';');
+  const stripped = stripQuotes(raw.trim());
+  const parts = stripped.split(';');
   if (parts.length !== 2) {
     return {
       ok: false,
@@ -454,17 +665,24 @@ function validateBlindTiltSetPosition(raw: string | undefined): ValidateResult {
       error: `Blind Tilt setPosition angle must be an integer 0-100, got "${parts[1]}".`,
     };
   }
+  if (angle % 2 !== 0) {
+    return {
+      ok: false,
+      error: `Blind Tilt setPosition angle must be a multiple of 2, got "${parts[1]}". Example: "up;48".`,
+    };
+  }
   return { ok: true, normalized: `${dir};${angle}` };
 }
 
-function validateRelaySetMode(raw: string | undefined): ValidateResult {
+function validateRelay2PmSetMode(raw: string | undefined): ValidateResult {
   if (raw === undefined || raw === '' || raw === 'default') {
     return {
       ok: false,
       error: `Relay Switch setMode requires a parameter. Expected: "<1|2>;<0|1|2|3>". Example: "1;1" (channel 1, edge mode).`,
     };
   }
-  const parts = raw.split(';');
+  const stripped = stripQuotes(raw.trim());
+  const parts = stripped.split(';');
   if (parts.length !== 2) {
     return {
       ok: false,
@@ -486,4 +704,369 @@ function validateRelaySetMode(raw: string | undefined): ValidateResult {
     };
   }
   return { ok: true, normalized: `${ch};${mode}` };
+}
+
+// ---- Relay Switch 2PM channel (turnOn/turnOff/toggle) -----------------------
+
+function validateRelayChannel(raw: string | undefined): ValidateResult {
+  if (raw === undefined || raw === '' || raw === 'default') {
+    return {
+      ok: false,
+      error: `Relay Switch 2PM turnOn/turnOff/toggle requires a channel parameter: "1" or "2". Example: turnOff 1`,
+    };
+  }
+  const n = stripQuotes(raw.trim());
+  if (n !== '1' && n !== '2') {
+    return {
+      ok: false,
+      error: `Relay Switch 2PM channel must be "1" or "2", got ${JSON.stringify(raw)}.`,
+    };
+  }
+  return { ok: true, normalized: n };
+}
+
+// ---- Generic helpers --------------------------------------------------------
+
+/**
+ * Strip surrounding double-quotes from user input so that both `1` and `"1"`
+ * are accepted interchangeably. This makes the CLI tolerant of users who
+ * wrap numeric values in quotes (e.g. shell escaping `'"1"'`).
+ */
+function stripQuotes(s: string): string {
+  if (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) {
+    return s.slice(1, -1);
+  }
+  return s;
+}
+
+function validateIntRange(
+  raw: string | undefined,
+  command: string,
+  min: number,
+  max: number,
+  label: string,
+): ValidateResult {
+  if (raw === undefined || raw === '' || raw === 'default') {
+    return {
+      ok: false,
+      error: `${command} requires an integer ${min}-${max} (${label}). Example: "${Math.round((min + max) / 2)}".`,
+    };
+  }
+  const trimmed = stripQuotes(raw.trim());
+  if (!/^-?\d+$/.test(trimmed)) {
+    return {
+      ok: false,
+      error: `${command} must be an integer ${min}-${max} (${label}), got ${JSON.stringify(raw)}.`,
+    };
+  }
+  const n = Number(trimmed);
+  if (n < min || n > max) {
+    return {
+      ok: false,
+      error: `${command} must be an integer ${min}-${max} (${label}), got ${n}.`,
+    };
+  }
+  return { ok: true, normalized: String(n) };
+}
+
+function validateEnum(
+  raw: string | undefined,
+  command: string,
+  allowed: string[],
+  hint?: string,
+): ValidateResult {
+  if (raw === undefined || raw === '' || raw === 'default') {
+    return {
+      ok: false,
+      error: `${command} requires a parameter: ${allowed.join(' | ')}${hint ? ` (${hint})` : ''}. Example: "${allowed[0]}".`,
+    };
+  }
+  const trimmed = stripQuotes(raw.trim()).toLowerCase();
+  const match = allowed.find((a) => a.toLowerCase() === trimmed);
+  if (!match) {
+    return {
+      ok: false,
+      error: `${command} must be one of: ${allowed.join(', ')}. Got ${JSON.stringify(raw)}.`,
+    };
+  }
+  return { ok: true, normalized: match };
+}
+
+// ---- Humidifier -------------------------------------------------------------
+
+function validateHumidifierSetMode(raw: string | undefined): ValidateResult {
+  if (raw === undefined || raw === '' || raw === 'default') {
+    return {
+      ok: false,
+      error: `Humidifier setMode requires a parameter: "auto", "101", "102", "103", or 0-100 (humidity %). Example: "auto".`,
+    };
+  }
+  const trimmed = stripQuotes(raw.trim()).toLowerCase();
+  if (trimmed === 'auto') return { ok: true, normalized: 'auto' };
+  if (['101', '102', '103'].includes(trimmed)) return { ok: true, normalized: trimmed };
+  if (/^\d+$/.test(trimmed)) {
+    const n = Number(trimmed);
+    if (n >= 0 && n <= 100) return { ok: true, normalized: String(n) };
+  }
+  return {
+    ok: false,
+    error: `Humidifier setMode must be "auto", "101" (34%), "102" (67%), "103" (100%), or 0-100. Got ${JSON.stringify(raw)}.`,
+  };
+}
+
+function validateHumidifier2SetMode(raw: string | undefined): ValidateResult {
+  if (raw === undefined || raw === '' || raw === 'default') {
+    return {
+      ok: false,
+      error: `Humidifier2 setMode requires a JSON parameter: {"mode":1-8,"targetHumidify":0-100}. Example: '{"mode":7,"targetHumidify":50}'.`,
+    };
+  }
+  let obj: unknown;
+  try { obj = JSON.parse(raw); } catch {
+    return {
+      ok: false,
+      error: `Humidifier2 setMode expects JSON: {"mode":1-8,"targetHumidify":0-100}. Got ${JSON.stringify(raw)}.`,
+    };
+  }
+  if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) {
+    return { ok: false, error: `Humidifier2 setMode expects a JSON object, got ${typeof obj}.` };
+  }
+  const o = obj as Record<string, unknown>;
+  if (!isNumericish(o.mode)) {
+    return { ok: false, error: `Humidifier2 setMode "mode" must be a number or numeric string, got ${JSON.stringify(o.mode)}.` };
+  }
+  const mode = Number(o.mode);
+  if (!Number.isInteger(mode) || mode < 1 || mode > 8) {
+    return { ok: false, error: `Humidifier2 setMode "mode" must be 1-8, got ${JSON.stringify(o.mode)}.` };
+  }
+  if (!isNumericish(o.targetHumidify)) {
+    return { ok: false, error: `Humidifier2 setMode "targetHumidify" must be a number or numeric string, got ${JSON.stringify(o.targetHumidify)}.` };
+  }
+  const hum = Number(o.targetHumidify);
+  if (!Number.isInteger(hum) || hum < 0 || hum > 100) {
+    return { ok: false, error: `Humidifier2 setMode "targetHumidify" must be 0-100, got ${JSON.stringify(o.targetHumidify)}.` };
+  }
+  return { ok: true, normalized: JSON.stringify({ mode, targetHumidify: hum }) };
+}
+
+// ---- Air Purifier VOC -------------------------------------------------------
+
+function validateAirPurifierSetMode(raw: string | undefined): ValidateResult {
+  if (raw === undefined || raw === '' || raw === 'default') {
+    return {
+      ok: false,
+      error: `Air Purifier setMode requires a JSON parameter: {"mode":1-4} or {"mode":1,"fanGear":1-3}. Example: '{"mode":2}'.`,
+    };
+  }
+  let obj: unknown;
+  try { obj = JSON.parse(raw); } catch {
+    return {
+      ok: false,
+      error: `Air Purifier setMode expects JSON: {"mode":1-4,"fanGear":1-3}. Got ${JSON.stringify(raw)}.`,
+    };
+  }
+  if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) {
+    return { ok: false, error: `Air Purifier setMode expects a JSON object, got ${typeof obj}.` };
+  }
+  const o = obj as Record<string, unknown>;
+  if (!isNumericish(o.mode)) {
+    return { ok: false, error: `Air Purifier setMode "mode" must be a number or numeric string, got ${JSON.stringify(o.mode)}.` };
+  }
+  const mode = Number(o.mode);
+  if (!Number.isInteger(mode) || mode < 1 || mode > 4) {
+    return { ok: false, error: `Air Purifier setMode "mode" must be 1-4 (1=normal 2=auto 3=sleep 4=pet), got ${JSON.stringify(o.mode)}.` };
+  }
+  const normalized: Record<string, number> = { mode };
+  if (o.fanGear !== undefined) {
+    if (mode !== 1) {
+      return { ok: false, error: `Air Purifier setMode "fanGear" can only be set when "mode" is 1 (normal/fan mode).` };
+    }
+    if (!isNumericish(o.fanGear)) {
+      return { ok: false, error: `Air Purifier setMode "fanGear" must be a number or numeric string, got ${JSON.stringify(o.fanGear)}.` };
+    }
+    const fg = Number(o.fanGear);
+    if (!Number.isInteger(fg) || fg < 1 || fg > 3) {
+      return { ok: false, error: `Air Purifier setMode "fanGear" must be 1-3, got ${JSON.stringify(o.fanGear)}.` };
+    }
+    normalized.fanGear = fg;
+  }
+  return { ok: true, normalized: JSON.stringify(normalized) };
+}
+
+// ---- Robot Vacuums ----------------------------------------------------------
+
+function validateVacuumStartClean(raw: string | undefined, deviceType: string): ValidateResult {
+  if (raw === undefined || raw === '' || raw === 'default') {
+    const actions = isFloorCleaningVacuum(deviceType) ? 'sweep | sweep_mop' : 'sweep | mop';
+    return {
+      ok: false,
+      error: `${deviceType} startClean requires a JSON parameter: {"action":"${actions.split(' | ')[0]}","param":{"fanLevel":1-4,"times":1}}. Example: '{"action":"${actions.split(' | ')[0]}","param":{"fanLevel":2,"times":1}}'.`,
+    };
+  }
+  let obj: unknown;
+  try { obj = JSON.parse(raw); } catch {
+    return {
+      ok: false,
+      error: `${deviceType} startClean expects JSON. Got ${JSON.stringify(raw)}.`,
+    };
+  }
+  if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) {
+    return { ok: false, error: `${deviceType} startClean expects a JSON object.` };
+  }
+  const o = obj as Record<string, unknown>;
+  const validActions = isFloorCleaningVacuum(deviceType)
+    ? ['sweep', 'sweep_mop']
+    : ['sweep', 'mop'];
+  if (typeof o.action !== 'string' || !validActions.includes(o.action)) {
+    return { ok: false, error: `${deviceType} startClean "action" must be one of: ${validActions.join(', ')}. Got ${JSON.stringify(o.action)}.` };
+  }
+  const normalized: Record<string, unknown> = { action: o.action };
+  if (o.param !== undefined) {
+    if (typeof o.param !== 'object' || o.param === null || Array.isArray(o.param)) {
+      return { ok: false, error: `${deviceType} startClean "param" must be an object.` };
+    }
+    const p = o.param as Record<string, unknown>;
+    const normalizedParam: Record<string, number> = {};
+    if (p.fanLevel !== undefined) {
+      if (!isNumericish(p.fanLevel)) {
+        return { ok: false, error: `${deviceType} startClean "param.fanLevel" must be a number or numeric string, got ${JSON.stringify(p.fanLevel)}.` };
+      }
+      const fl = Number(p.fanLevel);
+      if (!Number.isInteger(fl) || fl < 1 || fl > 4) {
+        return { ok: false, error: `${deviceType} startClean "param.fanLevel" must be 1-4, got ${JSON.stringify(p.fanLevel)}.` };
+      }
+      normalizedParam.fanLevel = fl;
+    }
+    if (p.waterLevel !== undefined) {
+      if (!isFloorCleaningVacuum(deviceType)) {
+        return { ok: false, error: `${deviceType} startClean "param.waterLevel" is only supported for Floor Cleaning Robot S10/S20.` };
+      }
+      if (!isNumericish(p.waterLevel)) {
+        return { ok: false, error: `${deviceType} startClean "param.waterLevel" must be a number or numeric string, got ${JSON.stringify(p.waterLevel)}.` };
+      }
+      const wl = Number(p.waterLevel);
+      if (!Number.isInteger(wl) || wl < 1 || wl > 2) {
+        return { ok: false, error: `${deviceType} startClean "param.waterLevel" must be 1-2, got ${JSON.stringify(p.waterLevel)}.` };
+      }
+      normalizedParam.waterLevel = wl;
+    }
+    if (p.times !== undefined) {
+      if (!isNumericish(p.times)) {
+        return { ok: false, error: `${deviceType} startClean "param.times" must be a number or numeric string, got ${JSON.stringify(p.times)}.` };
+      }
+      const t = Number(p.times);
+      if (!Number.isInteger(t) || t < 1 || t > 2639999) {
+        return { ok: false, error: `${deviceType} startClean "param.times" must be an integer 1-2639999, got ${JSON.stringify(p.times)}.` };
+      }
+      normalizedParam.times = t;
+    }
+    normalized.param = normalizedParam;
+  }
+  return { ok: true, normalized: JSON.stringify(normalized) };
+}
+
+function validateVacuumChangeParam(raw: string | undefined, deviceType: string): ValidateResult {
+  if (raw === undefined || raw === '' || raw === 'default') {
+    return {
+      ok: false,
+      error: `changeParam requires a JSON parameter: {"fanLevel":1-4,"waterLevel":1-2,"times":1}. Example: '{"fanLevel":3,"waterLevel":1,"times":1}'.`,
+    };
+  }
+  let obj: unknown;
+  try { obj = JSON.parse(raw); } catch {
+    return {
+      ok: false,
+      error: `changeParam expects JSON: {"fanLevel":1-4,"waterLevel":1-2,"times":...}. Got ${JSON.stringify(raw)}.`,
+    };
+  }
+  if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) {
+    return { ok: false, error: `changeParam expects a JSON object.` };
+  }
+  const p = obj as Record<string, unknown>;
+  const normalized: Record<string, number> = {};
+  if (p.fanLevel !== undefined) {
+    if (!isNumericish(p.fanLevel)) {
+      return { ok: false, error: `changeParam "fanLevel" must be a number or numeric string, got ${JSON.stringify(p.fanLevel)}.` };
+    }
+    const fl = Number(p.fanLevel);
+    if (!Number.isInteger(fl) || fl < 1 || fl > 4) {
+      return { ok: false, error: `changeParam "fanLevel" must be 1-4, got ${JSON.stringify(p.fanLevel)}.` };
+    }
+    normalized.fanLevel = fl;
+  }
+  if (p.waterLevel !== undefined) {
+    if (isComboVacuum(deviceType)) {
+      return { ok: false, error: `${deviceType} changeParam does not support "waterLevel" according to the API docs.` };
+    }
+    if (!isNumericish(p.waterLevel)) {
+      return { ok: false, error: `changeParam "waterLevel" must be a number or numeric string, got ${JSON.stringify(p.waterLevel)}.` };
+    }
+    const wl = Number(p.waterLevel);
+    if (!Number.isInteger(wl) || wl < 1 || wl > 2) {
+      return { ok: false, error: `changeParam "waterLevel" must be 1-2, got ${JSON.stringify(p.waterLevel)}.` };
+    }
+    normalized.waterLevel = wl;
+  }
+  if (p.times !== undefined) {
+    if (!isNumericish(p.times)) {
+      return { ok: false, error: `changeParam "times" must be a number or numeric string, got ${JSON.stringify(p.times)}.` };
+    }
+    const t = Number(p.times);
+    if (!Number.isInteger(t) || t < 1 || t > 2639999) {
+      return { ok: false, error: `changeParam "times" must be an integer 1-2639999, got ${JSON.stringify(p.times)}.` };
+    }
+    normalized.times = t;
+  }
+  return { ok: true, normalized: JSON.stringify(normalized) };
+}
+
+// ---- Keypad -----------------------------------------------------------------
+
+function validateKeypadCreateKey(raw: string | undefined): ValidateResult {
+  if (raw === undefined || raw === '' || raw === 'default') {
+    return {
+      ok: false,
+      error: `createKey requires a JSON parameter: {"name":"...","type":"permanent|timeLimit|disposable|urgent","password":"6-12 digits",...}.`,
+    };
+  }
+  let obj: unknown;
+  try { obj = JSON.parse(raw); } catch {
+    return { ok: false, error: `createKey expects a JSON object. Got ${JSON.stringify(raw)}.` };
+  }
+  if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) {
+    return { ok: false, error: `createKey expects a JSON object.` };
+  }
+  const o = obj as Record<string, unknown>;
+  if (typeof o.name !== 'string' || o.name.length === 0) {
+    return { ok: false, error: `createKey "name" is required and must be a non-empty string.` };
+  }
+  const validTypes = ['permanent', 'timeLimit', 'disposable', 'urgent'];
+  if (typeof o.type !== 'string' || !validTypes.includes(o.type)) {
+    return { ok: false, error: `createKey "type" must be one of: ${validTypes.join(', ')}. Got ${JSON.stringify(o.type)}.` };
+  }
+  if (typeof o.password !== 'string' || !/^\d{6,12}$/.test(o.password)) {
+    return { ok: false, error: `createKey "password" must be a 6-12 digit string. Got ${JSON.stringify(o.password)}.` };
+  }
+  return { ok: true };
+}
+
+function validateKeypadDeleteKey(raw: string | undefined): ValidateResult {
+  if (raw === undefined || raw === '' || raw === 'default') {
+    return {
+      ok: false,
+      error: `deleteKey requires a JSON parameter: {"id":<passcode_id>}. Example: '{"id":12345}'.`,
+    };
+  }
+  let obj: unknown;
+  try { obj = JSON.parse(raw); } catch {
+    return { ok: false, error: `deleteKey expects a JSON object: {"id":<passcode_id>}. Got ${JSON.stringify(raw)}.` };
+  }
+  if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) {
+    return { ok: false, error: `deleteKey expects a JSON object.` };
+  }
+  const o = obj as Record<string, unknown>;
+  if (o.id === undefined || (typeof o.id !== 'number' && typeof o.id !== 'string')) {
+    return { ok: false, error: `deleteKey "id" is required (passcode ID). Got ${JSON.stringify(o.id)}.` };
+  }
+  return { ok: true };
 }

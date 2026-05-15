@@ -39,7 +39,7 @@ export function registerExpandCommand(devices: Command): void {
     .option('--direction <dir>', 'Blind Tilt setPosition: up|down', stringArg('--direction'))
     .option('--angle <percent>', 'Blind Tilt setPosition: 0-100 (0=closed, 100=open)', intArg('--angle', { min: 0, max: 100 }))
     .option('--channel <n>', 'Relay Switch 2 setMode: channel 1 or 2', intArg('--channel', { min: 1, max: 2 }))
-    .option('--brightness <percent>', 'setBrightness: 1-100 percent', intArg('--brightness', { min: 1, max: 100 }))
+    .option('--brightness <percent>', 'setBrightness: 0-100 percent (minimum depends on device)', intArg('--brightness', { min: 0, max: 100 }))
     .option('--color <value>', 'setColor: R:G:B, #RRGGBB, or named color (red, blue, etc.)', stringArg('--color'))
     .option('--color-temp <kelvin>', 'setColorTemperature: 2700-6500 Kelvin', intArg('--color-temp', { min: 2700, max: 6500 }))
     .option('--yes', 'Confirm destructive commands')
@@ -189,7 +189,7 @@ Examples:
             }
           }
           if (command === 'setBrightness') {
-            parameter = buildBrightnessSet(options);
+            parameter = buildBrightnessSet(options, cached?.type);
           } else if (command === 'setColor') {
             parameter = buildColorSet(options);
           } else {
