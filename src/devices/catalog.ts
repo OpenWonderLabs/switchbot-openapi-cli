@@ -775,6 +775,16 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   },
 ];
 
+export function canonicalizeDeviceType(deviceType: string): string {
+  const catalog = getEffectiveCatalog();
+  const lower = deviceType.toLowerCase();
+  for (const entry of catalog) {
+    if (entry.type.toLowerCase() === lower) return entry.type;
+    if (entry.aliases?.some((a) => a.toLowerCase() === lower)) return entry.type;
+  }
+  return deviceType;
+}
+
 /** Find a catalog entry by exact name, alias, or case-insensitive substring. */
 export function findCatalogEntry(query: string): DeviceCatalogEntry | DeviceCatalogEntry[] | null {
   const q = query.trim().toLowerCase();

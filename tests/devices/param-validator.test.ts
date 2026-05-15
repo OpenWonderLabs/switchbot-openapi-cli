@@ -442,6 +442,13 @@ describe('validateParameter — Humidifier2 setMode', () => {
     expect(r.ok).toBe(true);
   });
 
+  it('validates via alias (Evaporative Humidifier → Humidifier2)', () => {
+    const r = validateParameter('Evaporative Humidifier', 'setMode', '{"mode":7,"targetHumidify":50}');
+    expect(r.ok).toBe(true);
+    const bad = validateParameter('Evaporative Humidifier', 'setMode', '{"mode":true,"targetHumidify":50}');
+    expect(bad.ok).toBe(false);
+  });
+
   it('normalizes numeric string fields to JSON numbers', () => {
     const r = validateParameter('Humidifier2', 'setMode', '{"mode":"7","targetHumidify":"50"}');
     expect(r.ok).toBe(true);

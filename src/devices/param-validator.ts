@@ -1,5 +1,6 @@
 import { UsageError } from '../utils/output.js';
 import { CSS_COLORS } from './css-colors.js';
+import { canonicalizeDeviceType } from './catalog.js';
 
 export const AC_MODE_MAP: Record<string, number> = { auto: 1, cool: 2, dry: 3, fan: 4, heat: 5 };
 export const AC_FAN_MAP: Record<string, number> = { auto: 1, low: 2, mid: 3, high: 4 };
@@ -148,120 +149,121 @@ export function validateParameter(
   raw: string | undefined,
 ): ValidateResult {
   if (!deviceType) return { ok: true };
+  const dt = canonicalizeDeviceType(deviceType);
 
   // --- Air Conditioner ---
-  if (deviceType === 'Air Conditioner' && command === 'setAll') {
+  if (dt === 'Air Conditioner' && command === 'setAll') {
     return validateAcSetAll(raw);
   }
 
   // --- Curtain ---
-  if (deviceType.startsWith('Curtain') && command === 'setPosition') {
+  if (dt.startsWith('Curtain') && command === 'setPosition') {
     return validateCurtainSetPosition(raw);
   }
 
   // --- Blind Tilt ---
-  if (deviceType.startsWith('Blind Tilt') && command === 'setPosition') {
+  if (dt.startsWith('Blind Tilt') && command === 'setPosition') {
     return validateBlindTiltSetPosition(raw);
   }
 
   // --- Relay Switch ---
-  if ((deviceType === 'Relay Switch 1' || deviceType === 'Relay Switch 1PM') && command === 'setMode') {
+  if ((dt === 'Relay Switch 1' || dt === 'Relay Switch 1PM') && command === 'setMode') {
     return validateIntRange(raw, 'setMode', 0, 3, 'Relay Switch mode (0=toggle 1=edge 2=detached 3=momentary)');
   }
-  if (deviceType === 'Relay Switch 2PM' && command === 'setMode') {
+  if (dt === 'Relay Switch 2PM' && command === 'setMode') {
     return validateRelay2PmSetMode(raw);
   }
-  if (deviceType === 'Relay Switch 2PM' && (command === 'turnOn' || command === 'turnOff' || command === 'toggle')) {
+  if (dt === 'Relay Switch 2PM' && (command === 'turnOn' || command === 'turnOff' || command === 'toggle')) {
     return validateRelayChannel(raw);
   }
-  if (deviceType === 'Relay Switch 2PM' && command === 'setPosition') {
+  if (dt === 'Relay Switch 2PM' && command === 'setPosition') {
     return validateIntRange(raw, 'setPosition', 0, 100, 'Relay Switch 2PM roller-shade percentage');
   }
 
   // --- Lighting ---
-  if (command === 'setBrightness' && isBrightnessDevice(deviceType)) {
-    return validateSetBrightness(raw, deviceType);
+  if (command === 'setBrightness' && isBrightnessDevice(dt)) {
+    return validateSetBrightness(raw, dt);
   }
-  if (command === 'setColor' && isColorDevice(deviceType)) {
+  if (command === 'setColor' && isColorDevice(dt)) {
     return validateSetColor(raw);
   }
-  if (command === 'setColorTemperature' && isColorTemperatureDevice(deviceType)) {
+  if (command === 'setColorTemperature' && isColorTemperatureDevice(dt)) {
     return validateSetColorTemperature(raw);
   }
 
   // --- Humidifier ---
-  if (deviceType === 'Humidifier' && command === 'setMode') {
+  if (dt === 'Humidifier' && command === 'setMode') {
     return validateHumidifierSetMode(raw);
   }
-  if (deviceType === 'Humidifier2' && command === 'setMode') {
+  if (dt === 'Humidifier2' && command === 'setMode') {
     return validateHumidifier2SetMode(raw);
   }
-  if (deviceType === 'Humidifier2' && command === 'setChildLock') {
+  if (dt === 'Humidifier2' && command === 'setChildLock') {
     return validateEnum(raw, 'setChildLock', ['true', 'false']);
   }
 
   // --- Air Purifier VOC ---
-  if (isAirPurifierDevice(deviceType) && command === 'setMode') {
+  if (isAirPurifierDevice(dt) && command === 'setMode') {
     return validateAirPurifierSetMode(raw);
   }
-  if (isAirPurifierDevice(deviceType) && command === 'setChildLock') {
+  if (isAirPurifierDevice(dt) && command === 'setChildLock') {
     return validateEnum(raw, 'setChildLock', ['0', '1']);
   }
 
   // --- Robot Vacuums ---
-  if (isPowLevelVacuum(deviceType) && command === 'PowLevel') {
+  if (isPowLevelVacuum(dt) && command === 'PowLevel') {
     return validateIntRange(raw, 'PowLevel', 0, 3, 'suction level (0=Quiet 1=Standard 2=Strong 3=Max)');
   }
-  if ((isComboVacuum(deviceType) || isFloorCleaningVacuum(deviceType)) && command === 'startClean') {
-    return validateVacuumStartClean(raw, deviceType);
+  if ((isComboVacuum(dt) || isFloorCleaningVacuum(dt)) && command === 'startClean') {
+    return validateVacuumStartClean(raw, dt);
   }
-  if ((isComboVacuum(deviceType) || isFloorCleaningVacuum(deviceType)) && command === 'setVolume') {
+  if ((isComboVacuum(dt) || isFloorCleaningVacuum(dt)) && command === 'setVolume') {
     return validateIntRange(raw, 'setVolume', 0, 100, 'volume percentage');
   }
-  if ((isComboVacuum(deviceType) || isFloorCleaningVacuum(deviceType)) && command === 'changeParam') {
-    return validateVacuumChangeParam(raw, deviceType);
+  if ((isComboVacuum(dt) || isFloorCleaningVacuum(dt)) && command === 'changeParam') {
+    return validateVacuumChangeParam(raw, dt);
   }
-  if (isFloorCleaningVacuum(deviceType) && command === 'selfClean') {
+  if (isFloorCleaningVacuum(dt) && command === 'selfClean') {
     return validateEnum(raw, 'selfClean', ['1', '2', '3'], '1=wash mop, 2=dry, 3=terminate');
   }
 
   // --- Circulator Fan ---
-  if (isCirculatorFan(deviceType) && command === 'setNightLightMode') {
+  if (isCirculatorFan(dt) && command === 'setNightLightMode') {
     return validateEnum(raw, 'setNightLightMode', ['off', '1', '2']);
   }
-  if (isCirculatorFan(deviceType) && command === 'setWindMode') {
+  if (isCirculatorFan(dt) && command === 'setWindMode') {
     return validateEnum(raw, 'setWindMode', ['direct', 'natural', 'sleep', 'baby']);
   }
-  if (isCirculatorFan(deviceType) && command === 'setWindSpeed') {
+  if (isCirculatorFan(dt) && command === 'setWindSpeed') {
     return validateIntRange(raw, 'setWindSpeed', 1, 100, 'fan speed percentage');
   }
-  if (isCirculatorFan(deviceType) && command === 'closeDelay') {
+  if (isCirculatorFan(dt) && command === 'closeDelay') {
     return validateIntRange(raw, 'closeDelay', 1, 36000, 'auto-off delay in seconds');
   }
 
   // --- Smart Radiator Thermostat ---
-  if (deviceType === 'Smart Radiator Thermostat' && command === 'setMode') {
+  if (dt === 'Smart Radiator Thermostat' && command === 'setMode') {
     return validateIntRange(raw, 'setMode', 0, 5, 'mode (0=schedule 1=manual 2=off 3=eco 4=comfort 5=quickHeat)');
   }
-  if (deviceType === 'Smart Radiator Thermostat' && command === 'setManualModeTemperature') {
+  if (dt === 'Smart Radiator Thermostat' && command === 'setManualModeTemperature') {
     return validateIntRange(raw, 'setManualModeTemperature', 4, 35, 'temperature in °C');
   }
 
   // --- Keypad ---
-  if (deviceType.startsWith('Keypad') && command === 'createKey') {
+  if (dt.startsWith('Keypad') && command === 'createKey') {
     return validateKeypadCreateKey(raw);
   }
-  if (deviceType.startsWith('Keypad') && command === 'deleteKey') {
+  if (dt.startsWith('Keypad') && command === 'deleteKey') {
     return validateKeypadDeleteKey(raw);
   }
 
   // --- TV (IR) ---
-  if (deviceType === 'TV' && command === 'SetChannel') {
+  if (dt === 'TV' && command === 'SetChannel') {
     return validateIntRange(raw, 'SetChannel', 1, 999, 'channel number');
   }
 
   // --- Roller Shade ---
-  if (deviceType === 'Roller Shade' && command === 'setPosition') {
+  if (dt === 'Roller Shade' && command === 'setPosition') {
     return validateIntRange(raw, 'setPosition', 0, 100, 'position percentage (0=open, 100=closed)');
   }
 
