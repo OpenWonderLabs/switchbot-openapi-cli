@@ -199,12 +199,12 @@ const lightControls: CommandSpec[] = [
   { command: 'setColorTemperature', parameter: '2700-6500', description: 'Set color temperature (Kelvin)', idempotent: true, exampleParams: ['2700', '4000', '6500'] },
 ];
 const rgbLightControls0To100: CommandSpec[] = [
-  { command: 'setBrightness', parameter: '0-100', description: 'Set brightness percentage', idempotent: true, exampleParams: ['0', '50', '100'] },
+  { command: 'setBrightness', parameter: '0-100', description: 'Set brightness percentage', idempotent: true, exampleParams: ['1', '50', '100'] },
   { command: 'setColor', parameter: 'R:G:B (0-255 each)', description: 'Set RGB color, e.g. "255:0:0"', idempotent: true, exampleParams: ['255:0:0', '255:255:255'] },
   { command: 'setColorTemperature', parameter: '2700-6500', description: 'Set color temperature (Kelvin)', idempotent: true, exampleParams: ['2700', '4000', '6500'] },
 ];
 const rgbOnlyLightControls0To100: CommandSpec[] = [
-  { command: 'setBrightness', parameter: '0-100', description: 'Set brightness percentage', idempotent: true, exampleParams: ['0', '50', '100'] },
+  { command: 'setBrightness', parameter: '0-100', description: 'Set brightness percentage', idempotent: true, exampleParams: ['1', '50', '100'] },
   { command: 'setColor', parameter: 'R:G:B (0-255 each)', description: 'Set RGB color, e.g. "255:0:0"', idempotent: true, exampleParams: ['255:0:0', '255:255:255'] },
 ];
 
@@ -573,7 +573,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     role: 'lighting',
     commands: [
       ...onOffToggle,
-      { command: 'setBrightness', parameter: '0-100', description: 'Set brightness percentage', idempotent: true, exampleParams: ['0', '50', '100'] },
+      { command: 'setBrightness', parameter: '0-100', description: 'Set brightness percentage', idempotent: true, exampleParams: ['1', '50', '100'] },
     ],
     statusFields: ['power', 'brightness', 'colorTemperature', 'version'],
   },
