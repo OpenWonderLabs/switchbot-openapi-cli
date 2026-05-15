@@ -241,10 +241,29 @@ too.
 |-----------------|---------------------------------------------------------------|--------|
 | `time_between`  | `[HH:MM, HH:MM]` local-time window, `start > end` → overnight | active |
 | `device_state`  | `{ device, field, op, value }` read device status inline      | active |
+| `event_count`   | Count events in a rolling window over device history          | active |
 | `all`           | AND-join multiple sub-conditions                               | active |
 | `any`           | OR-join multiple sub-conditions                                | active |
 | `not`           | Negate a sub-condition                                         | active |
 | `llm`           | AI judgement — prompt an LLM before firing (see below)         | active |
+
+**`event_count` condition fields:**
+
+```yaml
+conditions:
+  - event_count:
+      device: hallway-motion       # alias or deviceId (required)
+      event: motion.detected       # MQTT event name; omit to count all
+      window: "5m"                 # rolling window: \d+[smh] (required)
+      min: 3                       # fire only if count >= min (required)
+      max: 10                      # optional upper bound (count <= max)
+```
+
+Reads `~/.switchbot/device-history/<deviceId>.jsonl` (the same ring
+buffer `events mqtt-tail` writes). Lints flag a missing history file
+(`condition-event-count-no-history` — likely typo) and a `max < min`
+inversion (`condition-event-count-max-below-min`). For the LLM-free
+path: an "alarm if motion ≥3 times in 5m" guard does not need a model.
 
 **LLM condition fields:**
 
@@ -252,16 +271,47 @@ too.
 conditions:
   - llm:
       prompt: "Is the temperature above normal comfort range?"
-      provider: auto          # auto | openai | anthropic
+      provider: auto          # auto | openai | anthropic | local
       timeout_ms: 5000        # 500–10000 (default 5000)
       cache_ttl: 5m           # none | \d+[smh] (default 5m)
-      recent_events: 5        # 0–20 (default 5) — recent events included in prompt
+      recent_events: 5        # 0–20 (default 5) — last N events of the
+                              # trigger device included verbatim in prompt
       budget:
-        max_calls_per_hour: 10  # per-condition limit (default 10)
+        max_calls_per_hour: 10        # per-condition limit (default 10)
+        max_tokens_per_hour: 100000   # optional rolling 1h token cap
+        max_cost_per_day_usd: 1.00    # optional rolling 24h USD cap
       on_error: fail          # fail | pass | skip (default fail)
 ```
 
-Set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. `rules lint` flags misconfigured LLM conditions. Global LLM budget can be set via `automation.llm_budget.max_calls_per_hour` (default 60).
+Set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` for the cloud providers.
+For `provider: local`, point `SWITCHBOT_LOCAL_LLM_URL` at any
+OpenAI-compatible `/v1/chat/completions` endpoint (Ollama defaults
+to `http://localhost:11434/v1`, llama.cpp / vLLM / LM Studio also
+work). Models without tool-use call into a structured-output
+fallback (JSON instruction prompt + lenient parser + one repair
+retry); set `SWITCHBOT_LOCAL_LLM_TOOL_USE=1` if your local model
+does support tool use.
+
+`rules lint` flags misconfigured LLM conditions, including
+`condition-llm-tokens-budget-zero` (token cap set to 0 — never
+allowed) and `condition-llm-cost-without-known-model` (cost cap on a
+model not in the pricing table — won't be enforced).
+
+The audit log records every LLM condition outcome as
+`kind: llm-condition` with `usage: { tokensIn, tokensOut, costUsd? }`
+and emits `kind: llm-budget-exceeded` with
+`dimension: "calls" | "tokens" | "cost"` when a cap fires.
+
+Global LLM budget (applied across all LLM conditions, in addition to
+each condition's per-rule budget):
+
+```yaml
+automation:
+  llm_budget:
+    max_calls_per_hour: 60        # default 60
+    max_tokens_per_hour: 1000000  # optional
+    max_cost_per_day_usd: 10.00   # optional
+```
 
 **Destructive verbs are refused upstream.** The v0.2 validator
 rejects `lock`, `unlock`, `deleteWebhook`, `deleteScene`,

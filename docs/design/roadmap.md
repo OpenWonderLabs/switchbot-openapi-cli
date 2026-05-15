@@ -1,6 +1,6 @@
 # Roadmap — Phase 1 through Phase 4
 
-> **Status as of 2026-05-06:** Phase 1 complete, Phase 2 complete,
+> **Status as of 2026-05-15:** Phase 1 complete, Phase 2 complete,
 > Phase 3A complete (keychain + install library + built-in CLI install
 > command), Phase 3B tracked in the separate companion skill repo,
 > Phase 4 shipped at v0.2 (rules engine with MQTT + cron +
@@ -10,7 +10,13 @@
 > and `policy_diff`; v2.15.0 flips `policy new` default schema to v0.2
 > and starts the v0.1 deprecation window.
 > Tracks θ (notify actions) and η (LLM-backed rule suggestion)
-> shipped in v3.0.
+> shipped in v3.0. Track κ (AI decision loop — `rules trace`,
+> `rules trace-explain`, `llm` conditions, `rules simulate`)
+> shipped in v3.6.x. Track μ (catalog sync — Weather Station, Lock
+> Vision, Lock Vision Pro, Smart Lock Pro Wifi alias, AI Art Frame
+> `uploadImage`) and Track λ (USD/token budget, cross-event
+> aggregation, local LLM providers, JSON-RPC IPC) are queued for
+> the next release.
 > Note: Track γ is a runtime capability increment on the v0.2 rule
 > model, not a separate policy schema version.
 
@@ -196,13 +202,58 @@ the skill's `manifest.json` `roadmap` block, which points back here.
   warning on provider failure. `rules_suggest` MCP tool gains a `llm`
   parameter. All LLM calls are written to the audit log as
   `kind: llm-suggest` with backend, model, and latency fields.
+- **Track κ — AI decision loop *(shipped, v3.6.x)*.**
+  `rules trace` records every condition evaluation; `rules
+  trace-explain` renders why a tick fired or was blocked.
+  `conditions: [- llm: { prompt, provider, ... }]` lets a rule call
+  an LLM as a condition (per-condition + global call budget,
+  cache, on_error fail/pass/skip). `rules simulate` replays a rule
+  against `~/.switchbot/device-history` for offline what-if.
+  Audit gains `llm-condition`, `llm-cache-hit`,
+  `llm-budget-exceeded` records.
+
+## In-flight (next release)
+
+- **Track μ — catalog sync.**
+  Adds Weather Station (read-only sensor), Lock Vision and Lock Vision
+  Pro (video locks with `lock` / `unlock` / `deadbolt` for the Pro),
+  the `Smart Lock Pro Wifi` alias for Matter-enabled Lock Pro, and
+  `uploadImage` on AI Art Frame. Pure data + tests; no schema bump.
+- **Track λ.1 — USD/token budget for `llm` conditions.**
+  `DecideResult.usage = { tokensIn, tokensOut, costUsd? }`; per-rule
+  `budget.max_tokens_per_hour` / `max_cost_per_day_usd` and global
+  `automation.llm_budget.{max_tokens_per_hour, max_cost_per_day_usd}`.
+  Audit `llm-budget-exceeded` carries `dimension: "calls" | "tokens" | "cost"`.
+  Pricing table at `src/llm/pricing.ts` (override via the policy
+  `automation.llm_pricing_overrides` field).
+- **Track λ.2 — cross-event aggregation.**
+  Non-LLM `event_count: { device, event?, window, min, max? }`
+  condition counts firings inside a rolling time window. Same
+  `EventWindowFetcher` populates the LLM `recent_events` hook so
+  prompts get the last N events of the trigger device for free.
+  Backed by `~/.switchbot/device-history/<deviceId>.jsonl`.
+- **Track λ.3 — local / non-tool-use LLM providers.**
+  `LLMProvider.capabilities.toolUse` flag gates a structured-output
+  fallback (JSON instruction + lenient parser + one repair retry)
+  for endpoints that don't support tool use. New `provider: local`
+  in policy points at any OpenAI-compatible `/v1/chat/completions`
+  (Ollama, llama.cpp, vLLM, LM Studio) via
+  `SWITCHBOT_LOCAL_LLM_URL`. `doctor` adds `local-llm-reachable`.
+- **Track λ.4 — daemon JSON-RPC 2.0 IPC.**
+  `rules run` now exposes `daemon.status`, `daemon.ping`,
+  `daemon.reload` over a Unix domain socket
+  (`~/.switchbot/daemon.sock`, mode 0600) on POSIX or a per-user
+  named pipe (`\\.\pipe\switchbot-daemon-<user>`) on Windows. v1
+  surface; future `mcp serve --via-daemon` will proxy MCP tool calls
+  through the same transport. `doctor` adds `daemon-ipc`.
 
 ## Next execution queue (ordered)
 
-1. **Daemon mode for repeated agent invocations.**
-  Add a local long-lived process with Unix socket / named pipe transport.
-  Exit when: repeated MCP + plan runs no longer pay fresh-process startup,
-  and `doctor` can verify daemon health.
+1. **`mcp serve --via-daemon` proxy.**
+  Route MCP tool calls through the JSON-RPC IPC so repeated agent
+  invocations skip the cold-start cost.
+  Exit when: `mcp serve --via-daemon list_devices` round-trips and
+  `doctor` confirms daemon health.
 2. **Standalone MCP package (`npx @switchbot/mcp-server`).**
   Split MCP serve entrypoint into a tiny publishable package while
   preserving tool contract parity with the main CLI.
