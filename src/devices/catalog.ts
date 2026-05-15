@@ -240,9 +240,9 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Smart Lock',
     category: 'physical',
-    description: 'Bluetooth/Wi-Fi electronic deadbolt that locks and unlocks a door via cloud API.',
+    description: 'Bluetooth/Wi-Fi electronic deadbolt that locks and unlocks a door via cloud API. Pro models support the Matter protocol when configured via the SwitchBot app (deviceType "Smart Lock Pro Wifi").',
     role: 'security',
-    aliases: ['Lock', 'Smart Lock Pro', 'Lock Pro'],
+    aliases: ['Lock', 'Smart Lock Pro', 'Lock Pro', 'Smart Lock Pro Wifi'],
     commands: [
       { command: 'lock', parameter: '—', description: 'Lock the door', idempotent: true },
       { command: 'unlock', parameter: '—', description: 'Unlock the door', idempotent: true, safetyTier: 'destructive', safetyReason: 'Physically unlocks the door — anyone nearby can open it.' },
@@ -274,6 +274,29 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
       { command: 'deadbolt', parameter: '—', description: 'Engage deadbolt', idempotent: true },
     ],
     statusFields: ['battery', 'version', 'lockState', 'doorState', 'calibrate'],
+  },
+  {
+    type: 'Lock Vision',
+    category: 'physical',
+    description: 'Video smart lock with built-in camera; supports lock and unlock control plus status reporting.',
+    role: 'security',
+    commands: [
+      { command: 'lock', parameter: '—', description: 'Lock the door', idempotent: true },
+      { command: 'unlock', parameter: '—', description: 'Unlock the door', idempotent: true, safetyTier: 'destructive', safetyReason: 'Physically unlocks the door — anyone nearby can open it.' },
+    ],
+    statusFields: ['lockState', 'doorState', 'battery', 'keyList', 'version'],
+  },
+  {
+    type: 'Lock Vision Pro',
+    category: 'physical',
+    description: 'Pro-tier video smart lock with camera; supports lock, unlock, and deadbolt control.',
+    role: 'security',
+    commands: [
+      { command: 'lock', parameter: '—', description: 'Lock the door', idempotent: true },
+      { command: 'unlock', parameter: '—', description: 'Unlock the door', idempotent: true, safetyTier: 'destructive', safetyReason: 'Physically unlocks the door — anyone nearby can open it.' },
+      { command: 'deadbolt', parameter: '—', description: 'Engage deadbolt', idempotent: true },
+    ],
+    statusFields: ['lockState', 'doorState', 'battery', 'keyList', 'version'],
   },
   {
     type: 'Plug',
@@ -582,11 +605,12 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'AI Art Frame',
     category: 'physical',
-    description: 'Digital art frame that can switch to the next or previous image.',
+    description: 'Digital art frame that can switch images and accept new artwork uploads.',
     role: 'other',
     commands: [
       { command: 'next', parameter: '—', description: 'Switch to the next image', idempotent: false },
       { command: 'previous', parameter: '—', description: 'Switch to the previous image', idempotent: false },
+      { command: 'uploadImage', parameter: '<imageUrl>', description: 'Upload a new image from an https:// URL to display on the frame', idempotent: true, exampleParams: ['https://example.com/art.jpg'] },
     ],
     statusFields: ['version'],
   },
@@ -611,6 +635,16 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     ],
     commands: [],
     statusFields: ['temperature', 'humidity', 'battery', 'version'],
+  },
+  {
+    type: 'WeatherStation',
+    category: 'physical',
+    description: 'Outdoor weather station reporting temperature, humidity, and atmospheric pressure; read-only.',
+    role: 'sensor',
+    readOnly: true,
+    aliases: ['Weather Station'],
+    commands: [],
+    statusFields: ['temperature', 'humidity', 'atmosphericPressure', 'battery', 'version'],
   },
   {
     type: 'Motion Sensor',

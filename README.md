@@ -63,7 +63,7 @@ Under the hood every surface shares the same catalog, cache, and HMAC client —
 - 🎨 **Dual output modes** — colorized tables by default; `--json` passthrough for `jq` and scripting
 - 🔐 **Secure credentials** — HMAC-SHA256 signed requests; config file written with `0600`; env-var override for CI
 - 🔍 **Dry-run mode** — preview every mutating request before it hits the API
-- 🧪 **Fully tested** — 2391 Vitest tests, mocked axios, zero network in CI
+- 🧪 **Fully tested** — 2465 Vitest tests, mocked axios, zero network in CI
 - ⚡ **Shell completion** — Bash / Zsh / Fish / PowerShell
 
 ## Requirements
@@ -244,7 +244,8 @@ With a policy.yaml (v0.2) you can declare automations that the CLI
 executes for you. Supported triggers: **MQTT** (device events),
 **cron** (schedule-driven), and **webhook** (local HTTP POST).
 Supported conditions: `time_between` (quiet hours), `device_state`
-(live API check with per-tick dedup), and `llm` (AI decision — see
+(live API check with per-tick dedup), `event_count` (rolling-window
+counts over per-device history), and `llm` (AI decision — see
 below). Every fire is recorded in `~/.switchbot/audit.log`. `rules run` is long-running; use
 `daemon start` / `daemon reload` for the managed background mode.
 
@@ -272,14 +273,22 @@ then:
 conditions:
   - llm:
       prompt: "Is the temperature above normal comfort range?"
-      provider: auto          # auto | openai | anthropic
+      provider: auto          # auto | openai | anthropic | local
       cache_ttl: 5m
       budget:
         max_calls_per_hour: 20
+        max_tokens_per_hour: 100000   # optional rolling 1h token cap
+        max_cost_per_day_usd: 1.00    # optional rolling 24h USD cap
       on_error: pass          # fail | pass | skip
 ```
 
-Set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. `rules lint` flags misconfigured LLM conditions.
+Set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` for the cloud providers.
+For `provider: local`, point `SWITCHBOT_LOCAL_LLM_URL` at any
+OpenAI-compatible `/v1/chat/completions` endpoint (Ollama, llama.cpp,
+vLLM, LM Studio); `SWITCHBOT_LOCAL_LLM_MODEL` picks the model and
+`SWITCHBOT_LOCAL_LLM_TOOL_USE=1` opts into native tool-use when the
+endpoint supports it (otherwise a structured-output fallback is used).
+`rules lint` flags misconfigured LLM conditions.
 
 **Decision trace** — set `automation.audit.evaluate_trace: sampled` (or `full`) in `policy.yaml` to record every evaluation decision.
 
@@ -633,7 +642,7 @@ switchbot doctor
 switchbot doctor --json
 ```
 
-Runs local checks (Node version, credentials, profiles, catalog, catalog-schema, catalog-coverage, cache, quota, clock, MQTT, policy, MCP, keychain, path, inventory, audit, daemon, health, notify-connectivity, release-notes) and exits 1 if any check fails. `warn` results exit 0. The MQTT check reports `ok` when REST credentials are configured (auto-provisioned on first use). The `notify-connectivity` check probes webhook URLs declared in `type: notify` actions. Use this to diagnose connectivity or config issues before running automation.
+Runs local checks (Node version, credentials, profiles, catalog, catalog-schema, catalog-coverage, cache, quota, clock, MQTT, policy, MCP, keychain, path, inventory, audit, daemon, daemon-ipc, health, notify-connectivity, local-llm-reachable, release-notes) and exits 1 if any check fails. `warn` results exit 0. The MQTT check reports `ok` when REST credentials are configured (auto-provisioned on first use). The `notify-connectivity` check probes webhook URLs declared in `type: notify` actions. `daemon-ipc` round-trips the JSON-RPC socket when the daemon is running (silently skipped otherwise); `local-llm-reachable` only fires when policy uses `provider: local`. Use this to diagnose connectivity or config issues before running automation.
 
 `--json` output includes `maturityScore` (0–100) and `maturityLabel` (`production-ready` / `mostly-ready` / `needs-work` / `not-ready`) to give an at-a-glance readiness rating:
 
@@ -807,7 +816,7 @@ npm install
 
 npm run dev -- <args>       # Run from TypeScript sources via tsx
 npm run build               # Compile to dist/
-npm test                    # Run the Vitest suite (2391 tests)
+npm test                    # Run the Vitest suite (2465 tests)
 npm run test:watch          # Watch mode
 npm run test:coverage       # Coverage report (v8, HTML + text)
 ```

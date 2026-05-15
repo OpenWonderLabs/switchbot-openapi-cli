@@ -31,6 +31,16 @@ function mockProvider(pass: boolean, reason = 'ok') {
   };
 }
 
+// Mock provider whose decide() reports usage (token + cost) info.
+function mockProviderWithUsage(pass: boolean, reason: string, usage: { tokensIn: number; tokensOut: number; costUsd?: number }) {
+  return {
+    name: 'mock',
+    model: 'mock-model',
+    generateYaml: vi.fn().mockResolvedValue(''),
+    decide: vi.fn().mockResolvedValue({ pass, reason, usage }),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -212,6 +222,79 @@ describe('LlmConditionEvaluator', () => {
     expect(r4.traceFields.reason).toContain('Budget exceeded');
   });
 
+  it('token budget exceeded: third call returns on_error result with dimension "tokens"', async () => {
+    const evaluator = new LlmConditionEvaluator();
+    const provider = mockProviderWithUsage(true, 'ok', { tokensIn: 60, tokensOut: 40 });
+
+    const condition = { prompt: 'Check?', cache_ttl: 'none', budget: { max_tokens_per_hour: 150 } };
+    const ctx = makeCtx();
+
+    // First call: 100 tokens consumed (60+40)
+    await evaluateWithProvider(evaluator, provider, condition, ctx, 'v1');
+    // Second call: 200 tokens cumulative — over the 150 cap, but only the THIRD pre-call check sees it
+    await evaluateWithProvider(evaluator, provider, condition, ctx, 'v1');
+    const r3 = await evaluateWithProvider(evaluator, provider, condition, ctx, 'v1');
+
+    expect(provider.decide).toHaveBeenCalledTimes(2);
+    expect(r3.pass).toBe(false);
+    expect(r3.traceFields.reason).toContain('tokens');
+  });
+
+  it('cost budget exceeded: USD ceiling stops further calls', async () => {
+    const evaluator = new LlmConditionEvaluator();
+    const provider = mockProviderWithUsage(true, 'ok', { tokensIn: 100, tokensOut: 100, costUsd: 0.50 });
+
+    const condition = { prompt: 'Check?', cache_ttl: 'none', budget: { max_cost_per_day_usd: 0.75 } };
+    const ctx = makeCtx();
+
+    await evaluateWithProvider(evaluator, provider, condition, ctx, 'v1');
+    await evaluateWithProvider(evaluator, provider, condition, ctx, 'v1');
+    const r3 = await evaluateWithProvider(evaluator, provider, condition, ctx, 'v1');
+
+    expect(provider.decide).toHaveBeenCalledTimes(2);
+    expect(r3.pass).toBe(false);
+    expect(r3.traceFields.reason).toContain('cost');
+  });
+
+  it('cost dimension is skipped when usage.costUsd is undefined (unknown model)', async () => {
+    const evaluator = new LlmConditionEvaluator();
+    // costUsd absent — unknown model, cost cap should be ignored
+    const provider = mockProviderWithUsage(true, 'ok', { tokensIn: 100, tokensOut: 100 });
+
+    const condition = { prompt: 'Check?', cache_ttl: 'none', budget: { max_cost_per_day_usd: 0.001 } };
+    const ctx = makeCtx();
+
+    // All three calls should succeed because the cost dimension is unknown
+    await evaluateWithProvider(evaluator, provider, condition, ctx, 'v1');
+    await evaluateWithProvider(evaluator, provider, condition, ctx, 'v1');
+    const r3 = await evaluateWithProvider(evaluator, provider, condition, ctx, 'v1');
+
+    expect(provider.decide).toHaveBeenCalledTimes(3);
+    expect(r3.pass).toBe(true);
+  });
+
+  it('traceFields.usage carries provider-reported tokens and cost', async () => {
+    const evaluator = new LlmConditionEvaluator();
+    const provider = mockProviderWithUsage(true, 'ok', { tokensIn: 50, tokensOut: 25, costUsd: 0.0001 });
+
+    const result = await evaluateWithProvider(evaluator, provider, { prompt: 'Check?' }, makeCtx(), 'v1');
+    expect(result.traceFields.usage).toEqual({ tokensIn: 50, tokensOut: 25, costUsd: 0.0001 });
+  });
+
+  it('cache hit does not carry usage in trace (no provider call was made)', async () => {
+    const evaluator = new LlmConditionEvaluator();
+    const provider = mockProviderWithUsage(true, 'ok', { tokensIn: 10, tokensOut: 5, costUsd: 0.0001 });
+
+    const condition = { prompt: 'Check?', cache_ttl: '5m' };
+    const ctx = makeCtx();
+
+    await evaluateWithProvider(evaluator, provider, condition, ctx, 'v1');
+    const cached = await evaluateWithProvider(evaluator, provider, condition, ctx, 'v1');
+
+    expect(cached.traceFields.cacheHit).toBe(true);
+    expect(cached.traceFields.usage).toBeUndefined();
+  });
+
   it('reason is truncated to 200 chars from provider', async () => {
     const evaluator = new LlmConditionEvaluator();
     const longReason = 'x'.repeat(300);
@@ -329,6 +412,86 @@ describe('LLM condition lint rules', () => {
     });
     const issues = result.rules[0].issues;
     expect(issues.some(i => i.code === 'condition-llm-budget-zero')).toBe(true);
+  });
+
+  it('condition-llm-tokens-budget-zero fires when max_tokens_per_hour is 0', async () => {
+    process.env.ANTHROPIC_API_KEY = 'key';
+    const { lintRules } = await import('../../src/rules/engine.js');
+    const result = lintRules({
+      enabled: true,
+      rules: [{
+        name: 'test',
+        when: { source: 'cron', schedule: '0 8 * * *' },
+        conditions: [{ llm: { prompt: 'Check?', budget: { max_tokens_per_hour: 0 } } }],
+        then: [{ command: 'turnOn', device: 'light' }],
+      }],
+    });
+    const issues = result.rules[0].issues;
+    expect(issues.some(i => i.code === 'condition-llm-tokens-budget-zero')).toBe(true);
+  });
+
+  it('condition-llm-tokens-budget-zero does not fire when max_tokens_per_hour is positive', async () => {
+    process.env.ANTHROPIC_API_KEY = 'key';
+    const { lintRules } = await import('../../src/rules/engine.js');
+    const result = lintRules({
+      enabled: true,
+      rules: [{
+        name: 'test',
+        when: { source: 'cron', schedule: '0 8 * * *' },
+        conditions: [{ llm: { prompt: 'Check?', budget: { max_tokens_per_hour: 1000 } } }],
+        then: [{ command: 'turnOn', device: 'light' }],
+      }],
+    });
+    const issues = result.rules[0].issues;
+    expect(issues.some(i => i.code === 'condition-llm-tokens-budget-zero')).toBe(false);
+  });
+
+  it('condition-llm-cost-without-known-model fires when cost cap set with provider:auto', async () => {
+    process.env.ANTHROPIC_API_KEY = 'key';
+    const { lintRules } = await import('../../src/rules/engine.js');
+    const result = lintRules({
+      enabled: true,
+      rules: [{
+        name: 'test',
+        when: { source: 'cron', schedule: '0 8 * * *' },
+        conditions: [{ llm: { prompt: 'Check?', budget: { max_cost_per_day_usd: 1.00 } } }],
+        then: [{ command: 'turnOn', device: 'light' }],
+      }],
+    });
+    const issues = result.rules[0].issues;
+    expect(issues.some(i => i.code === 'condition-llm-cost-without-known-model')).toBe(true);
+  });
+
+  it('condition-llm-cost-without-known-model does not fire when provider is explicit', async () => {
+    process.env.ANTHROPIC_API_KEY = 'key';
+    const { lintRules } = await import('../../src/rules/engine.js');
+    const result = lintRules({
+      enabled: true,
+      rules: [{
+        name: 'test',
+        when: { source: 'cron', schedule: '0 8 * * *' },
+        conditions: [{ llm: { prompt: 'Check?', provider: 'anthropic', budget: { max_cost_per_day_usd: 1.00 } } }],
+        then: [{ command: 'turnOn', device: 'light' }],
+      }],
+    });
+    const issues = result.rules[0].issues;
+    expect(issues.some(i => i.code === 'condition-llm-cost-without-known-model')).toBe(false);
+  });
+
+  it('condition-llm-cost-without-known-model does not fire when cost cap is zero', async () => {
+    process.env.ANTHROPIC_API_KEY = 'key';
+    const { lintRules } = await import('../../src/rules/engine.js');
+    const result = lintRules({
+      enabled: true,
+      rules: [{
+        name: 'test',
+        when: { source: 'cron', schedule: '0 8 * * *' },
+        conditions: [{ llm: { prompt: 'Check?', budget: { max_cost_per_day_usd: 0 } } }],
+        then: [{ command: 'turnOn', device: 'light' }],
+      }],
+    });
+    const issues = result.rules[0].issues;
+    expect(issues.some(i => i.code === 'condition-llm-cost-without-known-model')).toBe(false);
   });
 
   it('condition-llm-on-error-pass fires when on_error is "pass"', async () => {

@@ -51,6 +51,8 @@ const OFFICIAL_API_DEVICE_TYPES = [
   'Keypad Vision Pro',
   'Lock Lite',
   'Lock Ultra',
+  'Lock Vision',
+  'Lock Vision Pro',
   'Meter',
   'MeterPlus',
   'MeterPro',
@@ -83,6 +85,7 @@ const OFFICIAL_API_DEVICE_TYPES = [
   'Roller Shade',
   'Smart Lock',
   'Smart Lock Pro',
+  'Smart Lock Pro Wifi',
   'Smart Lock Ultra',
   'Smart Radiator Thermostat',
   'Standing Circulator Fan',
@@ -90,6 +93,7 @@ const OFFICIAL_API_DEVICE_TYPES = [
   'Strip Light 3',
   'Video Doorbell',
   'Water Detector',
+  'WeatherStation',
   'WoIOSensor',
 ] as const;
 
@@ -161,6 +165,8 @@ const OFFICIAL_SUPPORTED_DEVICE_LIST_NAMES = [
   'Keypad Vision',
   'Keypad Vision Pro',
   'Lock Ultra',
+  'Lock Vision',
+  'Lock Vision Pro',
   'Standing Circulator Fan',
   'Pan/Tilt Cam Plus 2K',
   'Pan/Tilt Cam Plus 3K',
@@ -168,6 +174,7 @@ const OFFICIAL_SUPPORTED_DEVICE_LIST_NAMES = [
   'Candle Warmer Lamp',
   'Home Climate Panel',
   'Smart Radiator Thermostat',
+  'Weather Station',
   'AI Art Frame',
 ] as const;
 
@@ -285,6 +292,34 @@ describe('devices/catalog', () => {
       expect(tierOf('Smart Lock', 'unlock')).toBe('destructive');
       expect(tierOf('Smart Lock Lite', 'unlock')).toBe('destructive');
       expect(tierOf('Smart Lock Ultra', 'unlock')).toBe('destructive');
+    });
+
+    it('Lock Vision and Lock Vision Pro unlock are safetyTier: destructive', () => {
+      expect(tierOf('Lock Vision', 'unlock')).toBe('destructive');
+      expect(tierOf('Lock Vision Pro', 'unlock')).toBe('destructive');
+    });
+
+    it('AI Art Frame uploadImage is idempotent and exposes a URL example', () => {
+      const cmd = commandOf('AI Art Frame', 'uploadImage');
+      expect(cmd, 'AI Art Frame should expose an uploadImage command').toBeDefined();
+      expect(cmd?.idempotent).toBe(true);
+      expect(cmd?.parameter).toBeTruthy();
+      expect(cmd?.exampleParams?.[0]).toMatch(/^https:\/\//);
+    });
+
+    it('Smart Lock entry resolves the Matter alias "Smart Lock Pro Wifi"', () => {
+      const match = findCatalogEntry('Smart Lock Pro Wifi');
+      expect(match).not.toBeNull();
+      expect(Array.isArray(match)).toBe(false);
+      expect((match as { type: string } | null)?.type).toBe('Smart Lock');
+    });
+
+    it('Weather Station resolves and reports atmosphericPressure', () => {
+      const match = findCatalogEntry('Weather Station');
+      expect(match).not.toBeNull();
+      const entry = match as { type: string; statusFields: string[] } | null;
+      expect(entry?.type).toBe('WeatherStation');
+      expect(entry?.statusFields).toContain('atmosphericPressure');
     });
 
     it('Garage Door Opener turnOn and turnOff are safetyTier: destructive', () => {

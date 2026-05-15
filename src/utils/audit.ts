@@ -77,6 +77,14 @@ export interface AuditEntry {
   llmModel?: string;
   /** Round-trip LLM latency in milliseconds. */
   llmLatencyMs?: number;
+  /** Token + cost accounting for an LLM call (present on llm-condition entries when the provider reports usage). */
+  llmUsage?: { tokensIn: number; tokensOut: number; costUsd?: number };
+  /** Which budget dimension was exceeded — present on llm-budget-exceeded entries. */
+  budgetDimension?: 'calls' | 'tokens' | 'cost';
+  /** Effective budget limit at the moment the violation was recorded. */
+  budgetLimit?: number;
+  /** Observed value when the budget was exceeded. */
+  budgetObserved?: number;
 }
 
 function resolveAuditPath(): string | null {

@@ -273,6 +273,8 @@ function registerRun(rules: Command): void {
       let stopping = false;
       const pidPaths = getDefaultPidFilePaths();
       writePidFile(pidPaths.pidFile);
+      const ipcStartedAt = new Date();
+      let ipcServerHandle: { socketPath: string; close: () => Promise<void> } | null = null;
       const cleanup = () => {
         clearPidFile(pidPaths.pidFile);
         // Drop any stale reload sentinel too — this process won't see it.
@@ -282,6 +284,9 @@ function registerRun(rules: Command): void {
         if (stopping) return;
         stopping = true;
         try {
+          if (ipcServerHandle) {
+            try { await ipcServerHandle.close(); } catch { /* best-effort */ }
+          }
           await engine.stop();
           await client.disconnect();
         } finally {
@@ -295,7 +300,7 @@ function registerRun(rules: Command): void {
       await client.connect();
       await engine.start();
 
-      const doReload = async (trigger: 'signal' | 'sentinel'): Promise<void> => {
+      const doReload = async (trigger: 'signal' | 'sentinel' | 'ipc'): Promise<void> => {
         try {
           const fresh = loadAutomation(pathArg);
           if (!fresh) return;
@@ -337,6 +342,37 @@ function registerRun(rules: Command): void {
         }
       }, 2000);
       reloadPoll.unref();
+
+      // IPC: start a JSON-RPC server on the daemon socket so MCP and other
+      // long-running clients can avoid per-call CLI cold-start overhead.
+      // Starts after engine.start() so daemon.status reflects real state.
+      try {
+        const { startIpcServer } = await import('../daemon/server.js');
+        ipcServerHandle = await startIpcServer({
+          handlers: {
+            'daemon.status': () => ({
+              status: 'running',
+              pid: process.pid,
+              startedAt: ipcStartedAt.toISOString(),
+              rulesActive: engine.getStats().rulesActive,
+              globalDryRun: opts.dryRun === true,
+            }),
+            'daemon.ping': () => ({ ok: true, t: new Date().toISOString() }),
+            'daemon.reload': async () => {
+              await doReload('ipc' as const);
+              return { ok: true, rulesActive: engine.getStats().rulesActive };
+            },
+          },
+          onClientError: () => { /* silenced — clients dropping mid-call is normal */ },
+        });
+        if (!isJsonMode()) {
+          console.error(`IPC: listening on ${ipcServerHandle.socketPath}`);
+        }
+      } catch (err) {
+        if (!isJsonMode()) {
+          console.error(`IPC: failed to start (${err instanceof Error ? err.message : String(err)}) — daemon will run without IPC`);
+        }
+      }
 
       if (!isJsonMode()) {
         console.error(

@@ -24,6 +24,7 @@ import {
   isAnyCondition,
   isNotCondition,
   isLlmCondition,
+  isEventCountCondition,
 } from './types.js';
 import { isWithinTuple } from './quiet-hours.js';
 import type { TraceBuilder } from './trace.js';
@@ -103,7 +104,24 @@ export interface EvaluateConditionsContext {
   llmEvaluator?: LlmConditionEvaluator;
   ruleVersion?: string;
   globalLlmMaxCallsPerHour?: number;
+  /**
+   * Optional fetcher for cross-event aggregation. Called by `event_count`
+   * conditions and used to populate `recent_events` for LLM conditions.
+   * The matcher stays pure; engine callers wire this to history-window.
+   */
+  eventWindowFetcher?: EventWindowFetcher;
 }
+
+/**
+ * Pluggable history-window fetcher used by event_count conditions and the
+ * LLM condition's `recent_events` hook. Returns historical events for a
+ * device in [sinceMs, untilMs] (inclusive). Implementations should clamp
+ * `limit` to bound IO.
+ */
+export type EventWindowFetcher = (
+  deviceId: string,
+  opts: { sinceMs: number; untilMs: number; limit?: number; eventName?: string },
+) => Promise<EngineEvent[]>;
 
 /**
  * Evaluate all conditions; AND-joined at the top level. Composite nodes
@@ -224,9 +242,10 @@ async function evaluateSingle(
       };
     }
     try {
+      const recent = await fetchRecentEvents(c.llm.recent_events, ctx);
       const res = await ctx.llmEvaluator.evaluate(
         c.llm,
-        { event: ctx.event },
+        { event: ctx.event, recentEvents: recent },
         ctx.ruleVersion ?? 'unknown',
         ctx.globalLlmMaxCallsPerHour,
       );
@@ -236,6 +255,45 @@ async function evaluateSingle(
       return res.pass ? ok : fail(`llm condition returned false: ${res.traceFields.reason}`);
     } catch (err) {
       return fail(`llm condition error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  if (isEventCountCondition(c)) {
+    if (!ctx.eventWindowFetcher) {
+      return {
+        matched: false,
+        failures: [],
+        unsupported: [{ keyword: 'event_count', hint: 'event_count evaluation requires a history fetcher; this call site did not provide one.' }],
+      };
+    }
+    const ec = c.event_count;
+    const resolved = resolveDeviceRef(ec.device, ctx.aliases);
+    if (!resolved) return fail(`event_count: could not resolve device "${ec.device}" to an id (no matching alias).`);
+    const windowMs = parseDurationOrNull(ec.window);
+    if (windowMs === null || windowMs <= 0) {
+      return fail(`event_count: invalid window "${ec.window}" — expected e.g. "30s", "5m", "1h".`);
+    }
+    const untilMs = now.getTime();
+    const sinceMs = untilMs - windowMs;
+    try {
+      const events = await ctx.eventWindowFetcher(resolved, {
+        sinceMs,
+        untilMs,
+        limit: Math.max(ec.min, ec.max ?? ec.min) + 1,
+        eventName: ec.event,
+      });
+      const count = events.length;
+      const min = ec.min;
+      const max = ec.max;
+      const ceilingViolated = max !== undefined && count > max;
+      const floorViolated = count < min;
+      if (floorViolated || ceilingViolated) {
+        const range = max !== undefined ? `${min}–${max}` : `≥ ${min}`;
+        return fail(`event_count ${ec.device}${ec.event ? ` ${ec.event}` : ''} in ${ec.window}: ${count} (expected ${range})`);
+      }
+      return ok;
+    } catch (err) {
+      return fail(`event_count ${ec.device}: fetch failed — ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -322,6 +380,7 @@ function conditionKind(c: Condition): string {
   if (isTimeBetween(c)) return 'time_between';
   if (isDeviceState(c)) return 'device_state';
   if (isLlmCondition(c)) return 'llm';
+  if (isEventCountCondition(c)) return 'event_count';
   return 'unknown';
 }
 
@@ -329,6 +388,7 @@ function conditionConfig(c: Condition): unknown {
   if (isTimeBetween(c)) return c.time_between;
   if (isDeviceState(c)) return { device: c.device, field: c.field, op: c.op, value: c.value };
   if (isLlmCondition(c)) return { prompt: c.llm.prompt.slice(0, 80) };
+  if (isEventCountCondition(c)) return c.event_count;
   return undefined;
 }
 
@@ -338,4 +398,36 @@ function pushConditionTrace(trace: TraceBuilder, c: Condition, sub: ConditionEva
     config: conditionConfig(c),
     passed: sub.unsupported.length > 0 ? false : sub.matched,
   });
+}
+
+function parseDurationOrNull(spec: string): number | null {
+  const m = String(spec ?? '').trim().match(/^(\d+)(ms|s|m|h|d)$/i);
+  if (!m) return null;
+  const n = Number(m[1]);
+  const unit = m[2].toLowerCase();
+  const factor = unit === 'ms' ? 1 : unit === 's' ? 1_000 : unit === 'm' ? 60_000 : unit === 'h' ? 3_600_000 : 86_400_000;
+  return n * factor;
+}
+
+async function fetchRecentEvents(
+  count: number | undefined,
+  ctx: EvaluateConditionsContext,
+): Promise<EngineEvent[] | undefined> {
+  if (!count || count <= 0) return undefined;
+  if (!ctx.eventWindowFetcher || !ctx.event?.deviceId) return undefined;
+  // Look back 24h by default — recent_events is a "last N matching events"
+  // hook, not a window-anchored aggregator. The fetcher caps the read.
+  const untilMs = ctx.event.t.getTime();
+  const sinceMs = untilMs - 24 * 60 * 60 * 1000;
+  try {
+    const events = await ctx.eventWindowFetcher(ctx.event.deviceId, {
+      sinceMs,
+      untilMs,
+      limit: count,
+      eventName: ctx.event.event,
+    });
+    return events.slice(-count);
+  } catch {
+    return undefined;
+  }
 }
