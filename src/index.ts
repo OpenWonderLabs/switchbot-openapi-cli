@@ -44,6 +44,7 @@ if (process.argv.includes('--no-color') || Boolean(process.env.NO_COLOR)) {
 }
 
 const program = new Command();
+program.allowExcessArguments(false);
 if (isJsonMode()) {
   // In --json mode, commander writes plain-text usage errors by default.
   // Silence that channel and emit a single structured error in the catch block.

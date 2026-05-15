@@ -74,7 +74,7 @@ Example:
           if (isJsonMode()) {
             printJson({ dryRun: true, wouldSend });
           } else {
-            console.log(`[dry-run] Would POST /v1.1/scenes/${sceneId}/execute (${found.sceneName})`);
+            console.error(`[dry-run] Would POST /v1.1/scenes/${sceneId}/execute (${found.sceneName})`);
           }
           return;
         }
@@ -260,7 +260,7 @@ Example:
         console.log(`idempotent: unknown (scene steps not exposed by API)`);
         console.log(`toExecute:  ${explanation.toExecute}`);
         if (explanation.dryRun) {
-          console.log(`dryRun:     true  (pass --dry-run to execute would be a no-op)`);
+          console.error(`dryRun:     true  (pass --dry-run to execute would be a no-op)`);
         }
         console.log(`note:       ${explanation.note}`);
       } catch (error) {

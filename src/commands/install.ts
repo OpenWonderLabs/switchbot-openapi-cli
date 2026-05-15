@@ -108,18 +108,18 @@ function printDryRun(steps: InstallStep<InstallContext>[], ctx: InstallContext):
     });
     return;
   }
-  console.log(chalk.bold('switchbot install — dry run'));
-  console.log(`  profile: ${ctx.profile}`);
-  console.log(`  agent:   ${ctx.agent}`);
-  console.log(`  skill:   ${ctx.skillPath ?? '(none — recipe will be printed)'}`);
-  console.log(`  policy:  ${ctx.policyPath}`);
-  console.log('');
-  console.log(chalk.bold('Steps that would run (in order):'));
+  console.error(chalk.bold('switchbot install — dry run'));
+  console.error(`  profile: ${ctx.profile}`);
+  console.error(`  agent:   ${ctx.agent}`);
+  console.error(`  skill:   ${ctx.skillPath ?? '(none — recipe will be printed)'}`);
+  console.error(`  policy:  ${ctx.policyPath}`);
+  console.error('');
+  console.error(chalk.bold('Steps that would run (in order):'));
   for (const s of steps) {
-    console.log(`  • ${s.name}${s.description ? `  — ${s.description}` : ''}`);
+    console.error(`  • ${s.name}${s.description ? `  — ${s.description}` : ''}`);
   }
-  console.log('');
-  console.log(chalk.dim('No changes made. Re-run without --dry-run to apply.'));
+  console.error('');
+  console.error(chalk.dim('No changes made. Re-run without --dry-run to apply.'));
 }
 
 export function registerInstallCommand(program: Command): void {

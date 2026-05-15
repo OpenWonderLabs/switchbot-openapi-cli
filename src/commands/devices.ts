@@ -297,7 +297,7 @@ Examples:
   devices
     .command('status')
     .description('Query the real-time status of a specific device')
-    .argument('[deviceId]', 'Device ID from "devices list" (or use --name or --ids)')
+    .argument('[deviceId...]', 'Device ID(s) from "devices list" (or use --name or --ids)')
     .option('--name <query>', 'Resolve device by fuzzy name instead of deviceId', stringArg('--name'))
     .option('--name-strategy <s>', `Name match strategy: ${ALL_STRATEGIES.join('|')} (default: fuzzy)`, stringArg('--name-strategy'))
     .option('--name-type <type>', 'Narrow --name by device type (e.g. "Bot", "Color Bulb")', stringArg('--name-type'))
@@ -314,6 +314,7 @@ all field names returned by your specific device, then narrow with --fields.
 
 Examples:
   $ switchbot devices status ABC123DEF456
+  $ switchbot devices status ABC123 DEF456 GHI789
   $ switchbot devices status --name "Living Room AC"
   $ switchbot devices status ABC123DEF456 --json
   $ switchbot devices status ABC123DEF456 --format yaml
@@ -322,13 +323,16 @@ Examples:
   $ switchbot devices status --ids ABC123,DEF456,GHI789
   $ switchbot devices status --ids ABC123,DEF456 --fields power,battery
 `)
-    .action(async (deviceIdArg: string | undefined, options: { name?: string; nameStrategy?: string; nameType?: string; nameCategory?: 'physical' | 'ir'; nameRoom?: string; ids?: string }) => {
+    .action(async (deviceIdArgs: string[], options: { name?: string; nameStrategy?: string; nameType?: string; nameCategory?: 'physical' | 'ir'; nameRoom?: string; ids?: string }) => {
       try {
-        // Batch mode: --ids id1,id2,id3
-        if (options.ids) {
+        // Batch mode: --ids id1,id2,id3 OR multiple positional args
+        const batchIds = options.ids
+          ? options.ids.split(',').map((s) => s.trim()).filter(Boolean)
+          : deviceIdArgs.length > 1 ? deviceIdArgs : undefined;
+        if (batchIds) {
           if (options.name) throw new UsageError('--ids and --name cannot be used together.');
-          const ids = options.ids.split(',').map((s) => s.trim()).filter(Boolean);
-          if (ids.length === 0) throw new UsageError('--ids requires at least one device ID.');
+          if (batchIds.length === 0) throw new UsageError('--ids requires at least one device ID.');
+          const ids = batchIds;
           const results = await Promise.allSettled(ids.map((id) => fetchDeviceStatus(id)));
           const fetchedAt = new Date().toISOString();
           const batch = results.map((r, i) =>
@@ -366,7 +370,7 @@ Examples:
           return;
         }
 
-        const deviceId = resolveDeviceId(deviceIdArg, options.name, {
+        const deviceId = resolveDeviceId(deviceIdArgs[0], options.name, {
           strategy: (options.nameStrategy as NameResolveStrategy | undefined) ?? 'fuzzy',
           type: options.nameType,
           category: options.nameCategory,
@@ -702,7 +706,7 @@ Examples:
           if (isJsonMode()) {
             printJson({ dryRun: true, wouldSend });
           } else {
-            console.log(`◦ dry-run intercepted for ${_cmd} on ${_deviceId}; see stderr preview for the HTTP request.`);
+            console.error(`◦ dry-run intercepted for ${_cmd} on ${_deviceId}; see stderr preview for the HTTP request.`);
           }
           return;
         }
@@ -1004,13 +1008,20 @@ function renderCatalogEntry(entry: DeviceCatalogEntry): void {
   console.log(`Type:     ${entry.type}`);
   console.log(`Category: ${entry.category === 'ir' ? 'IR remote' : 'Physical device'}`);
   if (entry.role) console.log(`Role:     ${entry.role}`);
-  if (entry.readOnly) console.log(`ReadOnly: yes (status-only device, no control commands)`);
+  const hasStatusFields = (entry.statusFields?.length ?? 0) > 0;
+  if (entry.readOnly) {
+    console.log(hasStatusFields
+      ? `ReadOnly: yes (status-only device, no control commands)`
+      : `ReadOnly: yes (no cloud control commands cataloged)`);
+  }
   if (entry.aliases && entry.aliases.length > 0) {
     console.log(`Aliases:  ${entry.aliases.join(', ')}`);
   }
 
   if (entry.commands.length === 0) {
-    console.log('\nCommands: (none — status-only device)');
+    console.log(hasStatusFields
+      ? '\nCommands: (none — status-only device)'
+      : '\nCommands: (none — no cloud control commands cataloged)');
   } else {
     console.log('\nCommands:');
     const hasExamples = entry.commands.some((c) => c.exampleParams && c.exampleParams.length > 0);

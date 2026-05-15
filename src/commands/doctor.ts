@@ -265,6 +265,26 @@ function checkCatalog(): Check {
   };
 }
 
+function checkCatalogCoverage(): Check {
+  const cache = loadCache();
+  if (!cache) {
+    return { name: 'catalog-coverage', status: 'ok', detail: 'no device cache — run "switchbot devices list" first' };
+  }
+  const catalog = getEffectiveCatalog();
+  const catalogTypes = new Set(catalog.map((e) => e.type.toLowerCase()));
+  const aliases = new Set(catalog.flatMap((e) => (e.aliases ?? []).map((a) => a.toLowerCase())));
+  const deviceTypes = [...new Set(Object.values(cache.devices).map((d) => d.type))];
+  const missing = deviceTypes.filter((t) => !catalogTypes.has(t.toLowerCase()) && !aliases.has(t.toLowerCase()));
+  if (missing.length === 0) {
+    return { name: 'catalog-coverage', status: 'ok', detail: `all ${deviceTypes.length} device types have catalog entries` };
+  }
+  return {
+    name: 'catalog-coverage',
+    status: 'warn',
+    detail: { missing, message: `${missing.length} device type(s) without catalog entry` },
+  };
+}
+
 function checkCache(): Check {
   try {
     const info = describeCache();
@@ -402,6 +422,7 @@ function checkInventoryConsistency(): Check {
     status: 'warn',
     detail: {
       message: `${dangling.length} device(s) reference a hubDeviceId that is not present in the current inventory`,
+      hint: 'This usually means the hub was removed or replaced. Re-pair affected devices in the SwitchBot app, or ignore if the devices still work.',
       dangling: dangling.slice(0, 10),
     },
   };
@@ -976,6 +997,7 @@ const CHECK_REGISTRY: CheckDef[] = [
   { name: 'keychain', description: 'OS keychain backend availability and usage', run: () => checkKeychain() },
   { name: 'profiles', description: 'profile definitions valid', run: () => checkProfiles() },
   { name: 'catalog', description: 'catalog loads', run: () => checkCatalog() },
+  { name: 'catalog-coverage', description: 'all cached device types have catalog entries', run: () => checkCatalogCoverage() },
   { name: 'catalog-schema', description: 'catalog vs agent-bootstrap version aligned', run: () => checkCatalogSchema() },
   { name: 'inventory', description: 'cached inventory graph consistency (hubDeviceId references)', run: () => checkInventoryConsistency() },
   { name: 'cache', description: 'device cache state', run: () => checkCache() },
@@ -1051,6 +1073,7 @@ interface DoctorCliOptions {
   fix?: boolean;
   yes?: boolean;
   probe?: boolean;
+  quiet?: boolean;
 }
 
 export function registerDoctorCommand(program: Command): void {
@@ -1062,6 +1085,7 @@ export function registerDoctorCommand(program: Command): void {
     .option('--fix', 'Apply safe, reversible remediations for failing checks (e.g. clear stale cache)')
     .option('--yes', 'Required together with --fix to confirm write actions')
     .option('--probe', 'Perform live-probe variant of checks that support it (mqtt)')
+    .option('-q, --quiet', 'Only show warn/fail checks, hide passing checks')
     .addHelpText('after', `
 Runs a battery of local sanity checks and exits with code 0 only when every
 check is 'ok'. 'warn' → exit 0 (informational); 'fail' → exit 1.
@@ -1159,7 +1183,9 @@ Examples:
         if (fixes !== undefined) payload.fixes = fixes;
         printJson(payload);
       } else {
+        const quiet = Boolean(opts.quiet);
         for (const c of checks) {
+          if (quiet && c.status === 'ok') continue;
           const icon = c.status === 'ok' ? '✓' : c.status === 'warn' ? '!' : '✗';
           const detailStr =
             typeof c.detail === 'string'

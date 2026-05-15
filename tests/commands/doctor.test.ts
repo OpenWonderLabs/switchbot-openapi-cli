@@ -717,6 +717,47 @@ describe('doctor command', () => {
     });
   });
 
+  it('catalog-coverage accepts real account types discovered in deviceList', async () => {
+    updateCacheFromDeviceList({
+      deviceList: [
+        {
+          deviceId: 'CAM-1',
+          deviceName: 'Office Camera',
+          deviceType: 'Pan/Tilt Cam Plus 3K',
+          controlType: 'Cameras',
+          enableCloudService: true,
+        },
+        {
+          deviceId: 'REMOTE-1',
+          deviceName: 'Desk Remote',
+          deviceType: 'Remote',
+          controlType: 'Wireless Remote',
+          enableCloudService: true,
+        },
+        {
+          deviceId: 'PRESENCE-1',
+          deviceName: 'Presence',
+          deviceType: 'Presence Sensor',
+          controlType: 'Motion Sensor',
+          enableCloudService: true,
+        },
+      ],
+      infraredRemoteList: [
+        {
+          deviceId: 'IR-AC',
+          deviceName: 'AC',
+          remoteType: 'Air Conditioner',
+        },
+      ],
+    });
+
+    const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--section', 'catalog-coverage']);
+    const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    const coverage = payload.data.checks.find((c: { name: string }) => c.name === 'catalog-coverage');
+    expect(coverage.status).toBe('ok');
+    expect(coverage.detail).toContain('all 4 device types have catalog entries');
+  });
+
   it('release-notes check is ok when RELEASE_METADATA carries no breaking notice for the current release', async () => {
     // The release-notes check is a contract between doctor and
     // src/version-notes.ts RELEASE_METADATA. When no entry exists for

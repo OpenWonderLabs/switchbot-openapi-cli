@@ -173,6 +173,7 @@ Examples:
     .option('--strict', 'Only return entries whose type name matches (skip alias/role/command fallbacks)')
     .action((keyword: string, options: { strict?: boolean }) => {
       try {
+        if (!keyword.trim()) throw new UsageError('catalog search requires a non-empty keyword.');
         const q = keyword.toLowerCase();
         const entries = getEffectiveCatalog();
         const strict = options.strict === true;

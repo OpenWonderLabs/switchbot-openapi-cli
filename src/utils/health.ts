@@ -110,7 +110,7 @@ export function getHealthReport(auditPath = DEFAULT_AUDIT_PATH): HealthReport {
     const breakdown: Record<string, number> = {};
     let expectedErrors = 0;
     for (const e of errorEntries) {
-      const code = e.statusCode !== undefined ? String(e.statusCode) : 'unknown';
+      const code = e.statusCode !== undefined ? String(e.statusCode) : 'client';
       breakdown[code] = (breakdown[code] ?? 0) + 1;
       if (e.statusCode !== undefined && EXPECTED_ERROR_CODES.has(e.statusCode)) {
         expectedErrors++;

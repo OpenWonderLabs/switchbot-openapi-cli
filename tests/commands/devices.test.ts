@@ -1740,6 +1740,24 @@ describe('devices command', () => {
       expect(out).toContain('moveDetected');
     });
 
+    it('recognizes official GitHub-documented device types observed in the real account', async () => {
+      const cases = [
+        ['Pan/Tilt Cam Plus 3K', 'Pan/Tilt Cam Plus'],
+        ['Presence Sensor', 'detected'],
+        ['Remote', 'Wireless Remote'],
+      ];
+
+      for (const [type, expected] of cases) {
+        const res = await runCli(registerDevicesCommand, ['devices', 'commands', type]);
+        const out = res.stdout.join('\n');
+        expect(res.exitCode, type).toBeNull();
+        expect(res.stderr.join('\n'), type).toBe('');
+        expect(out).toContain(type);
+        expect(out).toContain('Commands: (none');
+        expect(out).toContain(expected);
+      }
+    });
+
     it('--json mode outputs the catalog entry as JSON', async () => {
       const res = await runCli(registerDevicesCommand, ['devices', 'commands', 'Bot', '--json']);
       const out = res.stdout.join('\n');
@@ -2674,15 +2692,15 @@ describe('devices command', () => {
       expect(parsed.data.wouldSend.commandType).toBe('command');
     });
 
-    it('emits human-readable dry-run message to stdout when --dry-run (no --json)', async () => {
+    it('emits human-readable dry-run message to stderr when --dry-run (no --json)', async () => {
       const res = await runCli(registerDevicesCommand, [
         '--dry-run', 'devices', 'command', DRY_ID, 'turnOn',
       ]);
       expect(res.exitCode).toBeNull();
-      const out = res.stdout.join('\n');
-      expect(out).toMatch(/dry-run/i);
-      expect(out).toContain(DRY_ID);
-      expect(out).not.toMatch(/Would POST/i);
+      const err = res.stderr.join('\n');
+      expect(err).toMatch(/dry-run/i);
+      expect(err).toContain(DRY_ID);
+      expect(err).not.toMatch(/Would POST/i);
     });
   });
 

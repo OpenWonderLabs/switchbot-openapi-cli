@@ -25,12 +25,12 @@ describe('switchbot uninstall (dry-run smoke)', () => {
   });
 
   it('--dry-run lists the planned removals without mutating anything', () => {
-    const { code, stdout } = runCli(['--dry-run', 'uninstall', '--agent', 'none']);
+    const { code, stderr } = runCli(['--dry-run', 'uninstall', '--agent', 'none']);
     expect(code).toBe(0);
-    expect(stdout).toContain('switchbot uninstall — dry run');
-    expect(stdout).toContain('remove-credentials');
-    expect(stdout).toContain('remove-policy');
-    expect(stdout).toContain('No changes made');
+    expect(stderr).toContain('switchbot uninstall — dry run');
+    expect(stderr).toContain('remove-credentials');
+    expect(stderr).toContain('remove-policy');
+    expect(stderr).toContain('No changes made');
   });
 
   it('--dry-run --json emits a structured plan including skill link for claude-code', () => {

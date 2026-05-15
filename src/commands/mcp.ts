@@ -2328,7 +2328,7 @@ Inspect locally:
   mcp
     .command('tools')
     .description('Print the registered MCP tools in human or JSON form')
-    .option('--tools <profile>', 'Tool profile: default, readonly, all (default: all)', stringArg('--tools'), 'all')
+    .option('--tools <profile>', 'Tool profile: "default" (13 tools), "readonly" (10), or "all" (24). Lists all when omitted', stringArg('--tools'), 'all')
     .action((opts: { tools?: string }) => {
       try { printMcpToolDirectory(resolveToolProfile(opts.tools)); }
       catch (e) { handleError(e); }
@@ -2337,7 +2337,7 @@ Inspect locally:
   mcp
     .command('list-tools')
     .description('Alias of `mcp tools`')
-    .option('--tools <profile>', 'Tool profile: default, readonly, all (default: all)', stringArg('--tools'), 'all')
+    .option('--tools <profile>', 'Tool profile: "default" (13 tools), "readonly" (10), or "all" (24). Lists all when omitted', stringArg('--tools'), 'all')
     .action((opts: { tools?: string }) => {
       try { printMcpToolDirectory(resolveToolProfile(opts.tools)); }
       catch (e) { handleError(e); }
@@ -2351,7 +2351,7 @@ Inspect locally:
     .option('--auth-token <token>', 'Bearer token for HTTP requests (required for --bind 0.0.0.0; falls back to SWITCHBOT_MCP_TOKEN env var)', stringArg('--auth-token'))
     .option('--cors-origin <url>', 'Allowed CORS origin(s) for HTTP (repeatable)', stringArg('--cors-origin'))
     .option('--rate-limit <n>', 'Max requests per minute per profile (default 60)', intArg('--rate-limit', { min: 1 }), '60')
-    .option('--tools <profile>', 'Tool profile: default, readonly, all (default: default)', stringArg('--tools'), 'default')
+    .option('--tools <profile>', 'Tool profile: "default" (13 tools), "readonly" (10), or "all" (24)', stringArg('--tools'), 'default')
     .addHelpText('after', `
 Examples:
   $ switchbot mcp serve
