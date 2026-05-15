@@ -312,6 +312,31 @@ export function lintRules(automation: AutomationBlock | null | undefined): LintR
         });
       }
 
+      // condition-llm-tokens-budget-zero: budget.max_tokens_per_hour set to 0 makes condition always fail
+      if (llm.budget?.max_tokens_per_hour === 0) {
+        issues.push({
+          rule: r.name,
+          severity: 'warning',
+          code: 'condition-llm-tokens-budget-zero',
+          message: 'llm condition budget.max_tokens_per_hour is 0 — condition will always take the on_error path.',
+        });
+      }
+
+      // condition-llm-cost-without-known-model: cost cap set with provider:auto cannot be evaluated until runtime
+      // resolves the model. Warn so the operator knows the cost dimension may silently skip if the chosen model
+      // is not in the pricing table.
+      if (llm.budget?.max_cost_per_day_usd !== undefined && llm.budget.max_cost_per_day_usd > 0) {
+        const provider = llm.provider ?? 'auto';
+        if (provider === 'auto') {
+          issues.push({
+            rule: r.name,
+            severity: 'warning',
+            code: 'condition-llm-cost-without-known-model',
+            message: 'llm condition sets max_cost_per_day_usd but provider is "auto" — cost dimension is skipped for any model not in the pricing table.',
+          });
+        }
+      }
+
       // condition-llm-on-error-pass: on_error "pass" silently passes conditions when LLM is unavailable
       if (llm.on_error === 'pass') {
         issues.push({

@@ -12,6 +12,7 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - **Catalog sync with upstream OpenAPI**: added `Weather Station` (deviceType `WeatherStation`, sensor with `atmosphericPressure` field), `Lock Vision` and `Lock Vision Pro` (video smart locks with the same lock/unlock/deadbolt safety semantics as Smart Lock Pro), the `Smart Lock Pro Wifi` Matter alias on the existing Smart Lock entry, and `uploadImage <imageUrl>` on AI Art Frame. The upload command parameter is documented as a single https URL pending upstream parameter-shape clarification.
+- **LLM condition USD and token budgets**: per-rule and global `llm_budget` now accept `max_tokens_per_hour` (hourly window, aligned with `max_calls_per_hour`) and `max_cost_per_day_usd` (24h window). Costs are computed from per-model USD pricing in `src/llm/pricing.ts` and reported on `DecideResult.usage`. Audit entries for `llm-condition` now carry `llmUsage`, and `llm-budget-exceeded` records `budgetDimension` (`calls | tokens | cost`), `budgetLimit`, and `budgetObserved`. New lints: `condition-llm-tokens-budget-zero` (warns when token cap is 0) and `condition-llm-cost-without-known-model` (warns when a USD cap is set with `provider: auto` since the cost dimension silently skips models not in the pricing table).
 
 ### Fixed
 

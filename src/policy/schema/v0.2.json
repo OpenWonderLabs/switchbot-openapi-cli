@@ -107,6 +107,16 @@
               "minimum": 0,
               "default": 60,
               "description": "Maximum LLM condition calls per hour across all rules."
+            },
+            "max_tokens_per_hour": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Maximum total LLM tokens (input + output) per hour across all rules. Omit to leave unbounded."
+            },
+            "max_cost_per_day_usd": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Maximum cumulative USD cost per day across all rules. Skipped for models not in the pricing table."
             }
           }
         }
@@ -350,7 +360,9 @@
                   "type": ["object", "null"],
                   "additionalProperties": false,
                   "properties": {
-                    "max_calls_per_hour": { "type": "integer", "minimum": 0, "default": 10 }
+                    "max_calls_per_hour": { "type": "integer", "minimum": 0, "default": 10 },
+                    "max_tokens_per_hour": { "type": "integer", "minimum": 0, "description": "Hourly token cap (input + output combined). Omit to leave unbounded." },
+                    "max_cost_per_day_usd": { "type": "number", "minimum": 0, "description": "Daily USD cap. Skipped for models not in the pricing table." }
                   }
                 },
                 "on_error": { "enum": ["fail", "pass", "skip"], "default": "fail" },

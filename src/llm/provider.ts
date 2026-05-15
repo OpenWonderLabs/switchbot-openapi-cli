@@ -1,6 +1,16 @@
+export interface DecideUsage {
+  tokensIn: number;
+  tokensOut: number;
+  /** Computed by `calculateCostUsd(model, tokensIn, tokensOut)`; undefined if model is not in the pricing table. */
+  costUsd?: number;
+}
+
 export interface DecideResult {
   pass: boolean;
   reason: string;
+  /** Token + cost accounting for the underlying API call. Absent on cached
+   * results and when the provider does not report usage. */
+  usage?: DecideUsage;
 }
 
 export interface DecideOptions {

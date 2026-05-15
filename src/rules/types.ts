@@ -75,7 +75,11 @@ export interface LlmCondition {
     provider?: 'auto' | 'openai' | 'anthropic';
     timeout_ms?: number;
     cache_ttl?: string;
-    budget?: { max_calls_per_hour?: number };
+    budget?: {
+      max_calls_per_hour?: number;
+      max_tokens_per_hour?: number;
+      max_cost_per_day_usd?: number;
+    };
     on_error?: 'fail' | 'pass' | 'skip';
     recent_events?: number;
   };
@@ -143,6 +147,8 @@ export interface AutomationAuditConfig {
 
 export interface AutomationLlmBudgetConfig {
   max_calls_per_hour?: number;
+  max_tokens_per_hour?: number;
+  max_cost_per_day_usd?: number;
 }
 
 export interface AutomationBlock {

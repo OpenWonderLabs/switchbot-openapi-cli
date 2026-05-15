@@ -1,6 +1,7 @@
 import https from 'node:https';
 import http from 'node:http';
 import type { LLMProvider, LLMProviderOptions, DecideResult, DecideOptions } from '../provider.js';
+import { calculateCostUsd } from '../pricing.js';
 
 export class OpenAIProvider implements LLMProvider {
   readonly name = 'openai';
@@ -137,11 +138,17 @@ export class OpenAIProvider implements LLMProvider {
           tool_calls?: Array<{ function: { name: string; arguments: string } }>;
         };
       }>;
+      usage?: { prompt_tokens?: number; completion_tokens?: number };
     };
     const toolCall = json.choices?.[0]?.message?.tool_calls?.find(tc => tc.function.name === 'decide');
     if (!toolCall) throw new Error('OpenAI decide: no tool call in response');
     const args = JSON.parse(toolCall.function.arguments) as { pass: boolean; reason: string };
     if (typeof args.pass !== 'boolean') throw new Error('OpenAI decide: malformed function-call response');
-    return { pass: args.pass, reason: String(args.reason ?? '').slice(0, 200) };
+    const tokensIn = json.usage?.prompt_tokens ?? 0;
+    const tokensOut = json.usage?.completion_tokens ?? 0;
+    const usage = json.usage
+      ? { tokensIn, tokensOut, costUsd: calculateCostUsd(this.model, tokensIn, tokensOut) }
+      : undefined;
+    return { pass: args.pass, reason: String(args.reason ?? '').slice(0, 200), usage };
   }
 }
