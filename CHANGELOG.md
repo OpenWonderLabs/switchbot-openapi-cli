@@ -9,26 +9,6 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Added
-
-- **Catalog sync with upstream OpenAPI**: added `Weather Station` (deviceType `WeatherStation`, sensor with `atmosphericPressure` field), `Lock Vision` and `Lock Vision Pro` (video smart locks with the same lock/unlock/deadbolt safety semantics as Smart Lock Pro), the `Smart Lock Pro Wifi` Matter alias on the existing Smart Lock entry, and `uploadImage <imageUrl>` on AI Art Frame. The upload command parameter is documented as a single https URL pending upstream parameter-shape clarification.
-- **LLM condition USD and token budgets**: per-rule and global `llm_budget` now accept `max_tokens_per_hour` (hourly window, aligned with `max_calls_per_hour`) and `max_cost_per_day_usd` (24h window). Costs are computed from per-model USD pricing in `src/llm/pricing.ts` and reported on `DecideResult.usage`. Audit entries for `llm-condition` now carry `llmUsage`, and `llm-budget-exceeded` records `budgetDimension` (`calls | tokens | cost`), `budgetLimit`, and `budgetObserved`. New lints: `condition-llm-tokens-budget-zero` (warns when token cap is 0) and `condition-llm-cost-without-known-model` (warns when a USD cap is set with `provider: auto` since the cost dimension silently skips models not in the pricing table).
-- **Cross-event aggregation in conditions**: new `event_count` condition counts how many events fired for a given device inside a rolling time window. Schema:
-
-  ```yaml
-  conditions:
-    - event_count:
-        device: front-door         # deviceId or alias
-        event: motion.detected     # optional canonical event filter
-        window: "5m"               # duration: 100ms | 30s | 5m | 1h | 1d
-        min: 3                     # required floor
-        max: 10                    # optional ceiling
-  ```
-
-  Backed by the same per-device JSONL ring at `~/.switchbot/device-history/<deviceId>.jsonl` used by `events history`, with rotation honored. The LLM-condition `recent_events` hook (declared in v0.2 schema since Track κ but unwired) now also pulls from this fetcher, populating `context.recent_events` with up to N most-recent matching events on the trigger device. Engine-level `LlmConditionEvaluator` is now wired into `RulesEngine` (previously only `simulate` had it). New lints: `condition-event-count-bad-window` and `condition-event-count-max-below-min`.
-- **Local / non-tool-use LLM provider**: new `provider: local` for `llm` conditions points at any OpenAI-compatible chat completions endpoint (Ollama, llama.cpp server, vLLM, LM Studio). Defaults to `http://localhost:11434/v1`; override with `SWITCHBOT_LOCAL_LLM_URL`, `SWITCHBOT_LOCAL_LLM_MODEL`. Because most local servers don't support OpenAI-style tool use, `decide()` falls back to a structured-output prompt that asks for a `{"pass": bool, "reason": str}` JSON object and runs one repair retry if the first response is not parseable. Operators on tool-use-capable local endpoints can opt in via YAML `tool_use: true` or `SWITCHBOT_LOCAL_LLM_TOOL_USE=1`. New `LLMProvider.capabilities.toolUse` flag exposes this to the rest of the system. New `doctor` check `local-llm-reachable` probes the configured endpoint when (and only when) policy uses `provider: local`.
-- **Daemon JSON-RPC IPC transport**: `switchbot rules run` now exposes a JSON-RPC 2.0 endpoint over a Unix domain socket on POSIX (`~/.switchbot/daemon.sock`, mode 0600) and a per-user named pipe on Windows (`\\.\pipe\switchbot-daemon-<user>`). v1 methods: `daemon.status`, `daemon.ping`, `daemon.reload`. New client at `src/daemon/client.ts` exposes `IpcDaemonClient.call()` and `.ping()`. Wire protocol: newline-delimited JSON-RPC. Sets the foundation for future `mcp serve --via-daemon` proxying so MCP clients can avoid per-call CLI cold-start. New `doctor` check `daemon-ipc` reports IPC reachability and round-trip latency when the daemon is running.
-
 ### Fixed
 
 - **Daemon start failed in bundled builds** (BUG-001): CLI entry path resolution navigated above the dist/ directory when running from the single-file bundle. Now correctly detects the bundled scenario.
@@ -48,6 +28,28 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - **`devices expand` supports lighting commands**: `setBrightness` (`--brightness`), `setColor` (`--color`), and `setColorTemperature` (`--color-temp`) flags now expand for Color Bulb, Strip Light, Ceiling Light, and similar devices.
+
+## [3.6.2]
+
+### Added
+
+- **Catalog sync with upstream OpenAPI**: added `Weather Station` (deviceType `WeatherStation`, sensor with `atmosphericPressure` field), `Lock Vision` and `Lock Vision Pro` (video smart locks with the same lock/unlock/deadbolt safety semantics as Smart Lock Pro), the `Smart Lock Pro Wifi` Matter alias on the existing Smart Lock entry, and `uploadImage <imageUrl>` on AI Art Frame. The upload command parameter is documented as a single https URL pending upstream parameter-shape clarification.
+- **LLM condition USD and token budgets**: per-rule and global `llm_budget` now accept `max_tokens_per_hour` (hourly window, aligned with `max_calls_per_hour`) and `max_cost_per_day_usd` (24h window). Costs are computed from per-model USD pricing in `src/llm/pricing.ts` and reported on `DecideResult.usage`. Audit entries for `llm-condition` now carry `llmUsage`, and `llm-budget-exceeded` records `budgetDimension` (`calls | tokens | cost`), `budgetLimit`, and `budgetObserved`. New lints: `condition-llm-tokens-budget-zero` (warns when token cap is 0) and `condition-llm-cost-without-known-model` (warns when a USD cap is set with `provider: auto` since the cost dimension silently skips models not in the pricing table).
+- **Cross-event aggregation in conditions**: new `event_count` condition counts how many events fired for a given device inside a rolling time window. Schema:
+
+  ```yaml
+  conditions:
+    - event_count:
+        device: front-door         # deviceId or alias
+        event: motion.detected     # optional canonical event filter
+        window: "5m"               # duration: 100ms | 30s | 5m | 1h | 1d
+        min: 3                     # required floor
+        max: 10                    # optional ceiling
+  ```
+
+  Backed by the same per-device JSONL ring at `~/.switchbot/device-history/<deviceId>.jsonl` used by `events history`, with rotation honored. The LLM-condition `recent_events` hook (declared in v0.2 schema since Track κ but unwired) now also pulls from this fetcher, populating `context.recent_events` with up to N most-recent matching events on the trigger device. Engine-level `LlmConditionEvaluator` is now wired into `RulesEngine` (previously only `simulate` had it). New lints: `condition-event-count-bad-window` and `condition-event-count-max-below-min`.
+- **Local / non-tool-use LLM provider**: new `provider: local` for `llm` conditions points at any OpenAI-compatible chat completions endpoint (Ollama, llama.cpp server, vLLM, LM Studio). Defaults to `http://localhost:11434/v1`; override with `SWITCHBOT_LOCAL_LLM_URL`, `SWITCHBOT_LOCAL_LLM_MODEL`. Because most local servers don't support OpenAI-style tool use, `decide()` falls back to a structured-output prompt that asks for a `{"pass": bool, "reason": str}` JSON object and runs one repair retry if the first response is not parseable. Operators on tool-use-capable local endpoints can opt in via YAML `tool_use: true` or `SWITCHBOT_LOCAL_LLM_TOOL_USE=1`. New `LLMProvider.capabilities.toolUse` flag exposes this to the rest of the system. New `doctor` check `local-llm-reachable` probes the configured endpoint when (and only when) policy uses `provider: local`.
+- **Daemon JSON-RPC IPC transport**: `switchbot rules run` now exposes a JSON-RPC 2.0 endpoint over a Unix domain socket on POSIX (`~/.switchbot/daemon.sock`, mode 0600) and a per-user named pipe on Windows (`\\.\pipe\switchbot-daemon-<user>`). v1 methods: `daemon.status`, `daemon.ping`, `daemon.reload`. New client at `src/daemon/client.ts` exposes `IpcDaemonClient.call()` and `.ping()`. Wire protocol: newline-delimited JSON-RPC. Sets the foundation for future `mcp serve --via-daemon` proxying so MCP clients can avoid per-call CLI cold-start. New `doctor` check `daemon-ipc` reports IPC reachability and round-trip latency when the daemon is running.
 
 ## [3.4.0] - 2026-05-07
 
