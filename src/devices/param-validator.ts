@@ -64,6 +64,9 @@ export function buildBlindTiltSetPosition(opts: {
   if (!Number.isFinite(angle) || angle < 0 || angle > 100) {
     throw new UsageError(`--angle must be an integer between 0 and 100 (got "${opts.angle}")`);
   }
+  if (angle % 2 !== 0) {
+    throw new UsageError(`--angle must be a multiple of 2 (got "${opts.angle}"). Example: --angle 50`);
+  }
   return `${dir};${angle}`;
 }
 
@@ -83,11 +86,12 @@ export function buildRelaySetMode(opts: {
   return `${ch};${modeInt}`;
 }
 
-export function buildBrightnessSet(opts: { brightness?: string }): string {
-  if (!opts.brightness) throw new UsageError('--brightness is required (1-100)');
+export function buildBrightnessSet(opts: { brightness?: string }, deviceType?: string): string {
+  const [min, max] = (deviceType && brightnessRange(deviceType)) || [1, 100];
+  if (!opts.brightness) throw new UsageError(`--brightness is required (${min}-${max})`);
   const b = parseInt(opts.brightness, 10);
-  if (!Number.isFinite(b) || b < 1 || b > 100) {
-    throw new UsageError(`--brightness must be an integer between 1 and 100 (got "${opts.brightness}")`);
+  if (!Number.isFinite(b) || b < min || b > max) {
+    throw new UsageError(`--brightness must be an integer between ${min} and ${max} (got "${opts.brightness}")`);
   }
   return String(b);
 }
@@ -268,7 +272,7 @@ function isBrightnessDevice(deviceType: string): boolean {
   return brightnessRange(deviceType) !== null;
 }
 
-function brightnessRange(deviceType: string): [number, number] | null {
+export function brightnessRange(deviceType: string): [number, number] | null {
   if (
     deviceType === 'Color Bulb' ||
     deviceType === 'Strip Light' ||
