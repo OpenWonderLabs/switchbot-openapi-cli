@@ -265,6 +265,26 @@ function checkCatalog(): Check {
   };
 }
 
+function checkCatalogCoverage(): Check {
+  const cache = loadCache();
+  if (!cache) {
+    return { name: 'catalog-coverage', status: 'ok', detail: 'no device cache — run "switchbot devices list" first' };
+  }
+  const catalog = getEffectiveCatalog();
+  const catalogTypes = new Set(catalog.map((e) => e.type.toLowerCase()));
+  const aliases = new Set(catalog.flatMap((e) => (e.aliases ?? []).map((a) => a.toLowerCase())));
+  const deviceTypes = [...new Set(Object.values(cache.devices).map((d) => d.type))];
+  const missing = deviceTypes.filter((t) => !catalogTypes.has(t.toLowerCase()) && !aliases.has(t.toLowerCase()));
+  if (missing.length === 0) {
+    return { name: 'catalog-coverage', status: 'ok', detail: `all ${deviceTypes.length} device types have catalog entries` };
+  }
+  return {
+    name: 'catalog-coverage',
+    status: 'warn',
+    detail: { missing, message: `${missing.length} device type(s) without catalog entry` },
+  };
+}
+
 function checkCache(): Check {
   try {
     const info = describeCache();
@@ -976,6 +996,7 @@ const CHECK_REGISTRY: CheckDef[] = [
   { name: 'keychain', description: 'OS keychain backend availability and usage', run: () => checkKeychain() },
   { name: 'profiles', description: 'profile definitions valid', run: () => checkProfiles() },
   { name: 'catalog', description: 'catalog loads', run: () => checkCatalog() },
+  { name: 'catalog-coverage', description: 'all cached device types have catalog entries', run: () => checkCatalogCoverage() },
   { name: 'catalog-schema', description: 'catalog vs agent-bootstrap version aligned', run: () => checkCatalogSchema() },
   { name: 'inventory', description: 'cached inventory graph consistency (hubDeviceId references)', run: () => checkInventoryConsistency() },
   { name: 'cache', description: 'device cache state', run: () => checkCache() },

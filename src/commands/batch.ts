@@ -511,8 +511,8 @@ Examples:
           printJson(result);
         } else {
           if (dryRunned.length > 0) {
-            console.log(`\nPlanned (dry-run): ${dryRunned.length} device(s)`);
-            for (const d of dryRunned) console.log(`  - ${d.deviceId}`);
+            console.error(`\nPlanned (dry-run): ${dryRunned.length} device(s)`);
+            for (const d of dryRunned) console.error(`  - ${d.deviceId}`);
           }
           if (preSkipped.length > 0) {
             console.log(`\nSkipped (offline): ${preSkipped.length} device(s)`);

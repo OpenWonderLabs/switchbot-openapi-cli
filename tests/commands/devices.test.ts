@@ -2674,15 +2674,15 @@ describe('devices command', () => {
       expect(parsed.data.wouldSend.commandType).toBe('command');
     });
 
-    it('emits human-readable dry-run message to stdout when --dry-run (no --json)', async () => {
+    it('emits human-readable dry-run message to stderr when --dry-run (no --json)', async () => {
       const res = await runCli(registerDevicesCommand, [
         '--dry-run', 'devices', 'command', DRY_ID, 'turnOn',
       ]);
       expect(res.exitCode).toBeNull();
-      const out = res.stdout.join('\n');
-      expect(out).toMatch(/dry-run/i);
-      expect(out).toContain(DRY_ID);
-      expect(out).not.toMatch(/Would POST/i);
+      const err = res.stderr.join('\n');
+      expect(err).toMatch(/dry-run/i);
+      expect(err).toContain(DRY_ID);
+      expect(err).not.toMatch(/Would POST/i);
     });
   });
 

@@ -1,8 +1,9 @@
 import http from 'node:http';
 import { Command } from 'commander';
-import { printJson, isJsonMode, printTable, handleError } from '../utils/output.js';
+import { printJson, isJsonMode, printTable, handleError, UsageError } from '../utils/output.js';
 import { getHealthReport, toPrometheusText } from '../utils/health.js';
 import { intArg } from '../utils/arg-parsers.js';
+import { resolveFormat, renderRows } from '../utils/format.js';
 
 const HEALTHZ_SCHEMA_VERSION = '1.1';
 
@@ -12,28 +13,36 @@ function runHealthCheck(opts: { prometheus?: boolean; auditLog?: string }): void
     process.stdout.write(toPrometheusText(report));
     return;
   }
-  if (isJsonMode()) {
+  const fmt = resolveFormat();
+  if (fmt === 'json' || isJsonMode()) {
     printJson(report);
+    return;
+  }
+  const headers = ['Component', 'Status', 'Detail'];
+  const rows: string[][] = [
+    ['quota', report.quota.status,
+      `${report.quota.used}/${report.quota.limit} (${report.quota.percentUsed}% used, ${report.quota.remaining} remaining)`],
+    ['audit', report.audit.status,
+      report.audit.present
+        ? `${report.audit.recentErrors}/${report.audit.recentTotal} errors in 24h (${report.audit.errorRatePercent}%)`
+        : 'log not present'],
+    ['circuit', report.circuit.status,
+      `${report.circuit.name}: ${report.circuit.state} (failures: ${report.circuit.failures})`],
+    ['process', 'ok',
+      `pid ${report.process.pid} · uptime ${report.process.uptimeSeconds}s · mem ${report.process.memoryMb}MB`],
+  ];
+  if (fmt !== 'table') {
+    if (fmt === 'id') {
+      handleError(new UsageError('--format=id is not supported for health check (no deviceId column). Use --format json, yaml, tsv, jsonl, or markdown.'));
+    }
+    renderRows(headers, rows, fmt);
+    if (report.overall !== 'ok') process.exit(1);
     return;
   }
   const statusEmoji = report.overall === 'ok' ? '✓' : report.overall === 'degraded' ? '⚠' : '✗';
   console.log(`${statusEmoji} overall: ${report.overall}  (${report.generatedAt})`);
   console.log('');
-  printTable(
-    ['Component', 'Status', 'Detail'],
-    [
-      ['quota', report.quota.status,
-        `${report.quota.used}/${report.quota.limit} (${report.quota.percentUsed}% used, ${report.quota.remaining} remaining)`],
-      ['audit', report.audit.status,
-        report.audit.present
-          ? `${report.audit.recentErrors}/${report.audit.recentTotal} errors in 24h (${report.audit.errorRatePercent}%)`
-          : 'log not present'],
-      ['circuit', report.circuit.status,
-        `${report.circuit.name}: ${report.circuit.state} (failures: ${report.circuit.failures})`],
-      ['process', 'ok',
-        `pid ${report.process.pid} · uptime ${report.process.uptimeSeconds}s · mem ${report.process.memoryMb}MB`],
-    ],
-  );
+  printTable(headers, rows);
   if (report.overall !== 'ok') process.exit(1);
 }
 

@@ -400,15 +400,15 @@ function validateSetBrightness(raw: string | undefined, deviceType: string): Val
       error: `setBrightness requires an integer ${min}-${max} (percent). Example: "50".`,
     };
   }
-  const trimmed = stripQuotes(raw.trim());
-  if (!/^-?\d+$/.test(trimmed)) {
+  const parsed = parseStrictInt(raw);
+  if (!parsed.ok) {
     return {
       ok: false,
       error: `setBrightness must be an integer ${min}-${max}, got ${JSON.stringify(raw)}. ${hintBrightnessRetry(min, max)}`,
     };
   }
-  const n = Number(trimmed);
-  if (!Number.isInteger(n) || n < min || n > max) {
+  const n = parsed.value;
+  if (n < min || n > max) {
     return {
       ok: false,
       error: `setBrightness must be an integer ${min}-${max}, got "${raw}". ${hintBrightnessRetry(min, max)}`,
@@ -515,15 +515,15 @@ function validateSetColorTemperature(raw: string | undefined): ValidateResult {
       error: `setColorTemperature requires an integer Kelvin value 2700-6500. Example: "4000".`,
     };
   }
-  const trimmed = stripQuotes(raw.trim());
-  if (!/^-?\d+$/.test(trimmed)) {
+  const parsed = parseStrictInt(raw);
+  if (!parsed.ok) {
     return {
       ok: false,
       error: `setColorTemperature must be an integer 2700-6500, got ${JSON.stringify(raw)}.`,
     };
   }
-  const n = Number(trimmed);
-  if (!Number.isInteger(n) || n < 2700 || n > 6500) {
+  const n = parsed.value;
+  if (n < 2700 || n > 6500) {
     return {
       ok: false,
       error: `setColorTemperature must be an integer 2700-6500, got "${raw}".`,
@@ -739,6 +739,12 @@ function stripQuotes(s: string): string {
   return s;
 }
 
+function parseStrictInt(raw: string): { ok: true; value: number } | { ok: false } {
+  const trimmed = stripQuotes(raw.trim());
+  if (!/^-?(?:0|[1-9]\d*)$/.test(trimmed)) return { ok: false };
+  return { ok: true, value: Number(trimmed) };
+}
+
 function validateIntRange(
   raw: string | undefined,
   command: string,
@@ -752,14 +758,14 @@ function validateIntRange(
       error: `${command} requires an integer ${min}-${max} (${label}). Example: "${Math.round((min + max) / 2)}".`,
     };
   }
-  const trimmed = stripQuotes(raw.trim());
-  if (!/^-?\d+$/.test(trimmed)) {
+  const parsed = parseStrictInt(raw);
+  if (!parsed.ok) {
     return {
       ok: false,
       error: `${command} must be an integer ${min}-${max} (${label}), got ${JSON.stringify(raw)}.`,
     };
   }
-  const n = Number(trimmed);
+  const n = parsed.value;
   if (n < min || n > max) {
     return {
       ok: false,

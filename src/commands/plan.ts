@@ -357,7 +357,7 @@ async function executePlanSteps(
       if (err instanceof Error && err.name === 'DryRunSignal') {
         out.results.push({ step: idx, type: 'command', deviceId: resolvedDeviceId, command: step.command, status: 'dry-run' });
         out.summary.dryRun++;
-        if (!isJsonMode()) console.log(`  ${idx}. ◦ dry-run ${step.command} on ${resolvedDeviceId}`);
+        if (!isJsonMode()) console.error(`  ${idx}. ◦ dry-run ${step.command} on ${resolvedDeviceId}`);
         continue;
       }
       const msg = err instanceof Error ? err.message : String(err);

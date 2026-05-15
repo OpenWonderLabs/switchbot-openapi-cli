@@ -231,7 +231,7 @@ Examples:
           if (isJsonMode()) {
             printJson({ ok: true, dryRun: true, command, deviceId });
           } else {
-            console.log(`◦ dry-run: ${command} would be sent to ${deviceId}`);
+            console.error(`◦ dry-run: ${command} would be sent to ${deviceId}`);
           }
           return;
         }

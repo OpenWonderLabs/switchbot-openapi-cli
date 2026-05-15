@@ -642,12 +642,13 @@ describe('devices batch', () => {
     // Only BOT1 reaches the post path; BOT2 was pre-filtered.
     expect(apiMock.__instance.post).toHaveBeenCalledTimes(1);
     const out = result.stdout.join('\n');
-    expect(out).toContain('Planned (dry-run): 1 device(s)');
-    expect(out).toContain('- BOT1');
+    const err = result.stderr.join('\n');
+    expect(err).toContain('Planned (dry-run): 1 device(s)');
+    expect(err).toContain('- BOT1');
     expect(out).toContain('Skipped (offline): 1 device(s)');
     expect(out).toContain('- BOT2');
     // BOT2 must never show up in a dry-run POST log.
-    expect(out).not.toMatch(/Would POST.*BOT2/);
+    expect(err).not.toMatch(/Would POST.*BOT2/);
     // Summary line now includes both "planned" and "skipped_offline" counts.
     expect(out).toMatch(/Summary:.*1 planned.*1 skipped_offline/);
   });
