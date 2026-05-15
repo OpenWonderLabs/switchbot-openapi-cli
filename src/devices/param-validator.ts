@@ -740,9 +740,9 @@ function stripQuotes(s: string): string {
 }
 
 function parseStrictInt(raw: string): { ok: true; value: number } | { ok: false } {
-  const trimmed = stripQuotes(raw.trim());
-  if (!/^-?(?:0|[1-9]\d*)$/.test(trimmed)) return { ok: false };
-  return { ok: true, value: Number(trimmed) };
+  const cleaned = stripQuotes(raw);
+  if (!/^[+-]?(?:0|[1-9]\d*)$/.test(cleaned)) return { ok: false };
+  return { ok: true, value: Number(cleaned) };
 }
 
 function validateIntRange(
