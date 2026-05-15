@@ -1,0 +1,23 @@
+package-lock.json
+  ai_agent 3,9
+package.json
+  s_df4afb688a5f3c::t_224bf7a13d44ea 3
+README.md
+  s_df4afb688a5f3c::t_40bb05625d180d 66,810
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "fe9378a543aaf2dc729424fb98894f5abbb7f7d0",
+  "prompts": {},
+  "sessions": {
+    "s_df4afb688a5f3c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f49d7892-ec92-492e-ab81-568fd7da0571",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
