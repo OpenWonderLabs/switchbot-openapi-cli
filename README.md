@@ -633,7 +633,7 @@ switchbot doctor
 switchbot doctor --json
 ```
 
-Runs local checks (Node version, credentials, profiles, catalog, catalog-schema, cache, quota, clock, MQTT, policy, MCP, keychain, path, inventory, audit, daemon, health, notify-connectivity, release-notes) and exits 1 if any check fails. `warn` results exit 0. The MQTT check reports `ok` when REST credentials are configured (auto-provisioned on first use). The `notify-connectivity` check probes webhook URLs declared in `type: notify` actions. Use this to diagnose connectivity or config issues before running automation.
+Runs local checks (Node version, credentials, profiles, catalog, catalog-schema, catalog-coverage, cache, quota, clock, MQTT, policy, MCP, keychain, path, inventory, audit, daemon, health, notify-connectivity, release-notes) and exits 1 if any check fails. `warn` results exit 0. The MQTT check reports `ok` when REST credentials are configured (auto-provisioned on first use). The `notify-connectivity` check probes webhook URLs declared in `type: notify` actions. Use this to diagnose connectivity or config issues before running automation.
 
 `--json` output includes `maturityScore` (0–100) and `maturityLabel` (`production-ready` / `mostly-ready` / `needs-work` / `not-ready`) to give an at-a-glance readiness rating:
 

@@ -150,7 +150,7 @@ describe('audit health layering', () => {
         expectedErrors: 0,
         unexpectedErrors: 4,
         unexpectedRatePercent: 40,
-        breakdown: { 'unknown': 4 },
+        breakdown: { 'client': 4 },
         status: 'warn',
       },
     };

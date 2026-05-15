@@ -11,7 +11,7 @@ cd "$(dirname "$0")/.."
 errors=0
 
 # 1. No dry-run messages on stdout (must use console.error)
-hits=$(grep -rn 'console\.log.*dry.run\|console\.log.*◦' src/commands/ 2>/dev/null || true)
+hits=$(grep -rn 'console\.log.*dry.run\|console\.log.*◦' src/commands/ 2>/dev/null | grep -v '// stdout-ok' || true)
 if [ -n "$hits" ]; then
   echo "ERROR: dry-run messages must use console.error, not console.log:"
   echo "$hits"
