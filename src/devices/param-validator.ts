@@ -379,9 +379,10 @@ function isCirculatorFan(deviceType: string): boolean {
 }
 
 export function isLightingCommandSupported(deviceType: string, command: string): boolean {
-  if (command === 'setBrightness') return isBrightnessDevice(deviceType);
-  if (command === 'setColorTemperature') return isColorTemperatureDevice(deviceType);
-  if (command === 'setColor') return isColorDevice(deviceType);
+  const dt = canonicalizeDeviceType(deviceType);
+  if (command === 'setBrightness') return isBrightnessDevice(dt);
+  if (command === 'setColorTemperature') return isColorTemperatureDevice(dt);
+  if (command === 'setColor') return isColorDevice(dt);
   return false;
 }
 
