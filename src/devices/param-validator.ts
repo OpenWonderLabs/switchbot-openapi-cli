@@ -386,7 +386,9 @@ export function isLightingCommandSupported(deviceType: string, command: string):
 }
 
 function isNumericish(v: unknown): boolean {
-  return typeof v === 'number' || typeof v === 'string';
+  if (typeof v === 'number') return true;
+  if (typeof v === 'string' && v.trim() !== '') return true;
+  return false;
 }
 
 function validateSetBrightness(raw: string | undefined, deviceType: string): ValidateResult {

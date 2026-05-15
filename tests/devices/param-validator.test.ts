@@ -476,6 +476,12 @@ describe('validateParameter — Humidifier2 setMode', () => {
     expect(validateParameter('Humidifier2', 'setMode', '{"mode":[7],"targetHumidify":50}').ok).toBe(false);
     expect(validateParameter('Humidifier2', 'setMode', '{"mode":1,"targetHumidify":null}').ok).toBe(false);
   });
+
+  it('rejects empty string fields that would coerce to 0', () => {
+    expect(validateParameter('Humidifier2', 'setMode', '{"mode":1,"targetHumidify":""}').ok).toBe(false);
+    expect(validateParameter('Humidifier2', 'setMode', '{"mode":"","targetHumidify":50}').ok).toBe(false);
+    expect(validateParameter('Humidifier2', 'setMode', '{"mode":" ","targetHumidify":50}').ok).toBe(false);
+  });
 });
 
 describe('validateParameter — Humidifier2 setChildLock', () => {
