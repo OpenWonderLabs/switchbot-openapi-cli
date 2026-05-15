@@ -422,6 +422,7 @@ function checkInventoryConsistency(): Check {
     status: 'warn',
     detail: {
       message: `${dangling.length} device(s) reference a hubDeviceId that is not present in the current inventory`,
+      hint: 'This usually means the hub was removed or replaced. Re-pair affected devices in the SwitchBot app, or ignore if the devices still work.',
       dangling: dangling.slice(0, 10),
     },
   };
@@ -1072,6 +1073,7 @@ interface DoctorCliOptions {
   fix?: boolean;
   yes?: boolean;
   probe?: boolean;
+  quiet?: boolean;
 }
 
 export function registerDoctorCommand(program: Command): void {
@@ -1083,6 +1085,7 @@ export function registerDoctorCommand(program: Command): void {
     .option('--fix', 'Apply safe, reversible remediations for failing checks (e.g. clear stale cache)')
     .option('--yes', 'Required together with --fix to confirm write actions')
     .option('--probe', 'Perform live-probe variant of checks that support it (mqtt)')
+    .option('-q, --quiet', 'Only show warn/fail checks, hide passing checks')
     .addHelpText('after', `
 Runs a battery of local sanity checks and exits with code 0 only when every
 check is 'ok'. 'warn' → exit 0 (informational); 'fail' → exit 1.
@@ -1180,7 +1183,9 @@ Examples:
         if (fixes !== undefined) payload.fixes = fixes;
         printJson(payload);
       } else {
+        const quiet = Boolean(opts.quiet);
         for (const c of checks) {
+          if (quiet && c.status === 'ok') continue;
           const icon = c.status === 'ok' ? '✓' : c.status === 'warn' ? '!' : '✗';
           const detailStr =
             typeof c.detail === 'string'
