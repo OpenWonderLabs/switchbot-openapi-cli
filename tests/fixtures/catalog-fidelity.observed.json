@@ -30,8 +30,7 @@
     "statusFields": ["version"]
   },
   {
-    "type": "Strip Light",
-    "observedAs": "Strip Light 3",
+    "type": "Strip Light 3",
     "role": "lighting",
     "statusFields": ["power", "brightness", "color", "colorTemperature", "version"]
   },

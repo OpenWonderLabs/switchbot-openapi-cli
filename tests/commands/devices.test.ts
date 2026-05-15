@@ -1162,26 +1162,26 @@ describe('devices command', () => {
     });
     it('setMode 0 (toggle)', async () => {
       await runCmd('setMode', '0');
-      expectPost('setMode', 0);
+      expectPost('setMode', '0');
     });
     it('setMode 3 (momentary)', async () => {
       await runCmd('setMode', '3');
-      expectPost('setMode', 3);
+      expectPost('setMode', '3');
     });
   });
 
   describe('device: Relay Switch 2PM (dual-channel)', () => {
     it('turnOn channel 1', async () => {
       await runCmd('turnOn', '1');
-      expectPost('turnOn', 1);
+      expectPost('turnOn', '1');
     });
     it('turnOff channel 2', async () => {
       await runCmd('turnOff', '2');
-      expectPost('turnOff', 2);
+      expectPost('turnOff', '2');
     });
     it('toggle channel 1', async () => {
       await runCmd('toggle', '1');
-      expectPost('toggle', 1);
+      expectPost('toggle', '1');
     });
     it('setMode "1;0" (channel;mode)', async () => {
       await runCmd('setMode', '1;0');
@@ -1189,7 +1189,7 @@ describe('devices command', () => {
     });
     it('setPosition 50 (roller percent)', async () => {
       await runCmd('setPosition', '50');
-      expectPost('setPosition', 50);
+      expectPost('setPosition', '50');
     });
   });
 
@@ -1204,15 +1204,15 @@ describe('devices command', () => {
     });
     it('setMode preset 101 (34%)', async () => {
       await runCmd('setMode', '101');
-      expectPost('setMode', 101);
+      expectPost('setMode', '101');
     });
     it('setMode preset 103 (100%)', async () => {
       await runCmd('setMode', '103');
-      expectPost('setMode', 103);
+      expectPost('setMode', '103');
     });
     it('setMode with custom humidity 55', async () => {
       await runCmd('setMode', '55');
-      expectPost('setMode', 55);
+      expectPost('setMode', '55');
     });
   });
 
@@ -1223,11 +1223,11 @@ describe('devices command', () => {
     });
     it('setChildLock true', async () => {
       await runCmd('setChildLock', 'true');
-      expectPost('setChildLock', true);
+      expectPost('setChildLock', 'true');
     });
     it('setChildLock false', async () => {
       await runCmd('setChildLock', 'false');
-      expectPost('setChildLock', false);
+      expectPost('setChildLock', 'false');
     });
   });
 
@@ -1238,7 +1238,7 @@ describe('devices command', () => {
     });
     it('setChildLock "1"', async () => {
       await runCmd('setChildLock', '1');
-      expectPost('setChildLock', 1);
+      expectPost('setChildLock', '1');
     });
   });
 
@@ -1253,7 +1253,7 @@ describe('devices command', () => {
     });
     it('setBrightness mid-range', async () => {
       await runCmd('setBrightness', '75');
-      expectPost('setBrightness', 75);
+      expectPost('setBrightness', '75');
     });
     it('setColor R:G:B', async () => {
       await runCmd('setColor', '122:80:20');
@@ -1261,18 +1261,18 @@ describe('devices command', () => {
     });
     it('setColorTemperature 2700', async () => {
       await runCmd('setColorTemperature', '2700');
-      expectPost('setColorTemperature', 2700);
+      expectPost('setColorTemperature', '2700');
     });
     it('setColorTemperature 6500', async () => {
       await runCmd('setColorTemperature', '6500');
-      expectPost('setColorTemperature', 6500);
+      expectPost('setColorTemperature', '6500');
     });
   });
 
   describe('device: Strip Light', () => {
     it('setBrightness', async () => {
       await runCmd('setBrightness', '30');
-      expectPost('setBrightness', 30);
+      expectPost('setBrightness', '30');
     });
     it('setColor', async () => {
       await runCmd('setColor', '0:255:0');
@@ -1283,11 +1283,11 @@ describe('devices command', () => {
   describe('device: Ceiling Light / Ceiling Light Pro', () => {
     it('setBrightness 1 (min)', async () => {
       await runCmd('setBrightness', '1');
-      expectPost('setBrightness', 1);
+      expectPost('setBrightness', '1');
     });
     it('setBrightness 100 (max)', async () => {
       await runCmd('setBrightness', '100');
-      expectPost('setBrightness', 100);
+      expectPost('setBrightness', '100');
     });
     it('setBrightness -1 (negative positional parameter reaches validation)', async () => {
       // Regression for bug #53: Commander used to swallow "-1" as an unknown
@@ -1296,11 +1296,11 @@ describe('devices command', () => {
       // reach the API (the device then returns 190 for out-of-range values,
       // but that's a device-layer concern, not a CLI parsing failure).
       await runCmd('setBrightness', '-1');
-      expectPost('setBrightness', -1);
+      expectPost('setBrightness', '-1');
     });
     it('setColorTemperature', async () => {
       await runCmd('setColorTemperature', '4000');
-      expectPost('setColorTemperature', 4000);
+      expectPost('setColorTemperature', '4000');
     });
   });
 
@@ -1311,11 +1311,11 @@ describe('devices command', () => {
     });
     it('setMode 4 (comfort)', async () => {
       await runCmd('setMode', '4');
-      expectPost('setMode', 4);
+      expectPost('setMode', '4');
     });
     it('setManualModeTemperature 22', async () => {
       await runCmd('setManualModeTemperature', '22');
-      expectPost('setManualModeTemperature', 22);
+      expectPost('setManualModeTemperature', '22');
     });
   });
 
@@ -1334,7 +1334,7 @@ describe('devices command', () => {
     });
     it('PowLevel 3 (max suction)', async () => {
       await runCmd('PowLevel', '3');
-      expectPost('PowLevel', 3);
+      expectPost('PowLevel', '3');
     });
   });
 
@@ -1359,7 +1359,7 @@ describe('devices command', () => {
     });
     it('setVolume', async () => {
       await runCmd('setVolume', '60');
-      expectPost('setVolume', 60);
+      expectPost('setVolume', '60');
     });
     it('changeParam', async () => {
       await runCmd('changeParam', '{"fanLevel":3,"waterLevel":2,"times":1}');
@@ -1384,15 +1384,15 @@ describe('devices command', () => {
     });
     it('selfClean 1 (wash mop)', async () => {
       await runCmd('selfClean', '1');
-      expectPost('selfClean', 1);
+      expectPost('selfClean', '1');
     });
     it('selfClean 2 (dry)', async () => {
       await runCmd('selfClean', '2');
-      expectPost('selfClean', 2);
+      expectPost('selfClean', '2');
     });
     it('selfClean 3 (terminate)', async () => {
       await runCmd('selfClean', '3');
-      expectPost('selfClean', 3);
+      expectPost('selfClean', '3');
     });
   });
 
@@ -1411,11 +1411,11 @@ describe('devices command', () => {
     });
     it('setWindSpeed 50', async () => {
       await runCmd('setWindSpeed', '50');
-      expectPost('setWindSpeed', 50);
+      expectPost('setWindSpeed', '50');
     });
     it('closeDelay 600 (seconds)', async () => {
       await runCmd('closeDelay', '600');
-      expectPost('closeDelay', 600);
+      expectPost('closeDelay', '600');
     });
   });
 
@@ -1445,11 +1445,11 @@ describe('devices command', () => {
   describe('device: Roller Shade', () => {
     it('setPosition 0 (open)', async () => {
       await runCmd('setPosition', '0');
-      expectPost('setPosition', 0);
+      expectPost('setPosition', '0');
     });
     it('setPosition 100 (closed)', async () => {
       await runCmd('setPosition', '100');
-      expectPost('setPosition', 100);
+      expectPost('setPosition', '100');
     });
   });
 
@@ -1509,7 +1509,7 @@ describe('devices command', () => {
   describe('device: Candle Warmer Lamp', () => {
     it('turnOn / toggle / setBrightness / setColorTemperature', async () => {
       await runCmd('setBrightness', '80');
-      expectPost('setBrightness', 80);
+      expectPost('setBrightness', '80');
     });
   });
 
@@ -1546,7 +1546,7 @@ describe('devices command', () => {
   describe('IR remote: TV / IPTV / Set Top Box', () => {
     it('SetChannel', async () => {
       await runCmd('SetChannel', '15');
-      expectPost('SetChannel', 15);
+      expectPost('SetChannel', '15');
     });
     it('volumeAdd', async () => {
       await runCmd('volumeAdd');
@@ -2267,7 +2267,7 @@ describe('devices command', () => {
       expect(res.exitCode).toBeNull();
       expect(apiMock.__instance.post).toHaveBeenCalledWith(
         '/v1.1/devices/BULB-1/commands',
-        { command: 'setBrightness', parameter: 50, commandType: 'command' }
+        { command: 'setBrightness', parameter: '50', commandType: 'command' }
       );
     });
 
@@ -2486,7 +2486,7 @@ describe('devices command', () => {
       expect(res.exitCode).toBeNull();
       expect(apiMock.__instance.post).toHaveBeenCalledWith(
         `/v1.1/devices/${CURTAIN_ID}/commands`,
-        { command: 'setPosition', parameter: 50, commandType: 'command' }
+        { command: 'setPosition', parameter: '50', commandType: 'command' }
       );
     });
 

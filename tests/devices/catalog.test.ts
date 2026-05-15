@@ -268,10 +268,10 @@ describe('devices/catalog', () => {
   });
 
   describe('findCatalogEntry (existing)', () => {
-    it('resolves Strip Light 3 via alias to Strip Light', () => {
+    it('resolves Strip Light 3 as its own documented device type', () => {
       const match = findCatalogEntry('Strip Light 3');
       expect(Array.isArray(match)).toBe(false);
-      expect((match as { type: string }).type).toBe('Strip Light');
+      expect((match as { type: string }).type).toBe('Strip Light 3');
     });
   });
 });
