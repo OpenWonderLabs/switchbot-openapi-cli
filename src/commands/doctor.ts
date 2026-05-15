@@ -979,6 +979,86 @@ function checkNotifyConnectivity(): Check {
   };
 }
 
+async function checkLocalLlmReachable(): Promise<Check> {
+  // Only run if a policy is configured AND it references provider: local
+  // (either at the global automation level or in any rule's llm condition).
+  // Otherwise this check is silently skipped — operators without local LLM
+  // setup shouldn't see warnings about an endpoint they don't use.
+  const policyPath = resolvePolicyPath();
+  let loaded: { data: unknown };
+  try {
+    loaded = loadPolicyFile(policyPath);
+  } catch {
+    return { name: 'local-llm-reachable', status: 'ok', detail: { present: false, message: 'no policy or policy unreadable — check skipped' } };
+  }
+  const policy = loaded.data as {
+    automation?: { rules?: unknown };
+  } | null;
+  const automation = policy?.automation;
+  const ruleArr = Array.isArray(automation?.rules) ? (automation.rules as Array<Record<string, unknown>>) : [];
+  const usesLocal = ruleArr.some((rule) => {
+    const conds = Array.isArray(rule.conditions) ? (rule.conditions as Array<Record<string, unknown>>) : [];
+    return conds.some((c) => {
+      const llm = c.llm as Record<string, unknown> | undefined;
+      return llm && llm.provider === 'local';
+    });
+  });
+
+  if (!usesLocal) {
+    return { name: 'local-llm-reachable', status: 'ok', detail: { applicable: false, message: 'no policy reference to provider:local — check skipped' } };
+  }
+
+  const baseUrl = (process.env.SWITCHBOT_LOCAL_LLM_URL ?? 'http://localhost:11434/v1').replace(/\/v1\/?$/, '').replace(/\/+$/, '');
+  const start = Date.now();
+  try {
+    const reachable = await probeLocalLlmEndpoint(baseUrl);
+    const latencyMs = Date.now() - start;
+    if (!reachable) {
+      return {
+        name: 'local-llm-reachable',
+        status: 'fail',
+        detail: { baseUrl, latencyMs, message: 'endpoint did not respond — start your local LLM server (e.g. `ollama serve`)' },
+      };
+    }
+    return { name: 'local-llm-reachable', status: 'ok', detail: { baseUrl, latencyMs } };
+  } catch (err) {
+    return {
+      name: 'local-llm-reachable',
+      status: 'fail',
+      detail: { baseUrl, message: err instanceof Error ? err.message : String(err) },
+    };
+  }
+}
+
+async function probeLocalLlmEndpoint(baseUrl: string): Promise<boolean> {
+  const httpMod = await import('node:http');
+  const httpsMod = await import('node:https');
+  return new Promise((resolve) => {
+    let url: URL;
+    try { url = new URL(baseUrl); } catch { resolve(false); return; }
+    const isHttps = url.protocol === 'https:';
+    const lib = isHttps ? httpsMod.default : httpMod.default;
+    const req = lib.request(
+      {
+        hostname: url.hostname,
+        port: url.port || (isHttps ? 443 : 80),
+        path: url.pathname || '/',
+        method: 'GET',
+        timeout: 3_000,
+      },
+      (res) => {
+        // Any HTTP response (even 404) means the server is reachable.
+        res.on('data', () => { /* drain */ });
+        res.on('end', () => resolve(true));
+        res.resume();
+      },
+    );
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+    req.end();
+  });
+}
+
 
 interface CheckDef {
   name: string;
@@ -1015,6 +1095,7 @@ const CHECK_REGISTRY: CheckDef[] = [
   { name: 'daemon', description: 'daemon state file + runtime status', run: () => checkDaemon() },
   { name: 'health', description: 'health endpoint availability (daemon --healthz-port)', run: () => checkHealthEndpoint() },
   { name: 'notify-connectivity', description: 'webhook URLs from notify actions in policy.yaml', run: () => checkNotifyConnectivity() },
+  { name: 'local-llm-reachable', description: 'local LLM endpoint reachable (only when policy uses provider:local)', run: () => checkLocalLlmReachable() },
 ];
 
 interface FixResult {

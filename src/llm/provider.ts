@@ -17,9 +17,17 @@ export interface DecideOptions {
   timeoutMs?: number;
 }
 
+export interface ProviderCapabilities {
+  /** Whether this provider supports OpenAI/Anthropic-style structured tool use.
+   * When false, `decide()` falls back to plain chat completions and parses a
+   * JSON object out of the model's free-form text. */
+  toolUse: boolean;
+}
+
 export interface LLMProvider {
   readonly name: string;
   readonly model: string;
+  readonly capabilities: ProviderCapabilities;
   generateYaml(systemPrompt: string, userIntent: string): Promise<string>;
   decide(prompt: string, opts?: DecideOptions): Promise<DecideResult>;
 }
@@ -29,4 +37,7 @@ export interface LLMProviderOptions {
   baseUrl?: string;
   timeoutMs?: number;
   maxTokens?: number;
+  /** Optional capability override. Useful when wrapping a tool-use-capable
+   * endpoint that has been deployed without tool support, or vice-versa. */
+  toolUse?: boolean;
 }

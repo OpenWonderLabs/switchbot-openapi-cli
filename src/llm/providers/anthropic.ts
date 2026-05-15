@@ -1,10 +1,11 @@
 import https from 'node:https';
-import type { LLMProvider, LLMProviderOptions, DecideResult, DecideOptions } from '../provider.js';
+import type { LLMProvider, LLMProviderOptions, DecideResult, DecideOptions, ProviderCapabilities } from '../provider.js';
 import { calculateCostUsd } from '../pricing.js';
 
 export class AnthropicProvider implements LLMProvider {
   readonly name = 'anthropic';
   readonly model: string;
+  readonly capabilities: ProviderCapabilities = { toolUse: true };
   private readonly apiKey: string;
   private readonly timeoutMs: number;
   private readonly maxTokens: number;
