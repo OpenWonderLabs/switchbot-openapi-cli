@@ -492,7 +492,7 @@ function validateSetColor(raw: string | undefined): ValidateResult {
         error: `setColor component "${p}" is not an integer. ${hintColorRetry()}`,
       };
     }
-    const n = Number(p);
+    const n = Number(p); // number-ok: regex-guarded above
     if (!Number.isInteger(n) || n < 0 || n > 255) {
       return {
         ok: false,
@@ -555,27 +555,30 @@ function validateAcSetAll(raw: string | undefined): ValidateResult {
   }
   const [tempStr, modeStr, fanStr, powerStr] = parts.map((s) => s.trim());
 
-  const temp = Number(tempStr);
-  if (!Number.isInteger(temp) || temp < 16 || temp > 30) {
+  const tempP = parseStrictInt(tempStr);
+  if (!tempP.ok || tempP.value < 16 || tempP.value > 30) {
     return {
       ok: false,
       error: `setAll field 1 (temp) must be an integer 16-30, got "${tempStr}". Example: "26,2,2,on".`,
     };
   }
-  const mode = Number(modeStr);
-  if (!Number.isInteger(mode) || mode < 1 || mode > 5) {
+  const temp = tempP.value;
+  const modeP = parseStrictInt(modeStr);
+  if (!modeP.ok || modeP.value < 1 || modeP.value > 5) {
     return {
       ok: false,
       error: `setAll field 2 (mode) must be 1-5 (1=auto 2=cool 3=dry 4=fan 5=heat), got "${modeStr}". Example: "26,2,2,on".`,
     };
   }
-  const fan = Number(fanStr);
-  if (!Number.isInteger(fan) || fan < 1 || fan > 4) {
+  const mode = modeP.value;
+  const fanP = parseStrictInt(fanStr);
+  if (!fanP.ok || fanP.value < 1 || fanP.value > 4) {
     return {
       ok: false,
       error: `setAll field 3 (fan) must be 1-4 (1=auto 2=low 3=mid 4=high), got "${fanStr}". Example: "26,2,2,on".`,
     };
   }
+  const fan = fanP.value;
   const power = powerStr.toLowerCase();
   if (power !== 'on' && power !== 'off') {
     return {
@@ -595,14 +598,14 @@ function validateCurtainSetPosition(raw: string | undefined): ValidateResult {
   }
   const stripped = stripQuotes(raw.trim());
   if (!stripped.includes(',')) {
-    const pos = Number(stripped);
-    if (!Number.isInteger(pos) || pos < 0 || pos > 100) {
+    const posP = parseStrictInt(stripped);
+    if (!posP.ok || posP.value < 0 || posP.value > 100) {
       return {
         ok: false,
         error: `setPosition must be an integer 0-100, got "${raw}". Example: "50".`,
       };
     }
-    return { ok: true, normalized: String(pos) };
+    return { ok: true, normalized: String(posP.value) };
   }
   const parts = stripped.split(',').map((s) => s.trim());
   if (parts.length !== 3) {
@@ -612,13 +615,14 @@ function validateCurtainSetPosition(raw: string | undefined): ValidateResult {
     };
   }
   const [idxStr, modeStr, posStr] = parts;
-  const idx = Number(idxStr);
-  if (!Number.isInteger(idx) || idx < 0) {
+  const idxP = parseStrictInt(idxStr);
+  if (!idxP.ok || idxP.value < 0) {
     return {
       ok: false,
       error: `setPosition field 1 (index) must be a non-negative integer, got "${idxStr}".`,
     };
   }
+  const idx = idxP.value;
   const modeLower = modeStr.toLowerCase();
   if (!['ff', '0', '1'].includes(modeLower)) {
     return {
@@ -626,13 +630,14 @@ function validateCurtainSetPosition(raw: string | undefined): ValidateResult {
       error: `setPosition field 2 (mode) must be "ff", "0", or "1", got "${modeStr}". (ff=default, 0=performance, 1=silent)`,
     };
   }
-  const pos = Number(posStr);
-  if (!Number.isInteger(pos) || pos < 0 || pos > 100) {
+  const posP = parseStrictInt(posStr);
+  if (!posP.ok || posP.value < 0 || posP.value > 100) {
     return {
       ok: false,
       error: `setPosition field 3 (position) must be an integer 0-100, got "${posStr}".`,
     };
   }
+  const pos = posP.value;
   return { ok: true, normalized: `${idx},${modeLower},${pos}` };
 }
 
@@ -658,13 +663,14 @@ function validateBlindTiltSetPosition(raw: string | undefined): ValidateResult {
       error: `Blind Tilt setPosition direction must be "up" or "down", got "${parts[0]}".`,
     };
   }
-  const angle = Number(parts[1]);
-  if (!Number.isInteger(angle) || angle < 0 || angle > 100) {
+  const angleP = parseStrictInt(parts[1]);
+  if (!angleP.ok || angleP.value < 0 || angleP.value > 100) {
     return {
       ok: false,
       error: `Blind Tilt setPosition angle must be an integer 0-100, got "${parts[1]}".`,
     };
   }
+  const angle = angleP.value;
   if (angle % 2 !== 0) {
     return {
       ok: false,
@@ -689,21 +695,22 @@ function validateRelay2PmSetMode(raw: string | undefined): ValidateResult {
       error: `Relay Switch setMode expects "<channel>;<mode>", got ${JSON.stringify(raw)}. Example: "1;1".`,
     };
   }
-  const ch = Number(parts[0]);
-  if (ch !== 1 && ch !== 2) {
+  const chP = parseStrictInt(parts[0]);
+  if (!chP.ok || (chP.value !== 1 && chP.value !== 2)) {
     return {
       ok: false,
       error: `Relay Switch setMode channel must be 1 or 2, got "${parts[0]}".`,
     };
   }
-  const mode = Number(parts[1]);
-  if (!Number.isInteger(mode) || mode < 0 || mode > 3) {
+  const ch = chP.value;
+  const modeP = parseStrictInt(parts[1]);
+  if (!modeP.ok || modeP.value < 0 || modeP.value > 3) {
     return {
       ok: false,
       error: `Relay Switch setMode mode must be 0-3 (0=toggle 1=edge 2=detached 3=momentary), got "${parts[1]}".`,
     };
   }
-  return { ok: true, normalized: `${ch};${mode}` };
+  return { ok: true, normalized: `${ch};${modeP.value}` };
 }
 
 // ---- Relay Switch 2PM channel (turnOn/turnOff/toggle) -----------------------
@@ -742,7 +749,7 @@ function stripQuotes(s: string): string {
 function parseStrictInt(raw: string): { ok: true; value: number } | { ok: false } {
   const cleaned = stripQuotes(raw);
   if (!/^[+-]?(?:0|[1-9]\d*)$/.test(cleaned)) return { ok: false };
-  return { ok: true, value: Number(cleaned) };
+  return { ok: true, value: Number(cleaned) }; // number-ok: regex-validated above
 }
 
 function validateIntRange(
@@ -811,7 +818,7 @@ function validateHumidifierSetMode(raw: string | undefined): ValidateResult {
   if (trimmed === 'auto') return { ok: true, normalized: 'auto' };
   if (['101', '102', '103'].includes(trimmed)) return { ok: true, normalized: trimmed };
   if (/^\d+$/.test(trimmed)) {
-    const n = Number(trimmed);
+    const n = Number(trimmed); // number-ok: regex-guarded above
     if (n >= 0 && n <= 100) return { ok: true, normalized: String(n) };
   }
   return {
@@ -841,14 +848,14 @@ function validateHumidifier2SetMode(raw: string | undefined): ValidateResult {
   if (!isNumericish(o.mode)) {
     return { ok: false, error: `Humidifier2 setMode "mode" must be a number or numeric string, got ${JSON.stringify(o.mode)}.` };
   }
-  const mode = Number(o.mode);
+  const mode = Number(o.mode); // number-ok: isNumericish-guarded
   if (!Number.isInteger(mode) || mode < 1 || mode > 8) {
     return { ok: false, error: `Humidifier2 setMode "mode" must be 1-8, got ${JSON.stringify(o.mode)}.` };
   }
   if (!isNumericish(o.targetHumidify)) {
     return { ok: false, error: `Humidifier2 setMode "targetHumidify" must be a number or numeric string, got ${JSON.stringify(o.targetHumidify)}.` };
   }
-  const hum = Number(o.targetHumidify);
+  const hum = Number(o.targetHumidify); // number-ok: isNumericish-guarded
   if (!Number.isInteger(hum) || hum < 0 || hum > 100) {
     return { ok: false, error: `Humidifier2 setMode "targetHumidify" must be 0-100, got ${JSON.stringify(o.targetHumidify)}.` };
   }
@@ -878,7 +885,7 @@ function validateAirPurifierSetMode(raw: string | undefined): ValidateResult {
   if (!isNumericish(o.mode)) {
     return { ok: false, error: `Air Purifier setMode "mode" must be a number or numeric string, got ${JSON.stringify(o.mode)}.` };
   }
-  const mode = Number(o.mode);
+  const mode = Number(o.mode); // number-ok: isNumericish-guarded
   if (!Number.isInteger(mode) || mode < 1 || mode > 4) {
     return { ok: false, error: `Air Purifier setMode "mode" must be 1-4 (1=normal 2=auto 3=sleep 4=pet), got ${JSON.stringify(o.mode)}.` };
   }
@@ -890,7 +897,7 @@ function validateAirPurifierSetMode(raw: string | undefined): ValidateResult {
     if (!isNumericish(o.fanGear)) {
       return { ok: false, error: `Air Purifier setMode "fanGear" must be a number or numeric string, got ${JSON.stringify(o.fanGear)}.` };
     }
-    const fg = Number(o.fanGear);
+    const fg = Number(o.fanGear); // number-ok: isNumericish-guarded
     if (!Number.isInteger(fg) || fg < 1 || fg > 3) {
       return { ok: false, error: `Air Purifier setMode "fanGear" must be 1-3, got ${JSON.stringify(o.fanGear)}.` };
     }
@@ -937,7 +944,7 @@ function validateVacuumStartClean(raw: string | undefined, deviceType: string): 
       if (!isNumericish(p.fanLevel)) {
         return { ok: false, error: `${deviceType} startClean "param.fanLevel" must be a number or numeric string, got ${JSON.stringify(p.fanLevel)}.` };
       }
-      const fl = Number(p.fanLevel);
+      const fl = Number(p.fanLevel); // number-ok: isNumericish-guarded
       if (!Number.isInteger(fl) || fl < 1 || fl > 4) {
         return { ok: false, error: `${deviceType} startClean "param.fanLevel" must be 1-4, got ${JSON.stringify(p.fanLevel)}.` };
       }
@@ -950,7 +957,7 @@ function validateVacuumStartClean(raw: string | undefined, deviceType: string): 
       if (!isNumericish(p.waterLevel)) {
         return { ok: false, error: `${deviceType} startClean "param.waterLevel" must be a number or numeric string, got ${JSON.stringify(p.waterLevel)}.` };
       }
-      const wl = Number(p.waterLevel);
+      const wl = Number(p.waterLevel); // number-ok: isNumericish-guarded
       if (!Number.isInteger(wl) || wl < 1 || wl > 2) {
         return { ok: false, error: `${deviceType} startClean "param.waterLevel" must be 1-2, got ${JSON.stringify(p.waterLevel)}.` };
       }
@@ -960,7 +967,7 @@ function validateVacuumStartClean(raw: string | undefined, deviceType: string): 
       if (!isNumericish(p.times)) {
         return { ok: false, error: `${deviceType} startClean "param.times" must be a number or numeric string, got ${JSON.stringify(p.times)}.` };
       }
-      const t = Number(p.times);
+      const t = Number(p.times); // number-ok: isNumericish-guarded
       if (!Number.isInteger(t) || t < 1 || t > 2639999) {
         return { ok: false, error: `${deviceType} startClean "param.times" must be an integer 1-2639999, got ${JSON.stringify(p.times)}.` };
       }
@@ -994,7 +1001,7 @@ function validateVacuumChangeParam(raw: string | undefined, deviceType: string):
     if (!isNumericish(p.fanLevel)) {
       return { ok: false, error: `changeParam "fanLevel" must be a number or numeric string, got ${JSON.stringify(p.fanLevel)}.` };
     }
-    const fl = Number(p.fanLevel);
+    const fl = Number(p.fanLevel); // number-ok: isNumericish-guarded
     if (!Number.isInteger(fl) || fl < 1 || fl > 4) {
       return { ok: false, error: `changeParam "fanLevel" must be 1-4, got ${JSON.stringify(p.fanLevel)}.` };
     }
@@ -1007,7 +1014,7 @@ function validateVacuumChangeParam(raw: string | undefined, deviceType: string):
     if (!isNumericish(p.waterLevel)) {
       return { ok: false, error: `changeParam "waterLevel" must be a number or numeric string, got ${JSON.stringify(p.waterLevel)}.` };
     }
-    const wl = Number(p.waterLevel);
+    const wl = Number(p.waterLevel); // number-ok: isNumericish-guarded
     if (!Number.isInteger(wl) || wl < 1 || wl > 2) {
       return { ok: false, error: `changeParam "waterLevel" must be 1-2, got ${JSON.stringify(p.waterLevel)}.` };
     }
@@ -1017,7 +1024,7 @@ function validateVacuumChangeParam(raw: string | undefined, deviceType: string):
     if (!isNumericish(p.times)) {
       return { ok: false, error: `changeParam "times" must be a number or numeric string, got ${JSON.stringify(p.times)}.` };
     }
-    const t = Number(p.times);
+    const t = Number(p.times); // number-ok: isNumericish-guarded
     if (!Number.isInteger(t) || t < 1 || t > 2639999) {
       return { ok: false, error: `changeParam "times" must be an integer 1-2639999, got ${JSON.stringify(p.times)}.` };
     }

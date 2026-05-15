@@ -176,14 +176,14 @@ describe('scenes command', () => {
       expect(parsed.data.wouldSend.sceneName).toBe('Morning');
     });
 
-    it('--dry-run plaintext prints Would POST on stdout (bug #54)', async () => {
+    it('--dry-run plaintext prints Would POST on stderr (bug #54)', async () => {
       apiMock.__instance.get.mockResolvedValue({
         data: { body: [{ sceneId: 'SCENE-1', sceneName: 'Morning' }] },
       });
       const res = await runCli(registerScenesCommand, ['scenes', 'execute', 'SCENE-1', '--dry-run']);
       expect(res.exitCode).toBeNull();
       expect(apiMock.__instance.post).not.toHaveBeenCalled();
-      const out = res.stdout.join('\n');
+      const out = res.stderr.join('\n');
       expect(out).toContain('[dry-run]');
       expect(out).toContain('SCENE-1');
     });

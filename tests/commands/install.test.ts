@@ -34,14 +34,14 @@ describe('switchbot install (dry-run smoke)', () => {
   });
 
   it('--dry-run prints the step list without mutating anything', () => {
-    const { code, stdout } = runCli(['install', '--dry-run', '--agent', 'none']);
+    const { code, stderr } = runCli(['install', '--dry-run', '--agent', 'none']);
     expect(code).toBe(0);
-    expect(stdout).toContain('switchbot install — dry run');
-    expect(stdout).toContain('prompt-credentials');
-    expect(stdout).toContain('write-keychain');
-    expect(stdout).toContain('scaffold-policy');
-    expect(stdout).toContain('symlink-skill');
-    expect(stdout).toContain('No changes made');
+    expect(stderr).toContain('switchbot install — dry run');
+    expect(stderr).toContain('prompt-credentials');
+    expect(stderr).toContain('write-keychain');
+    expect(stderr).toContain('scaffold-policy');
+    expect(stderr).toContain('symlink-skill');
+    expect(stderr).toContain('No changes made');
   });
 
   it('--dry-run --json emits a structured preview', () => {

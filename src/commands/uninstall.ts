@@ -219,14 +219,14 @@ Examples:
             plan: plan.map(({ action, detail }) => ({ action, detail })),
           });
         } else {
-          console.log(chalk.bold('switchbot uninstall — dry run'));
-          console.log(`  profile: ${profile}`);
-          console.log(`  agent:   ${agent}`);
-          console.log('');
-          console.log(chalk.bold('Would run:'));
-          for (const p of plan) console.log(`  • ${p.action}  — ${p.detail}`);
-          console.log('');
-          console.log(chalk.dim('No changes made. Re-run without --dry-run (add --yes to skip prompts).'));
+          console.error(chalk.bold('switchbot uninstall — dry run'));
+          console.error(`  profile: ${profile}`);
+          console.error(`  agent:   ${agent}`);
+          console.error('');
+          console.error(chalk.bold('Would run:'));
+          for (const p of plan) console.error(`  • ${p.action}  — ${p.detail}`);
+          console.error('');
+          console.error(chalk.dim('No changes made. Re-run without --dry-run (add --yes to skip prompts).'));
         }
         return;
       }

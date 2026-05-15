@@ -893,7 +893,7 @@ function registerExplain(rules: Command): void {
       if (detail.hysteresis) console.log(`hysteresis:            ${detail.hysteresis}`);
       if (detail.maxFiringsPerHour !== null) console.log(`maxFiringsPerHour:     ${detail.maxFiringsPerHour}`);
       if (detail.suppressIfAlreadyDesired) console.log(`suppressIfAlreadyDesired: true`);
-      if (detail.dryRun) console.log(`dry_run:               true`);
+      if (detail.dryRun) console.error(`dry_run:               true`);
       console.log(`last fired:            ${detail.lastFired ?? '(never)'}`);
     });
 }

@@ -389,8 +389,8 @@ Examples:
       if (opts.dryRun) {
         if (isJsonMode()) printJson(finalPayload);
         else {
-          console.log(`• dry-run: would upgrade ${policyPath} (v${plan.fromVersion} → v${plan.toVersion})`);
-          console.log(`  bytes: ${bytesWritten}`);
+          console.error(`• dry-run: would upgrade ${policyPath} (v${plan.fromVersion} → v${plan.toVersion})`);
+          console.error(`  bytes: ${bytesWritten}`);
           console.log(`  precheck: valid against v${target}`);
         }
         return;
@@ -526,7 +526,7 @@ Reads rule YAML from stdin. Combine with 'rules suggest' for a full pipeline:
           if (result.written) {
             console.log(`✓ rule "${result.ruleName}" added to ${policyPath}`);
           } else {
-            console.log(`• dry-run: rule "${result.ruleName}" not written`);
+            console.error(`• dry-run: rule "${result.ruleName}" not written`);
           }
         }
       } catch (err) {
