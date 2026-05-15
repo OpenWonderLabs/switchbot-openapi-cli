@@ -1,0 +1,21 @@
+src/devices/param-validator.ts
+  s_609937a4e2becf::t_9341e7f3a115cf 389-391
+tests/devices/param-validator.test.ts
+  s_609937a4e2becf::t_e0f0d807f64e93 479-484
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "21a7cb0740417c65db6235a3b0cbb4c110dfaa3a",
+  "prompts": {},
+  "sessions": {
+    "s_609937a4e2becf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "815adb82-2d53-4b9c-90fd-f2cca599d974",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
