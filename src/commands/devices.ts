@@ -304,6 +304,7 @@ Examples:
     .option('--name-category <cat>', 'Narrow --name by category: physical|ir', enumArg('--name-category', ['physical', 'ir'] as const))
     .option('--name-room <room>', 'Narrow --name by room name (substring match)', stringArg('--name-room'))
     .option('--ids <list>', 'Comma-separated device IDs for batch status (incompatible with --name)', stringArg('--ids'))
+    .option('--strict', 'Exit 1 if any device status fetch fails (batch mode only)')
     .addHelpText('after', `
 Status fields vary by device type. To discover them without a live call:
 
@@ -323,7 +324,7 @@ Examples:
   $ switchbot devices status --ids ABC123,DEF456,GHI789
   $ switchbot devices status --ids ABC123,DEF456 --fields power,battery
 `)
-    .action(async (deviceIdArgs: string[], options: { name?: string; nameStrategy?: string; nameType?: string; nameCategory?: 'physical' | 'ir'; nameRoom?: string; ids?: string }) => {
+    .action(async (deviceIdArgs: string[], options: { name?: string; nameStrategy?: string; nameType?: string; nameCategory?: 'physical' | 'ir'; nameRoom?: string; ids?: string; strict?: boolean }) => {
       try {
         // Batch mode: --ids id1,id2,id3 OR multiple positional args
         const batchIds = options.ids
@@ -367,6 +368,7 @@ Examples:
               }
             }
           }
+          if (options.strict && batch.some((e) => !(e as { ok: boolean }).ok)) process.exit(1);
           return;
         }
 

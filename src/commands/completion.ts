@@ -41,6 +41,16 @@ _switchbot_completion() {
     return
   fi
 
+  if [[ "\${prev}" == "--backoff" ]]; then
+    COMPREPLY=( $(compgen -W "linear exponential" -- "\${cur}") )
+    return
+  fi
+
+  if [[ "\${prev}" == "--cache" ]]; then
+    COMPREPLY=( $(compgen -W "off auto 30s 5m 1h" -- "\${cur}") )
+    return
+  fi
+
   case "\${words[1]}" in
     config)
       if [[ \${cword} -eq 2 ]]; then

@@ -108,13 +108,18 @@ export function registerDevicesMetaCommand(devices: Command): void {
   // switchbot devices meta list
   meta
     .command('list')
-    .description('List all devices with local metadata')
+    .description('List devices with local metadata (hidden devices excluded by default)')
     .option('--hidden-only', 'Show only hidden devices')
-    .action((options: { hiddenOnly?: boolean }) => {
+    .option('--all', 'Include hidden devices')
+    .action((options: { hiddenOnly?: boolean; all?: boolean }) => {
       try {
         const file = loadDeviceMeta();
         let entries = Object.entries(file.devices);
-        if (options.hiddenOnly) entries = entries.filter(([, m]) => m.hidden);
+        if (options.hiddenOnly) {
+          entries = entries.filter(([, m]) => m.hidden);
+        } else if (!options.all) {
+          entries = entries.filter(([, m]) => !m.hidden);
+        }
 
         if (entries.length === 0) {
           if (isJsonMode()) {
