@@ -27,7 +27,7 @@ function runQuotaStatus(): void {
 
   console.log(`Today (${usage.date}):`);
   console.log(`  Requests used:      ${usage.total} / ${DAILY_QUOTA}`);
-  console.log(`  Remaining budget:   ${usage.remaining}`);
+  console.log(`  Remaining budget:   ${usage.remaining}  (resets daily at midnight local time)`);
   if (Object.keys(usage.endpoints).length === 0) {
     console.log('  (no requests recorded yet)');
   } else {

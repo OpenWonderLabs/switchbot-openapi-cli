@@ -907,7 +907,7 @@ function checkMcp(): Check {
         toolCount: tools.length,
         tools,
         transportsAvailable: ['stdio', 'http'],
-        message: `${tools.length} tools registered; no network probe`,
+        message: `${tools.length} tools registered (default profile; use --tools all for 24); no network probe`,
       },
     };
   } catch (err) {

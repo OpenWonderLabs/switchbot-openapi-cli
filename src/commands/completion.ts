@@ -26,10 +26,18 @@ _switchbot_completion() {
   local history_sub="show replay"
   local plan_sub="schema validate run"
   local completion_shells="bash zsh fish powershell"
+  local format_vals="table json jsonl tsv yaml id markdown"
   local global_opts="--json --format --fields --verbose -v --dry-run --timeout --retry-on-429 --backoff --no-retry --no-quota --cache --no-cache --config --profile --audit-log --audit-log-path --help -h --version -V"
 
   if [[ \${cword} -eq 1 ]]; then
     COMPREPLY=( $(compgen -W "\${top_cmds} \${global_opts}" -- "\${cur}") )
+    return
+  fi
+
+  if [[ "\${prev}" == "--format" || "\${prev}" == "--table-style" ]]; then
+    local vals="\${format_vals}"
+    [[ "\${prev}" == "--table-style" ]] && vals="unicode ascii simple markdown"
+    COMPREPLY=( $(compgen -W "\${vals}" -- "\${cur}") )
     return
   fi
 
@@ -160,7 +168,7 @@ _switchbot() {
   local global_opts
   global_opts=(
     '--json[Raw JSON output]'
-    '--format[Output format]:type:(table json jsonl tsv yaml id)'
+    '--format[Output format]:type:(table json jsonl tsv yaml id markdown)'
     '--fields[Comma-separated output columns]:csv:'
     '(-v --verbose)'{-v,--verbose}'[Log HTTP details to stderr]'
     '--dry-run[Print mutating requests without sending]'

@@ -459,14 +459,21 @@ against the live API without executing any mutations.
       (v: string, prev: string[]) => [...prev, v],
       [] as string[],
     )
+    .option(
+      '--devices <id>',
+      'Alias for --device (repeatable)',
+      (v: string, prev: string[]) => [...prev, v],
+      [] as string[],
+    )
     .option('--out <file>', 'Write plan JSON to file instead of stdout')
-    .action((opts: { intent: string; device: string[]; out?: string }) => {
+    .action((opts: { intent: string; device: string[]; devices: string[]; out?: string }) => {
       try {
-        if (opts.device.length === 0) {
+        const allDevices = [...opts.device, ...opts.devices];
+        if (allDevices.length === 0) {
           console.error('error: at least one --device is required');
-          process.exit(1);
+          process.exit(2);
         }
-        const devices = opts.device.map((ref) => {
+        const devices = allDevices.map((ref) => {
           const cached = getCachedDevice(ref);
           return { id: ref, name: cached?.name, type: cached?.type };
         });
