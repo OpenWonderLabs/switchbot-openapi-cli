@@ -326,6 +326,17 @@ describe('doctor command', () => {
     expect(mcp.detail.transportsAvailable).toEqual(['stdio', 'http']);
   });
 
+  it('P10: mcp check message includes default profile context', async () => {
+    process.env.SWITCHBOT_TOKEN = 't';
+    process.env.SWITCHBOT_SECRET = 's';
+    const res = await runCli(registerDoctorCommand, ['--json', 'doctor']);
+    const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
+    const mcp = payload.data.checks.find((c: { name: string }) => c.name === 'mcp');
+    expect(mcp).toBeDefined();
+    expect(mcp.detail.message).toContain('default profile');
+    expect(mcp.detail.message).toContain('use --tools all for 24');
+  });
+
   it('P10: --list prints the registered check names without running any check', async () => {
     const res = await runCli(registerDoctorCommand, ['--json', 'doctor', '--list']);
     const payload = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join(''));
