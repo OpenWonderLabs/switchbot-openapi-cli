@@ -366,5 +366,22 @@ describe('plan command', () => {
       expect(res.exitCode).toBe(2);
       expect(res.stderr.join('\n')).toMatch(/cannot safely infer/i);
     });
+
+    it('exits 2 when no --device is given', async () => {
+      const res = await runCli(registerPlanCommand, [
+        'plan', 'suggest', '--intent', 'turn off lights',
+      ]);
+      expect(res.exitCode).toBe(2);
+      expect(res.stderr.join('\n')).toContain('at least one --device');
+    });
+
+    it('accepts --devices as alias for --device', async () => {
+      cacheMock.map.set('BOT1', { type: 'Bot', name: 'My Bot', category: 'physical' });
+      const res = await runCli(registerPlanCommand, [
+        'plan', 'suggest', '--intent', 'turn on the bot', '--devices', 'BOT1',
+      ]);
+      expect(res.exitCode).toBeNull();
+      expect(res.stdout.join('\n')).toContain('BOT1');
+    });
   });
 });

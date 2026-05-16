@@ -467,12 +467,12 @@ against the live API without executing any mutations.
     )
     .option('--out <file>', 'Write plan JSON to file instead of stdout')
     .action((opts: { intent: string; device: string[]; devices: string[]; out?: string }) => {
+      const allDevices = [...opts.device, ...opts.devices];
+      if (allDevices.length === 0) {
+        console.error('error: at least one --device is required');
+        process.exit(2);
+      }
       try {
-        const allDevices = [...opts.device, ...opts.devices];
-        if (allDevices.length === 0) {
-          console.error('error: at least one --device is required');
-          process.exit(2);
-        }
         const devices = allDevices.map((ref) => {
           const cached = getCachedDevice(ref);
           return { id: ref, name: cached?.name, type: cached?.type };
