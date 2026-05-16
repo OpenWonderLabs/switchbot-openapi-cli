@@ -325,7 +325,7 @@ describe('doctor command', () => {
     expect(Array.isArray(mcp.detail.tools)).toBe(true);
     expect(mcp.detail.transportsAvailable).toEqual(['stdio', 'http']);
     expect(mcp.detail.message).toContain('default profile');
-    expect(mcp.detail.message).toContain('use --tools all for 24');
+    expect(mcp.detail.message).toContain('use --tools all for 24'); // 24 = total in 'all' profile; update if tool list changes
   });
 
   it('P10: --list prints the registered check names without running any check', async () => {
