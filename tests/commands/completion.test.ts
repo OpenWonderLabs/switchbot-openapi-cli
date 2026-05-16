@@ -33,10 +33,7 @@ describe('completion command', () => {
     const res = await runCli(registerCompletionCommand, ['completion', 'bash']);
     expect(res.exitCode).toBeNull();
     const out = written.join('');
-    expect(out).toContain('format_vals');
-    for (const fmt of ['table', 'json', 'jsonl', 'tsv', 'yaml', 'id', 'markdown']) {
-      expect(out).toContain(fmt);
-    }
+    expect(out).toContain('local format_vals="table json jsonl tsv yaml id markdown"');
   });
 
   it('prints a zsh completion script', async () => {
