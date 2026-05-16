@@ -29,6 +29,16 @@ describe('completion command', () => {
     expect(out).toContain('--audit-log-path');
   });
 
+  it('bash completion includes all --format values', async () => {
+    const res = await runCli(registerCompletionCommand, ['completion', 'bash']);
+    expect(res.exitCode).toBeNull();
+    const out = written.join('');
+    expect(out).toContain('format_vals');
+    for (const fmt of ['table', 'json', 'jsonl', 'tsv', 'yaml', 'id', 'markdown']) {
+      expect(out).toContain(fmt);
+    }
+  });
+
   it('prints a zsh completion script', async () => {
     const res = await runCli(registerCompletionCommand, ['completion', 'zsh']);
     expect(res.exitCode).toBeNull();
