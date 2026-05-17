@@ -467,7 +467,15 @@ against the live API without executing any mutations.
     )
     .option('--out <file>', 'Write plan JSON to file instead of stdout')
     .action((opts: { intent: string; device: string[]; devices: string[]; out?: string }) => {
-      const allDevices = [...opts.device, ...opts.devices];
+      // Preserve argv order across --device / --devices: Commander stores each spelling in its
+      // own array, so [...device, ...devices] would reorder mixed input like
+      // "--device A --devices B --device C" → A, C, B.  Scan process.argv instead.
+      const allDevices: string[] = [];
+      const raw = process.argv;
+      for (let i = 0; i < raw.length - 1; i++) {
+        if (raw[i] === '--device' || raw[i] === '--devices') allDevices.push(raw[i + 1]);
+      }
+      if (allDevices.length === 0) allDevices.push(...opts.device, ...opts.devices);
       if (allDevices.length === 0) {
         console.error('error: at least one --device is required');
         process.exit(2);

@@ -10,7 +10,13 @@ export default defineConfig({
       include: ['src/**/*.ts'],
       exclude: [
         'src/index.ts',
-        'src/sinks/**',              // I/O adapters — require live integration, no unit tests
+        // I/O adapters — require live infrastructure; dispatcher.ts and format.ts are unit-testable and NOT excluded
+        'src/sinks/file.ts',
+        'src/sinks/homeassistant.ts',
+        'src/sinks/openclaw.ts',
+        'src/sinks/stdout.ts',
+        'src/sinks/telegram.ts',
+        'src/sinks/webhook.ts',
         'src/commands/install.ts',   // system-level operations — require OS privilege
         'src/commands/uninstall.ts', // system-level operations — require OS privilege
         // Live infrastructure required: cannot be unit-tested

@@ -457,12 +457,15 @@ Register-ArgumentCompleter -Native -CommandName switchbot -ScriptBlock {
       ForEach-Object { [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_) }
   }
 
-  if ($count -le 2) { return _emit ($top + $globalOpts) }
-
+  # Value completions must come before the $count guard: after "switchbot --format <Tab>"
+  # the empty wordToComplete is absent from CommandElements, so $count stays 2 and
+  # the guard would fire first, swallowing these completions.
   if ($prev -eq '--format') { return _emit $formatVals }
   if ($prev -eq '--table-style') { return _emit $tableStyleVals }
   if ($prev -eq '--backoff') { return _emit $backoffVals }
   if ($prev -eq '--cache') { return _emit $cacheVals }
+
+  if ($count -le 2) { return _emit ($top + $globalOpts) }
 
   switch ($tokens[1]) {
     'config'     { if ($count -eq 3) { return _emit $configSub } }

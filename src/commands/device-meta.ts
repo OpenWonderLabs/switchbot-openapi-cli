@@ -128,7 +128,12 @@ export function registerDevicesMetaCommand(devices: Command): void {
           if (isJsonMode()) {
             printJson([]);
           } else {
-            console.log('No local metadata entries.');
+            const hiddenCount = Object.values(file.devices).filter((m) => m.hidden).length;
+            if (hiddenCount > 0 && !options.hiddenOnly && !options.all) {
+              console.log(`No visible metadata entries (${hiddenCount} hidden — use --all or --hidden-only to show).`);
+            } else {
+              console.log('No local metadata entries.');
+            }
             console.log(`File: ${getMetaFilePath()}`);
           }
           return;
