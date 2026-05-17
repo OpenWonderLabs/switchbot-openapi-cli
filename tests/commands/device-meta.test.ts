@@ -153,4 +153,11 @@ describe('devices meta', () => {
     expect(ids).not.toContain('LAMP-1');
     expect(ids).toContain('LAMP-2');
   });
+
+  it('meta list --all --json warns that --all has no effect in JSON mode', async () => {
+    await runCli(registerDevicesCommand, ['devices', 'meta', 'set', 'LAMP-1', '--alias', 'L1']);
+    await runCli(registerDevicesCommand, ['devices', 'meta', 'set', 'LAMP-2', '--hide']);
+    const res = await runCli(registerDevicesCommand, ['devices', 'meta', 'list', '--all', '--json']);
+    expect(res.stderr.join('\n')).toContain('--all has no effect');
+  });
 });

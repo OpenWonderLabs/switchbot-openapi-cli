@@ -124,6 +124,10 @@ export function registerDevicesMetaCommand(devices: Command): void {
           entries = entries.filter(([, m]) => !m.hidden);
         }
 
+        if (options.all && isJsonMode()) {
+          console.error('warning: --all has no effect in JSON mode (all records are always exported)');
+        }
+
         if (entries.length === 0) {
           if (isJsonMode()) {
             printJson([]);

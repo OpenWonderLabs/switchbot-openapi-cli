@@ -472,8 +472,12 @@ against the live API without executing any mutations.
       // "--device A --devices B --device C" → A, C, B.  Scan process.argv instead.
       const allDevices: string[] = [];
       const raw = process.argv;
-      for (let i = 0; i < raw.length - 1; i++) {
-        if (raw[i] === '--device' || raw[i] === '--devices') allDevices.push(raw[i + 1]);
+      for (let i = 0; i < raw.length; i++) {
+        const eqMatch = raw[i].match(/^--devices?=(.+)/);
+        if (eqMatch) { allDevices.push(eqMatch[1]); continue; }
+        if ((raw[i] === '--device' || raw[i] === '--devices') && i + 1 < raw.length) {
+          allDevices.push(raw[i + 1]);
+        }
       }
       if (allDevices.length === 0) allDevices.push(...opts.device, ...opts.devices);
       if (allDevices.length === 0) {

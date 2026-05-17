@@ -403,6 +403,19 @@ describe('plan command', () => {
       expect(res.exitCode).toBeNull();
       expect(res.stdout.join('\n')).toContain('BOT1');
     });
+
+    it('preserves argv order when --device and --devices use equals-sign syntax', async () => {
+      cacheMock.map.set('LAMP-1', { type: 'Color Bulb', name: 'L1', category: 'physical' });
+      cacheMock.map.set('LAMP-2', { type: 'Color Bulb', name: 'L2', category: 'physical' });
+      cacheMock.map.set('BOT-1', { type: 'Bot', name: 'B1', category: 'physical' });
+      const res = await runCli(registerPlanCommand, [
+        'plan', 'suggest', '--intent', 'turn on',
+        '--device=LAMP-1', '--devices=LAMP-2', '--device=BOT-1',
+      ]);
+      expect(res.exitCode).toBeNull();
+      const plan = JSON.parse(res.stdout.join('\n')) as { steps: Array<{ deviceId: string }> };
+      expect(plan.steps.map((s) => s.deviceId)).toEqual(['LAMP-1', 'LAMP-2', 'BOT-1']);
+    });
   });
 
   describe('plan save / list / review / approve', () => {
