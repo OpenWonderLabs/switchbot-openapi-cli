@@ -36,12 +36,31 @@ describe('completion command', () => {
     expect(out).toContain('local format_vals="table json jsonl tsv yaml id markdown"');
   });
 
+  it('bash completion includes enum values for --backoff, --cache, and devices command --type', async () => {
+    const res = await runCli(registerCompletionCommand, ['completion', 'bash']);
+    expect(res.exitCode).toBeNull();
+    const out = written.join('');
+    expect(out).toContain('linear exponential');
+    expect(out).toContain('off auto 30s 5m 1h');
+    expect(out).toContain('command customize');
+  });
+
   it('prints a zsh completion script', async () => {
     const res = await runCli(registerCompletionCommand, ['completion', 'zsh']);
     expect(res.exitCode).toBeNull();
     const out = written.join('');
     expect(out).toContain('compdef _switchbot switchbot');
     expect(out).toContain('_switchbot()');
+  });
+
+  it('zsh completion includes enum values for format, table style, backoff, and cache', async () => {
+    const res = await runCli(registerCompletionCommand, ['completion', 'zsh']);
+    expect(res.exitCode).toBeNull();
+    const out = written.join('');
+    expect(out).toContain('--format[Output format]:type:(table json jsonl tsv yaml id markdown)');
+    expect(out).toContain('--table-style[Table rendering style]:style:(unicode ascii simple markdown)');
+    expect(out).toContain('--backoff[Retry backoff strategy]:strategy:(linear exponential)');
+    expect(out).toContain('--cache[Cache mode]:mode:(off auto 30s 5m 1h)');
   });
 
   it('prints a fish completion script', async () => {
@@ -55,6 +74,16 @@ describe('completion command', () => {
     expect(out).toContain('-l audit-log-path');
   });
 
+  it('fish completion includes enum values for format, table style, backoff, and cache', async () => {
+    const res = await runCli(registerCompletionCommand, ['completion', 'fish']);
+    expect(res.exitCode).toBeNull();
+    const out = written.join('');
+    expect(out).toContain("-l format   -r -a 'table json jsonl tsv yaml id markdown'");
+    expect(out).toContain("-l table-style -r -a 'unicode ascii simple markdown'");
+    expect(out).toContain("-l backoff  -r -a 'linear exponential'");
+    expect(out).toContain("-l cache    -r -a 'off auto 30s 5m 1h'");
+  });
+
   it('prints a powershell completion script', async () => {
     const res = await runCli(registerCompletionCommand, ['completion', 'powershell']);
     expect(res.exitCode).toBeNull();
@@ -64,6 +93,16 @@ describe('completion command', () => {
     expect(out).toContain("'events'");
     expect(out).toContain("'--profile'");
     expect(out).toContain("'--audit-log-path'");
+  });
+
+  it('powershell completion includes enum value arrays for format, table style, backoff, and cache', async () => {
+    const res = await runCli(registerCompletionCommand, ['completion', 'powershell']);
+    expect(res.exitCode).toBeNull();
+    const out = written.join('');
+    expect(out).toContain("$formatVals = 'table','json','jsonl','tsv','yaml','id','markdown'");
+    expect(out).toContain("$tableStyleVals = 'unicode','ascii','simple','markdown'");
+    expect(out).toContain("$backoffVals = 'linear','exponential'");
+    expect(out).toContain("$cacheVals = 'off','auto','30s','5m','1h'");
   });
 
   it('accepts "pwsh" as an alias for powershell', async () => {

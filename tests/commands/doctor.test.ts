@@ -14,6 +14,7 @@ vi.mock('node:child_process', async (importOriginal) => {
 });
 
 import { registerDoctorCommand } from '../../src/commands/doctor.js';
+import { TOOL_PROFILES } from '../../src/mcp/tool-profiles.js';
 import { runCli } from '../helpers/cli.js';
 import { expectJsonEnvelopeShape } from '../helpers/contracts.js';
 
@@ -321,11 +322,12 @@ describe('doctor command', () => {
     expect(mcp.status).toBe('ok');
     expect(mcp.detail.serverInstantiated).toBe(true);
     expect(typeof mcp.detail.toolCount).toBe('number');
-    expect(mcp.detail.toolCount).toBeGreaterThan(0);
+    expect(mcp.detail.toolCount).toBe(TOOL_PROFILES.default.size);
     expect(Array.isArray(mcp.detail.tools)).toBe(true);
+    expect(mcp.detail.tools).toHaveLength(TOOL_PROFILES.default.size);
     expect(mcp.detail.transportsAvailable).toEqual(['stdio', 'http']);
     expect(mcp.detail.message).toContain('default profile');
-    expect(mcp.detail.message).toContain('use --tools all for 24'); // 24 = total in 'all' profile; update if tool list changes
+    expect(mcp.detail.message).toContain(`use --tools all for ${TOOL_PROFILES.all.size}`);
   });
 
   it('P10: --list prints the registered check names without running any check', async () => {

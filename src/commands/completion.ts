@@ -1,5 +1,88 @@
 import { Command } from 'commander';
 
+const TOP_COMMANDS = [
+  'config',
+  'devices',
+  'scenes',
+  'webhook',
+  'completion',
+  'mcp',
+  'quota',
+  'catalog',
+  'cache',
+  'events',
+  'doctor',
+  'schema',
+  'history',
+  'plan',
+  'capabilities',
+  'agent-bootstrap',
+  'policy',
+  'rules',
+  'auth',
+  'install',
+  'uninstall',
+  'status-sync',
+  'health',
+  'upgrade-check',
+  'daemon',
+  'help',
+] as const;
+
+const CONFIG_SUBCOMMANDS = ['set-token', 'show', 'list-profiles', 'agent-profile'] as const;
+const DEVICES_SUBCOMMANDS = ['list', 'ls', 'status', 'command', 'types', 'commands', 'describe', 'batch', 'watch', 'explain', 'expand', 'meta'] as const;
+const SCENES_SUBCOMMANDS = ['list', 'execute', 'describe', 'validate', 'simulate', 'explain'] as const;
+const WEBHOOK_SUBCOMMANDS = ['setup', 'query', 'update', 'delete'] as const;
+const EVENTS_SUBCOMMANDS = ['tail', 'mqtt-tail'] as const;
+const QUOTA_SUBCOMMANDS = ['status', 'reset'] as const;
+const CATALOG_SUBCOMMANDS = ['path', 'show', 'search', 'diff', 'refresh'] as const;
+const CACHE_SUBCOMMANDS = ['show', 'clear'] as const;
+const HISTORY_SUBCOMMANDS = ['show', 'replay', 'range', 'stats', 'verify', 'aggregate'] as const;
+const PLAN_SUBCOMMANDS = ['schema', 'validate', 'suggest', 'run', 'save', 'list', 'review', 'approve', 'execute'] as const;
+const COMPLETION_SHELLS = ['bash', 'zsh', 'fish', 'powershell'] as const;
+const GLOBAL_OPTIONS = [
+  '--json',
+  '--format',
+  '--fields',
+  '--table-style',
+  '--verbose',
+  '-v',
+  '--dry-run',
+  '--timeout',
+  '--retry-on-429',
+  '--backoff',
+  '--no-retry',
+  '--no-quota',
+  '--cache',
+  '--no-cache',
+  '--config',
+  '--profile',
+  '--audit-log',
+  '--audit-log-path',
+  '--help',
+  '-h',
+  '--version',
+  '-V',
+] as const;
+
+const FORMAT_VALUES = ['table', 'json', 'jsonl', 'tsv', 'yaml', 'id', 'markdown'] as const;
+const TABLE_STYLE_VALUES = ['unicode', 'ascii', 'simple', 'markdown'] as const;
+const BACKOFF_VALUES = ['linear', 'exponential'] as const;
+const CACHE_VALUE_SUGGESTIONS = ['off', 'auto', '30s', '5m', '1h'] as const;
+const COMMAND_TYPE_VALUES = ['command', 'customize'] as const;
+
+function joinWords(values: readonly string[]): string {
+  return values.join(' ');
+}
+
+function joinQuoted(values: readonly string[]): string {
+  return values.map((value) => `'${value}'`).join(' ');
+}
+
+function joinPsArray(values: readonly string[]): string {
+  return values.map((value) => `'${value}'`).join(',');
+}
+
 const BASH_SCRIPT = `# switchbot bash completion
 # Install: source <(switchbot completion bash)
 # Or add to ~/.bashrc:
@@ -14,20 +97,20 @@ _switchbot_completion() {
     cword="\${COMP_CWORD}"
   }
 
-  local top_cmds="config devices scenes webhook completion mcp quota catalog cache events doctor schema history plan capabilities help"
-  local config_sub="set-token show list-profiles"
-  local devices_sub="list ls status command types commands describe batch watch explain expand meta"
-  local scenes_sub="list execute"
-  local webhook_sub="setup query update delete"
-  local events_sub="tail mqtt-tail"
-  local quota_sub="status reset"
-  local catalog_sub="path show diff refresh"
-  local cache_sub="show clear"
-  local history_sub="show replay"
-  local plan_sub="schema validate run"
-  local completion_shells="bash zsh fish powershell"
-  local format_vals="table json jsonl tsv yaml id markdown"
-  local global_opts="--json --format --fields --verbose -v --dry-run --timeout --retry-on-429 --backoff --no-retry --no-quota --cache --no-cache --config --profile --audit-log --audit-log-path --help -h --version -V"
+  local top_cmds="${joinWords(TOP_COMMANDS)}"
+  local config_sub="${joinWords(CONFIG_SUBCOMMANDS)}"
+  local devices_sub="${joinWords(DEVICES_SUBCOMMANDS)}"
+  local scenes_sub="${joinWords(SCENES_SUBCOMMANDS)}"
+  local webhook_sub="${joinWords(WEBHOOK_SUBCOMMANDS)}"
+  local events_sub="${joinWords(EVENTS_SUBCOMMANDS)}"
+  local quota_sub="${joinWords(QUOTA_SUBCOMMANDS)}"
+  local catalog_sub="${joinWords(CATALOG_SUBCOMMANDS)}"
+  local cache_sub="${joinWords(CACHE_SUBCOMMANDS)}"
+  local history_sub="${joinWords(HISTORY_SUBCOMMANDS)}"
+  local plan_sub="${joinWords(PLAN_SUBCOMMANDS)}"
+  local completion_shells="${joinWords(COMPLETION_SHELLS)}"
+  local format_vals="${joinWords(FORMAT_VALUES)}"
+  local global_opts="${joinWords(GLOBAL_OPTIONS)}"
 
   if [[ \${cword} -eq 1 ]]; then
     COMPREPLY=( $(compgen -W "\${top_cmds} \${global_opts}" -- "\${cur}") )
@@ -36,18 +119,18 @@ _switchbot_completion() {
 
   if [[ "\${prev}" == "--format" || "\${prev}" == "--table-style" ]]; then
     local vals="\${format_vals}"
-    [[ "\${prev}" == "--table-style" ]] && vals="unicode ascii simple markdown"
+    [[ "\${prev}" == "--table-style" ]] && vals="${joinWords(TABLE_STYLE_VALUES)}"
     COMPREPLY=( $(compgen -W "\${vals}" -- "\${cur}") )
     return
   fi
 
   if [[ "\${prev}" == "--backoff" ]]; then
-    COMPREPLY=( $(compgen -W "linear exponential" -- "\${cur}") )
+    COMPREPLY=( $(compgen -W "${joinWords(BACKOFF_VALUES)}" -- "\${cur}") )
     return
   fi
 
   if [[ "\${prev}" == "--cache" ]]; then
-    COMPREPLY=( $(compgen -W "off auto 30s 5m 1h" -- "\${cur}") )
+    COMPREPLY=( $(compgen -W "${joinWords(CACHE_VALUE_SUGGESTIONS)}" -- "\${cur}") )
     return
   fi
 
@@ -61,7 +144,7 @@ _switchbot_completion() {
       if [[ \${cword} -eq 2 ]]; then
         COMPREPLY=( $(compgen -W "\${devices_sub}" -- "\${cur}") )
       elif [[ "\${words[2]}" == "command" && "\${prev}" == "--type" ]]; then
-        COMPREPLY=( $(compgen -W "command customize" -- "\${cur}") )
+        COMPREPLY=( $(compgen -W "${joinWords(COMMAND_TYPE_VALUES)}" -- "\${cur}") )
       fi
       ;;
     scenes)
@@ -143,9 +226,19 @@ _switchbot() {
     'history:View and replay audited commands'
     'plan:Validate and run batch plans'
     'capabilities:Print a machine-readable manifest'
+    'agent-bootstrap:Print bootstrap info for AI agents'
+    'policy:Validate scaffold and migrate policy.yaml'
+    'rules:Inspect and simulate automation rules'
+    'auth:Manage keychain-backed credentials'
+    'install:Bootstrap SwitchBot CLI setup'
+    'uninstall:Remove SwitchBot CLI setup'
+    'status-sync:Bridge MQTT shadow updates'
+    'health:Report runtime health'
+    'upgrade-check:Check release notes before upgrading'
+    'daemon:Run the background rules engine'
     'help:Show help for a command'
   )
-  config_sub=('set-token:Save token + secret' 'show:Show current credential source' 'list-profiles:List named credential profiles')
+  config_sub=('set-token:Save token + secret' 'show:Show current credential source' 'list-profiles:List named credential profiles' 'agent-profile:Print agent-oriented profile details')
   devices_sub=(
     'list:List all devices'
     'ls:Alias for list'
@@ -160,7 +253,7 @@ _switchbot() {
     'expand:Build wire-format params from semantic flags'
     'meta:Manage local device metadata'
   )
-  scenes_sub=('list:List manual scenes' 'execute:Run a scene')
+  scenes_sub=('list:List manual scenes' 'execute:Run a scene' 'describe:Show one scene' 'validate:Check whether a scene id exists' 'simulate:Dry-run a scene invocation' 'explain:Show a human-readable scene summary')
   webhook_sub=(
     'setup:Register a webhook URL'
     'query:Query configured webhooks'
@@ -169,25 +262,26 @@ _switchbot() {
   )
   events_sub=('tail:Run a local webhook receiver' 'mqtt-tail:Stream MQTT shadow events')
   quota_sub=('status:Show today and recent quota usage' 'reset:Delete the local quota counter')
-  catalog_sub=('path:Show overlay path' 'show:Show built-in/overlay/effective catalog' 'diff:Show overlay changes' 'refresh:Clear overlay cache')
+  catalog_sub=('path:Show overlay path' 'show:Show built-in/overlay/effective catalog' 'search:Search the effective catalog' 'diff:Show overlay changes' 'refresh:Clear overlay cache')
   cache_sub=('show:Summarize cache files' 'clear:Delete cache files')
-  history_sub=('show:Print recent audit entries' 'replay:Re-run one audited command')
-  plan_sub=('schema:Print the plan schema' 'validate:Validate a plan file' 'run:Validate and execute a plan')
-  completion_shells=('bash' 'zsh' 'fish' 'powershell')
+  history_sub=('show:Print recent audit entries' 'replay:Re-run one audited command' 'range:Query a time range' 'stats:Aggregate audit results' 'verify:Verify audit log integrity' 'aggregate:Aggregate audit fields')
+  plan_sub=('schema:Print the plan schema' 'validate:Validate a plan file' 'suggest:Draft a plan from intent + devices' 'run:Validate and execute a plan' 'save:Save a plan for approval' 'list:List saved plans' 'review:Inspect a saved plan' 'approve:Approve a saved plan' 'execute:Run an approved plan')
+  completion_shells=(${joinQuoted(COMPLETION_SHELLS)})
 
   local global_opts
   global_opts=(
     '--json[Raw JSON output]'
-    '--format[Output format]:type:(table json jsonl tsv yaml id markdown)'
+    '--format[Output format]:type:(${joinWords(FORMAT_VALUES)})'
     '--fields[Comma-separated output columns]:csv:'
+    '--table-style[Table rendering style]:style:(${joinWords(TABLE_STYLE_VALUES)})'
     '(-v --verbose)'{-v,--verbose}'[Log HTTP details to stderr]'
     '--dry-run[Print mutating requests without sending]'
     '--timeout[HTTP timeout in ms]:ms:'
     '--retry-on-429[Max 429 retries]:n:'
-    '--backoff[Retry backoff strategy]:strategy:(linear exponential)'
+    '--backoff[Retry backoff strategy]:strategy:(${joinWords(BACKOFF_VALUES)})'
     '--no-retry[Disable 429 retries]'
     '--no-quota[Disable the local quota counter]'
-    '--cache[Cache mode]:mode:'
+    '--cache[Cache mode]:mode:(${joinWords(CACHE_VALUE_SUGGESTIONS)})'
     '--no-cache[Disable cache reads]'
     '--config[Override credential file path]:path:_files'
     '--profile[Use a named credential profile]:name:'
@@ -241,16 +335,17 @@ complete -c switchbot -f
 
 # Global options
 complete -c switchbot -l json        -d 'Raw JSON output'
-complete -c switchbot -l format   -r -d 'Output format'
+complete -c switchbot -l format   -r -a '${joinWords(FORMAT_VALUES)}' -d 'Output format'
 complete -c switchbot -l fields   -r -d 'Comma-separated output columns'
+complete -c switchbot -l table-style -r -a '${joinWords(TABLE_STYLE_VALUES)}' -d 'Table rendering style'
 complete -c switchbot -s v -l verbose -d 'Log HTTP details to stderr'
 complete -c switchbot -l dry-run     -d 'Print mutating requests without sending'
 complete -c switchbot -l timeout  -r -d 'HTTP timeout in ms'
 complete -c switchbot -l retry-on-429 -r -d 'Max 429 retries'
-complete -c switchbot -l backoff  -r -d 'Retry backoff strategy'
+complete -c switchbot -l backoff  -r -a '${joinWords(BACKOFF_VALUES)}' -d 'Retry backoff strategy'
 complete -c switchbot -l no-retry    -d 'Disable 429 retries'
 complete -c switchbot -l no-quota    -d 'Disable the local quota counter'
-complete -c switchbot -l cache    -r -d 'Cache mode'
+complete -c switchbot -l cache    -r -a '${joinWords(CACHE_VALUE_SUGGESTIONS)}' -d 'Cache mode'
 complete -c switchbot -l no-cache    -d 'Disable cache reads'
 complete -c switchbot -l config   -r -d 'Credential file path'
 complete -c switchbot -l profile  -r -d 'Named credential profile'
@@ -275,42 +370,53 @@ complete -c switchbot -n '__fish_use_subcommand' -a 'schema'     -d 'Export the 
 complete -c switchbot -n '__fish_use_subcommand' -a 'history'    -d 'View and replay audited commands'
 complete -c switchbot -n '__fish_use_subcommand' -a 'plan'       -d 'Validate and run batch plans'
 complete -c switchbot -n '__fish_use_subcommand' -a 'capabilities' -d 'Print a machine-readable manifest'
+complete -c switchbot -n '__fish_use_subcommand' -a 'agent-bootstrap' -d 'Print bootstrap info for AI agents'
+complete -c switchbot -n '__fish_use_subcommand' -a 'policy'     -d 'Validate scaffold and migrate policy.yaml'
+complete -c switchbot -n '__fish_use_subcommand' -a 'rules'      -d 'Inspect and simulate automation rules'
+complete -c switchbot -n '__fish_use_subcommand' -a 'auth'       -d 'Manage keychain-backed credentials'
+complete -c switchbot -n '__fish_use_subcommand' -a 'install'    -d 'Bootstrap SwitchBot CLI setup'
+complete -c switchbot -n '__fish_use_subcommand' -a 'uninstall'  -d 'Remove SwitchBot CLI setup'
+complete -c switchbot -n '__fish_use_subcommand' -a 'status-sync' -d 'Bridge MQTT shadow updates'
+complete -c switchbot -n '__fish_use_subcommand' -a 'health'     -d 'Report runtime health'
+complete -c switchbot -n '__fish_use_subcommand' -a 'upgrade-check' -d 'Check release notes before upgrading'
+complete -c switchbot -n '__fish_use_subcommand' -a 'daemon'     -d 'Run the background rules engine'
 complete -c switchbot -n '__fish_use_subcommand' -a 'help'       -d 'Show help'
 
 # config
-complete -c switchbot -n '__fish_seen_subcommand_from config' -a 'set-token show list-profiles'
+complete -c switchbot -n '__fish_seen_subcommand_from config' -a '${joinWords(CONFIG_SUBCOMMANDS)}'
 
 # devices
-complete -c switchbot -n '__fish_seen_subcommand_from devices' -a 'list ls status command types commands describe batch watch explain expand meta'
+complete -c switchbot -n '__fish_seen_subcommand_from devices' -a '${joinWords(DEVICES_SUBCOMMANDS)}'
+complete -c switchbot -n '__fish_seen_subcommand_from devices; and __fish_seen_subcommand_from command' -l type -r -a '${joinWords(COMMAND_TYPE_VALUES)}' -d 'Command type'
 
 # scenes
-complete -c switchbot -n '__fish_seen_subcommand_from scenes' -a 'list execute'
+complete -c switchbot -n '__fish_seen_subcommand_from scenes' -a '${joinWords(SCENES_SUBCOMMANDS)}'
 
 # webhook
-complete -c switchbot -n '__fish_seen_subcommand_from webhook' -a 'setup query update delete'
+complete -c switchbot -n '__fish_seen_subcommand_from webhook' -a '${joinWords(WEBHOOK_SUBCOMMANDS)}'
 complete -c switchbot -n '__fish_seen_subcommand_from webhook; and __fish_seen_subcommand_from update' -l enable  -d 'Enable the webhook'
 complete -c switchbot -n '__fish_seen_subcommand_from webhook; and __fish_seen_subcommand_from update' -l disable -d 'Disable the webhook'
 
 # events
-complete -c switchbot -n '__fish_seen_subcommand_from events' -a 'tail mqtt-tail'
+complete -c switchbot -n '__fish_seen_subcommand_from events' -a '${joinWords(EVENTS_SUBCOMMANDS)}'
 
 # quota
-complete -c switchbot -n '__fish_seen_subcommand_from quota' -a 'status reset'
+complete -c switchbot -n '__fish_seen_subcommand_from quota' -a '${joinWords(QUOTA_SUBCOMMANDS)}'
 
 # catalog
-complete -c switchbot -n '__fish_seen_subcommand_from catalog' -a 'path show diff refresh'
+complete -c switchbot -n '__fish_seen_subcommand_from catalog' -a '${joinWords(CATALOG_SUBCOMMANDS)}'
 
 # cache
-complete -c switchbot -n '__fish_seen_subcommand_from cache' -a 'show clear'
+complete -c switchbot -n '__fish_seen_subcommand_from cache' -a '${joinWords(CACHE_SUBCOMMANDS)}'
 
 # history
-complete -c switchbot -n '__fish_seen_subcommand_from history' -a 'show replay'
+complete -c switchbot -n '__fish_seen_subcommand_from history' -a '${joinWords(HISTORY_SUBCOMMANDS)}'
 
 # plan
-complete -c switchbot -n '__fish_seen_subcommand_from plan' -a 'schema validate run'
+complete -c switchbot -n '__fish_seen_subcommand_from plan' -a '${joinWords(PLAN_SUBCOMMANDS)}'
 
 # completion
-complete -c switchbot -n '__fish_seen_subcommand_from completion' -a 'bash zsh fish powershell'
+complete -c switchbot -n '__fish_seen_subcommand_from completion' -a '${joinWords(COMPLETION_SHELLS)}'
 `;
 
 const POWERSHELL_SCRIPT = `# switchbot PowerShell completion
@@ -323,20 +429,27 @@ Register-ArgumentCompleter -Native -CommandName switchbot -ScriptBlock {
 
   $tokens = $commandAst.CommandElements | ForEach-Object { $_.ToString() }
   $count = $tokens.Count
+  $lastToken = if ($count -gt 0) { $tokens[$count - 1] } else { '' }
+  $prev = if ($wordToComplete -and $lastToken -eq $wordToComplete -and $count -ge 2) { $tokens[$count - 2] } else { $lastToken }
 
-  $top = 'config','devices','scenes','webhook','completion','mcp','quota','catalog','cache','events','doctor','schema','history','plan','capabilities','help'
-  $configSub = 'set-token','show','list-profiles'
-  $devicesSub = 'list','ls','status','command','types','commands','describe','batch','watch','explain','expand','meta'
-  $scenesSub = 'list','execute'
-  $webhookSub = 'setup','query','update','delete'
-  $eventsSub = 'tail','mqtt-tail'
-  $quotaSub = 'status','reset'
-  $catalogSub = 'path','show','diff','refresh'
-  $cacheSub = 'show','clear'
-  $historySub = 'show','replay'
-  $planSub = 'schema','validate','run'
-  $shells = 'bash','zsh','fish','powershell'
-  $globalOpts = '--json','--format','--fields','--verbose','-v','--dry-run','--timeout','--retry-on-429','--backoff','--no-retry','--no-quota','--cache','--no-cache','--config','--profile','--audit-log','--audit-log-path','--help','-h','--version','-V'
+  $top = ${joinPsArray(TOP_COMMANDS)}
+  $configSub = ${joinPsArray(CONFIG_SUBCOMMANDS)}
+  $devicesSub = ${joinPsArray(DEVICES_SUBCOMMANDS)}
+  $scenesSub = ${joinPsArray(SCENES_SUBCOMMANDS)}
+  $webhookSub = ${joinPsArray(WEBHOOK_SUBCOMMANDS)}
+  $eventsSub = ${joinPsArray(EVENTS_SUBCOMMANDS)}
+  $quotaSub = ${joinPsArray(QUOTA_SUBCOMMANDS)}
+  $catalogSub = ${joinPsArray(CATALOG_SUBCOMMANDS)}
+  $cacheSub = ${joinPsArray(CACHE_SUBCOMMANDS)}
+  $historySub = ${joinPsArray(HISTORY_SUBCOMMANDS)}
+  $planSub = ${joinPsArray(PLAN_SUBCOMMANDS)}
+  $shells = ${joinPsArray(COMPLETION_SHELLS)}
+  $formatVals = ${joinPsArray(FORMAT_VALUES)}
+  $tableStyleVals = ${joinPsArray(TABLE_STYLE_VALUES)}
+  $backoffVals = ${joinPsArray(BACKOFF_VALUES)}
+  $cacheVals = ${joinPsArray(CACHE_VALUE_SUGGESTIONS)}
+  $commandTypeVals = ${joinPsArray(COMMAND_TYPE_VALUES)}
+  $globalOpts = ${joinPsArray(GLOBAL_OPTIONS)}
 
   function _emit($values) {
     $values |
@@ -346,9 +459,17 @@ Register-ArgumentCompleter -Native -CommandName switchbot -ScriptBlock {
 
   if ($count -le 2) { return _emit ($top + $globalOpts) }
 
+  if ($prev -eq '--format') { return _emit $formatVals }
+  if ($prev -eq '--table-style') { return _emit $tableStyleVals }
+  if ($prev -eq '--backoff') { return _emit $backoffVals }
+  if ($prev -eq '--cache') { return _emit $cacheVals }
+
   switch ($tokens[1]) {
     'config'     { if ($count -eq 3) { return _emit $configSub } }
-    'devices'    { if ($count -eq 3) { return _emit $devicesSub } }
+    'devices'    {
+      if ($count -eq 3) { return _emit $devicesSub }
+      if ($tokens[2] -eq 'command' -and $prev -eq '--type') { return _emit $commandTypeVals }
+    }
     'scenes'     { if ($count -eq 3) { return _emit $scenesSub } }
     'events'     { if ($count -eq 3) { return _emit $eventsSub } }
     'quota'      { if ($count -eq 3) { return _emit $quotaSub } }
@@ -358,7 +479,7 @@ Register-ArgumentCompleter -Native -CommandName switchbot -ScriptBlock {
     'plan'       { if ($count -eq 3) { return _emit $planSub } }
     'webhook'    {
       if ($count -eq 3) { return _emit $webhookSub }
-      if ($tokens[2] -eq 'update') { return _emit ('--enable','--disable' + $globalOpts) }
+      if ($tokens[2] -eq 'update') { return _emit (('--enable','--disable') + $globalOpts) }
     }
     'completion' { if ($count -eq 3) { return _emit $shells } }
   }
