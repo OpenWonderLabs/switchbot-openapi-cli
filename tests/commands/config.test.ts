@@ -69,6 +69,39 @@ describe('config command', () => {
       expect(res.exitCode).toBe(2);
       expect(res.stderr.join('\n').toLowerCase()).toMatch(/missing token\/secret/);
     });
+
+    it('passes --label to saveConfig', async () => {
+      const res = await runCli(registerConfigCommand, [
+        'config', 'set-token', 'MY_T', 'MY_S', '--label', 'home',
+      ]);
+      expect(configMock.saveConfig).toHaveBeenCalledWith(
+        'MY_T', 'MY_S',
+        expect.objectContaining({ label: 'home' }),
+      );
+      expect(res.exitCode).toBeNull();
+    });
+
+    it('passes --daily-cap as a numeric limit to saveConfig', async () => {
+      const res = await runCli(registerConfigCommand, [
+        'config', 'set-token', 'MY_T', 'MY_S', '--daily-cap', '200',
+      ]);
+      expect(configMock.saveConfig).toHaveBeenCalledWith(
+        'MY_T', 'MY_S',
+        expect.objectContaining({ limits: { dailyCap: 200 } }),
+      );
+      expect(res.exitCode).toBeNull();
+    });
+
+    it('passes --default-flags as a split array to saveConfig', async () => {
+      const res = await runCli(registerConfigCommand, [
+        'config', 'set-token', 'MY_T', 'MY_S', '--default-flags', 'audit-log,verbose',
+      ]);
+      expect(configMock.saveConfig).toHaveBeenCalledWith(
+        'MY_T', 'MY_S',
+        expect.objectContaining({ defaults: { flags: ['audit-log', 'verbose'] } }),
+      );
+      expect(res.exitCode).toBeNull();
+    });
   });
 
   describe('show', () => {
