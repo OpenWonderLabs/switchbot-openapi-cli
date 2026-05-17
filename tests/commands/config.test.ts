@@ -3,6 +3,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+const keychainMock = vi.hoisted(() => vi.fn());
+
+vi.mock('../../src/credentials/keychain.js', () => ({
+  selectCredentialStore: keychainMock,
+}));
+
 const configMock = vi.hoisted(() => ({
   saveConfig: vi.fn(),
   showConfig: vi.fn(),
@@ -174,6 +180,7 @@ describe('config command', () => {
   });
 
   describe('agent-profile', () => {
+
     let tmpHome: string;
     let homedirSpy: ReturnType<typeof vi.spyOn>;
 
@@ -254,5 +261,68 @@ describe('config command', () => {
       expect(typeof data.path).toBe('string');
       expect(data.template.label).toBe('agent');
     });
+  });
+});
+
+describe('set-token platform keychain hint', () => {
+  let savedPlatformDescriptor: PropertyDescriptor | undefined;
+
+  beforeEach(() => {
+    configMock.saveConfig.mockReset();
+    savedPlatformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+    keychainMock.mockResolvedValue({
+      name: 'file',
+      describe: () => ({ backend: 'file', tag: 'file', writable: true }),
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    });
+  });
+
+  afterEach(() => {
+    if (savedPlatformDescriptor) {
+      Object.defineProperty(process, 'platform', savedPlatformDescriptor);
+    }
+  });
+
+  it('emits native-keychain tip to stderr on darwin when backend is file', async () => {
+    Object.defineProperty(process, 'platform', {
+      value: 'darwin',
+      configurable: true,
+      writable: false,
+    });
+    const res = await runCli(registerConfigCommand, ['config', 'set-token', 'T', 'S']);
+    expect(res.exitCode).toBeNull();
+    expect(res.stderr.join('\n')).toContain('native keychain');
+  });
+
+  it('emits GNOME Keyring tip to stderr on linux when backend is file', async () => {
+    Object.defineProperty(process, 'platform', {
+      value: 'linux',
+      configurable: true,
+      writable: false,
+    });
+    const res = await runCli(registerConfigCommand, ['config', 'set-token', 'T', 'S']);
+    expect(res.exitCode).toBeNull();
+    expect(res.stderr.join('\n')).toContain('GNOME Keyring');
+  });
+
+  it('emits no keychain tip when the backend is not file', async () => {
+    Object.defineProperty(process, 'platform', {
+      value: 'darwin',
+      configurable: true,
+      writable: false,
+    });
+    keychainMock.mockResolvedValue({
+      name: 'keychain',
+      describe: () => ({ backend: 'keychain', tag: 'keychain', writable: true }),
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    });
+    const res = await runCli(registerConfigCommand, ['config', 'set-token', 'T', 'S']);
+    expect(res.exitCode).toBeNull();
+    expect(res.stderr.join('\n')).not.toContain('native keychain');
+    expect(res.stderr.join('\n')).not.toContain('GNOME');
   });
 });
