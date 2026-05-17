@@ -671,6 +671,26 @@ describe('switchbot rules (commander surface)', () => {
       fs.writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
     }
 
+    it('returns total:0 and empty summaries under --json when log is absent', async () => {
+      const logFile = path.join(tmpDir, 'noaudit.log');
+      const res = await runCli(['--json', 'rules', 'summary', '--file', logFile]);
+      expect(res.exitCode).toBe(0);
+      const body = JSON.parse(res.stdout[0]) as Record<string, unknown>;
+      const data = expectJsonEnvelopeContainingKeys(body, ['total', 'summaries']) as {
+        total: number;
+        summaries: unknown[];
+      };
+      expect(data.total).toBe(0);
+      expect(data.summaries).toEqual([]);
+    });
+
+    it('prints "no rule activity" in human mode when log is absent', async () => {
+      const logFile = path.join(tmpDir, 'noaudit.log');
+      const res = await runCli(['rules', 'summary', '--file', logFile]);
+      expect(res.exitCode).toBe(0);
+      expect(res.stdout.join('\n')).toContain('no rule activity');
+    });
+
     it('prints "(no rule activity)" when the audit log is empty', async () => {
       const f = path.join(tmpDir, 'audit-empty.log');
       fs.writeFileSync(f, '');
@@ -713,6 +733,26 @@ describe('switchbot rules (commander surface)', () => {
     function writeAudit(file: string, rows: unknown[]): void {
       fs.writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
     }
+
+    it('returns count:0 and empty entries under --json when log is absent', async () => {
+      const logFile = path.join(tmpDir, 'noaudit.log');
+      const res = await runCli(['--json', 'rules', 'last-fired', '--file', logFile]);
+      expect(res.exitCode).toBe(0);
+      const body = JSON.parse(res.stdout[0]) as Record<string, unknown>;
+      const data = expectJsonEnvelopeContainingKeys(body, ['count', 'entries']) as {
+        count: number;
+        entries: unknown[];
+      };
+      expect(data.count).toBe(0);
+      expect(data.entries).toEqual([]);
+    });
+
+    it('prints "no rule-fire entries" in human mode when log is absent', async () => {
+      const logFile = path.join(tmpDir, 'noaudit.log');
+      const res = await runCli(['rules', 'last-fired', '--file', logFile]);
+      expect(res.exitCode).toBe(0);
+      expect(res.stdout.join('\n')).toContain('no rule-fire entries');
+    });
 
     it('prints hint when no rule-fire entries exist', async () => {
       const f = path.join(tmpDir, 'audit-empty2.log');
