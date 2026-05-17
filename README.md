@@ -45,7 +45,7 @@ Under the hood every surface shares the same catalog, cache, and HMAC client —
 
 ## Table of contents
 
-- [Features](#features) · [Requirements](#requirements) · [Installation](#installation)
+- [Features](#features) · [Supported devices](#supported-devices) · [Requirements](#requirements) · [Installation](#installation)
 - [Quick start](#quick-start)
 - [Credentials](#credentials)
 - [Policy](#policy) · [Rules engine](#rules-engine)
@@ -63,8 +63,28 @@ Under the hood every surface shares the same catalog, cache, and HMAC client —
 - 🎨 **Dual output modes** — colorized tables by default; `--json` passthrough for `jq` and scripting
 - 🔐 **Secure credentials** — HMAC-SHA256 signed requests; config file written with `0600`; env-var override for CI
 - 🔍 **Dry-run mode** — preview every mutating request before it hits the API
-- 🧪 **Fully tested** — 2465 Vitest tests, mocked axios, zero network in CI
+- 🧪 **Fully tested** — 2574 Vitest tests, mocked axios, zero network in CI
 - ⚡ **Shell completion** — Bash / Zsh / Fish / PowerShell
+
+## Supported devices
+
+The built-in catalog covers every device type in the [SwitchBot Cloud API v1.1](https://github.com/OpenWonderLabs/SwitchBotAPI).
+Run `switchbot catalog list` to see the full list including aliases and per-command details.
+
+| Category | Devices |
+|---|---|
+| **Lighting** | Color Bulb · Strip Light · Strip Light 3 · RGBICWW Strip Light · Floor Lamp · RGBICWW Floor Lamp · Ceiling Light · Ceiling Light Pro · RGBIC Neon Rope Light · RGBIC Neon Wire Rope Light · Candle Warmer Lamp |
+| **Climate** | Humidifier · Humidifier2 · Air Purifier VOC · Air Purifier Table VOC · Air Purifier PM2.5 · Air Purifier Table PM2.5 · Smart Radiator Thermostat |
+| **Security** | Smart Lock · Smart Lock Pro · Smart Lock Pro Wifi · Smart Lock Ultra · Lock Lite · Lock Vision · Lock Vision Pro · Keypad · Keypad Touch · Keypad Vision · Keypad Vision Pro · Garage Door Opener · Video Doorbell |
+| **Curtains & blinds** | Curtain · Curtain3 · Blind Tilt · Roller Shade |
+| **Power** | Plug · Plug Mini (US) · Plug Mini (JP) · Plug Mini (EU) · Relay Switch 1 · Relay Switch 1PM · Relay Switch 2PM |
+| **Fans** | Battery Circulator Fan · Circulator Fan · Standing Circulator Fan |
+| **Cleaning** | Robot Vacuum Cleaner S1 · Robot Vacuum Cleaner S1 Plus · K10+ · K10+ Pro · Robot Vacuum Cleaner K10+ Pro Combo · Robot Vacuum Cleaner S10 · Robot Vacuum Cleaner S20 · Robot Vacuum Cleaner K11+ · Robot Vacuum Cleaner K20 Plus Pro |
+| **Sensors** _(read-only)_ | Meter · MeterPlus · WoIOSensor · MeterPro · MeterPro(CO2) · WeatherStation · Motion Sensor · Presence Sensor · Contact Sensor · Water Detector · Wallet Finder Card |
+| **Hubs** _(read-only)_ | Hub · Hub Plus · Hub Mini · Hub 2 · Hub 3 · AI Hub |
+| **Cameras** _(status only)_ | Indoor Cam · Pan/Tilt Cam · Pan/Tilt Cam 2K · Pan/Tilt Cam Plus 2K · Pan/Tilt Cam Plus 3K · Outdoor Spotlight Cam |
+| **Other** | Bot · AI Art Frame · Home Climate Panel · Remote |
+| **IR virtual remotes** _(via Hub)_ | Air Conditioner · TV · Streamer · Set Top Box · DVD · Speaker · Fan · Light · Others |
 
 ## Requirements
 
