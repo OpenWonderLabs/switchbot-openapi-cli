@@ -44,6 +44,14 @@ describe('quota command', () => {
     expect(out).toMatch(/POST \/v1\.1\/devices\/:id\/commands\s+1/);
   });
 
+  it('status human output includes Remaining budget line with reset time', async () => {
+    const result = await runCli(registerQuotaCommand, ['quota', 'status']);
+    expect(result.exitCode).toBeNull();
+    const out = result.stdout.join('\n');
+    expect(out).toContain('Remaining budget:');
+    expect(out).toContain('resets at');
+  });
+
   it('status --json returns structured payload', async () => {
     await seedQuota();
     const result = await runCli(registerQuotaCommand, ['--json', 'quota', 'status']);

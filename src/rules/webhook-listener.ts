@@ -94,14 +94,18 @@ export class WebhookListener {
       };
       const onListening = () => {
         server.off('error', onError);
+        // Capture the bound address synchronously inside the callback so there
+        // is no async gap between the OS confirming the bind and us reading it.
+        // Reading after the await boundary can race with concurrent I/O on
+        // Windows (IOCP) and yield a stale or zero port in stressed test runs.
+        const address = server.address();
+        this.actualPort = typeof address === 'object' && address ? address.port : port;
         resolve();
       };
       server.once('error', onError);
       server.once('listening', onListening);
       server.listen(port, host);
     });
-    const address = server.address();
-    this.actualPort = typeof address === 'object' && address ? address.port : port;
     this.server = server;
   }
 
@@ -193,6 +197,9 @@ export class WebhookListener {
     const body = await readLimitedBody(req, MAX_BODY_BYTES);
     if (body === null) {
       res.writeHead(413);
+      // Destroy the socket after the 413 response has flushed so the connection
+      // is not held open indefinitely by a client that keeps streaming.
+      res.on('finish', () => req.destroy());
       res.end();
       return;
     }
@@ -239,16 +246,22 @@ function readLimitedBody(req: IncomingMessage, max: number): Promise<string | nu
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let total = 0;
+    let done = false;
     req.on('data', (chunk: Buffer) => {
+      if (done) return;
       total += chunk.length;
       if (total > max) {
-        req.destroy();
+        done = true;
+        // Drain the remaining data so the server can send the 413 response
+        // before the connection is torn down. req.destroy() would close the
+        // socket immediately and prevent the response headers from flushing.
+        req.resume();
         resolve(null);
         return;
       }
       chunks.push(chunk);
     });
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
+    req.on('end', () => { if (!done) resolve(Buffer.concat(chunks).toString('utf-8')); });
     req.on('error', reject);
   });
 }

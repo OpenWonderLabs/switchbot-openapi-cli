@@ -1,7 +1,7 @@
 // scripts/bundle.mjs
 // Production bundler: esbuild inlines pure-JS dependencies into a single
 // dist/index.js, reducing install size. Heavy deps that use native bindings
-// (mqtt, pino, axios, @modelcontextprotocol/sdk) remain in node_modules.
+// (mqtt, pino, axios) remain in node_modules.
 
 import { build } from 'esbuild';
 import path from 'node:path';
@@ -19,7 +19,7 @@ await build({
   target: 'node18',
   format: 'esm',
   outfile,
-  // Keep heavy native-binding or large deps external; they stay in node_modules.
+  // Keep heavy native-binding deps external; they stay in node_modules.
   external: [
     'node:*',
     // native binding deps
@@ -28,8 +28,6 @@ await build({
     'pino-pretty',
     // large deps with native parts
     'axios',
-    '@modelcontextprotocol/sdk',
-    // pure-JS but large — inline separately if needed
   ],
   // Inject a createRequire-based require() so CJS packages bundled into the
   // ESM output can call require('process'), require('events'), etc. (bare names

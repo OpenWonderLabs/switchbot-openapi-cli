@@ -338,4 +338,65 @@ describe('auth keychain migrate', () => {
     expect(data.sourceDeleted).toBe(true);
     expect(data.sourceScrubbed).toBe(false);
   });
+
+  it('exits 1 when the keychain write fails during migrate', async () => {
+    const store = makeStore({
+      writable: true,
+      setImpl: async () => {
+        throw new Error('permission denied');
+      },
+    });
+    selectMock.mockResolvedValue(store);
+
+    const file = path.join(tmpHome, '.switchbot', 'config.json');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ token: 't-src', secret: 's-src' }));
+
+    const res = await runCli(['auth', 'keychain', 'migrate']);
+    expect(res.exitCode).toBe(1);
+    expect(res.stderr.join('\n')).toContain('keychain write failed');
+  });
+
+  it('exits 1 when source config.json contains invalid JSON', async () => {
+    const file = path.join(tmpHome, '.switchbot', 'config.json');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, 'THIS IS NOT JSON');
+    const store = makeStore({ writable: true });
+    selectMock.mockResolvedValue(store);
+    const res = await runCli(['auth', 'keychain', 'migrate']);
+    expect(res.exitCode).toBe(1);
+    expect(res.stderr.join('\n')).toMatch(/failed to parse/i);
+  });
+
+  it('exits 1 when source config.json contains a non-object (array)', async () => {
+    const file = path.join(tmpHome, '.switchbot', 'config.json');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify([1, 2, 3]));
+    const store = makeStore({ writable: true });
+    selectMock.mockResolvedValue(store);
+    const res = await runCli(['auth', 'keychain', 'migrate']);
+    expect(res.exitCode).toBe(1);
+    expect(res.stderr.join('\n')).toMatch(/failed to parse/i);
+  });
+
+  it('exits 0 but logs a warning when --delete-file cleanup throws', async () => {
+    const store = makeStore({ writable: true });
+    selectMock.mockResolvedValue(store);
+
+    const file = path.join(tmpHome, '.switchbot', 'config.json');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    // Only token+secret → no metadata → cleanup tries fs.unlinkSync
+    fs.writeFileSync(file, JSON.stringify({ token: 't-src', secret: 's-src' }));
+
+    const unlinkSpy = vi.spyOn(fs, 'unlinkSync').mockImplementation(() => {
+      throw new Error('EPERM: operation not permitted');
+    });
+    try {
+      const res = await runCli(['auth', 'keychain', 'migrate', '--delete-file']);
+      expect(res.exitCode).toBe(0);
+      expect(res.stderr.join('\n')).toContain('warning: could not remove');
+    } finally {
+      unlinkSpy.mockRestore();
+    }
+  });
 });

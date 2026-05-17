@@ -14,6 +14,7 @@ vi.mock('node:child_process', async (importOriginal) => {
 });
 
 import { registerDoctorCommand } from '../../src/commands/doctor.js';
+import { TOOL_PROFILES } from '../../src/mcp/tool-profiles.js';
 import { runCli } from '../helpers/cli.js';
 import { expectJsonEnvelopeShape } from '../helpers/contracts.js';
 
@@ -321,9 +322,13 @@ describe('doctor command', () => {
     expect(mcp.status).toBe('ok');
     expect(mcp.detail.serverInstantiated).toBe(true);
     expect(typeof mcp.detail.toolCount).toBe('number');
-    expect(mcp.detail.toolCount).toBeGreaterThan(0);
+    expect(mcp.detail.toolCount).toBe(TOOL_PROFILES.default.size);
     expect(Array.isArray(mcp.detail.tools)).toBe(true);
+    expect(mcp.detail.tools).toHaveLength(TOOL_PROFILES.default.size);
     expect(mcp.detail.transportsAvailable).toEqual(['stdio', 'http']);
+    expect(mcp.detail.message).toContain('default profile');
+    expect(mcp.detail.message).toContain(`mcp serve --tools all`);
+    expect(mcp.detail.message).toContain(`${TOOL_PROFILES.all.size}`);
   });
 
   it('P10: --list prints the registered check names without running any check', async () => {
@@ -397,6 +402,20 @@ describe('doctor command', () => {
       expect(typeof f.action).toBe('string');
       expect(typeof f.applied).toBe('boolean');
     }
+  });
+
+  it('--fix prints a Fixes: section with remediation entries', async () => {
+    // credentials check fails when no token/secret env vars are set.
+    // Running --fix without --yes returns a "manual" or "pass --yes" fix entry,
+    // which exercises the fixes loop at lines 1316-1323.
+    delete process.env.SWITCHBOT_TOKEN;
+    delete process.env.SWITCHBOT_SECRET;
+    const res = await runCli(registerDoctorCommand, [
+      'doctor', '--section', 'credentials', '--fix',
+    ]);
+    const combined = res.stdout.join('\n');
+    expect(combined).toContain('Fixes:');
+    expect(combined).toMatch(/credentials/);
   });
 
   it('P10: --probe runs the MQTT live-probe variant and tolerates failure as warn', async () => {
@@ -822,5 +841,46 @@ describe('doctor command', () => {
     } finally {
       delete process.env.SWITCHBOT_POLICY_PATH;
     }
+  });
+
+  // ---------------------------------------------------------------------
+  // Non-JSON human-mode output coverage
+  // ---------------------------------------------------------------------
+  it('non-JSON --list prints "Available checks:" followed by check names', async () => {
+    const res = await runCli(registerDoctorCommand, ['doctor', '--list']);
+    expect(res.exitCode).toBeNull();
+    const out = res.stdout.join('\n');
+    expect(out).toContain('Available checks:');
+    expect(out).toContain('credentials');
+    expect(out).toContain('mcp');
+    expect(out).toContain('catalog-schema');
+  });
+
+  it('non-JSON output shows icon (✓/!/✗) per check and a summary line', async () => {
+    process.env.SWITCHBOT_TOKEN = 't';
+    process.env.SWITCHBOT_SECRET = 's';
+    const res = await runCli(
+      registerDoctorCommand,
+      ['doctor', '--section', 'catalog-schema,mcp'],
+    );
+    const out = res.stdout.join('\n');
+    expect(out).toMatch(/[✓!✗]\s+catalog-schema/);
+    expect(out).toMatch(/[✓!✗]\s+mcp/);
+    expect(out).toMatch(/\d+ ok, \d+ warn, \d+ fail/);
+  });
+
+  it('--quiet suppresses ok checks but keeps failing checks and the summary', async () => {
+    // No credentials → credentials check fails; catalog-schema does not need live API
+    const res = await runCli(
+      registerDoctorCommand,
+      ['doctor', '--section', 'catalog-schema,credentials', '--quiet'],
+    );
+    const out = res.stdout.join('\n');
+    // The credentials check line (fail/warn) must appear
+    expect(out).toMatch(/[!✗]\s+credentials/);
+    // The catalog-schema ok check must be suppressed
+    expect(out).not.toMatch(/✓\s+catalog-schema/);
+    // Summary is always shown
+    expect(out).toMatch(/\d+ ok, \d+ warn, \d+ fail/);
   });
 });

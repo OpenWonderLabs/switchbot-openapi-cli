@@ -56,30 +56,30 @@
     "prepublishOnly": "npm test && npm run build && npm run smoke:pack-install"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
-    "ajv": "^8.18.0",
-    "ajv-formats": "^3.0.1",
     "axios": "^1.7.9",
-    "chalk": "^5.4.1",
-    "cli-table3": "^0.6.5",
-    "commander": "^12.1.0",
-    "croner": "^10.0.1",
-    "js-yaml": "^4.1.1",
     "mqtt": "^5.3.0",
-    "pino": "^9.0.0",
-    "uuid": "^11.0.5",
-    "yaml": "^2.8.3",
-    "zod": "^4.3.6"
+    "pino": "^9.0.0"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.10.7",
     "@types/uuid": "^10.0.0",
     "@vitest/coverage-v8": "^2.1.9",
+    "ajv": "^8.18.0",
+    "ajv-formats": "^3.0.1",
+    "chalk": "^5.4.1",
+    "cli-table3": "^0.6.5",
+    "commander": "^12.1.0",
+    "croner": "^10.0.1",
     "esbuild": "^0.28.0",
+    "js-yaml": "^4.1.1",
     "markdownlint-cli": "^0.48.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
-    "vitest": "^2.1.9"
+    "uuid": "^11.0.5",
+    "vitest": "^2.1.9",
+    "yaml": "^2.8.3",
+    "zod": "^4.3.6"
   }
 }

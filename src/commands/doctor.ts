@@ -11,6 +11,7 @@ import { DAILY_QUOTA, todayUsage } from '../utils/quota.js';
 import { AGENT_BOOTSTRAP_SCHEMA_VERSION } from './agent-bootstrap.js';
 import { CATALOG_SCHEMA_VERSION } from '../devices/catalog.js';
 import { createSwitchBotMcpServer, listRegisteredTools } from './mcp.js';
+import { TOOL_PROFILES } from '../mcp/tool-profiles.js';
 import { getReleaseMetadata } from '../version-notes.js';
 import { VERSION as currentVersion } from '../version.js';
 import {
@@ -899,6 +900,7 @@ function checkMcp(): Check {
   try {
     const server = createSwitchBotMcpServer();
     const tools = listRegisteredTools(server);
+    const allToolCount = TOOL_PROFILES.all.size;
     return {
       name: 'mcp',
       status: 'ok',
@@ -907,7 +909,7 @@ function checkMcp(): Check {
         toolCount: tools.length,
         tools,
         transportsAvailable: ['stdio', 'http'],
-        message: `${tools.length} tools registered; no network probe`,
+        message: `${tools.length} tools registered (default profile; use 'mcp serve --tools all' for ${allToolCount}); no network probe`,
       },
     };
   } catch (err) {

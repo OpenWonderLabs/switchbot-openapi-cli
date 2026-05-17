@@ -108,19 +108,36 @@ export function registerDevicesMetaCommand(devices: Command): void {
   // switchbot devices meta list
   meta
     .command('list')
-    .description('List all devices with local metadata')
+    .description('List devices with local metadata (hidden devices excluded by default)')
     .option('--hidden-only', 'Show only hidden devices')
-    .action((options: { hiddenOnly?: boolean }) => {
+    .option('--all', 'Include hidden devices (human-mode only; JSON always exports all records)')
+    .action((options: { hiddenOnly?: boolean; all?: boolean }) => {
       try {
         const file = loadDeviceMeta();
         let entries = Object.entries(file.devices);
-        if (options.hiddenOnly) entries = entries.filter(([, m]) => m.hidden);
+        if (options.hiddenOnly) {
+          entries = entries.filter(([, m]) => m.hidden);
+        } else if (!options.all && !isJsonMode()) {
+          // In human mode, hide hidden devices by default so the table is clean.
+          // JSON mode is used for machine export, so all records are included
+          // unless the caller is explicit with --hidden-only.
+          entries = entries.filter(([, m]) => !m.hidden);
+        }
+
+        if (options.all && isJsonMode()) {
+          console.error('warning: --all has no effect in JSON mode (all records are always exported)');
+        }
 
         if (entries.length === 0) {
           if (isJsonMode()) {
             printJson([]);
           } else {
-            console.log('No local metadata entries.');
+            const hiddenCount = Object.values(file.devices).filter((m) => m.hidden).length;
+            if (hiddenCount > 0 && !options.hiddenOnly && !options.all) {
+              console.log(`No visible metadata entries (${hiddenCount} hidden — use --all or --hidden-only to show).`);
+            } else {
+              console.log('No local metadata entries.');
+            }
             console.log(`File: ${getMetaFilePath()}`);
           }
           return;

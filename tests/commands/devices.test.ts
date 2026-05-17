@@ -785,6 +785,101 @@ describe('devices command', () => {
       expect(res.stderr.join('\n')).toContain('device offline');
     });
 
+    describe('batch mode / --strict', () => {
+      it('keeps exit 0 on partial failures by default', async () => {
+        apiMock.__instance.get.mockImplementation((url: string) => {
+          if (url === '/v1.1/devices/BATCH-OK/status') {
+            return Promise.resolve({ data: { body: { power: 'on' } } });
+          }
+          if (url === '/v1.1/devices/BATCH-FAIL/status') {
+            return Promise.reject(new Error('device offline'));
+          }
+          throw new Error(`unexpected url: ${url}`);
+        });
+
+        const res = await runCli(registerDevicesCommand, [
+          '--json', 'devices', 'status', '--ids', 'BATCH-OK,BATCH-FAIL',
+        ]);
+
+        expect(res.exitCode).toBeNull();
+        const parsed = JSON.parse(res.stdout.find((line) => line.trim().startsWith('{')) ?? '');
+        expect(parsed.data).toHaveLength(2);
+        expect(parsed.data[0]).toMatchObject({ deviceId: 'BATCH-OK', ok: true, power: 'on' });
+        expect(parsed.data[1]).toMatchObject({ deviceId: 'BATCH-FAIL', ok: false, error: 'device offline' });
+      });
+
+      it('exits 1 on partial failures when --strict is set', async () => {
+        apiMock.__instance.get.mockImplementation((url: string) => {
+          if (url === '/v1.1/devices/BATCH-OK/status') {
+            return Promise.resolve({ data: { body: { battery: 80 } } });
+          }
+          if (url === '/v1.1/devices/BATCH-FAIL/status') {
+            return Promise.reject(new Error('timeout'));
+          }
+          throw new Error(`unexpected url: ${url}`);
+        });
+
+        const res = await runCli(registerDevicesCommand, [
+          '--json', 'devices', 'status', '--ids', 'BATCH-OK,BATCH-FAIL', '--strict',
+        ]);
+
+        expect(res.exitCode).toBe(1);
+        const parsed = JSON.parse(res.stdout.find((line) => line.trim().startsWith('{')) ?? '');
+        expect(parsed.data).toHaveLength(2);
+        expect(parsed.data[0]).toMatchObject({ deviceId: 'BATCH-OK', ok: true, battery: 80 });
+        expect(parsed.data[1]).toMatchObject({ deviceId: 'BATCH-FAIL', ok: false, error: 'timeout' });
+      });
+
+      it('exits 1 with --strict when every batch status fails', async () => {
+        apiMock.__instance.get.mockRejectedValue(new Error('offline'));
+
+        const res = await runCli(registerDevicesCommand, [
+          '--json', 'devices', 'status', '--ids', 'FAIL-1,FAIL-2', '--strict',
+        ]);
+
+        expect(res.exitCode).toBe(1);
+        const parsed = JSON.parse(res.stdout.find((line) => line.trim().startsWith('{')) ?? '');
+        expect(parsed.data).toHaveLength(2);
+        expect(parsed.data[0]).toMatchObject({ deviceId: 'FAIL-1', ok: false, error: 'offline' });
+        expect(parsed.data[1]).toMatchObject({ deviceId: 'FAIL-2', ok: false, error: 'offline' });
+      });
+
+      it('keeps exit 0 with --strict when every batch status succeeds', async () => {
+        apiMock.__instance.get.mockImplementation((url: string) => {
+          if (url === '/v1.1/devices/BATCH-1/status') {
+            return Promise.resolve({ data: { body: { power: 'on' } } });
+          }
+          if (url === '/v1.1/devices/BATCH-2/status') {
+            return Promise.resolve({ data: { body: { power: 'off' } } });
+          }
+          throw new Error(`unexpected url: ${url}`);
+        });
+
+        const res = await runCli(registerDevicesCommand, [
+          '--json', 'devices', 'status', '--ids', 'BATCH-1,BATCH-2', '--strict',
+        ]);
+
+        expect(res.exitCode).toBeNull();
+        const parsed = JSON.parse(res.stdout.find((line) => line.trim().startsWith('{')) ?? '');
+        expect(parsed.data).toHaveLength(2);
+        expect(parsed.data[0]).toMatchObject({ deviceId: 'BATCH-1', ok: true, power: 'on' });
+        expect(parsed.data[1]).toMatchObject({ deviceId: 'BATCH-2', ok: true, power: 'off' });
+      });
+
+      it('warns on stderr when --strict is used with a single device ID', async () => {
+        apiMock.__instance.get.mockResolvedValue({
+          data: { body: { power: 'on' } },
+        });
+
+        const res = await runCli(registerDevicesCommand, [
+          'devices', 'status', 'SINGLE-DEV', '--strict',
+        ]);
+
+        expect(res.exitCode).toBeNull();
+        expect(res.stderr.join('\n')).toMatch(/--strict.*(no effect|batch)/i);
+      });
+    });
+
     it('supports --format=tsv', async () => {
       apiMock.__instance.get.mockResolvedValue({
         data: { body: { power: 'on', battery: 87, temperature: 22 } },

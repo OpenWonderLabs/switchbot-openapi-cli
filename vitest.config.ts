@@ -8,8 +8,35 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],
-      exclude: ['src/index.ts'],
+      exclude: [
+        'src/index.ts',
+        // I/O adapters — require live infrastructure; dispatcher.ts and format.ts are unit-testable and NOT excluded
+        'src/sinks/file.ts',
+        'src/sinks/homeassistant.ts',
+        'src/sinks/openclaw.ts',
+        'src/sinks/stdout.ts',
+        'src/sinks/telegram.ts',
+        'src/sinks/webhook.ts',
+        'src/commands/install.ts',   // system-level operations — require OS privilege
+        'src/commands/uninstall.ts', // system-level operations — require OS privilege
+        // Live infrastructure required: cannot be unit-tested
+        'src/mcp/device-history.ts', // MCP streaming protocol (live server required)
+        'src/mcp/events-subscription.ts', // MCP event subscription (live server required)
+        'src/mqtt/client.ts', // MQTT broker required
+        'src/llm/providers/anthropic.ts', // Anthropic API key + live endpoint required
+        'src/llm/providers/openai.ts', // OpenAI API key + live endpoint required
+      ],
       reporter: ['text', 'html'],
+      // Thresholds locked to post-2026-05-17 backfill actuals.
+      // Hard ceiling: see docs/coverage-annotations.md for excluded + structurally untestable files.
+      thresholds: {
+        lines: 81,
+        branches: 79,
+        'src/commands/**': {
+          lines: 75,
+          branches: 74,
+        },
+      },
     },
     clearMocks: true,
     restoreMocks: true,

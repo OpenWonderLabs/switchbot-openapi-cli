@@ -671,6 +671,26 @@ describe('switchbot rules (commander surface)', () => {
       fs.writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
     }
 
+    it('returns total:0 and empty summaries under --json when log is absent', async () => {
+      const logFile = path.join(tmpDir, 'noaudit.log');
+      const res = await runCli(['--json', 'rules', 'summary', '--file', logFile]);
+      expect(res.exitCode).toBe(0);
+      const body = JSON.parse(res.stdout[0]) as Record<string, unknown>;
+      const data = expectJsonEnvelopeContainingKeys(body, ['total', 'summaries']) as {
+        total: number;
+        summaries: unknown[];
+      };
+      expect(data.total).toBe(0);
+      expect(data.summaries).toEqual([]);
+    });
+
+    it('prints "no rule activity" in human mode when log is absent', async () => {
+      const logFile = path.join(tmpDir, 'noaudit.log');
+      const res = await runCli(['rules', 'summary', '--file', logFile]);
+      expect(res.exitCode).toBe(0);
+      expect(res.stdout.join('\n')).toContain('no rule activity');
+    });
+
     it('prints "(no rule activity)" when the audit log is empty', async () => {
       const f = path.join(tmpDir, 'audit-empty.log');
       fs.writeFileSync(f, '');
@@ -707,12 +727,51 @@ describe('switchbot rules (commander surface)', () => {
       const body = JSON.parse(stdout[0]) as { data: { summaries: Array<{ rule: string }> } };
       expect(body.data.summaries.every((s) => s.rule === 'rule-A')).toBe(true);
     });
+
+    it('prints a table in human mode when entries exist', async () => {
+      const f = path.join(tmpDir, 'audit-human.log');
+      const now = new Date().toISOString();
+      fs.writeFileSync(
+        f,
+        [
+          { t: now, kind: 'rule-fire', rule: { name: 'motion rule', triggerSource: 'mqtt', fireId: 'f1' }, result: 'ok', deviceId: 'D1', command: 'turnOn', parameter: null, commandType: 'command', dryRun: false },
+          { t: now, kind: 'rule-fire', rule: { name: 'motion rule', triggerSource: 'mqtt', fireId: 'f2' }, result: 'ok', deviceId: 'D1', command: 'turnOn', parameter: null, commandType: 'command', dryRun: false },
+        ]
+          .map((r) => JSON.stringify(r))
+          .join('\n') + '\n',
+      );
+      const { stdout, exitCode } = await runCli(['rules', 'summary', '--file', f]);
+      expect(exitCode).toBe(0);
+      const out = stdout.join('\n');
+      expect(out).toContain('motion rule');
+      expect(out).toContain('2'); // fires count
+    });
   });
 
   describe('rules last-fired', () => {
     function writeAudit(file: string, rows: unknown[]): void {
       fs.writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
     }
+
+    it('returns count:0 and empty entries under --json when log is absent', async () => {
+      const logFile = path.join(tmpDir, 'noaudit.log');
+      const res = await runCli(['--json', 'rules', 'last-fired', '--file', logFile]);
+      expect(res.exitCode).toBe(0);
+      const body = JSON.parse(res.stdout[0]) as Record<string, unknown>;
+      const data = expectJsonEnvelopeContainingKeys(body, ['count', 'entries']) as {
+        count: number;
+        entries: unknown[];
+      };
+      expect(data.count).toBe(0);
+      expect(data.entries).toEqual([]);
+    });
+
+    it('prints "no rule-fire entries" in human mode when log is absent', async () => {
+      const logFile = path.join(tmpDir, 'noaudit.log');
+      const res = await runCli(['rules', 'last-fired', '--file', logFile]);
+      expect(res.exitCode).toBe(0);
+      expect(res.stdout.join('\n')).toContain('no rule-fire entries');
+    });
 
     it('prints hint when no rule-fire entries exist', async () => {
       const f = path.join(tmpDir, 'audit-empty2.log');
@@ -749,6 +808,33 @@ describe('switchbot rules (commander surface)', () => {
       const { stdout } = await runCli(['--json', 'rules', 'last-fired', '--file', f, '-n', '5']);
       const body = JSON.parse(stdout[0]) as { data: { count: number } };
       expect(body.data.count).toBe(5);
+    });
+
+    it('prints human-readable rows when entries exist', async () => {
+      const f = path.join(tmpDir, 'audit-lfhuman.log');
+      const ts = '2026-04-25T10:00:00.000Z';
+      fs.writeFileSync(
+        f,
+        JSON.stringify({
+          t: ts, kind: 'rule-fire', rule: { name: 'night-motion', triggerSource: 'mqtt', fireId: 'f1' },
+          result: 'ok', deviceId: 'LAMP', command: 'turnOn', parameter: null, commandType: 'command', dryRun: false,
+        }) + '\n',
+      );
+      const { stdout, exitCode } = await runCli(['rules', 'last-fired', '--file', f]);
+      expect(exitCode).toBe(0);
+      const out = stdout.join('\n');
+      expect(out).toContain('night-motion');
+      expect(out).toContain(ts);
+    });
+  });
+
+  describe('rules trace-explain', () => {
+    it('exits 1 when audit log file does not exist', async () => {
+      const { exitCode, stderr } = await runCli([
+        'rules', 'trace-explain', '--file', path.join(tmpDir, 'no-such-audit.log'),
+      ]);
+      expect(exitCode).toBe(1);
+      expect(stderr.join('\n')).toMatch(/not found/i);
     });
   });
 });

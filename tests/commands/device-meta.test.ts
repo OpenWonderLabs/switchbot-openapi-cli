@@ -104,4 +104,60 @@ describe('devices meta', () => {
     const res = await runCli(registerDevicesCommand, ['devices', 'meta', 'set', 'LAMP-1', '--alias', 'myAlias']);
     expect(res.exitCode).toBeNull();
   });
+
+  it('meta list excludes hidden devices by default', async () => {
+    await runCli(registerDevicesCommand, ['devices', 'meta', 'set', 'LAMP-1', '--alias', 'L1']);
+    await runCli(registerDevicesCommand, ['devices', 'meta', 'set', 'LAMP-2', '--hide']);
+    const res = await runCli(registerDevicesCommand, ['devices', 'meta', 'list']);
+    const out = res.stdout.join('\n');
+    expect(out).toContain('LAMP-1');
+    expect(out).not.toContain('LAMP-2');
+  });
+
+  it('meta list --all includes hidden devices', async () => {
+    await runCli(registerDevicesCommand, ['devices', 'meta', 'set', 'LAMP-1', '--alias', 'L1']);
+    await runCli(registerDevicesCommand, ['devices', 'meta', 'set', 'LAMP-2', '--hide']);
+    const res = await runCli(registerDevicesCommand, ['devices', 'meta', 'list', '--all']);
+    const out = res.stdout.join('\n');
+    expect(out).toContain('LAMP-1');
+    expect(out).toContain('LAMP-2');
+  });
+
+  it('meta list --hidden-only shows only hidden devices', async () => {
+    await runCli(registerDevicesCommand, ['devices', 'meta', 'set', 'LAMP-1', '--alias', 'L1']);
+    await runCli(registerDevicesCommand, ['devices', 'meta', 'set', 'LAMP-2', '--hide']);
+    const res = await runCli(registerDevicesCommand, ['devices', 'meta', 'list', '--hidden-only']);
+    const out = res.stdout.join('\n');
+    expect(out).not.toContain('LAMP-1');
+    expect(out).toContain('LAMP-2');
+  });
+
+  it('meta list --json includes hidden devices by default (machine-readable export)', async () => {
+    await runCli(registerDevicesCommand, ['devices', 'meta', 'set', 'LAMP-1', '--alias', 'L1']);
+    await runCli(registerDevicesCommand, ['devices', 'meta', 'set', 'LAMP-2', '--hide']);
+    const res = await runCli(registerDevicesCommand, ['devices', 'meta', 'list', '--json']);
+    const raw = res.stdout.join('\n');
+    const parsed = JSON.parse(raw) as { data: Array<{ deviceId: string }> };
+    const ids = parsed.data.map((e) => e.deviceId);
+    expect(ids).toContain('LAMP-1');
+    expect(ids).toContain('LAMP-2');
+  });
+
+  it('meta list --json --hidden-only returns only hidden devices', async () => {
+    await runCli(registerDevicesCommand, ['devices', 'meta', 'set', 'LAMP-1', '--alias', 'L1']);
+    await runCli(registerDevicesCommand, ['devices', 'meta', 'set', 'LAMP-2', '--hide']);
+    const res = await runCli(registerDevicesCommand, ['devices', 'meta', 'list', '--json', '--hidden-only']);
+    const raw = res.stdout.join('\n');
+    const parsed = JSON.parse(raw) as { data: Array<{ deviceId: string }> };
+    const ids = parsed.data.map((e) => e.deviceId);
+    expect(ids).not.toContain('LAMP-1');
+    expect(ids).toContain('LAMP-2');
+  });
+
+  it('meta list --all --json warns that --all has no effect in JSON mode', async () => {
+    await runCli(registerDevicesCommand, ['devices', 'meta', 'set', 'LAMP-1', '--alias', 'L1']);
+    await runCli(registerDevicesCommand, ['devices', 'meta', 'set', 'LAMP-2', '--hide']);
+    const res = await runCli(registerDevicesCommand, ['devices', 'meta', 'list', '--all', '--json']);
+    expect(res.stderr.join('\n')).toContain('--all has no effect');
+  });
 });
