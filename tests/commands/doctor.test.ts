@@ -825,4 +825,45 @@ describe('doctor command', () => {
       delete process.env.SWITCHBOT_POLICY_PATH;
     }
   });
+
+  // ---------------------------------------------------------------------
+  // Non-JSON human-mode output coverage
+  // ---------------------------------------------------------------------
+  it('non-JSON --list prints "Available checks:" followed by check names', async () => {
+    const res = await runCli(registerDoctorCommand, ['doctor', '--list']);
+    expect(res.exitCode).toBeNull();
+    const out = res.stdout.join('\n');
+    expect(out).toContain('Available checks:');
+    expect(out).toContain('credentials');
+    expect(out).toContain('mcp');
+    expect(out).toContain('catalog-schema');
+  });
+
+  it('non-JSON output shows icon (✓/!/✗) per check and a summary line', async () => {
+    process.env.SWITCHBOT_TOKEN = 't';
+    process.env.SWITCHBOT_SECRET = 's';
+    const res = await runCli(
+      registerDoctorCommand,
+      ['doctor', '--section', 'catalog-schema,mcp'],
+    );
+    const out = res.stdout.join('\n');
+    expect(out).toMatch(/[✓!✗]\s+catalog-schema/);
+    expect(out).toMatch(/[✓!✗]\s+mcp/);
+    expect(out).toMatch(/\d+ ok, \d+ warn, \d+ fail/);
+  });
+
+  it('--quiet suppresses ok checks but keeps failing checks and the summary', async () => {
+    // No credentials → credentials check fails; catalog-schema does not need live API
+    const res = await runCli(
+      registerDoctorCommand,
+      ['doctor', '--section', 'catalog-schema,credentials', '--quiet'],
+    );
+    const out = res.stdout.join('\n');
+    // The credentials check line (fail/warn) must appear
+    expect(out).toMatch(/[!✗]\s+credentials/);
+    // The catalog-schema ok check must be suppressed
+    expect(out).not.toMatch(/✓\s+catalog-schema/);
+    // Summary is always shown
+    expect(out).toMatch(/\d+ ok, \d+ warn, \d+ fail/);
+  });
 });
