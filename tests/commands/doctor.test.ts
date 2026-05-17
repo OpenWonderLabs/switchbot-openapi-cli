@@ -401,6 +401,20 @@ describe('doctor command', () => {
     }
   });
 
+  it('--fix prints a Fixes: section with remediation entries', async () => {
+    // credentials check fails when no token/secret env vars are set.
+    // Running --fix without --yes returns a "manual" or "pass --yes" fix entry,
+    // which exercises the fixes loop at lines 1316-1323.
+    delete process.env.SWITCHBOT_TOKEN;
+    delete process.env.SWITCHBOT_SECRET;
+    const res = await runCli(registerDoctorCommand, [
+      'doctor', '--section', 'credentials', '--fix',
+    ]);
+    const combined = res.stdout.join('\n');
+    expect(combined).toContain('Fixes:');
+    expect(combined).toMatch(/credentials/);
+  });
+
   it('P10: --probe runs the MQTT live-probe variant and tolerates failure as warn', async () => {
     process.env.SWITCHBOT_TOKEN = 't';
     process.env.SWITCHBOT_SECRET = 's';
