@@ -15,12 +15,11 @@ export default defineConfig({
         'src/commands/uninstall.ts', // system-level operations — require OS privilege
       ],
       reporter: ['text', 'html'],
-      // Thresholds set to current actual coverage. Original plan targeted 80%/85%
-      // but rules.ts (57%), mcp.ts (68%), and policy.ts (61%) are not yet backfilled.
-      // Raise these numbers incrementally as coverage is added.
+      // Thresholds locked to post-2026-05-16 backfill actuals.
+      // Remaining ceiling: rules.ts (57%), mcp.ts (68%) require live infrastructure.
       thresholds: {
-        lines: 75,
-        branches: 75,
+        lines: 79,
+        branches: 79,
         'src/commands/**': {
           lines: 75,
           branches: 75,
