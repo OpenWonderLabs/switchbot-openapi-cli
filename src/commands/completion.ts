@@ -370,6 +370,8 @@ _switchbot() {
     rest)
       if [[ "$words[2]" == "webhook" && "$words[3]" == "update" ]]; then
         _values 'flag' '--enable' '--disable'
+      elif [[ "$words[2]" == "auth" && "$words[3]" == "keychain" ]]; then
+        _describe 'auth keychain' auth_keychain_sub
       fi
       ;;
   esac
@@ -537,6 +539,7 @@ Register-ArgumentCompleter -Native -CommandName switchbot -ScriptBlock {
   if ($prev -eq '--table-style') { return _emit $tableStyleVals }
   if ($prev -eq '--backoff') { return _emit $backoffVals }
   if ($prev -eq '--cache') { return _emit $cacheVals }
+  if ($tokens[1] -eq 'auth' -and $prev -eq 'keychain') { return _emit $authKeychainSub }
 
   if ($count -le 2) { return _emit ($top + $globalOpts) }
 
