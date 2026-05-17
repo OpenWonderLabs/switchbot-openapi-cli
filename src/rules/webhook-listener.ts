@@ -197,6 +197,9 @@ export class WebhookListener {
     const body = await readLimitedBody(req, MAX_BODY_BYTES);
     if (body === null) {
       res.writeHead(413);
+      // Destroy the socket after the 413 response has flushed so the connection
+      // is not held open indefinitely by a client that keeps streaming.
+      res.on('finish', () => req.destroy());
       res.end();
       return;
     }

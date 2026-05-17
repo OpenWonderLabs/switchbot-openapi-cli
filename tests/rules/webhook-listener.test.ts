@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -217,6 +218,32 @@ describe('WebhookListener', () => {
     const res = await postTo(port, '/big', { token: 'secret-bearer', body: oversized });
     expect(res.status).toBe(413);
     expect(fires).toHaveLength(0);
+  });
+
+  it('server closes TCP connection after sending 413 for oversized body', async () => {
+    const port = await startListener([webhookRule('big', '/big')]);
+    const socketClosed = await new Promise<boolean>((resolve, reject) => {
+      const sock = net.createConnection({ host: '127.0.0.1', port });
+      let got413 = false;
+      sock.once('connect', () => {
+        sock.write(
+          'POST /big HTTP/1.1\r\n' +
+          'Host: 127.0.0.1\r\n' +
+          'Authorization: Bearer secret-bearer\r\n' +
+          'Transfer-Encoding: chunked\r\n' +
+          '\r\n',
+        );
+        const piece = 'x'.repeat(1024);
+        for (let i = 0; i < 20; i++) {
+          sock.write(`${piece.length.toString(16)}\r\n${piece}\r\n`);
+        }
+      });
+      sock.on('data', (d: Buffer) => { if (d.toString().includes('413')) got413 = true; });
+      sock.on('close', () => resolve(got413));
+      sock.on('error', reject);
+      setTimeout(() => reject(new Error('server did not close socket within 3s')), 3000);
+    });
+    expect(socketClosed).toBe(true);
   });
 
   it('body exactly at MAX_BODY_BYTES (16 KiB) is accepted → 202', async () => {

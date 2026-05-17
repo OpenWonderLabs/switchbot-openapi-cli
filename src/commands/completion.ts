@@ -71,6 +71,13 @@ const BACKOFF_VALUES = ['linear', 'exponential'] as const;
 const CACHE_VALUE_SUGGESTIONS = ['off', 'auto', '30s', '5m', '1h'] as const;
 const COMMAND_TYPE_VALUES = ['command', 'customize'] as const;
 
+const POLICY_SUBCOMMANDS = ['validate', 'new', 'migrate', 'diff', 'add-rule', 'backup', 'restore'] as const;
+const RULES_SUBCOMMANDS = ['lint', 'list', 'run', 'tail', 'replay', 'reload', 'webhook-rotate-token', 'webhook-show-token', 'suggest', 'conflicts', 'doctor', 'summary', 'last-fired', 'explain', 'trace-explain', 'simulate'] as const;
+const AUTH_SUBCOMMANDS = ['keychain'] as const;
+const AUTH_KEYCHAIN_SUBCOMMANDS = ['describe', 'get', 'set', 'delete', 'migrate'] as const;
+const STATUS_SYNC_SUBCOMMANDS = ['run', 'start', 'stop', 'status'] as const;
+const DAEMON_SUBCOMMANDS = ['start', 'stop', 'status', 'reload'] as const;
+
 function joinWords(values: readonly string[]): string {
   return values.join(' ');
 }
@@ -109,6 +116,12 @@ _switchbot_completion() {
   local history_sub="${joinWords(HISTORY_SUBCOMMANDS)}"
   local plan_sub="${joinWords(PLAN_SUBCOMMANDS)}"
   local completion_shells="${joinWords(COMPLETION_SHELLS)}"
+  local policy_sub="${joinWords(POLICY_SUBCOMMANDS)}"
+  local rules_sub="${joinWords(RULES_SUBCOMMANDS)}"
+  local auth_sub="${joinWords(AUTH_SUBCOMMANDS)}"
+  local auth_keychain_sub="${joinWords(AUTH_KEYCHAIN_SUBCOMMANDS)}"
+  local status_sync_sub="${joinWords(STATUS_SYNC_SUBCOMMANDS)}"
+  local daemon_sub="${joinWords(DAEMON_SUBCOMMANDS)}"
   local format_vals="${joinWords(FORMAT_VALUES)}"
   local global_opts="${joinWords(GLOBAL_OPTIONS)}"
 
@@ -194,6 +207,33 @@ _switchbot_completion() {
         COMPREPLY=( $(compgen -W "\${completion_shells}" -- "\${cur}") )
       fi
       ;;
+    policy)
+      if [[ \${cword} -eq 2 ]]; then
+        COMPREPLY=( $(compgen -W "\${policy_sub}" -- "\${cur}") )
+      fi
+      ;;
+    rules)
+      if [[ \${cword} -eq 2 ]]; then
+        COMPREPLY=( $(compgen -W "\${rules_sub}" -- "\${cur}") )
+      fi
+      ;;
+    auth)
+      if [[ \${cword} -eq 2 ]]; then
+        COMPREPLY=( $(compgen -W "\${auth_sub}" -- "\${cur}") )
+      elif [[ "\${words[2]}" == "keychain" && \${cword} -eq 3 ]]; then
+        COMPREPLY=( $(compgen -W "\${auth_keychain_sub}" -- "\${cur}") )
+      fi
+      ;;
+    status-sync)
+      if [[ \${cword} -eq 2 ]]; then
+        COMPREPLY=( $(compgen -W "\${status_sync_sub}" -- "\${cur}") )
+      fi
+      ;;
+    daemon)
+      if [[ \${cword} -eq 2 ]]; then
+        COMPREPLY=( $(compgen -W "\${daemon_sub}" -- "\${cur}") )
+      fi
+      ;;
     *)
       COMPREPLY=( $(compgen -W "\${global_opts}" -- "\${cur}") )
       ;;
@@ -267,6 +307,12 @@ _switchbot() {
   history_sub=('show:Print recent audit entries' 'replay:Re-run one audited command' 'range:Query a time range' 'stats:Aggregate audit results' 'verify:Verify audit log integrity' 'aggregate:Aggregate audit fields')
   plan_sub=('schema:Print the plan schema' 'validate:Validate a plan file' 'suggest:Draft a plan from intent + devices' 'run:Validate and execute a plan' 'save:Save a plan for approval' 'list:List saved plans' 'review:Inspect a saved plan' 'approve:Approve a saved plan' 'execute:Run an approved plan')
   completion_shells=(${joinQuoted(COMPLETION_SHELLS)})
+  policy_sub=(${joinQuoted(POLICY_SUBCOMMANDS)})
+  rules_sub=(${joinQuoted(RULES_SUBCOMMANDS)})
+  auth_sub=(${joinQuoted(AUTH_SUBCOMMANDS)})
+  auth_keychain_sub=(${joinQuoted(AUTH_KEYCHAIN_SUBCOMMANDS)})
+  status_sync_sub=(${joinQuoted(STATUS_SYNC_SUBCOMMANDS)})
+  daemon_sub=(${joinQuoted(DAEMON_SUBCOMMANDS)})
 
   local global_opts
   global_opts=(
@@ -314,6 +360,11 @@ _switchbot() {
         history)    _describe 'history'    history_sub ;;
         plan)       _describe 'plan'       plan_sub ;;
         completion) _values 'shell' $completion_shells ;;
+        policy) _describe 'policy' policy_sub ;;
+        rules) _describe 'rules' rules_sub ;;
+        auth) _describe 'auth' auth_sub ;;
+        status-sync) _describe 'status-sync' status_sync_sub ;;
+        daemon) _describe 'daemon' daemon_sub ;;
       esac
       ;;
     rest)
@@ -417,6 +468,22 @@ complete -c switchbot -n '__fish_seen_subcommand_from plan' -a '${joinWords(PLAN
 
 # completion
 complete -c switchbot -n '__fish_seen_subcommand_from completion' -a '${joinWords(COMPLETION_SHELLS)}'
+
+# policy
+complete -c switchbot -n '__fish_seen_subcommand_from policy' -a '${joinWords(POLICY_SUBCOMMANDS)}'
+
+# rules
+complete -c switchbot -n '__fish_seen_subcommand_from rules' -a '${joinWords(RULES_SUBCOMMANDS)}'
+
+# auth
+complete -c switchbot -n '__fish_seen_subcommand_from auth' -a '${joinWords(AUTH_SUBCOMMANDS)}'
+complete -c switchbot -n '__fish_seen_subcommand_from auth; and __fish_seen_subcommand_from keychain' -a '${joinWords(AUTH_KEYCHAIN_SUBCOMMANDS)}'
+
+# status-sync
+complete -c switchbot -n '__fish_seen_subcommand_from status-sync' -a '${joinWords(STATUS_SYNC_SUBCOMMANDS)}'
+
+# daemon
+complete -c switchbot -n '__fish_seen_subcommand_from daemon' -a '${joinWords(DAEMON_SUBCOMMANDS)}'
 `;
 
 const POWERSHELL_SCRIPT = `# switchbot PowerShell completion
@@ -444,6 +511,12 @@ Register-ArgumentCompleter -Native -CommandName switchbot -ScriptBlock {
   $historySub = ${joinPsArray(HISTORY_SUBCOMMANDS)}
   $planSub = ${joinPsArray(PLAN_SUBCOMMANDS)}
   $shells = ${joinPsArray(COMPLETION_SHELLS)}
+  $policySub = ${joinPsArray(POLICY_SUBCOMMANDS)}
+  $rulesSub = ${joinPsArray(RULES_SUBCOMMANDS)}
+  $authSub = ${joinPsArray(AUTH_SUBCOMMANDS)}
+  $authKeychainSub = ${joinPsArray(AUTH_KEYCHAIN_SUBCOMMANDS)}
+  $statusSyncSub = ${joinPsArray(STATUS_SYNC_SUBCOMMANDS)}
+  $daemonSub = ${joinPsArray(DAEMON_SUBCOMMANDS)}
   $formatVals = ${joinPsArray(FORMAT_VALUES)}
   $tableStyleVals = ${joinPsArray(TABLE_STYLE_VALUES)}
   $backoffVals = ${joinPsArray(BACKOFF_VALUES)}
@@ -485,6 +558,14 @@ Register-ArgumentCompleter -Native -CommandName switchbot -ScriptBlock {
       if ($tokens[2] -eq 'update') { return _emit (('--enable','--disable') + $globalOpts) }
     }
     'completion' { if ($count -eq 3) { return _emit $shells } }
+    'policy'     { if ($count -eq 3) { return _emit $policySub } }
+    'rules'      { if ($count -eq 3) { return _emit $rulesSub } }
+    'auth'       {
+      if ($count -eq 3) { return _emit $authSub }
+      if ($tokens[2] -eq 'keychain' -and $count -eq 4) { return _emit $authKeychainSub }
+    }
+    'status-sync' { if ($count -eq 3) { return _emit $statusSyncSub } }
+    'daemon'     { if ($count -eq 3) { return _emit $daemonSub } }
   }
 
   return _emit $globalOpts
