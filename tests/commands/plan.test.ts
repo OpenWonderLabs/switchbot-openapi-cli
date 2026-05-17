@@ -484,6 +484,7 @@ describe('plan command', () => {
       planStoreMock.loadPlanRecord.mockReturnValue(null);
       const res = await runCli(registerPlanCommand, ['plan', 'review', MOCK_ID]);
       expect(res.exitCode).toBe(2);
+      expect(res.stderr.join('\n')).toMatch(/not found/i);
     });
 
     it('plan approve transitions pending to approved', async () => {
@@ -514,7 +515,7 @@ describe('plan command', () => {
       });
       const res = await runCli(registerPlanCommand, ['plan', 'approve', MOCK_ID]);
       expect(res.exitCode).toBe(2);
-      expect(res.stderr.join('\n')).toMatch(/rejected/i);
+      expect(res.stderr.join('\n')).toMatch(/was rejected/i);
     });
 
     it('plan approve --json returns ok:true', async () => {
@@ -529,6 +530,89 @@ describe('plan command', () => {
       const out = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join('')) as Record<string, unknown>;
       const data = expectJsonEnvelopeContainingKeys(out, ['ok', 'planId', 'status']) as { ok: boolean };
       expect(data.ok).toBe(true);
+    });
+  });
+
+  describe('plan execute', () => {
+    const MOCK_ID = '00000000-0000-4000-8000-000000000002';
+
+    it('executes an approved plan and marks it executed', async () => {
+      planStoreMock.loadPlanRecord.mockReturnValue({
+        planId: MOCK_ID,
+        status: 'approved',
+        createdAt: '2024-01-01T00:00:00Z',
+        approvedAt: '2024-01-01T01:00:00Z',
+        plan: { version: '1.0', steps: [{ type: 'command', deviceId: 'BOT1', command: 'turnOn' }] },
+      });
+      planStoreMock.updatePlanRecord.mockReturnValue({
+        planId: MOCK_ID, status: 'executed', createdAt: '2024-01-01T00:00:00Z', plan: { version: '1.0', steps: [] },
+      });
+      apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body: {} } });
+
+      const res = await runCli(registerPlanCommand, ['plan', 'execute', MOCK_ID]);
+      expect(res.exitCode).toBeNull();
+      expect(planStoreMock.updatePlanRecord).toHaveBeenCalledWith(
+        MOCK_ID,
+        expect.objectContaining({ status: 'executed' }),
+      );
+    });
+
+    it('exits 2 when plan is not in approved status', async () => {
+      planStoreMock.loadPlanRecord.mockReturnValue({
+        planId: MOCK_ID, status: 'pending', createdAt: '2024-01-01T00:00:00Z', plan: { version: '1.0', steps: [] },
+      });
+      const res = await runCli(registerPlanCommand, ['plan', 'execute', MOCK_ID]);
+      expect(res.exitCode).toBe(2);
+      expect(res.stderr.join('\n')).toMatch(/pending/i);
+    });
+
+    it('exits 2 when plan is not found', async () => {
+      planStoreMock.loadPlanRecord.mockReturnValue(null);
+      const res = await runCli(registerPlanCommand, ['plan', 'execute', MOCK_ID]);
+      expect(res.exitCode).toBe(2);
+      expect(res.stderr.join('\n')).toMatch(/not found/i);
+    });
+
+    it('marks plan as failed when execution errors', async () => {
+      planStoreMock.loadPlanRecord.mockReturnValue({
+        planId: MOCK_ID,
+        status: 'approved',
+        createdAt: '2024-01-01T00:00:00Z',
+        approvedAt: '2024-01-01T01:00:00Z',
+        plan: { version: '1.0', steps: [{ type: 'command', deviceId: 'BOT1', command: 'turnOn' }] },
+      });
+      planStoreMock.updatePlanRecord.mockReturnValue({
+        planId: MOCK_ID, status: 'failed', createdAt: '2024-01-01T00:00:00Z', plan: { version: '1.0', steps: [] },
+      });
+      apiMock.__instance.post.mockRejectedValue(new Error('network error'));
+
+      const res = await runCli(registerPlanCommand, ['plan', 'execute', MOCK_ID]);
+      expect(res.exitCode).toBe(1);
+      expect(planStoreMock.updatePlanRecord).toHaveBeenCalledWith(
+        MOCK_ID,
+        expect.objectContaining({ status: 'failed' }),
+      );
+    });
+
+    it('plan execute --json returns ran:true on success', async () => {
+      planStoreMock.loadPlanRecord.mockReturnValue({
+        planId: MOCK_ID,
+        status: 'approved',
+        createdAt: '2024-01-01T00:00:00Z',
+        approvedAt: '2024-01-01T01:00:00Z',
+        plan: { version: '1.0', steps: [{ type: 'command', deviceId: 'BOT1', command: 'turnOn' }] },
+      });
+      planStoreMock.updatePlanRecord.mockReturnValue({
+        planId: MOCK_ID, status: 'executed', createdAt: '2024-01-01T00:00:00Z', plan: { version: '1.0', steps: [] },
+      });
+      apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body: {} } });
+
+      const res = await runCli(registerPlanCommand, ['--json', 'plan', 'execute', MOCK_ID]);
+      expect(res.exitCode).toBeNull();
+      const out = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join('')) as Record<string, unknown>;
+      const data = expectJsonEnvelopeContainingKeys(out, ['ran', 'planId', 'succeeded']) as { ran: boolean; succeeded: boolean };
+      expect(data.ran).toBe(true);
+      expect(data.succeeded).toBe(true);
     });
   });
 });
