@@ -269,6 +269,7 @@ describe('set-token platform keychain hint', () => {
 
   beforeEach(() => {
     configMock.saveConfig.mockReset();
+    keychainMock.mockReset();
     savedPlatformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform');
     keychainMock.mockResolvedValue({
       name: 'file',
