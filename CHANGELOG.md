@@ -29,6 +29,28 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **`devices expand` supports lighting commands**: `setBrightness` (`--brightness`), `setColor` (`--color`), and `setColorTemperature` (`--color-temp`) flags now expand for Color Bulb, Strip Light, Ceiling Light, and similar devices.
 
+## [3.6.3]
+
+### Fixed
+
+- **Webhook listener port race** (`webhook-listener.ts`): read `server.address()` synchronously inside the `listening` callback to prevent a stale port on Windows IOCP.
+- **Webhook 413 socket leak**: changed `req.destroy()` to `req.resume()` so the 413 response flushes before the connection is torn down; socket is destroyed on `res.finish`.
+- **`plan suggest` exit code**: missing `--device` now exits 2 (usage error) instead of 1.
+- **`plan suggest --devices` alias**: added `--devices` as a repeatable alias for `--device`; mixed usage preserves argv insertion order.
+- **`devices status --strict`**: added `--strict` flag that exits 1 if any batch device fetch fails.
+- **`device-meta list` hidden filter**: human mode now hides hidden devices by default; `--all` shows everything; JSON always exports all records.
+- **`doctor` MCP message**: now reports the default-profile tool count and hints at `--tools all`.
+- **`quota status` reset time**: "Remaining budget" line now includes the local reset time.
+- **`policy/validate` CJS interop**: replaced `createRequire` hack with a static `import` for `ajv-formats`, fixing esbuild bundling.
+- **`@modelcontextprotocol/sdk` bundled**: moved from `dependencies` to `devDependencies`; esbuild now inlines it, reducing install footprint.
+
+### Added
+
+- Shell completions for `policy`, `rules`, `auth keychain`, `status-sync`, and `daemon` command groups (bash / zsh / fish / PowerShell).
+- `TESTING.md`: three coverage conventions (exit-path tests, option smoke tests, message keyword assertions).
+- Layered coverage thresholds in `vitest.config.ts` (global lines ≥ 81%, `src/commands` lines ≥ 75%).
+- Test backfill: 2581 tests (+116 vs 3.6.2) covering auth migrate, completion, config, device-meta, devices, doctor, plan, quota, rules, webhook-listener, status-sync manager, daemon socket path/state, and bundle self-containment.
+
 ## [3.6.2]
 
 ### Added
