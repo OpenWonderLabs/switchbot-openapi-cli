@@ -25,7 +25,7 @@ export default defineConfig({
       // Hard ceiling: see docs/coverage-annotations.md for excluded + structurally untestable files.
       thresholds: {
         lines: 81,
-        branches: 78,
+        branches: 79,
         'src/commands/**': {
           lines: 75,
           branches: 74,
