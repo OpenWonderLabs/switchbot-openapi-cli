@@ -357,6 +357,28 @@ describe('auth keychain migrate', () => {
     expect(res.stderr.join('\n')).toContain('keychain write failed');
   });
 
+  it('exits 1 when source config.json contains invalid JSON', async () => {
+    const file = path.join(tmpHome, '.switchbot', 'config.json');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, 'THIS IS NOT JSON');
+    const store = makeStore({ writable: true });
+    selectMock.mockResolvedValue(store);
+    const res = await runCli(['auth', 'keychain', 'migrate']);
+    expect(res.exitCode).toBe(1);
+    expect(res.stderr.join('\n')).toMatch(/failed to parse/i);
+  });
+
+  it('exits 1 when source config.json contains a non-object (array)', async () => {
+    const file = path.join(tmpHome, '.switchbot', 'config.json');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify([1, 2, 3]));
+    const store = makeStore({ writable: true });
+    selectMock.mockResolvedValue(store);
+    const res = await runCli(['auth', 'keychain', 'migrate']);
+    expect(res.exitCode).toBe(1);
+    expect(res.stderr.join('\n')).toMatch(/failed to parse/i);
+  });
+
   it('exits 0 but logs a warning when --delete-file cleanup throws', async () => {
     const store = makeStore({ writable: true });
     selectMock.mockResolvedValue(store);
