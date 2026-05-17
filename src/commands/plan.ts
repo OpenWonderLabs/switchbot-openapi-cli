@@ -470,6 +470,8 @@ against the live API without executing any mutations.
       // Preserve argv order across --device / --devices: Commander stores each spelling in its
       // own array, so [...device, ...devices] would reorder mixed input like
       // "--device A --devices B --device C" → A, C, B.  Scan process.argv instead.
+      // (command.parseOptions() returns tokens but does not split across option-name variants,
+      // so it cannot restore cross-variant insertion order either.)
       const allDevices: string[] = [];
       const raw = process.argv;
       for (let i = 0; i < raw.length; i++) {

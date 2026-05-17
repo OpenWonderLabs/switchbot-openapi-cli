@@ -380,6 +380,8 @@ Examples:
         });
 
         if (options.strict) {
+          // --strict is batch-only: single-device fetches have no ok-flag array to evaluate,
+          // so there is nothing to translate into a non-zero exit code.
           console.error('warning: --strict has no effect without --ids or multiple device IDs (batch mode only)');
         }
         const body = annotateStatusPayload(deviceId, await fetchDeviceStatus(deviceId));

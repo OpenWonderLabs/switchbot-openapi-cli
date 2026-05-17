@@ -249,7 +249,7 @@ const ZSH_SCRIPT = `# switchbot zsh completion
 #   source <(switchbot completion zsh)
 
 _switchbot() {
-  local -a top_cmds config_sub devices_sub scenes_sub webhook_sub events_sub quota_sub catalog_sub cache_sub history_sub plan_sub completion_shells
+  local -a top_cmds config_sub devices_sub scenes_sub webhook_sub events_sub quota_sub catalog_sub cache_sub history_sub plan_sub completion_shells policy_sub rules_sub auth_sub auth_keychain_sub status_sync_sub daemon_sub
   top_cmds=(
     'config:Manage API credentials'
     'devices:List and control devices'
@@ -539,6 +539,11 @@ Register-ArgumentCompleter -Native -CommandName switchbot -ScriptBlock {
   if ($prev -eq '--table-style') { return _emit $tableStyleVals }
   if ($prev -eq '--backoff') { return _emit $backoffVals }
   if ($prev -eq '--cache') { return _emit $cacheVals }
+  # Two conditions handle auth keychain completions:
+  # 1. Below (before $count guard): trailing-space case — empty wordToComplete absent from
+  #    CommandElements keeps $count at 3, so this fires when cursor is after "keychain ".
+  # 2. Inside the switch ('auth' branch): partial-word case — $count is 4 and $tokens[3]
+  #    is the in-progress word.  The two conditions are mutually exclusive.
   if ($tokens[1] -eq 'auth' -and $prev -eq 'keychain') { return _emit $authKeychainSub }
 
   if ($count -le 2) { return _emit ($top + $globalOpts) }

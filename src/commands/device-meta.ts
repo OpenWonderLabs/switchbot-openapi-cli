@@ -110,7 +110,7 @@ export function registerDevicesMetaCommand(devices: Command): void {
     .command('list')
     .description('List devices with local metadata (hidden devices excluded by default)')
     .option('--hidden-only', 'Show only hidden devices')
-    .option('--all', 'Include hidden devices')
+    .option('--all', 'Include hidden devices (human-mode only; JSON always exports all records)')
     .action((options: { hiddenOnly?: boolean; all?: boolean }) => {
       try {
         const file = loadDeviceMeta();

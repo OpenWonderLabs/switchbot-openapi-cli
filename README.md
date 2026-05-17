@@ -63,7 +63,7 @@ Under the hood every surface shares the same catalog, cache, and HMAC client —
 - 🎨 **Dual output modes** — colorized tables by default; `--json` passthrough for `jq` and scripting
 - 🔐 **Secure credentials** — HMAC-SHA256 signed requests; config file written with `0600`; env-var override for CI
 - 🔍 **Dry-run mode** — preview every mutating request before it hits the API
-- 🧪 **Fully tested** — 2574 Vitest tests, mocked axios, zero network in CI
+- 🧪 **Fully tested** — 2500+ Vitest tests, mocked axios, zero network in CI
 - ⚡ **Shell completion** — Bash / Zsh / Fish / PowerShell
 
 ## Supported devices
@@ -836,7 +836,7 @@ npm install
 
 npm run dev -- <args>       # Run from TypeScript sources via tsx
 npm run build               # Compile to dist/
-npm test                    # Run the Vitest suite (2465 tests)
+npm test                    # Run the Vitest suite
 npm run test:watch          # Watch mode
 npm run test:coverage       # Coverage report (v8, HTML + text)
 ```
