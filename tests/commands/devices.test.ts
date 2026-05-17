@@ -865,6 +865,19 @@ describe('devices command', () => {
         expect(parsed.data[0]).toMatchObject({ deviceId: 'BATCH-1', ok: true, power: 'on' });
         expect(parsed.data[1]).toMatchObject({ deviceId: 'BATCH-2', ok: true, power: 'off' });
       });
+
+      it('warns on stderr when --strict is used with a single device ID', async () => {
+        apiMock.__instance.get.mockResolvedValue({
+          data: { body: { power: 'on' } },
+        });
+
+        const res = await runCli(registerDevicesCommand, [
+          'devices', 'status', 'SINGLE-DEV', '--strict',
+        ]);
+
+        expect(res.exitCode).toBeNull();
+        expect(res.stderr.join('\n')).toMatch(/--strict.*(no effect|batch)/i);
+      });
     });
 
     it('supports --format=tsv', async () => {

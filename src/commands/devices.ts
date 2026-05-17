@@ -368,7 +368,7 @@ Examples:
               }
             }
           }
-          if (options.strict && batch.some((e) => !(e as { ok: boolean }).ok)) process.exit(1);
+          if (options.strict && batch.some((e) => !(e as { ok: boolean }).ok)) process.exitCode = 1;
           return;
         }
 
@@ -378,6 +378,10 @@ Examples:
           category: options.nameCategory,
           room: options.nameRoom,
         });
+
+        if (options.strict) {
+          console.error('warning: --strict has no effect without --ids or multiple device IDs (batch mode only)');
+        }
         const body = annotateStatusPayload(deviceId, await fetchDeviceStatus(deviceId));
         const fetchedAt = new Date().toISOString();
         const fmt = resolveFormat();

@@ -64,6 +64,8 @@ export async function runCli(
 
   // isJsonMode() reads process.argv directly, so mirror it during the run.
   const originalArgv = process.argv;
+  const originalExitCode = process.exitCode;
+  process.exitCode = 0;
   process.argv = ['node', 'test', ...argv];
 
   register(program);
@@ -121,6 +123,11 @@ export async function runCli(
       }
     }
   } finally {
+    // Capture non-zero exitCode set via `process.exitCode = N` (graceful-exit pattern).
+    if (exitCode === null && process.exitCode !== 0) {
+      exitCode = process.exitCode ?? null;
+    }
+    process.exitCode = originalExitCode;
     process.argv = originalArgv;
     logSpy.mockRestore();
     errSpy.mockRestore();

@@ -117,7 +117,10 @@ export function registerDevicesMetaCommand(devices: Command): void {
         let entries = Object.entries(file.devices);
         if (options.hiddenOnly) {
           entries = entries.filter(([, m]) => m.hidden);
-        } else if (!options.all) {
+        } else if (!options.all && !isJsonMode()) {
+          // In human mode, hide hidden devices by default so the table is clean.
+          // JSON mode is used for machine export, so all records are included
+          // unless the caller is explicit with --hidden-only.
           entries = entries.filter(([, m]) => !m.hidden);
         }
 
