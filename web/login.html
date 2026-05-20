@@ -437,15 +437,19 @@
     if (error) {
       showError(decodeURIComponent(sp.get('error_description') || error));
     } else if (code && location.pathname === '/oauth-return') {
-      // Forward to CLI callback if callbackBase available
+      const returnedState = sp.get('state') || '';
+      // In CLI mode CONFIG.state is set by the server — validate before forwarding.
+      if (CONFIG.state && returnedState !== CONFIG.state) {
+        showError('State mismatch — possible CSRF attack. Please close this tab and try again.');
+        return;
+      }
       if (CONFIG.callbackBase) {
-        const p = new URLSearchParams({ code, state: sp.get('state') || '' });
+        const p = new URLSearchParams({ code, state: returnedState });
         location.href = CONFIG.callbackBase + '/callback?' + p.toString();
       } else {
         showError('OAuth code received but no CLI callback configured.');
       }
     }
-    // After CLI stores credentials it redirects to /done
     if (location.pathname === '/done') {
       showSuccess();
     }
