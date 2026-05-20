@@ -1,0 +1,25 @@
+scripts/lint-stdout.sh
+  s_b19d3a3d4d8af6::t_9469bcfc5c4055 14
+tests/commands/health-check.test.ts
+  s_b19d3a3d4d8af6::t_15a3c6186a92f5 153
+src/commands/rules.ts
+  s_b19d3a3d4d8af6::t_c1830e10ab18dd 896
+README.md
+  s_b19d3a3d4d8af6::t_99fee9c57b8b2a 636
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "9d92d39d9b7be028490c5654107ab1ffcecb9d41",
+  "prompts": {},
+  "sessions": {
+    "s_b19d3a3d4d8af6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1381414d-2711-4c09-945f-4bc062b6df44",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}

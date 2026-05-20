@@ -1,0 +1,26 @@
+src/devices/param-validator.ts
+  s_609937a4e2becf::t_3437805e3e5e8c 266
+  s_609937a4e2becf::t_5f9b24204dce6d 152
+  s_609937a4e2becf::t_673ad9803a080d 155,160,165,170,173,176,179,184-185,187,190,195,198,201,206,209,214,217-218,220,223-224,226,231,234,237,240,245,248,253,256,261
+  s_609937a4e2becf::t_b210c998156749 3
+src/devices/catalog.ts
+  s_609937a4e2becf::t_e69b63162d315d 778-787
+tests/devices/param-validator.test.ts
+  s_609937a4e2becf::t_9c5dd658379b88 445-451
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "1af1bfe61a4787a0fe30646596e0ace5c6991f51",
+  "prompts": {},
+  "sessions": {
+    "s_609937a4e2becf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "815adb82-2d53-4b9c-90fd-f2cca599d974",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+src/devices/catalog.ts
+  s_609937a4e2becf::t_2742bee09645ed 576
+  s_609937a4e2becf::t_4d84387f427b90 207
+  s_609937a4e2becf::t_911092c7e69122 202
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "966d9e67ce17f8a17d921b7a04dd599342138578",
+  "prompts": {},
+  "sessions": {
+    "s_609937a4e2becf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "815adb82-2d53-4b9c-90fd-f2cca599d974",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
