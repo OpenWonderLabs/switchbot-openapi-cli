@@ -1,5 +1,5 @@
 import http from 'node:http';
-import net from 'node:net';
+import { getFreePort, escapeHtml } from './utils.js';
 import { LOGIN_TIMEOUT_MS } from './constants.js';
 
 export interface CallbackResult {
@@ -12,6 +12,11 @@ export interface CallbackHandle {
   /** Resolves with the OAuth code once the browser redirects here. */
   wait(): Promise<CallbackResult>;
 }
+
+const SECURITY_HEADERS = {
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+} as const;
 
 function successHtml(): string {
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
@@ -28,6 +33,7 @@ h1{color:#16a34a;margin:0 0 12px}p{color:#374151;margin:0}</style>
 }
 
 function errorHtml(detail: string): string {
+  const escaped = escapeHtml(detail);
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <title>SwitchBot CLI — Login failed</title>
 <style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;
@@ -37,33 +43,10 @@ box-shadow:0 4px 24px rgba(0,0,0,.08)}
 h1{color:#dc2626;margin:0 0 12px}p{color:#374151;margin:0;font-size:.9rem}</style>
 </head><body><div class="card">
 <h1>Login failed</h1>
-<p>${detail}</p>
+<p>${escaped}</p>
 </div></body></html>`;
 }
 
-async function getFreePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = net.createServer();
-    srv.listen(0, '127.0.0.1', () => {
-      const addr = srv.address() as net.AddressInfo | null;
-      srv.close(() => {
-        if (!addr) { reject(new Error('Could not allocate callback port')); return; }
-        resolve(addr.port);
-      });
-    });
-    srv.on('error', reject);
-  });
-}
-
-/**
- * Bind a one-shot OAuth callback server on a free loopback port.
- *
- * Returns immediately with the bound `port` and a `wait()` function.
- * Call `wait()` to receive the authorization code once the user's browser
- * is redirected to `http://127.0.0.1:<port>/callback`.
- *
- * The server shuts itself down after the first valid callback or on timeout.
- */
 export async function bindCallbackServer(
   expectedState: string,
   timeoutMs = LOGIN_TIMEOUT_MS,
@@ -77,11 +60,13 @@ export async function bindCallbackServer(
     rejectResult = rej;
   });
 
+  let finished = false;
+
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? '/', `http://127.0.0.1:${port}`);
 
     if (url.pathname !== '/callback') {
-      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.writeHead(404, { 'Content-Type': 'text/plain', ...SECURITY_HEADERS });
       res.end('Not found');
       return;
     }
@@ -92,7 +77,9 @@ export async function bindCallbackServer(
     const errorDesc = url.searchParams.get('error_description') ?? '';
 
     const finish = (statusCode: number, body: string, err?: Error) => {
-      res.writeHead(statusCode, { 'Content-Type': 'text/html' });
+      if (finished) return;
+      finished = true;
+      res.writeHead(statusCode, { 'Content-Type': 'text/html', ...SECURITY_HEADERS });
       res.end(body);
       server.close();
       clearTimeout(timer);
@@ -123,6 +110,8 @@ export async function bindCallbackServer(
   server.listen(port, '127.0.0.1');
 
   const timer = setTimeout(() => {
+    if (finished) return;
+    finished = true;
     server.close();
     rejectResult(new Error('Login timed out. Please run `switchbot auth login` again.'));
   }, timeoutMs);
