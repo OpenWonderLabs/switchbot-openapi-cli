@@ -8,6 +8,7 @@ const repoRoot = dirname(scriptDir);
 const assets = [
   ['src/policy/schema', 'dist/policy/schema'],
   ['src/policy/examples', 'dist/policy/examples'],
+  ['web', 'dist/web'],
 ];
 
 for (const [srcRel, dstRel] of assets) {

@@ -27,6 +27,7 @@ import {
   CredentialBundle,
   selectCredentialStore,
 } from '../credentials/keychain.js';
+import { browserLogin } from '../auth/browser-login.js';
 
 function activeProfile(): string {
   return getActiveProfile() ?? 'default';
@@ -374,5 +375,57 @@ export function registerAuthCommand(program: Command): void {
       if (!options.deleteFile) {
         console.log('Source file kept — pass --delete-file on the next run to remove it.');
       }
+    });
+
+  // -------------------------------------------------------------------------
+  // auth login
+  // -------------------------------------------------------------------------
+  auth
+    .command('login')
+    .description('Sign in via browser and save credentials to the OS keychain')
+    .option('--no-open', 'Print the login URL instead of opening the browser automatically')
+    .option('--timeout <seconds>', 'Browser login timeout in seconds (default: 120)', '120')
+    .action(async (options: { open: boolean; timeout: string }) => {
+      const profile = activeProfile();
+      const timeoutMs = Math.max(10, parseInt(options.timeout, 10) || 120) * 1000;
+
+      let creds: CredentialBundle;
+      try {
+        creds = await browserLogin({
+          noOpen: !options.open,
+          timeoutMs,
+          log: (msg) => console.log(msg),
+        });
+      } catch (err) {
+        exitWithError({
+          code: 1,
+          kind: 'runtime',
+          message: `Login failed: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+
+      const store = await selectCredentialStore();
+      try {
+        await store.set(profile, creds!);
+      } catch (err) {
+        exitWithError({
+          code: 1,
+          kind: 'runtime',
+          message: `Failed to save credentials: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+
+      if (isJsonMode()) {
+        printJson({
+          profile,
+          backend: store.name,
+          loggedIn: true,
+          token: { length: creds!.token.length, masked: maskValue(creds!.token) },
+        });
+        return;
+      }
+
+      console.log(`Logged in. Credentials saved to backend "${store.name}" for profile "${profile}".`);
+      console.log(`token : ${maskValue(creds!.token)}`);
     });
 }

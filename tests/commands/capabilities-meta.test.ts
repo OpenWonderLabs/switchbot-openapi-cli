@@ -22,7 +22,7 @@ import { expectJsonEnvelopeContainingKeys } from '../helpers/contracts.js';
 const ALL_EXPECTED_LEAF_COMMANDS = [
   'agent-bootstrap',
   'auth keychain describe', 'auth keychain get', 'auth keychain set',
-  'auth keychain delete', 'auth keychain migrate',
+  'auth keychain delete', 'auth keychain migrate', 'auth login',
   'cache show', 'cache clear',
   'capabilities',
   'catalog path', 'catalog show', 'catalog search', 'catalog diff', 'catalog refresh',

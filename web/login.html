@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SwitchBot — Sign In</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-start: #1a2f4a;
+      --bg-end: #0f1e33;
+      --card-bg: rgba(255,255,255,.07);
+      --card-border: rgba(255,255,255,.12);
+      --input-bg: rgba(255,255,255,.08);
+      --input-border: rgba(255,255,255,.18);
+      --input-focus: #5BBCE4;
+      --text-primary: #ffffff;
+      --text-secondary: rgba(255,255,255,.55);
+      --text-link: #5BBCE4;
+      --btn-primary: #2D9CDB;
+      --btn-primary-hover: #2389c3;
+      --btn-social-bg: rgba(255,255,255,.06);
+      --btn-social-border: rgba(255,255,255,.18);
+      --divider: rgba(255,255,255,.15);
+      --error-bg: rgba(220,38,38,.15);
+      --error-border: rgba(220,38,38,.4);
+      --error-text: #fca5a5;
+      --success-text: #86efac;
+    }
+
+    body {
+      min-height: 100vh;
+      background: linear-gradient(135deg, var(--bg-start) 0%, var(--bg-end) 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      color: var(--text-primary);
+      padding: 24px;
+    }
+
+    /* subtle mesh overlay */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: radial-gradient(ellipse at 20% 20%, rgba(45,156,219,.12) 0%, transparent 60%),
+                  radial-gradient(ellipse at 80% 80%, rgba(91,188,228,.08) 0%, transparent 55%);
+      pointer-events: none;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 400px;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* logo */
+    .logo {
+      text-align: center;
+      margin-bottom: 32px;
+    }
+    .logo-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 52px; height: 52px;
+      background: linear-gradient(135deg, #2D9CDB, #1e7ab8);
+      border-radius: 16px;
+      margin-bottom: 14px;
+      box-shadow: 0 8px 24px rgba(45,156,219,.35);
+    }
+    .logo-icon svg { width: 28px; height: 28px; fill: #fff; }
+    .logo h1 {
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      color: var(--text-primary);
+    }
+    .logo p {
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin-top: 4px;
+    }
+
+    /* card */
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 20px;
+      padding: 32px 28px;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      box-shadow: 0 20px 60px rgba(0,0,0,.35);
+    }
+
+    /* social buttons */
+    .social-row {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 24px;
+    }
+    .btn-social {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      background: var(--btn-social-bg);
+      border: 1px solid var(--btn-social-border);
+      border-radius: 10px;
+      padding: 10px 6px;
+      color: var(--text-primary);
+      font-size: 12.5px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background .15s, border-color .15s, transform .1s;
+      text-decoration: none;
+    }
+    .btn-social:hover {
+      background: rgba(255,255,255,.12);
+      border-color: rgba(255,255,255,.28);
+    }
+    .btn-social:active { transform: scale(.97); }
+    .btn-social svg { width: 18px; height: 18px; flex-shrink: 0; }
+
+    /* divider */
+    .divider {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .divider-line {
+      flex: 1;
+      height: 1px;
+      background: var(--divider);
+    }
+    .divider-text {
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    /* form */
+    .form-group { margin-bottom: 16px; }
+    .form-label {
+      display: block;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      margin-bottom: 7px;
+    }
+    .form-input {
+      width: 100%;
+      background: var(--input-bg);
+      border: 1px solid var(--input-border);
+      border-radius: 10px;
+      padding: 11px 14px;
+      font-size: 14px;
+      color: var(--text-primary);
+      outline: none;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    .form-input::placeholder { color: var(--text-secondary); }
+    .form-input:focus {
+      border-color: var(--input-focus);
+      box-shadow: 0 0 0 3px rgba(91,188,228,.18);
+    }
+
+    .password-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 7px;
+    }
+    .forgot-link {
+      font-size: 12px;
+      color: var(--text-link);
+      text-decoration: none;
+      transition: opacity .15s;
+    }
+    .forgot-link:hover { opacity: .75; }
+
+    /* primary button */
+    .btn-primary {
+      width: 100%;
+      background: linear-gradient(135deg, var(--btn-primary), var(--btn-primary-hover));
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      padding: 12px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity .15s, transform .1s, box-shadow .15s;
+      margin-top: 8px;
+      box-shadow: 0 4px 16px rgba(45,156,219,.3);
+    }
+    .btn-primary:hover { opacity: .92; box-shadow: 0 6px 20px rgba(45,156,219,.4); }
+    .btn-primary:active { transform: scale(.98); }
+    .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+
+    /* alerts */
+    .alert {
+      border-radius: 10px;
+      padding: 11px 14px;
+      font-size: 13px;
+      margin-bottom: 16px;
+      display: none;
+    }
+    .alert.error {
+      background: var(--error-bg);
+      border: 1px solid var(--error-border);
+      color: var(--error-text);
+    }
+    .alert.success {
+      background: rgba(22,163,74,.15);
+      border: 1px solid rgba(22,163,74,.35);
+      color: var(--success-text);
+    }
+    .alert.visible { display: block; }
+
+    /* footer */
+    .card-footer {
+      text-align: center;
+      margin-top: 20px;
+      font-size: 12.5px;
+      color: var(--text-secondary);
+    }
+    .card-footer a {
+      color: var(--text-link);
+      text-decoration: none;
+    }
+    .card-footer a:hover { text-decoration: underline; }
+
+    /* spinner */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner {
+      display: inline-block;
+      width: 16px; height: 16px;
+      border: 2px solid rgba(255,255,255,.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+
+    /* success state */
+    .success-screen {
+      text-align: center;
+      padding: 12px 0;
+      display: none;
+    }
+    .success-screen.visible { display: block; }
+    .success-icon {
+      width: 56px; height: 56px;
+      background: rgba(22,163,74,.2);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 16px;
+    }
+    .success-icon svg { width: 28px; height: 28px; stroke: #86efac; fill: none; stroke-width: 2.5; }
+    .success-screen h2 { font-size: 18px; margin-bottom: 8px; }
+    .success-screen p { font-size: 13px; color: var(--text-secondary); }
+  </style>
+</head>
+<body>
+<div class="container">
+  <div class="logo">
+    <div class="logo-icon">
+      <!-- SwitchBot-style bolt icon -->
+      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <path d="M13 2L4.09 12.97 11 13l-1 9 8.91-10.97L12 11z"/>
+      </svg>
+    </div>
+    <h1>SwitchBot</h1>
+    <p>Sign in to your account</p>
+  </div>
+
+  <div class="card">
+    <!-- success screen (shown after auth) -->
+    <div class="success-screen" id="successScreen">
+      <div class="success-icon">
+        <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+      </div>
+      <h2>Login Successful</h2>
+      <p>Credentials saved. You can close this tab and return to your terminal.</p>
+    </div>
+
+    <!-- login form (default) -->
+    <div id="loginForm">
+      <!-- social -->
+      <div class="social-row">
+        <a class="btn-social" id="btnGoogle" href="#" onclick="socialLogin('Google');return false;">
+          <!-- Google logo -->
+          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+            <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+            <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/>
+            <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+          </svg>
+          Google
+        </a>
+        <a class="btn-social" id="btnAmazon" href="#" onclick="socialLogin('LoginWithAmazon');return false;">
+          <!-- Amazon smile -->
+          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path d="M13.23 10.56c-.28.1-.61.16-.98.19-.96.06-1.71-.32-1.71-1.44 0-1.1.73-1.56 1.72-1.63.38-.02.72.04.97.12v2.76zm2.13 1.16V7.6c0-1.49-.87-2.37-2.63-2.37-.92 0-1.72.19-2.4.54l.31.92c.52-.28 1.11-.43 1.71-.43.86 0 1.26.38 1.26 1.13v.27c-.31-.09-.73-.16-1.18-.16-1.71 0-2.87.77-2.87 2.2 0 1.34.95 2.01 2.19 2.01.73 0 1.34-.29 1.72-.78l.1.66h1.79z" fill="#FF9900"/>
+            <path d="M18.76 16.93c-2.89 2.07-7.08 3.17-10.69 3.17-5.06 0-9.61-1.87-13.05-4.97-.27-.24-.03-.57.3-.38 3.72 2.16 8.32 3.46 13.07 3.46 3.2 0 6.72-.66 9.96-2.04.49-.21.9.32.41.76z" fill="#FF9900"/>
+            <path d="M19.93 15.6c-.37-.48-2.47-.22-3.41-.11-.28.03-.32-.21-.07-.39 1.67-1.17 4.41-.83 4.73-.44.32.4-.08 3.15-1.65 4.47-.24.2-.47.09-.36-.17.35-.88 1.13-2.88.76-3.36z" fill="#FF9900"/>
+          </svg>
+          Amazon
+        </a>
+        <a class="btn-social" id="btnApple" href="#" onclick="socialLogin('SignInWithApple');return false;">
+          <!-- Apple logo -->
+          <svg viewBox="0 0 24 24" fill="white" xmlns="http://www.w3.org/2000/svg">
+            <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/>
+          </svg>
+          Apple
+        </a>
+      </div>
+
+      <div class="divider">
+        <div class="divider-line"></div>
+        <span class="divider-text">or sign in with email</span>
+        <div class="divider-line"></div>
+      </div>
+
+      <div id="alertBox" class="alert"></div>
+
+      <form id="emailForm" onsubmit="handleEmailLogin(event)">
+        <div class="form-group">
+          <label class="form-label" for="email">Email</label>
+          <input class="form-input" type="email" id="email" name="email"
+                 placeholder="you@example.com" autocomplete="email" required />
+        </div>
+        <div class="form-group">
+          <div class="password-row">
+            <label class="form-label" for="password" style="margin-bottom:0">Password</label>
+            <a class="forgot-link" href="#" onclick="forgotPassword();return false;">Forgot password?</a>
+          </div>
+          <input class="form-input" type="password" id="password" name="password"
+                 placeholder="••••••••" autocomplete="current-password" required />
+        </div>
+
+        <button class="btn-primary" type="submit" id="submitBtn">Sign In</button>
+      </form>
+
+      <div class="card-footer">
+        Don't have an account? <a href="https://www.switch-bot.com/register" target="_blank" rel="noopener">Create one</a>
+      </div>
+    </div><!-- /loginForm -->
+  </div><!-- /card -->
+</div><!-- /container -->
+
+<script>
+  // ── Config injected by CLI server (or defaults for standalone use) ──────────
+  const CONFIG = window.__SWITCHBOT_LOGIN_CONFIG__ || {
+    clientId: 'emvg3hk2tqu3q37fcw6cwyl4bi',
+    cognitoDomain: 'https://auth.switch-bot.com',
+    scope: 'openid',
+    state: '',          // set by CLI server
+    callbackBase: '',   // http://127.0.0.1:PORT  — set by CLI server
+  };
+
+  // Redirect URI: use current origin so the code comes back here,
+  // then we forward to the CLI callback if callbackBase is set.
+  const SELF_ORIGIN = location.origin; // e.g. http://127.0.0.1:PORT
+  const SELF_REDIRECT = SELF_ORIGIN + '/oauth-return';
+
+  // ── Social login ────────────────────────────────────────────────────────────
+  function socialLogin(provider) {
+    const params = new URLSearchParams({
+      response_type: 'code',
+      client_id: CONFIG.clientId,
+      redirect_uri: CONFIG.callbackBase ? CONFIG.callbackBase + '/callback' : SELF_REDIRECT,
+      scope: CONFIG.scope,
+      state: CONFIG.state || randomState(),
+      identity_provider: provider,
+    });
+    location.href = CONFIG.cognitoDomain + '/oauth2/authorize?' + params.toString();
+  }
+
+  // ── Email / password login (proxied through CLI server) ─────────────────────
+  async function handleEmailLogin(e) {
+    e.preventDefault();
+    const email = document.getElementById('email').value.trim();
+    const password = document.getElementById('password').value;
+    const btn = document.getElementById('submitBtn');
+
+    clearAlert();
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>Signing in…';
+
+    try {
+      // When served by CLI local server, POST /auth/email is on the same origin.
+      // When opened as a file:// or external host, this will fail gracefully.
+      const res = await fetch('/auth/email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.message || `HTTP ${res.status}`);
+      }
+
+      const data = await res.json();
+      if (data.success) {
+        showSuccess();
+      } else {
+        throw new Error(data.message || 'Authentication failed');
+      }
+    } catch (err) {
+      showError(err.message || 'Sign in failed. Please try again.');
+      btn.disabled = false;
+      btn.textContent = 'Sign In';
+    }
+  }
+
+  // ── Handle OAuth return (code in query string) ───────────────────────────────
+  // When social login returns to this page (SELF_REDIRECT = /oauth-return)
+  // the CLI server handles /callback directly, so this path is only needed
+  // for non-CLI standalone use.
+  (function checkOAuthReturn() {
+    const sp = new URLSearchParams(location.search);
+    const code = sp.get('code');
+    const error = sp.get('error');
+    if (error) {
+      showError(decodeURIComponent(sp.get('error_description') || error));
+    } else if (code && location.pathname === '/oauth-return') {
+      // Forward to CLI callback if callbackBase available
+      if (CONFIG.callbackBase) {
+        const p = new URLSearchParams({ code, state: sp.get('state') || '' });
+        location.href = CONFIG.callbackBase + '/callback?' + p.toString();
+      } else {
+        showError('OAuth code received but no CLI callback configured.');
+      }
+    }
+    // After CLI stores credentials it redirects to /done
+    if (location.pathname === '/done') {
+      showSuccess();
+    }
+  })();
+
+  function forgotPassword() {
+    window.open('https://www.switch-bot.com/forgot-password', '_blank', 'noopener');
+  }
+
+  // ── Helpers ──────────────────────────────────────────────────────────────────
+  function showSuccess() {
+    document.getElementById('loginForm').style.display = 'none';
+    const s = document.getElementById('successScreen');
+    s.classList.add('visible');
+  }
+
+  function showError(msg) {
+    const box = document.getElementById('alertBox');
+    box.textContent = msg;
+    box.className = 'alert error visible';
+  }
+
+  function clearAlert() {
+    document.getElementById('alertBox').className = 'alert';
+  }
+
+  function randomState() {
+    const arr = new Uint8Array(16);
+    crypto.getRandomValues(arr);
+    return Array.from(arr).map(b => b.toString(16).padStart(2,'0')).join('');
+  }
+</script>
+</body>
+</html>

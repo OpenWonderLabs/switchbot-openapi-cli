@@ -122,6 +122,7 @@ export const COMMAND_META: Record<string, CommandMeta> = {
   'auth keychain set': DESTRUCTIVE_LOCAL,
   'auth keychain delete': DESTRUCTIVE_LOCAL,
   'auth keychain migrate': DESTRUCTIVE_LOCAL,
+  'auth login': DESTRUCTIVE_LOCAL,
   'cache show': READ_LOCAL,
   'cache clear': ACTION_LOCAL,
   'capabilities': READ_LOCAL,
