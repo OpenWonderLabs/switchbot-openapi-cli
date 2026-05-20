@@ -5,7 +5,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import axios from 'axios';
-import { generateState } from './pkce.js';
+import { generateState } from './csrf.js';
 import {
   OAUTH_CLIENT_ID,
   OAUTH_SCOPE,

@@ -1,5 +1,5 @@
 import open from 'open';
-import { generateState } from './pkce.js';
+import { generateState } from './csrf.js';
 import { bindCallbackServer } from './oauth-callback.js';
 import { bindLoginServer } from './local-login-server.js';
 import { exchangeCodeForCredentials } from './token-exchange.js';
