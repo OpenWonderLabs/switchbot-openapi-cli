@@ -1,11 +1,11 @@
 import http from 'node:http';
-import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import axios from 'axios';
 import { generateState } from './csrf.js';
+import { getFreePort, escapeHtml } from './utils.js';
 import {
   OAUTH_CLIENT_ID,
   OAUTH_SCOPE,
@@ -27,6 +27,11 @@ export interface LoginServerHandle {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+const SECURITY_HEADERS = {
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+} as const;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = path.resolve(__dirname, 'web');
@@ -81,7 +86,7 @@ p{color:rgba(255,255,255,.55);font-size:14px}
 }
 
 function errorHtml(detail: string): string {
-  const escaped = detail.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const escaped = escapeHtml(detail);
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <title>SwitchBot — Login Failed</title>
 <style>
@@ -99,20 +104,6 @@ p{color:rgba(255,255,255,.55);font-size:13px}
 <h1>Login Failed</h1>
 <p>${escaped}</p>
 </div></body></html>`;
-}
-
-async function getFreePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = net.createServer();
-    srv.listen(0, '127.0.0.1', () => {
-      const addr = srv.address() as net.AddressInfo | null;
-      srv.close(() => {
-        if (!addr) { reject(new Error('Could not allocate port')); return; }
-        resolve(addr.port);
-      });
-    });
-    srv.on('error', reject);
-  });
 }
 
 /** Get botRegion then call wonder openapi to retrieve openToken + secretKey. */
@@ -136,6 +127,9 @@ async function fetchCredentials(accessToken: string): Promise<CredentialBundle> 
   } catch {
     // Non-fatal — fall back to "us"
   }
+
+  // Allowlist: reject any region value that is not 2–8 lowercase ASCII letters.
+  if (!/^[a-z]{2,8}$/.test(botRegion)) botRegion = 'us';
 
   const wonderHost = WONDER_API_BASE.replace('.us.api', `.${botRegion}.api`);
 
@@ -219,12 +213,11 @@ export async function bindLoginServer(
     rejectResult = rej;
   });
 
-  const timer = setTimeout(() => {
-    server.close();
-    rejectResult(new Error('Login timed out. Please run `switchbot auth login` again.'));
-  }, timeoutMs);
+  let finished = false;
 
   const finish = (creds: CredentialBundle | null, err?: Error) => {
+    if (finished) return;
+    finished = true;
     clearTimeout(timer);
     server.close();
     if (err) rejectResult(err); else resolveResult(creds!);
@@ -234,11 +227,11 @@ export async function bindLoginServer(
     const url = new URL(req.url ?? '/', `http://127.0.0.1:${port}`);
 
     const html = (code: number, body: string) => {
-      res.writeHead(code, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.writeHead(code, { 'Content-Type': 'text/html; charset=utf-8', ...SECURITY_HEADERS });
       res.end(body);
     };
     const json = (code: number, body: object) => {
-      res.writeHead(code, { 'Content-Type': 'application/json' });
+      res.writeHead(code, { 'Content-Type': 'application/json', ...SECURITY_HEADERS });
       res.end(JSON.stringify(body));
     };
 
@@ -280,7 +273,6 @@ export async function bindLoginServer(
         return;
       }
 
-      // Serve an intermediate page while we exchange the code server-side.
       html(200, `<!DOCTYPE html><html><head><meta charset="utf-8">
         <style>body{min-height:100vh;background:linear-gradient(135deg,#1a2f4a,#0f1e33);
         display:flex;align-items:center;justify-content:center;
@@ -295,9 +287,26 @@ export async function bindLoginServer(
 
     // ── POST /auth/email — email / password proxy ────────────────────────────
     if (req.method === 'POST' && url.pathname === '/auth/email') {
+      const BODY_LIMIT = 4 * 1024;
       let body = '';
-      req.on('data', chunk => { body += chunk; });
+      let bodySize = 0;
+      let over = false;
+
+      req.on('data', (chunk: Buffer) => {
+        bodySize += chunk.length;
+        if (bodySize > BODY_LIMIT) {
+          if (!over) {
+            over = true;
+            json(413, { success: false, message: 'Request body too large.' });
+            req.resume();
+          }
+          return;
+        }
+        body += chunk;
+      });
+
       req.on('end', () => {
+        if (over) return;
         let email: string, password: string;
         try {
           ({ email, password } = JSON.parse(body));
@@ -318,11 +327,15 @@ export async function bindLoginServer(
       return;
     }
 
-    res.writeHead(404, { 'Content-Type': 'text/plain' });
+    res.writeHead(404, { 'Content-Type': 'text/plain', ...SECURITY_HEADERS });
     res.end('Not found');
   });
 
   server.listen(port, '127.0.0.1');
+
+  const timer = setTimeout(() => {
+    finish(null, new Error('Login timed out. Please run `switchbot auth login` again.'));
+  }, timeoutMs);
 
   return { port, wait: () => resultPromise };
 }
