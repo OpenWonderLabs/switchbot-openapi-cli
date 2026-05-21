@@ -83,8 +83,8 @@ export function loadConfig(): SwitchBotConfig {
   if (!fs.existsSync(file)) {
     const profile = getActiveProfile();
     const hint = profile
-      ? `No credentials configured for profile "${profile}". Run: switchbot --profile ${profile} config set-token <token> <secret>`
-      : 'No credentials configured. Run: switchbot config set-token <token> <secret>';
+      ? `No credentials configured for profile "${profile}". Run:\n  switchbot auth login                                          (browser-based login)\n  switchbot --profile ${profile} config set-token <token> <secret>  (manual token)`
+      : 'No credentials configured. Run:\n  switchbot auth login                       (browser-based login)\n  switchbot config set-token <token> <secret>  (manual token)';
     const msg = `${hint}\nOr set SWITCHBOT_TOKEN and SWITCHBOT_SECRET environment variables.`;
     if (isJsonMode()) {
       emitJsonError({ code: 1, kind: 'runtime', message: hint });
