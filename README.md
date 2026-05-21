@@ -813,6 +813,9 @@ SwitchBot-specific error codes mapped to readable messages:
 
 - `SWITCHBOT_TOKEN`: API token — takes priority over the config file.
 - `SWITCHBOT_SECRET`: API secret — takes priority over the config file.
+- `SWITCHBOT_OAUTH_CLIENT_SECRET`: Override the bundled OAuth client secret (advanced).
+- `SWITCHBOT_TOKEN_AES_KEY`: Override the AES-128-CBC key used for token decryption (advanced).
+- `SWITCHBOT_TOKEN_AES_IV`: Override the AES-128-CBC IV used for token decryption (advanced).
 - `NO_COLOR`: Disable ANSI colors in all output (automatically respected).
 
 ## Scripting examples

@@ -26,13 +26,16 @@ export const OAUTH_SCOPE = 'api_login';
  * Consumer app client ID (from customize-login page).
  * Used in the email/password login request body sent to account API.
  */
+// client_id values are non-sensitive — publicly visible in any OAuth authorization URL
 export const ACCOUNT_CLIENT_ID = 'emvg3hk2tqu3q37fcw6cwyl4bi';
 
 /**
  * Merchant OAuth2 client registered with sp.oauth.switchbot.net.
  * Used as client_id when opening the hosted login page and exchanging codes.
  */
+// client_id values are non-sensitive — publicly visible in any OAuth authorization URL
 export const OAUTH_CLIENT_ID = 'wrZlijGQevZHVyGeINSQGUVEHw';
+
 // Baked-in consumer app credentials from the SwitchBot mobile app.
 // Override with SWITCHBOT_OAUTH_CLIENT_SECRET if you obtain fresh credentials
 // from SwitchBot (the bundled value is embedded in the published open-source repo).
