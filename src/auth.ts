@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { v4 as uuidv4 } from 'uuid';
+import { VERSION } from './version.js';
 
 export function buildAuthHeaders(token: string, secret: string): Record<string, string> {
   const t = String(Date.now());  // 13-digit millisecond timestamp
@@ -18,5 +19,6 @@ export function buildAuthHeaders(token: string, secret: string): Record<string, 
     nonce,
     src: 'OpenClaw',
     'Content-Type': 'application/json',
+    'User-Agent': `switchbot-cli/${VERSION}`,
   };
 }

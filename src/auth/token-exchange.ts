@@ -2,7 +2,7 @@ import axios from 'axios';
 import type { CredentialBundle } from '../credentials/keychain.js';
 import {
   OAUTH_CLIENT_ID,
-  OAUTH_TOKEN_URL,
+  ACCOUNT_API_BASE,
   MOBILE_API_BASE,
   ENDPOINTS,
 } from './constants.js';
@@ -10,11 +10,12 @@ import {
 // ── Response shapes ───────────────────────────────────────────────────────────
 
 interface TokenResponse {
-  access_token: string;
-  refresh_token?: string;
-  id_token?: string;
-  expires_in?: number;
-  token_type?: string;
+  statusCode?: number;
+  body?: {
+    access_token?: string;
+    [key: string]: unknown;
+  };
+  access_token?: string;
 }
 
 interface MobileLoginResponse {
@@ -43,10 +44,9 @@ function pickString(obj: Record<string, unknown>, ...keys: string[]): string | u
 /**
  * Exchange an OAuth authorization code for SwitchBot v1.1 credentials.
  *
- * Step 1 — POST https://auth.switch-bot.com/oauth2/token
- *   Standard OAuth2 authorization-code exchange using Basic auth
- *   (client_id:client_secret), as documented in the SwitchBot Enterprise API.
- *   Returns access_token.
+ * Step 1 — POST account.api.switchbot.net/merchant/v1/oauth/token
+ *   Exchange the authorization code issued by sp.oauth.switchbot.net for an
+ *   access_token using the SwitchBot account API.
  *
  * Step 2 — POST /v2/mobile/management/login  (wonderlabs mobile API)
  *   Uses the access_token to retrieve the v1.1 openToken + secretKey.
@@ -60,25 +60,29 @@ export async function exchangeCodeForCredentials(
   // ── Step 1: code → access_token ──────────────────────────────────────────
   let accessToken: string;
   try {
-    // Public client — no client_secret, no Basic auth header.
     const resp = await axios.post<TokenResponse>(
-      OAUTH_TOKEN_URL,
-      new URLSearchParams({
-        grant_type: 'authorization_code',
-        client_id: OAUTH_CLIENT_ID,
-        redirect_uri: redirectUri,
-        code,
-      }),
+      `${ACCOUNT_API_BASE}${ENDPOINTS.oauthToken}`,
       {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        clientId: OAUTH_CLIENT_ID,
+        redirectUri,
+        grantType: 'authorization_code',
+        code,
+      },
+      {
+        headers: { 'Content-Type': 'application/json' },
         timeout: 15_000,
       },
     );
 
-    if (!resp.data.access_token) {
+    // Support both top-level access_token and body.access_token response shapes
+    const token =
+      resp.data?.body?.access_token ??
+      (resp.data as { access_token?: string })?.access_token;
+
+    if (!token) {
       throw new Error(`Token endpoint returned no access_token. Body: ${JSON.stringify(resp.data)}`);
     }
-    accessToken = resp.data.access_token;
+    accessToken = token;
   } catch (err) {
     if (axios.isAxiosError(err)) {
       const status = err.response?.status;

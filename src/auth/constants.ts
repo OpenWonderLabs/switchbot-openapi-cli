@@ -6,26 +6,21 @@
  *  2. POST WONDER_API_BASE/openapi/openUser/token { operation:"get", version:2 }
  *     → encrypted openToken + secretKey (AES-128-CBC, hex-encoded)
  *
- * Social OAuth fallback (directOAuth: true):
- *  1. Redirect user to OAUTH_AUTHORIZE_URL → Cognito login
- *  2. Exchange code at OAUTH_TOKEN_URL → access_token
- *  3. POST MOBILE_API_BASE/v2/mobile/management/login → plaintext openToken + secretKey
+ * Browser OAuth flow (sp.oauth.switchbot.net):
+ *  1. Open SP_OAUTH_LOGIN_URL with client_id, redirect_uri, scope, state → user logs in
+ *  2. SPA redirects back with code
+ *  3. POST ACCOUNT_API_BASE/merchant/v1/oauth/token → access_token
+ *  4. POST MOBILE_API_BASE/v2/mobile/management/login → plaintext openToken + secretKey
  */
 
 /** Direct consumer account API (customize-login page). */
 export const ACCOUNT_API_BASE = 'https://account.api.switchbot.net';
 
-/** OAuth2 authorization endpoint (social login fallback). */
-export const OAUTH_AUTHORIZE_URL = 'https://auth.switch-bot.com/oauth2/authorize';
+/** SwitchBot hosted OAuth login page. */
+export const SP_OAUTH_LOGIN_URL = 'https://sp.oauth.switchbot.net/login';
 
-/** Cognito domain root, used when injecting config into the local login page. */
-export const COGNITO_DOMAIN = 'https://auth.switch-bot.com';
-
-/** OAuth2 token endpoint (AWS Cognito, social login fallback). */
-export const OAUTH_TOKEN_URL = 'https://auth.switch-bot.com/oauth2/token';
-
-/** OAuth2 scope required by social login fallback. */
-export const OAUTH_SCOPE = 'openid';
+/** OAuth2 scope required by browser login. */
+export const OAUTH_SCOPE = 'api_login';
 
 /**
  * Client ID from config.js on www.switch-bot.com/pages/customize-login.
@@ -52,6 +47,7 @@ export const ENDPOINTS = {
   mobileLogin: '/v2/mobile/management/login',
   openUserToken: '/openapi/openUser/token',
   userInfo: '/account/api/v1/user/userinfo',
+  oauthToken: '/merchant/v1/oauth/token',
 } as const;
 
 /** Allowlist of known bot-region labels returned by /account/api/v1/user/userinfo. */

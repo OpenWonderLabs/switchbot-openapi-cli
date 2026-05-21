@@ -1,15 +1,9 @@
 import http from 'node:http';
-import fs from 'node:fs';
-import path from 'node:path';
 import crypto, { randomUUID } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
 import axios from 'axios';
-import { generateState } from './csrf.js';
 import { getFreePort, escapeHtml, SECURITY_HEADERS } from './utils.js';
 import {
   OAUTH_CLIENT_ID,
-  OAUTH_SCOPE,
-  OAUTH_TOKEN_URL,
   ACCOUNT_API_BASE,
   TOKEN_AES_KEY,
   TOKEN_AES_IV,
@@ -17,48 +11,22 @@ import {
   LOGIN_TIMEOUT_MS,
   KNOWN_BOT_REGIONS,
   DEFAULT_BOT_REGION,
-  COGNITO_DOMAIN,
 } from './constants.js';
+import { VERSION } from '../version.js';
 import type { CredentialBundle } from '../credentials/keychain.js';
+
+const UA = `switchbot-cli/${VERSION}`;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface LoginServerHandle {
-  /** Port the server is listening on (open browser to http://127.0.0.1:<port>/) */
+  /** Port the server is listening on */
   port: number;
   /** Resolves with credentials once the user completes login, or rejects on timeout/error. */
   wait(): Promise<CredentialBundle>;
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const WEB_DIR = path.resolve(__dirname, 'web');
-
-function getLoginHtml(state: string, port: number): string {
-  const filePath = path.join(WEB_DIR, 'login.html');
-  let html: string;
-  try {
-    html = fs.readFileSync(filePath, 'utf8');
-  } catch {
-    // Fallback minimal page if web/login.html is missing
-    html = `<!DOCTYPE html><html><body>
-      <p>Login page not found. Run <code>npm run build</code>.</p>
-    </body></html>`;
-  }
-  // Inject runtime config just before </head>
-  const config = JSON.stringify({
-    clientId: OAUTH_CLIENT_ID,
-    cognitoDomain: COGNITO_DOMAIN,
-    scope: OAUTH_SCOPE,
-    state,
-    callbackBase: `http://127.0.0.1:${port}`,
-  });
-  return html.replace(
-    '</head>',
-    `<script>window.__SWITCHBOT_LOGIN_CONFIG__ = ${config};</script>\n</head>`,
-  );
-}
+// ── HTML helpers ──────────────────────────────────────────────────────────────
 
 function successHtml(): string {
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
@@ -105,6 +73,8 @@ p{color:rgba(255,255,255,.55);font-size:13px}
 </div></body></html>`;
 }
 
+// ── Crypto helpers ────────────────────────────────────────────────────────────
+
 function decryptField(hexCipher: string): string {
   const key = Buffer.from(TOKEN_AES_KEY, 'utf8');
   const iv  = Buffer.from(TOKEN_AES_IV,  'utf8');
@@ -123,7 +93,11 @@ async function fetchCredentials(accessToken: string, botRegion = DEFAULT_BOT_REG
     `${wonderBase}${ENDPOINTS.openUserToken}`,
     { operation: 'get', version: 2 },
     {
-      headers: { 'Content-Type': 'application/json', Authorization: accessToken },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: accessToken,
+        'User-Agent': UA,
+      },
       timeout: 15_000,
     },
   );
@@ -142,32 +116,10 @@ async function fetchCredentials(accessToken: string, botRegion = DEFAULT_BOT_REG
   return { token: decryptField(encToken), secret: decryptField(encSecret) };
 }
 
-/** Exchange authorization code → access_token → CredentialBundle. */
-async function exchangeCode(code: string, redirectUri: string): Promise<CredentialBundle> {
-  const tokenResp = await axios.post<{ access_token?: string }>(
-    OAUTH_TOKEN_URL,
-    new URLSearchParams({
-      grant_type: 'authorization_code',
-      client_id: OAUTH_CLIENT_ID,
-      redirect_uri: redirectUri,
-      code,
-    }),
-    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 15_000 },
-  );
-
-  const accessToken = tokenResp.data.access_token;
-  if (!accessToken) {
-    throw new Error(`Token exchange returned no access_token: ${JSON.stringify(tokenResp.data)}`);
-  }
-
-  return fetchCredentials(accessToken);
-}
-
 // ── Main export ───────────────────────────────────────────────────────────────
 
 /**
- * Start a local HTTP server that serves the custom SwitchBot login page and
- * handles the OAuth callback.
+ * Start a local HTTP server that handles the email/password login proxy.
  *
  * The caller gets back `{ port, wait() }`:
  * - Open browser to `http://127.0.0.1:<port>/`
@@ -179,8 +131,6 @@ export async function bindLoginServer(
   timeoutMs = LOGIN_TIMEOUT_MS,
 ): Promise<LoginServerHandle> {
   const port = await getFreePort();
-  const state = generateState();
-  const redirectUri = `http://127.0.0.1:${port}/callback`;
 
   let resolveResult!: (r: CredentialBundle) => void;
   let rejectResult!: (e: Error) => void;
@@ -211,53 +161,9 @@ export async function bindLoginServer(
       res.end(JSON.stringify(body));
     };
 
-    // ── GET / — serve login page ─────────────────────────────────────────────
-    if (req.method === 'GET' && url.pathname === '/') {
-      html(200, getLoginHtml(state, port));
-      return;
-    }
-
     // ── GET /done — success page ─────────────────────────────────────────────
     if (req.method === 'GET' && url.pathname === '/done') {
       html(200, successHtml());
-      return;
-    }
-
-    // ── GET /callback — OAuth authorization code callback ───────────────────
-    if (req.method === 'GET' && url.pathname === '/callback') {
-      const code = url.searchParams.get('code');
-      const returnedState = url.searchParams.get('state');
-      const error = url.searchParams.get('error');
-      const errorDesc = url.searchParams.get('error_description') ?? '';
-
-      if (error) {
-        const msg = `${error}${errorDesc ? ': ' + errorDesc : ''}`;
-        html(400, errorHtml(msg));
-        finish(null, new Error(`OAuth error: ${msg}`));
-        return;
-      }
-
-      if (returnedState !== state) {
-        html(400, errorHtml('State mismatch — possible CSRF. Please try again.'));
-        finish(null, new Error('OAuth state mismatch'));
-        return;
-      }
-
-      if (!code) {
-        html(400, errorHtml('Missing authorization code in callback.'));
-        finish(null, new Error('Missing authorization code'));
-        return;
-      }
-
-      html(200, `<!DOCTYPE html><html><head><meta charset="utf-8">
-        <style>body{min-height:100vh;background:linear-gradient(135deg,#1a2f4a,#0f1e33);
-        display:flex;align-items:center;justify-content:center;
-        font-family:-apple-system,sans-serif;color:rgba(255,255,255,.7)}</style>
-        </head><body><p>Completing sign-in…</p></body></html>`);
-
-      exchangeCode(code, redirectUri)
-        .then(creds => finish(creds))
-        .catch(err => finish(null, err instanceof Error ? err : new Error(String(err))));
       return;
     }
 
@@ -356,7 +262,10 @@ async function handleEmailLogin(
       dialCode: '',
       verifyCode: '',
     },
-    { headers: { 'Content-Type': 'application/json' }, timeout: 15_000 },
+    {
+      headers: { 'Content-Type': 'application/json', 'User-Agent': UA },
+      timeout: 15_000,
+    },
   );
 
   const loginBody = loginResp.data?.body ?? {};
@@ -369,7 +278,7 @@ async function handleEmailLogin(
   if (loginBody.mfa_enabled && loginBody.mfa_token) {
     throw new Error(
       'This account has MFA enabled. MFA login is not yet supported in CLI browser login. ' +
-        'Please use `switchbot auth login --direct` to sign in, or disable MFA on your account.',
+        'Please disable MFA on your account.',
     );
   }
 
@@ -385,7 +294,14 @@ async function handleEmailLogin(
   }>(
     `${ACCOUNT_API_BASE}${ENDPOINTS.userInfo}`,
     {},
-    { headers: { 'Content-Type': 'application/json', Authorization: accessToken }, timeout: 15_000 },
+    {
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: accessToken,
+        'User-Agent': UA,
+      },
+      timeout: 15_000,
+    },
   );
   const rawRegion = userInfoResp.data?.body?.botRegion ?? '';
   const botRegion = KNOWN_BOT_REGIONS.has(rawRegion) ? rawRegion : DEFAULT_BOT_REGION;

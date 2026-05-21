@@ -38,12 +38,11 @@ describe('exchangeCodeForCredentials — happy path', () => {
 
   it('calls the token endpoint first with correct params', async () => {
     await exchangeCodeForCredentials('code-x', 'http://127.0.0.1:9000/callback');
-    const [url, body] = mockPost.mock.calls[0] as [string, URLSearchParams];
-    expect(url).toContain('/oauth2/token');
-    const params = new URLSearchParams(body.toString());
-    expect(params.get('grant_type')).toBe('authorization_code');
-    expect(params.get('code')).toBe('code-x');
-    expect(params.get('redirect_uri')).toBe('http://127.0.0.1:9000/callback');
+    const [url, body] = mockPost.mock.calls[0] as [string, Record<string, string>];
+    expect(url).toContain('/merchant/v1/oauth/token');
+    expect(body.grantType).toBe('authorization_code');
+    expect(body.code).toBe('code-x');
+    expect(body.redirectUri).toBe('http://127.0.0.1:9000/callback');
   });
 
   it('passes access_token as Authorization header to mobile endpoint', async () => {
