@@ -233,7 +233,7 @@ Cache note:
             category: 'physical', controlType: d.controlType || '—',
             family: d.familyName || '—', roomID: d.roomID || '—', room: d.roomName || '—',
             hub: !d.hubDeviceId || d.hubDeviceId === '000000000000' ? '—' : d.hubDeviceId,
-            cloud: String(d.enableCloudService),
+            cloud: d.enableCloudService ?? null,
             alias: deviceMeta.devices[d.deviceId]?.alias ?? '—',
           });
           const normIr = (d: typeof infraredRemoteList[0]): Record<string, unknown> => {
@@ -242,7 +242,7 @@ Cache note:
               deviceId: d.deviceId, deviceName: d.deviceName,
               type: d.remoteType, category: 'ir', controlType: d.controlType || '—',
               family: inh?.family || '—', roomID: inh?.roomID || '—', room: inh?.room || '—',
-              hub: d.hubDeviceId, cloud: '—',
+              hub: d.hubDeviceId, cloud: null,
               alias: deviceMeta.devices[d.deviceId]?.alias ?? '—',
             };
           };
