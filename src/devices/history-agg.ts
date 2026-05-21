@@ -95,7 +95,9 @@ export async function aggregateDeviceHistory(
       const tMs = Date.parse(rec.t);
       if (!Number.isFinite(tMs) || tMs < fromMs || tMs > toMs) continue;
 
-      const key = bucketMs !== null ? Math.floor(tMs / bucketMs) * bucketMs : 0;
+      const key = bucketMs !== null
+        ? Math.floor(tMs / bucketMs) * bucketMs
+        : Math.floor((fromMs + (Number.isFinite(toMs) ? toMs : Date.now())) / 2);
       let bkt = buckets.get(key);
       if (!bkt) { bkt = new Map(); buckets.set(key, bkt); }
 

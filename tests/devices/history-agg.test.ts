@@ -211,6 +211,29 @@ describe('aggregateDeviceHistory — single bucket', () => {
     expect(res.buckets[0].metrics.temperature.count).toBe(2);
   });
 
+  it('when bucket is omitted, single bucket t is within the query range (not epoch)', async () => {
+    const file = path.join(historyDir, 'DEV2.jsonl');
+    writeJsonl(file, [
+      { t: '2026-04-19T10:00:00.000Z', topic: 'status', payload: { temperature: 21 } },
+      { t: '2026-04-19T14:00:00.000Z', topic: 'status', payload: { temperature: 23 } },
+    ]);
+
+    const res = await aggregateDeviceHistory('DEV2', {
+      from: '2026-04-19T00:00:00.000Z',
+      to:   '2026-04-20T00:00:00.000Z',
+      metrics: ['temperature'],
+      aggs: ['avg'],
+    });
+
+    expect(res.buckets).toHaveLength(1);
+    const bucketT = new Date(res.buckets[0].t).getTime();
+    // Must NOT be epoch (year 1970)
+    expect(bucketT).toBeGreaterThan(new Date('2026-01-01').getTime());
+    // Must be within the queried range
+    expect(bucketT).toBeGreaterThanOrEqual(new Date('2026-04-19T00:00:00.000Z').getTime());
+    expect(bucketT).toBeLessThanOrEqual(new Date('2026-04-20T00:00:00.000Z').getTime());
+  });
+
   it('returns empty buckets for an unknown device', async () => {
     const res = await aggregateDeviceHistory('does-not-exist', {
       from: '2026-04-19T00:00:00.000Z',
