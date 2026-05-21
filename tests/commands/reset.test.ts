@@ -123,6 +123,8 @@ describe('reset --json', () => {
 });
 
 describe('reset --config <path>', () => {
+  beforeEach(() => { vi.mocked(nodeFsMock.existsSync).mockClear(); });
+
   it('checks for data files adjacent to the --config file, not under ~/.switchbot', async () => {
     const altConfigDir = path.join(os.tmpdir(), 'sb-alt-reset-test');
     const altConfigFile = path.join(altConfigDir, 'config.json');

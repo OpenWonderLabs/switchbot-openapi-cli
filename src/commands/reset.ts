@@ -40,6 +40,7 @@ function removeItem(itemPath: string, type: 'file' | 'dir'): 'removed' | 'absent
 }
 
 function makeDataItems(dataDir: string): Array<{ key: string; label: string; path: string; type: 'file' | 'dir' }> {
+  // quota / device-history / audit are always global (their writers hardcode ~/.switchbot regardless of --config)
   return [
     { key: 'cache',          label: 'Device cache',       path: path.join(dataDir, 'cache'),            type: 'dir'  },
     { key: 'devices',        label: 'Devices list cache', path: path.join(dataDir, 'devices.json'),     type: 'file' },
