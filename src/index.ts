@@ -27,6 +27,7 @@ import { registerRulesCommand } from './commands/rules.js';
 import { registerAuthCommand } from './commands/auth.js';
 import { registerInstallCommand } from './commands/install.js';
 import { registerUninstallCommand } from './commands/uninstall.js';
+import { registerResetCommand } from './commands/reset.js';
 import { registerStatusSyncCommand } from './commands/status-sync.js';
 import { registerHealthCommand } from './commands/health.js';
 import { registerUpgradeCheckCommand } from './commands/upgrade-check.js';
@@ -57,7 +58,7 @@ const TOP_LEVEL_COMMANDS = [
   'config', 'devices', 'scenes', 'webhook', 'completion', 'mcp',
   'quota', 'catalog', 'cache', 'events', 'doctor', 'schema',
   'history', 'plan', 'capabilities', 'agent-bootstrap', 'install', 'uninstall', 'status-sync',
-  'health', 'upgrade-check', 'daemon',
+  'health', 'upgrade-check', 'daemon', 'reset',
 ] as const;
 
 const cacheModeArg = (value: string): string => {
@@ -120,6 +121,7 @@ registerRulesCommand(program);
 registerAuthCommand(program);
 registerInstallCommand(program);
 registerUninstallCommand(program);
+registerResetCommand(program);
 registerStatusSyncCommand(program);
 registerHealthCommand(program);
 registerUpgradeCheckCommand(program);
