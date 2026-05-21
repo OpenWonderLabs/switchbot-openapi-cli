@@ -1,22 +1,23 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import crypto from 'node:crypto';
-import { randomUUID } from 'node:crypto';
+import crypto, { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import axios from 'axios';
 import { generateState } from './csrf.js';
-import { getFreePort, escapeHtml } from './utils.js';
+import { getFreePort, escapeHtml, SECURITY_HEADERS } from './utils.js';
 import {
   OAUTH_CLIENT_ID,
   OAUTH_SCOPE,
   OAUTH_TOKEN_URL,
   ACCOUNT_API_BASE,
-  WONDER_API_BASE,
   TOKEN_AES_KEY,
   TOKEN_AES_IV,
   ENDPOINTS,
   LOGIN_TIMEOUT_MS,
+  KNOWN_BOT_REGIONS,
+  DEFAULT_BOT_REGION,
+  COGNITO_DOMAIN,
 } from './constants.js';
 import type { CredentialBundle } from '../credentials/keychain.js';
 
@@ -30,11 +31,6 @@ export interface LoginServerHandle {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-const SECURITY_HEADERS = {
-  'X-Content-Type-Options': 'nosniff',
-  'X-Frame-Options': 'DENY',
-} as const;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = path.resolve(__dirname, 'web');
@@ -53,7 +49,7 @@ function getLoginHtml(state: string, port: number): string {
   // Inject runtime config just before </head>
   const config = JSON.stringify({
     clientId: OAUTH_CLIENT_ID,
-    cognitoDomain: 'https://auth.switch-bot.com',
+    cognitoDomain: COGNITO_DOMAIN,
     scope: OAUTH_SCOPE,
     state,
     callbackBase: `http://127.0.0.1:${port}`,
@@ -118,12 +114,13 @@ function decryptField(hexCipher: string): string {
 }
 
 /** POST /openapi/openUser/token (v2) → decrypt → CredentialBundle. */
-async function fetchCredentials(accessToken: string): Promise<CredentialBundle> {
+async function fetchCredentials(accessToken: string, botRegion = DEFAULT_BOT_REGION): Promise<CredentialBundle> {
+  const wonderBase = `https://wonderlabs.${botRegion}.api.switchbot.net/wonder`;
   const resp = await axios.post<{
     statusCode?: number;
     body?: Record<string, unknown>;
   }>(
-    `${WONDER_API_BASE}${ENDPOINTS.openUserToken}`,
+    `${wonderBase}${ENDPOINTS.openUserToken}`,
     { operation: 'get', version: 2 },
     {
       headers: { 'Content-Type': 'application/json', Authorization: accessToken },
@@ -381,5 +378,18 @@ async function handleEmailLogin(
     throw new Error(`Login returned no access_token. Body: ${JSON.stringify(loginResp.data?.body)}`);
   }
 
-  return fetchCredentials(accessToken);
+  // Step 3 — look up botRegion for the user's account
+  const userInfoResp = await axios.post<{
+    statusCode?: number;
+    body?: { botRegion?: string };
+  }>(
+    `${ACCOUNT_API_BASE}${ENDPOINTS.userInfo}`,
+    {},
+    { headers: { 'Content-Type': 'application/json', Authorization: accessToken }, timeout: 15_000 },
+  );
+  const rawRegion = userInfoResp.data?.body?.botRegion ?? '';
+  const botRegion = KNOWN_BOT_REGIONS.has(rawRegion) ? rawRegion : DEFAULT_BOT_REGION;
+
+  // Step 4 — fetch encrypted credentials from the region-specific Wonder API
+  return fetchCredentials(accessToken, botRegion);
 }

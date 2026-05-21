@@ -1,5 +1,10 @@
 import * as net from 'node:net';
 
+export const SECURITY_HEADERS = {
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+} as const;
+
 export async function getFreePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const srv = net.createServer();

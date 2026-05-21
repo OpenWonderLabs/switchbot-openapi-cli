@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { getFreePort, escapeHtml } from './utils.js';
+import { getFreePort, escapeHtml, SECURITY_HEADERS } from './utils.js';
 import { LOGIN_TIMEOUT_MS } from './constants.js';
 
 export interface CallbackResult {
@@ -12,11 +12,6 @@ export interface CallbackHandle {
   /** Resolves with the OAuth code once the browser redirects here. */
   wait(): Promise<CallbackResult>;
 }
-
-const SECURITY_HEADERS = {
-  'X-Content-Type-Options': 'nosniff',
-  'X-Frame-Options': 'DENY',
-} as const;
 
 function successHtml(): string {
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">

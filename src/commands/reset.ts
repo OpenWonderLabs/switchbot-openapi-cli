@@ -20,8 +20,6 @@ const DATA_ITEMS = [
   { key: 'audit',          label: 'Audit log',          path: path.join(BASE, 'audit.log'),      type: 'file' },
 ] as const;
 
-type ItemKey = typeof DATA_ITEMS[number]['key'];
-
 type ResetResult = { key: string; label: string; status: 'removed' | 'absent' | 'failed'; error?: string };
 
 async function confirm(question: string): Promise<boolean> {

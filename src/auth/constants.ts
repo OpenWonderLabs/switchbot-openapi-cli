@@ -18,6 +18,9 @@ export const ACCOUNT_API_BASE = 'https://account.api.switchbot.net';
 /** OAuth2 authorization endpoint (social login fallback). */
 export const OAUTH_AUTHORIZE_URL = 'https://auth.switch-bot.com/oauth2/authorize';
 
+/** Cognito domain root, used when injecting config into the local login page. */
+export const COGNITO_DOMAIN = 'https://auth.switch-bot.com';
+
 /** OAuth2 token endpoint (AWS Cognito, social login fallback). */
 export const OAUTH_TOKEN_URL = 'https://auth.switch-bot.com/oauth2/token';
 
@@ -48,4 +51,11 @@ export const TOKEN_AES_IV  = '4mdN27rI3bk2LzWa';
 export const ENDPOINTS = {
   mobileLogin: '/v2/mobile/management/login',
   openUserToken: '/openapi/openUser/token',
+  userInfo: '/account/api/v1/user/userinfo',
 } as const;
+
+/** Allowlist of known bot-region labels returned by /account/api/v1/user/userinfo. */
+export const KNOWN_BOT_REGIONS = new Set(['us', 'eu', 'as']);
+
+/** Fallback region when the returned botRegion value is absent or unknown. */
+export const DEFAULT_BOT_REGION = 'us';

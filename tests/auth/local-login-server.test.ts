@@ -147,12 +147,21 @@ describe('bindLoginServer — POST /auth/email invalid JSON', () => {
 });
 
 describe('bindLoginServer — POST /auth/email happy path', () => {
+  // AES-128-CBC encrypted values for 'open-tok' and 'sec-key' using the
+  // hardcoded key/IV from constants.ts (lrQ0OTvwp9RTsXxk / 4mdN27rI3bk2LzWa).
+  // decryptField returns the plaintext re-encoded as hex, so expected token/secret
+  // are the hex representations of the original plaintext strings.
+  const ENC_TOKEN  = '4939095e1119e02b75f3f13627738d5d'; // AES-CBC('open-tok')
+  const ENC_SECRET = 'fcbfccf31f48f07675f4d4a3f6a3add2'; // AES-CBC('sec-key')
+  const DEC_TOKEN  = '6f70656e2d746f6b';                  // hex('open-tok')
+  const DEC_SECRET = '7365632d6b6579';                    // hex('sec-key')
+
   beforeEach(() => {
     mockPost.mockReset();
     mockPost
-      .mockResolvedValueOnce({ data: { statusCode: 100, body: { access_token: 'tok' } } }) // login
-      .mockResolvedValueOnce({ data: { statusCode: 100, body: { botRegion: 'eu' } } })      // userinfo
-      .mockResolvedValueOnce({ data: { body: { openToken: 'ot', secretKey: 'sk' } } });     // openUserToken
+      .mockResolvedValueOnce({ data: { statusCode: 100, body: { access_token: 'tok' } } })           // login
+      .mockResolvedValueOnce({ data: { statusCode: 100, body: { botRegion: 'eu' } } })               // userinfo
+      .mockResolvedValueOnce({ data: { body: { token: ENC_TOKEN, secretKey: ENC_SECRET } } });       // openUserToken
   });
 
   it('returns 200 {success:true} and resolves wait() with credentials', async () => {
@@ -161,7 +170,7 @@ describe('bindLoginServer — POST /auth/email happy path', () => {
     expect(resp.status).toBe(200);
     expect((resp.json as { success: boolean }).success).toBe(true);
     const creds = await handle.wait();
-    expect(creds).toEqual({ token: 'ot', secret: 'sk' });
+    expect(creds).toEqual({ token: DEC_TOKEN, secret: DEC_SECRET });
   });
 });
 
@@ -181,22 +190,25 @@ describe('bindLoginServer — POST /auth/email login failure', () => {
 });
 
 describe('bindLoginServer — botRegion validation', () => {
+  const ENC_TOKEN  = '4939095e1119e02b75f3f13627738d5d';
+  const ENC_SECRET = 'fcbfccf31f48f07675f4d4a3f6a3add2';
+
   beforeEach(() => {
     mockPost.mockReset();
     mockPost
       .mockResolvedValueOnce({ data: { statusCode: 100, body: { access_token: 'tok' } } })
       .mockResolvedValueOnce({ data: { statusCode: 100, body: { botRegion: '../../evil' } } })
-      .mockResolvedValueOnce({ data: { body: { openToken: 'ot', secretKey: 'sk' } } });
+      .mockResolvedValueOnce({ data: { body: { token: ENC_TOKEN, secretKey: ENC_SECRET } } });
   });
 
   it('falls back to "us" region when botRegion contains path-traversal characters', async () => {
     const handle = await bindLoginServer(30_000);
     const waitP = handle.wait().catch(() => {});
     await postJson(handle.port, '/auth/email', { email: 'a@b.com', password: 'pw' });
+    await waitP;
     const thirdCallUrl = mockPost.mock.calls[2][0] as string;
     expect(thirdCallUrl).not.toContain('evil');
     expect(thirdCallUrl).toContain('.us.api');
-    await waitP;
   });
 });
 
