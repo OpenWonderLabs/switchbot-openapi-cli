@@ -94,6 +94,29 @@ describe('config', () => {
       expect(errSpy.mock.calls[0][0]).toContain('SWITCHBOT_TOKEN');
     });
 
+    it('includes --profile <name> in auth login hint when a named profile is active', () => {
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {
+        throw new Error('__exit');
+      });
+      fsMock.existsSync.mockReturnValue(false);
+
+      const origArgv = process.argv;
+      process.argv = ['node', 'test', '--profile', 'work'];
+      try {
+        expect(() => loadConfig()).toThrow('__exit');
+        const msg = errSpy.mock.calls[0][0] as string;
+        // Option 1 must carry the profile so the user doesn't accidentally overwrite default
+        expect(msg).toContain('switchbot --profile work auth login');
+        // Option 2 already carries the profile — verify it still does
+        expect(msg).toContain('switchbot --profile work config set-token');
+      } finally {
+        process.argv = origArgv;
+        exitSpy.mockRestore();
+        errSpy.mockRestore();
+      }
+    });
+
     it('exits(1) when config file has invalid JSON', () => {
       const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {
