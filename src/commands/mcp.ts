@@ -110,9 +110,12 @@ function mcpError(
   if (options?.errorClass !== undefined) obj.errorClass = options.errorClass;
   if (options?.transient !== undefined) obj.transient = options.transient;
   if (options?.retryAfterMs !== undefined) obj.retryAfterMs = options.retryAfterMs;
+  const summary = `${kind} error (code ${code}): ${message}`;
+  const hintLine = options?.hint ? `\n${options.hint}` : '';
+  const textBody = `${summary}${hintLine}\n--- structured ---\n${JSON.stringify({ error: obj }, null, 2)}`;
   return {
     isError: true as const,
-    content: [{ type: 'text' as const, text: JSON.stringify({ error: obj }, null, 2) }],
+    content: [{ type: 'text' as const, text: textBody }],
     structuredContent: { error: obj },
   };
 }

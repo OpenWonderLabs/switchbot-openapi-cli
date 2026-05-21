@@ -203,6 +203,15 @@ describe('mcp server', () => {
     }
   });
 
+  /** Extract the structured JSON block from an mcpError content text. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function parseErrorText(text: string): any {
+    const marker = '--- structured ---\n';
+    const idx = text.indexOf(marker);
+    if (idx === -1) return JSON.parse(text); // fallback for non-error text
+    return JSON.parse(text.slice(idx + marker.length));
+  }
+
   it('send_command rejects destructive commands without confirm:true', async () => {
     cacheMock.map.set('LOCK1', { type: 'Smart Lock', name: 'Front Door', category: 'physical' });
     const { client } = await pair();
@@ -214,7 +223,7 @@ describe('mcp server', () => {
 
     expect(res.isError).toBe(true);
     const text = (res.content as Array<{ type: string; text: string }>)[0].text;
-    const parsed = JSON.parse(text);
+    const parsed = parseErrorText(text);
     expect(parsed.error.kind).toBe('guard');
     expect(parsed.error.code).toBe(3);
     expect(parsed.error.context.command).toBe('unlock');
@@ -236,7 +245,7 @@ describe('mcp server', () => {
     });
 
     expect(res.isError).toBe(true);
-    const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    const parsed = parseErrorText((res.content as Array<{ text: string }>)[0].text);
     expect(parsed.error.kind).toBe('guard');
     expect(parsed.error.hint).toMatch(/plan save|plan execute/);
     expect(apiMock.__instance.post).not.toHaveBeenCalled();
@@ -269,7 +278,7 @@ describe('mcp server', () => {
     });
 
     expect(res.isError).toBe(true);
-    const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    const parsed = parseErrorText((res.content as Array<{ text: string }>)[0].text);
     expect(parsed.error.kind).toBe('usage');
     expect(parsed.error.code).toBe(2);
     expect(parsed.error.context.validationKind).toBe('unknown-command');
@@ -286,7 +295,7 @@ describe('mcp server', () => {
     });
 
     expect(res.isError).toBe(true);
-    const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    const parsed = parseErrorText((res.content as Array<{ text: string }>)[0].text);
     expect(parsed.error.kind).toBe('usage');
     expect(parsed.error.context.validationKind).toBe('read-only-device');
     expect(apiMock.__instance.post).not.toHaveBeenCalled();
@@ -720,9 +729,10 @@ describe('mcp server', () => {
     expect(sc?.error?.subKind).toBe('device-offline');
     expect(sc?.error?.transient).toBe(false);
     expect(sc?.error?.hint).toMatch(/Hub/);
-    // content[0].text must still be a JSON string (backwards compat)
+    // content[0].text must start with human-readable summary; structured section must be valid JSON
     const text = (res.content as Array<{ type: string; text: string }>)[0].text;
-    expect(() => JSON.parse(text)).not.toThrow();
+    expect(text).toMatch(/^(api|runtime|usage|guard) error \(code \d+\): /);
+    expect(() => parseErrorText(text)).not.toThrow();
   });
 
   it('describe_device preserves structured error metadata on ApiError (code 401 auth-failed)', async () => {
@@ -764,6 +774,29 @@ describe('mcp server', () => {
     expect(sc?.error?.subKind).toBe('device-internal-error');
   });
 
+  describe('mcpError — content text format', () => {
+    it('content[0].text starts with human-readable summary line', async () => {
+      const { client } = await pair();
+      // Trigger an API error by calling describe_device with a device ID that returns 404
+      apiMock.__instance.get.mockRejectedValueOnce(
+        new ApiError('device not found', 190)
+      );
+
+      const result = await client.callTool({
+        name: 'describe_device',
+        arguments: { deviceId: 'NONEXISTENT' },
+      });
+
+      expect(result.isError).toBe(true);
+      const textContent = (result.content as Array<{ type: string; text: string }>).find(
+        (c) => c.type === 'text'
+      );
+      expect(textContent).toBeDefined();
+      // Must start with "api error (code" or similar pattern
+      expect(textContent!.text).toMatch(/^(api|runtime|usage|guard) error \(code \d+\): /);
+    });
+  });
+
   describe('plan/audit tools', () => {
     it('plan_run skips destructive steps when yes is not set', async () => {
       cacheMock.map.set('LOCK1', { type: 'Smart Lock', name: 'Front Door', category: 'physical' });
@@ -803,7 +836,7 @@ describe('mcp server', () => {
       });
 
       expect(res.isError).toBe(true);
-      const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+      const parsed = parseErrorText((res.content as Array<{ text: string }>)[0].text);
       expect(parsed.error.kind).toBe('guard');
       expect(parsed.error.hint).toMatch(/plan save|plan execute/);
     });
