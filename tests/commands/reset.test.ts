@@ -102,6 +102,24 @@ describe('reset --json', () => {
     expect(data).toHaveProperty('reset', true);
     expect(Array.isArray(data['results'])).toBe(true);
   });
+
+  it('exits 1 under --json when a keychain delete fails', async () => {
+    const store = {
+      name: 'file',
+      delete: vi.fn().mockRejectedValue(new Error('keychain locked')),
+      describe: () => ({ backend: 'mock', tag: 'file', writable: true }),
+    };
+    selectMock.mockResolvedValue(store);
+
+    const res = await runCli(registerResetCommand, ['--json', 'reset', '--yes']);
+    expect(res.exitCode).toBe(1);
+
+    const output = res.stdout.join('\n');
+    const parsed = JSON.parse(output) as Record<string, unknown>;
+    const data = parsed['data'] as Record<string, unknown>;
+    const results = data['results'] as Array<{ status: string }>;
+    expect(results.some((r) => r.status === 'failed')).toBe(true);
+  });
 });
 
 describe('reset --config <path>', () => {

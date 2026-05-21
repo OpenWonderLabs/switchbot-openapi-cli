@@ -148,6 +148,7 @@ export function registerResetCommand(program: Command): void {
 
       if (isJsonMode()) {
         printJson({ reset: true, results });
+        if (results.some(r => r.status === 'failed')) process.exit(1);
         return;
       }
 
