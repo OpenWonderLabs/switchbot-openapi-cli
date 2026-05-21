@@ -1,0 +1,25 @@
+src/auth/oauth-callback.ts
+  s_e9b1caed467e20::t_812a53e49b8122 49
+  s_e9b1caed467e20::t_f83f38d32503ba 105-118,127
+  s_e9b1caed467e20::t_aaaadb0f31e8c8 2-4
+tests/auth/oauth-callback.test.ts
+  s_e9b1caed467e20::t_b59bc778fea87a 12-14,17,28,39,48,60,72,82,93,100
+src/auth/constants.ts
+  s_e9b1caed467e20::t_c56e4efc513893 41-43
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "2036aa68a559864da8ccf02194489577bf61fb20",
+  "prompts": {},
+  "sessions": {
+    "s_e9b1caed467e20": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1609372a-454e-4580-90c6-e351730798f2",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
