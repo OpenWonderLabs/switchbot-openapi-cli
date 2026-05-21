@@ -28,6 +28,7 @@ function makeProgram(): Command {
   const program = new Command();
   program.exitOverride();
   program.option('--json');
+  program.option('--config <path>', 'Override credential file location');
   registerAuthCommand(program);
   return program;
 }
@@ -463,5 +464,31 @@ describe('auth login', () => {
     const data = (parsed['data'] ?? parsed) as Record<string, unknown>;
     expect(data).toHaveProperty('loggedIn', true);
     expect(data).toHaveProperty('verified', true);
+  });
+
+  it('writes credentials directly to the --config file instead of the keychain', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-auth-login-config-'));
+    const configFile = path.join(tmpDir, 'portable.json');
+
+    try {
+      browserLoginMock.mockResolvedValue({ token: 'tok-portable', secret: 'sec-portable' });
+      axiosGetMock.mockResolvedValue({ data: { statusCode: 100 } });
+      // selectMock is already reset in beforeEach — it must not be called at all
+
+      const res = await runCli([
+        '--config', configFile,
+        'auth', 'login', '--no-open',
+      ]);
+      expect(res.exitCode).toBe(0);
+
+      // Credentials must be written to the config file, NOT to the keychain
+      expect(selectMock).not.toHaveBeenCalled();
+      expect(fs.existsSync(configFile)).toBe(true);
+      const saved = JSON.parse(fs.readFileSync(configFile, 'utf-8')) as Record<string, unknown>;
+      expect(saved['token']).toBe('tok-portable');
+      expect(saved['secret']).toBe('sec-portable');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });

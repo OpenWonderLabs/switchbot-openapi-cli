@@ -24,6 +24,8 @@ import axios from 'axios';
 import { exitWithError, isJsonMode, printJson } from '../utils/output.js';
 import { stringArg } from '../utils/arg-parsers.js';
 import { getActiveProfile } from '../lib/request-context.js';
+import { getConfigPath } from '../utils/flags.js';
+import { saveConfig } from '../config.js';
 import {
   CredentialBundle,
   selectCredentialStore,
@@ -439,22 +441,38 @@ export function registerAuthCommand(program: Command): void {
         return;
       }
 
-      const store = await selectCredentialStore();
-      try {
-        await store.set(profile, creds);
-      } catch (err) {
-        exitWithError({
-          code: 1,
-          kind: 'runtime',
-          message: `Failed to save credentials: ${err instanceof Error ? err.message : String(err)}`,
-        });
-        return;
+      let backendName: string;
+      if (getConfigPath()) {
+        try {
+          saveConfig(creds.token, creds.secret);
+        } catch (err) {
+          exitWithError({
+            code: 1,
+            kind: 'runtime',
+            message: `Failed to save credentials: ${err instanceof Error ? err.message : String(err)}`,
+          });
+          return;
+        }
+        backendName = 'file';
+      } else {
+        const store = await selectCredentialStore();
+        try {
+          await store.set(profile, creds);
+        } catch (err) {
+          exitWithError({
+            code: 1,
+            kind: 'runtime',
+            message: `Failed to save credentials: ${err instanceof Error ? err.message : String(err)}`,
+          });
+          return;
+        }
+        backendName = store.name;
       }
 
       if (isJsonMode()) {
         printJson({
           profile,
-          backend: store.name,
+          backend: backendName,
           loggedIn: true,
           verified: true,
           token: { length: creds.token.length, masked: maskValue(creds.token) },
@@ -462,7 +480,7 @@ export function registerAuthCommand(program: Command): void {
         return;
       }
 
-      console.log(`✓ Credentials verified and saved to backend "${store.name}" for profile "${profile}".`);
+      console.log(`✓ Credentials verified and saved to backend "${backendName}" for profile "${profile}".`);
       console.log(`token : ${maskValue(creds.token)} (${creds.token.length} chars)`);
       console.log(`secret: ${maskValue(creds.secret)} (${creds.secret.length} chars)`);
     });
