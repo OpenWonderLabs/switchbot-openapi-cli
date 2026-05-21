@@ -18,7 +18,7 @@ function decryptField(hexCipher: string): string {
   const key = Buffer.from(TOKEN_AES_KEY, 'utf8');
   const iv  = Buffer.from(TOKEN_AES_IV,  'utf8');
   const d   = crypto.createDecipheriv('aes-128-cbc', key, iv);
-  return Buffer.concat([d.update(Buffer.from(hexCipher, 'hex')), d.final()]).toString('hex');
+  return Buffer.concat([d.update(Buffer.from(hexCipher, 'hex')), d.final()]).toString('utf8');
 }
 
 // ── Main export ───────────────────────────────────────────────────────────────

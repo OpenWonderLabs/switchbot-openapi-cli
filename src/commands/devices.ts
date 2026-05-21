@@ -258,14 +258,14 @@ Cache note:
             });
             printJson({
               ok: true,
-              deviceList: filteredDeviceList.map(d => project(normPhysical(d))),
-              infraredRemoteList: filteredIrList.map(d => project(normIr(d))),
+              deviceList: jsonFields ? filteredDeviceList.map(d => project(normPhysical(d))) : filteredDeviceList,
+              infraredRemoteList: jsonFields ? filteredIrList.map(d => project(normIr(d))) : filteredIrList,
             });
           } else {
             printJson({
               ok: true,
-              deviceList: deviceList.map(d => project(normPhysical(d))),
-              infraredRemoteList: infraredRemoteList.map(d => project(normIr(d))),
+              deviceList: jsonFields ? deviceList.map(d => project(normPhysical(d))) : deviceList,
+              infraredRemoteList: jsonFields ? infraredRemoteList.map(d => project(normIr(d))) : infraredRemoteList,
             });
           }
           return;

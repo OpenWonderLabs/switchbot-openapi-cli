@@ -5,6 +5,7 @@ import os from 'node:os';
 import readline from 'node:readline';
 import chalk from 'chalk';
 import { isJsonMode, printJson } from '../utils/output.js';
+import { isDryRun } from '../utils/flags.js';
 import { selectCredentialStore } from '../credentials/keychain.js';
 import { listProfiles } from '../config.js';
 import { getActiveProfile } from '../lib/request-context.js';
@@ -63,6 +64,23 @@ export function registerResetCommand(program: Command): void {
     .action(async (opts: { yes?: boolean; keepCredentials?: boolean }) => {
       const profile = getActiveProfile() ?? 'default';
       const extraProfiles = listProfiles();
+
+      if (isDryRun()) {
+        const preview: string[] = [];
+        if (!opts.keepCredentials) {
+          const profilesToWipe = [profile, ...extraProfiles.filter(p => p !== profile)];
+          for (const p of profilesToWipe) preview.push(`Credentials (${p})`);
+          preview.push('Config file (config.json)', 'Profiles directory');
+        }
+        for (const item of DATA_ITEMS) preview.push(item.label);
+        if (isJsonMode()) {
+          printJson({ dryRun: true, wouldDelete: preview });
+        } else {
+          console.error(chalk.dim('[dry-run] Would delete:'));
+          for (const p of preview) console.error(chalk.dim(`  • ${p}`));
+        }
+        return;
+      }
 
       if (!opts.yes) {
         console.error(chalk.yellow('This will permanently delete:'));
