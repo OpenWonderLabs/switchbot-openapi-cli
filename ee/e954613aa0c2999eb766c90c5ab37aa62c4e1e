@@ -1,0 +1,22 @@
+src/devices/history-agg.ts
+  s_fb6d2a8e0883f1::t_d75d44f56b0bd0 100
+  s_fb6d2a8e0883f1::t_f0f535afcde50f 98-99
+tests/devices/history-agg.test.ts
+  s_fb6d2a8e0883f1::t_7989a0cee3202e 214-236
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "eee954613aa0c2999eb766c90c5ab37aa62c4e1e",
+  "prompts": {},
+  "sessions": {
+    "s_fb6d2a8e0883f1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "82c94bf3-3326-4bff-8e54-af5800a1f153",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
