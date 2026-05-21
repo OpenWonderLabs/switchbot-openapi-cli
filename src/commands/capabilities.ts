@@ -214,6 +214,7 @@ export const COMMAND_META: Record<string, CommandMeta> = {
   'status-sync start': ACTION_LOCAL,
   'status-sync stop': ACTION_LOCAL,
   'status-sync status': READ_LOCAL,
+  'reset': ACTION_LOCAL,
   'uninstall': ACTION_LOCAL,
   'upgrade-check': READ_REMOTE,
   'webhook setup': ACTION_REMOTE,

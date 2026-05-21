@@ -206,10 +206,47 @@ Cache note:
 
         if (fmt === 'json' && process.argv.includes('--json')) {
           const jsonFields = resolveFields();
-          const projectDevice = jsonFields
-            ? (obj: Record<string, unknown>): Record<string, unknown> =>
-                Object.fromEntries(jsonFields.map((k) => [k, obj[k] ?? null]))
-            : null;
+
+          // Alias → canonical column name (same as table output).
+          const ALIAS: Record<string, string> = {
+            id: 'deviceId', name: 'deviceName', deviceType: 'type', type: 'type',
+            roomName: 'room', familyName: 'family', hubDeviceId: 'hub',
+            enableCloudService: 'cloud', controlType: 'controlType',
+            deviceName: 'deviceName', deviceId: 'deviceId', category: 'category',
+            roomID: 'roomID', alias: 'alias',
+          };
+          const ALL_COLS = new Set(['deviceId','deviceName','type','category','controlType','family','roomID','room','hub','cloud','alias']);
+
+          if (jsonFields) {
+            const unknown = jsonFields.filter(k => !ALL_COLS.has(ALIAS[k] ?? k));
+            if (unknown.length) {
+              exitWithError({ code: 2, kind: 'usage', message: `Unknown --fields value(s): ${unknown.join(', ')}` });
+            }
+          }
+
+          const normPhysical = (d: typeof deviceList[0]): Record<string, unknown> => ({
+            deviceId: d.deviceId, deviceName: d.deviceName,
+            type: d.deviceType || d.controlType || 'Unknown Device',
+            category: 'physical', controlType: d.controlType || '—',
+            family: d.familyName || '—', roomID: d.roomID || '—', room: d.roomName || '—',
+            hub: !d.hubDeviceId || d.hubDeviceId === '000000000000' ? '—' : d.hubDeviceId,
+            cloud: String(d.enableCloudService),
+            alias: deviceMeta.devices[d.deviceId]?.alias ?? '—',
+          });
+          const normIr = (d: typeof infraredRemoteList[0]): Record<string, unknown> => {
+            const inh = hubLocation.get(d.hubDeviceId);
+            return {
+              deviceId: d.deviceId, deviceName: d.deviceName,
+              type: d.remoteType, category: 'ir', controlType: d.controlType || '—',
+              family: inh?.family || '—', roomID: inh?.roomID || '—', room: inh?.room || '—',
+              hub: d.hubDeviceId, cloud: '—',
+              alias: deviceMeta.devices[d.deviceId]?.alias ?? '—',
+            };
+          };
+          const project = jsonFields
+            ? (norm: Record<string, unknown>) =>
+                Object.fromEntries(jsonFields.map(k => [k, norm[ALIAS[k] ?? k] ?? null]))
+            : (norm: Record<string, unknown>) => norm;
 
           if (listClauses) {
             const filteredDeviceList = deviceList.filter((d) =>
@@ -221,20 +258,15 @@ Cache note:
             });
             printJson({
               ok: true,
-              deviceList: projectDevice ? filteredDeviceList.map((d) => projectDevice(d as unknown as Record<string, unknown>)) : filteredDeviceList,
-              infraredRemoteList: projectDevice ? filteredIrList.map((d) => projectDevice(d as unknown as Record<string, unknown>)) : filteredIrList,
+              deviceList: filteredDeviceList.map(d => project(normPhysical(d))),
+              infraredRemoteList: filteredIrList.map(d => project(normIr(d))),
             });
           } else {
-            const rawBody = body as { deviceList?: unknown[]; infraredRemoteList?: unknown[] };
-            if (projectDevice && rawBody.deviceList) {
-              printJson({
-                ok: true,
-                deviceList: rawBody.deviceList.map((d) => projectDevice(d as Record<string, unknown>)),
-                infraredRemoteList: (rawBody.infraredRemoteList ?? []).map((d) => projectDevice(d as Record<string, unknown>)),
-              });
-            } else {
-              printJson({ ok: true, ...(body as object) });
-            }
+            printJson({
+              ok: true,
+              deviceList: deviceList.map(d => project(normPhysical(d))),
+              infraredRemoteList: infraredRemoteList.map(d => project(normIr(d))),
+            });
           }
           return;
         }

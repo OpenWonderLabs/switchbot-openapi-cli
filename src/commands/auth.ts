@@ -417,7 +417,7 @@ export function registerAuthCommand(program: Command): void {
         creds = await browserLogin({
           noOpen: !options.open,
           timeoutMs,
-          log: (msg) => console.log(msg),
+          log: (msg) => isJsonMode() ? console.error(msg) : console.log(msg),
         });
       } catch (err) {
         exitWithError({
@@ -427,7 +427,7 @@ export function registerAuthCommand(program: Command): void {
         });
       }
 
-      console.log('Verifying credentials…');
+      (isJsonMode() ? console.error : console.log)('Verifying credentials…');
       const check = await verifyCredentials(creds!);
       if (!check.ok) {
         exitWithError({

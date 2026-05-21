@@ -17,6 +17,7 @@ const DATA_ITEMS = [
   { key: 'quota',          label: 'Quota counter',      path: path.join(BASE, 'quota.json'),     type: 'file' },
   { key: 'device-history', label: 'Device history',     path: path.join(BASE, 'device-history'), type: 'dir'  },
   { key: 'device-meta',    label: 'Device metadata',    path: path.join(BASE, 'device-meta.json'), type: 'file' },
+  { key: 'status',         label: 'Status cache',       path: path.join(BASE, 'status.json'),      type: 'file' },
   { key: 'audit',          label: 'Audit log',          path: path.join(BASE, 'audit.log'),      type: 'file' },
 ] as const;
 
