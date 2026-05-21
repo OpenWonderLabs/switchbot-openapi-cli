@@ -1616,7 +1616,29 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
       outputSchema: {
         ran: z.boolean(),
         plan: z.unknown(),
-        results: z.array(z.unknown()),
+        results: z.array(z.discriminatedUnion('type', [
+          z.object({
+            step: z.number(),
+            type: z.literal('command'),
+            deviceId: z.string(),
+            command: z.string(),
+            status: z.enum(['ok', 'error', 'skipped']),
+            error: z.string().optional(),
+          }).passthrough(),
+          z.object({
+            step: z.number(),
+            type: z.literal('scene'),
+            sceneId: z.string(),
+            status: z.enum(['ok', 'error']),
+            error: z.string().optional(),
+          }).passthrough(),
+          z.object({
+            step: z.number(),
+            type: z.literal('wait'),
+            ms: z.number(),
+            status: z.literal('ok'),
+          }).passthrough(),
+        ])),
         summary: z.object({
           total: z.number().int(),
           ok: z.number().int(),

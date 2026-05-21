@@ -1292,4 +1292,36 @@ describe('mcp server', () => {
       expect(sc.deviceList).toHaveLength(1);
     });
   });
+
+  describe('plan_run — outputSchema structuredContent shape', () => {
+    it('returns typed results array with step/type/status fields', async () => {
+      const { client } = await pair();
+      // Mock the device command API call
+      apiMock.__instance.post.mockResolvedValueOnce({ data: { statusCode: 100, body: {} } });
+      cacheMock.map.set('DEVICE1', { type: 'Bot', name: 'test bot', category: 'physical' });
+
+      const plan = {
+        version: '1.0',
+        description: 'test',
+        steps: [{ type: 'command', deviceId: 'DEVICE1', command: 'turnOn' }],
+      };
+
+      const result = await client.callTool({
+        name: 'plan_run',
+        arguments: { plan },
+      });
+
+      expect(result.isError).toBeFalsy();
+      const sc = (result as { structuredContent: {
+        ran: boolean;
+        results: Array<{ step: number; type: string; status: string }>;
+        summary: { total: number; ok: number; error: number; skipped: number };
+      } }).structuredContent;
+
+      expect(sc.ran).toBe(true);
+      expect(sc.results).toHaveLength(1);
+      expect(sc.results[0]).toMatchObject({ step: 1, type: 'command', status: 'ok' });
+      expect(sc.summary).toMatchObject({ total: 1, ok: 1, error: 0, skipped: 0 });
+    });
+  });
 });
