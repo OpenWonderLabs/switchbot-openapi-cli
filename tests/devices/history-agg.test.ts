@@ -246,6 +246,32 @@ describe('aggregateDeviceHistory — single bucket', () => {
     expect(res.notes).toEqual([]);
   });
 
+  it('yields one bucket when upper bound is open (toMs = Infinity)', async () => {
+    const file = path.join(historyDir, 'DEV_OPEN.jsonl');
+    const base = new Date('2026-04-19T10:00:00.000Z').getTime();
+    writeJsonl(file, [
+      { t: new Date(base).toISOString(),        topic: 'status', payload: { temperature: 20 } },
+      { t: new Date(base + 1000).toISOString(), topic: 'status', payload: { temperature: 22 } },
+      { t: new Date(base + 2000).toISOString(), topic: 'status', payload: { temperature: 24 } },
+    ]);
+
+    // Mock Date.now to return a large increment per call.
+    // Before the fix, each per-record call produces a different key → 3 buckets.
+    // After the fix, Date.now() is called once before the loop → 1 bucket.
+    let call = 0;
+    vi.spyOn(Date, 'now').mockImplementation(() => base + call++ * 1_000_000);
+
+    const res = await aggregateDeviceHistory('DEV_OPEN', {
+      from: '2026-04-19T00:00:00.000Z', // finite fromMs; no --to → toMs = +Infinity
+      metrics: ['temperature'],
+      aggs: ['count', 'avg'],
+    });
+
+    expect(res.buckets).toHaveLength(1);
+    expect(res.buckets[0].metrics.temperature.count).toBe(3);
+    expect(res.buckets[0].metrics.temperature.avg).toBe(22);
+  });
+
   it('skips rotated files whose mtime is older than --since window', async () => {
     const id = 'DEV4';
     const rotatedFile = path.join(historyDir, `${id}.jsonl.1`);

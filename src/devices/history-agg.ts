@@ -73,6 +73,15 @@ export async function aggregateDeviceHistory(
     1,
     Math.min(opts.maxBucketSamples ?? DEFAULT_SAMPLE_CAP, MAX_SAMPLE_CAP),
   );
+
+  const now = Date.now();
+  const stableKey = bucketMs === null
+    ? Math.floor(
+        ((Number.isFinite(fromMs) ? fromMs : now) +
+         (Number.isFinite(toMs) ? toMs : now)) / 2,
+      )
+    : 0;
+
   let partial = false;
   const notes: string[] = [];
 
@@ -97,7 +106,7 @@ export async function aggregateDeviceHistory(
 
       const key = bucketMs !== null
         ? Math.floor(tMs / bucketMs) * bucketMs
-        : Math.floor(((Number.isFinite(fromMs) ? fromMs : Date.now()) + (Number.isFinite(toMs) ? toMs : Date.now())) / 2);
+        : stableKey;
       let bkt = buckets.get(key);
       if (!bkt) { bkt = new Map(); buckets.set(key, bkt); }
 
