@@ -94,7 +94,7 @@ export function registerResetCommand(program: Command): void {
         const ok = await confirm('Continue?');
         if (!ok) {
           console.error('Aborted.');
-          process.exit(0);
+          return;
         }
       }
 
@@ -110,7 +110,7 @@ export function registerResetCommand(program: Command): void {
             await store.delete(p);
             results.push({ key: `creds:${p}`, label: `Credentials (${p})`, status: 'removed' });
           } catch {
-            results.push({ key: `creds:${p}`, label: `Credentials (${p})`, status: 'absent' });
+            results.push({ key: `creds:${p}`, label: `Credentials (${p})`, status: 'failed' });
           }
         }
 
