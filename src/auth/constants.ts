@@ -38,6 +38,9 @@ export const OAUTH_CLIENT_SECRET = 'aFDbbDdGiUSGCgRbCvAHpMNokcQDnIDbDhaVYbWWpRaZ
 /** Milliseconds the CLI waits for the user to complete browser login. */
 export const LOGIN_TIMEOUT_MS = 120_000;
 
+/** Fixed loopback port registered as redirect URI in the SwitchBot merchant OAuth client. */
+export const OAUTH_CALLBACK_PORT = 53245;
+
 // ── Mobile management API (OAuth fallback — plaintext token) ─────────────────
 
 export const MOBILE_API_BASE = 'https://wonderlabs.us.api.switchbot.net/homepage';

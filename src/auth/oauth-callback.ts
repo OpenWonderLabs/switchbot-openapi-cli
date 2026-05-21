@@ -1,6 +1,7 @@
 import http from 'node:http';
-import { getFreePort, escapeHtml, SECURITY_HEADERS } from './utils.js';
-import { LOGIN_TIMEOUT_MS } from './constants.js';
+import type { AddressInfo } from 'node:net';
+import { escapeHtml, SECURITY_HEADERS } from './utils.js';
+import { LOGIN_TIMEOUT_MS, OAUTH_CALLBACK_PORT } from './constants.js';
 
 export interface CallbackResult {
   code: string;
@@ -45,9 +46,8 @@ h1{color:#dc2626;margin:0 0 12px}p{color:#374151;margin:0;font-size:.9rem}</styl
 export async function bindCallbackServer(
   expectedState: string,
   timeoutMs = LOGIN_TIMEOUT_MS,
+  port = OAUTH_CALLBACK_PORT,
 ): Promise<CallbackHandle> {
-  const port = await getFreePort();
-
   let resolveResult!: (r: CallbackResult) => void;
   let rejectResult!: (e: Error) => void;
   const resultPromise = new Promise<CallbackResult>((res, rej) => {
@@ -102,7 +102,20 @@ export async function bindCallbackServer(
     finish(200, successHtml());
   });
 
-  server.listen(port, '127.0.0.1');
+  const actualPort = await new Promise<number>((resolve, reject) => {
+    server.once('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE') {
+        reject(new Error(
+          `Port ${port} is already in use. Close any other switchbot login session and try again.`,
+        ));
+      } else {
+        reject(err);
+      }
+    });
+    server.listen(port, '127.0.0.1', () => {
+      resolve((server.address() as AddressInfo).port);
+    });
+  });
 
   const timer = setTimeout(() => {
     if (finished) return;
@@ -111,5 +124,5 @@ export async function bindCallbackServer(
     rejectResult(new Error('Login timed out. Please run `switchbot auth login` again.'));
   }, timeoutMs);
 
-  return { port, wait: () => resultPromise };
+  return { port: actualPort, wait: () => resultPromise };
 }
