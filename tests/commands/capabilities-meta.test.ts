@@ -1,63 +1,20 @@
 import { describe, it, expect, vi } from 'vitest';
 
-// ── mocks required for importing capabilities.ts ────────────────────────────
+// ── mocks required for importing capabilities.ts and program-builder.ts ────────
 const catalogMock = vi.hoisted(() => ({
   getEffectiveCatalog: vi.fn(() => []),
   deriveSafetyTier: vi.fn(() => 'action' as const),
   deriveStatusQueries: vi.fn(() => []),
+  CATALOG_SCHEMA_VERSION: '1.0',
 }));
 const cacheMock = vi.hoisted(() => ({ loadCache: vi.fn(() => ({ list: [], status: {} })) }));
 vi.mock('../../src/devices/catalog.js', () => catalogMock);
 vi.mock('../../src/devices/cache.js', () => cacheMock);
 
-import { COMMAND_META } from '../../src/commands/capabilities.js';
-import { registerCapabilitiesCommand } from '../../src/commands/capabilities.js';
+import { COMMAND_META, enumerateLeafNames, registerCapabilitiesCommand } from '../../src/commands/capabilities.js';
+import { buildProgram } from '../../src/program-builder.js';
 import { runCli } from '../helpers/cli.js';
 import { expectJsonEnvelopeContainingKeys } from '../helpers/contracts.js';
-
-// ── comprehensive list of every CLI leaf command ──────────────────────────────
-// Regression guard: when a new subcommand is added to the CLI, it MUST be added
-// here AND to COMMAND_META. If either is missing, this test fails with a clear
-// "missing: <name>" message.
-const ALL_EXPECTED_LEAF_COMMANDS = [
-  'agent-bootstrap',
-  'auth keychain describe', 'auth keychain get', 'auth keychain set',
-  'auth keychain delete', 'auth keychain migrate', 'auth login',
-  'cache show', 'cache clear',
-  'capabilities',
-  'catalog path', 'catalog show', 'catalog search', 'catalog diff', 'catalog refresh',
-  'completion',
-  'config set-token', 'config show', 'config list-profiles', 'config agent-profile',
-  'daemon start', 'daemon stop', 'daemon status', 'daemon reload',
-  'devices list', 'devices status', 'devices command', 'devices types',
-  'devices commands', 'devices describe', 'devices batch', 'devices watch',
-  'devices explain', 'devices expand',
-  'devices meta set', 'devices meta get', 'devices meta list', 'devices meta clear',
-  'doctor',
-  'events tail', 'events mqtt-tail',
-  'health check', 'health serve',
-  'history show', 'history replay', 'history range', 'history stats',
-  'history verify', 'history aggregate',
-  'install',
-  'mcp serve', 'mcp tools', 'mcp list-tools',
-  'plan schema', 'plan validate', 'plan suggest', 'plan run',
-  'plan save', 'plan list', 'plan review', 'plan approve', 'plan execute',
-  'policy validate', 'policy new', 'policy migrate', 'policy diff',
-  'policy add-rule', 'policy backup', 'policy restore',
-  'quota status', 'quota reset',
-  'reset',
-  'rules suggest', 'rules lint', 'rules list', 'rules run', 'rules reload',
-  'rules tail', 'rules replay', 'rules webhook-rotate-token', 'rules webhook-show-token',
-  'rules conflicts', 'rules doctor', 'rules summary', 'rules last-fired',
-  'rules explain', 'rules trace-explain', 'rules simulate',
-  'schema export',
-  'scenes list', 'scenes execute', 'scenes describe',
-  'scenes validate', 'scenes simulate', 'scenes explain',
-  'status-sync run', 'status-sync start', 'status-sync stop', 'status-sync status',
-  'uninstall',
-  'upgrade-check',
-  'webhook setup', 'webhook query', 'webhook update', 'webhook delete',
-] as const;
 
 // MCP tool names and other prefixes that legitimately live in COMMAND_META
 // but are NOT CLI leaf commands.
@@ -67,15 +24,18 @@ const NON_CLI_PREFIXES = [
 ];
 
 describe('COMMAND_META — exhaustive coverage guard', () => {
-  it('has an entry for every known CLI leaf command', () => {
-    const missing = ALL_EXPECTED_LEAF_COMMANDS.filter((cmd) => !(cmd in COMMAND_META));
+  // Derive ground truth from the real CLI program tree — no hardcoded list to maintain.
+  // Adding a new command automatically propagates here; only COMMAND_META needs updating.
+  const cliLeaves = new Set(enumerateLeafNames(buildProgram()));
+
+  it('has an entry for every CLI leaf command', () => {
+    const missing = [...cliLeaves].filter((cmd) => !(cmd in COMMAND_META));
     expect(missing, `COMMAND_META missing entries: ${missing.join(', ')}`).toHaveLength(0);
   });
 
   it('does not have phantom entries for commands that do not exist', () => {
-    const knownSet = new Set<string>(ALL_EXPECTED_LEAF_COMMANDS);
     const phantom = Object.keys(COMMAND_META).filter(
-      (k) => !knownSet.has(k) && !NON_CLI_PREFIXES.some((p) => k.startsWith(p)),
+      (k) => !cliLeaves.has(k) && !NON_CLI_PREFIXES.some((p) => k.startsWith(p)),
     );
     expect(phantom, `Phantom COMMAND_META entries: ${phantom.join(', ')}`).toHaveLength(0);
   });

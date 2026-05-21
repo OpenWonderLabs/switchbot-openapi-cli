@@ -266,7 +266,7 @@ export interface CompactLeaf {
   recommendedMode: RecommendedMode;
 }
 
-function enumerateLeafNames(program: Command, prefix = ''): string[] {
+export function enumerateLeafNames(program: Command, prefix = ''): string[] {
   const out: string[] = [];
   for (const cmd of program.commands) {
     const full = prefix ? `${prefix} ${cmd.name()}` : cmd.name();
