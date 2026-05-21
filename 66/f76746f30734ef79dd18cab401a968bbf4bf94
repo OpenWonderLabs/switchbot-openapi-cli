@@ -1,0 +1,26 @@
+src/auth/token-exchange.ts
+  s_e9b1caed467e20::t_26fd5d8135513d 5,68
+src/auth/local-login-server.ts
+  s_e9b1caed467e20::t_26fd5d8135513d 6,253
+src/auth/constants.ts
+  s_e9b1caed467e20::t_26fd5d8135513d 26-27,29-36
+src/auth/browser-login.ts
+  s_e9b1caed467e20::t_26fd5d8135513d 45-55,67-85
+  s_e9b1caed467e20::t_919183571ef6cf 86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "66f76746f30734ef79dd18cab401a968bbf4bf94",
+  "prompts": {},
+  "sessions": {
+    "s_e9b1caed467e20": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1609372a-454e-4580-90c6-e351730798f2",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
