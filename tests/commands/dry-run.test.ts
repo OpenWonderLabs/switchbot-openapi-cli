@@ -59,6 +59,15 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createSwitchBotMcpServer } from '../../src/commands/mcp.js';
 
+/** Extract the structured JSON block from an mcpError content text. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function parseErrorText(text: string): any {
+  const marker = '--- structured ---\n';
+  const idx = text.indexOf(marker);
+  if (idx === -1) return JSON.parse(text); // fallback for non-error text
+  return JSON.parse(text.slice(idx + marker.length));
+}
+
 async function pair() {
   const server = createSwitchBotMcpServer();
   const client = new Client({ name: 'test', version: '0.0.1' });
@@ -158,7 +167,7 @@ describe('dryRun support on mutating tools', () => {
     });
 
     expect(res.isError).toBe(true);
-    const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    const parsed = parseErrorText((res.content as Array<{ text: string }>)[0].text);
     expect(parsed.error.context?.validationKind).toBe('unknown-command');
     expect(apiMock.__instance.post).not.toHaveBeenCalled();
   });
@@ -204,7 +213,7 @@ describe('dryRun support on mutating tools', () => {
     });
 
     expect(res.isError).toBe(true);
-    const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    const parsed = parseErrorText((res.content as Array<{ text: string }>)[0].text);
     expect(parsed.error.context?.validationKind).toBe('read-only-device');
     expect(apiMock.__instance.post).not.toHaveBeenCalled();
   });
@@ -219,7 +228,7 @@ describe('dryRun support on mutating tools', () => {
     });
 
     expect(res.isError).toBe(true);
-    const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    const parsed = parseErrorText((res.content as Array<{ text: string }>)[0].text);
     expect(parsed.error.context?.validationKind).toBe('unknown-command');
     expect(parsed.error.hint).toContain('turnOn');
     expect(parsed.error.hint).toContain('press');
@@ -272,7 +281,7 @@ describe('dryRun support on mutating tools', () => {
     });
 
     expect(res.isError).toBe(true);
-    const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    const parsed = parseErrorText((res.content as Array<{ text: string }>)[0].text);
     expect(parsed.error.subKind).toBe('scene-not-found');
     expect(parsed.error.message).toContain('FAKE');
     expect(apiMock.__instance.post).not.toHaveBeenCalled();
