@@ -3,13 +3,13 @@
  *
  * Email/password flow (customize-login page):
  *  1. POST ACCOUNT_API_BASE/account/api/v2/user/login → access_token
- *  2. POST ACCOUNT_API_BASE/account/api/v1/user/userinfo (with access_token) → botRegion
- *  3. POST wonderlabs.{botRegion}.api.switchbot.net/homepage/v2/mobile/management/login → openToken + secretKey
+ *  2. POST WONDER_API_BASE/openapi/openUser/token { operation:"get", version:2 }
+ *     → encrypted openToken + secretKey (AES-128-CBC, hex-encoded)
  *
  * Social OAuth fallback (directOAuth: true):
  *  1. Redirect user to OAUTH_AUTHORIZE_URL → Cognito login
  *  2. Exchange code at OAUTH_TOKEN_URL → access_token
- *  3. Same step 3 as above.
+ *  3. POST MOBILE_API_BASE/v2/mobile/management/login → plaintext openToken + secretKey
  */
 
 /** Direct consumer account API (customize-login page). */
@@ -33,19 +33,17 @@ export const OAUTH_CLIENT_ID = 'emvg3hk2tqu3q37fcw6cwyl4bi';
 /** Milliseconds the CLI waits for the user to complete browser login. */
 export const LOGIN_TIMEOUT_MS = 120_000;
 
-// ── Mobile management API (for retrieving v1.1 openToken + secretKey) ────────
+// ── Mobile management API (OAuth fallback — plaintext token) ─────────────────
 
-/**
- * Region-aware mobile management base URL template.
- * Replace "us" with the botRegion returned from /account/api/v1/user/userinfo.
- */
 export const MOBILE_API_BASE = 'https://wonderlabs.us.api.switchbot.net/homepage';
 
-/**
- * Region-aware wonder API base URL template.
- * Replace "us" with the botRegion. Used for /openapi/openUser/token.
- */
+// ── Wonder OpenAPI (email/password flow — encrypted token) ───────────────────
+
 export const WONDER_API_BASE = 'https://wonderlabs.us.api.switchbot.net/wonder';
+
+/** AES-128-CBC key/IV for decrypting token + secretKey from openUser/token v2. */
+export const TOKEN_AES_KEY = 'lrQ0OTvwp9RTsXxk';
+export const TOKEN_AES_IV  = '4mdN27rI3bk2LzWa';
 
 export const ENDPOINTS = {
   mobileLogin: '/v2/mobile/management/login',

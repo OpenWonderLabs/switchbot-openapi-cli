@@ -1,6 +1,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import axios from 'axios';
@@ -12,6 +13,8 @@ import {
   OAUTH_TOKEN_URL,
   ACCOUNT_API_BASE,
   WONDER_API_BASE,
+  TOKEN_AES_KEY,
+  TOKEN_AES_IV,
   ENDPOINTS,
   LOGIN_TIMEOUT_MS,
 } from './constants.js';
@@ -106,40 +109,21 @@ p{color:rgba(255,255,255,.55);font-size:13px}
 </div></body></html>`;
 }
 
-/** Get botRegion then call wonder openapi to retrieve openToken + secretKey. */
+function decryptField(hexCipher: string): string {
+  const key = Buffer.from(TOKEN_AES_KEY, 'utf8');
+  const iv  = Buffer.from(TOKEN_AES_IV,  'utf8');
+  const d   = crypto.createDecipheriv('aes-128-cbc', key, iv);
+  const buf = Buffer.concat([d.update(Buffer.from(hexCipher, 'hex')), d.final()]);
+  return buf.toString('hex');
+}
+
+/** POST /openapi/openUser/token (v2) → decrypt → CredentialBundle. */
 async function fetchCredentials(accessToken: string): Promise<CredentialBundle> {
-  // Detect botRegion for region-aware API routing
-  let botRegion = 'us';
-  try {
-    const userInfoResp = await axios.post<{
-      statusCode: number;
-      body?: { botRegion?: string };
-    }>(
-      `${ACCOUNT_API_BASE}/account/api/v1/user/userinfo`,
-      {},
-      {
-        headers: { 'Content-Type': 'application/json', Authorization: accessToken },
-        timeout: 10_000,
-      },
-    );
-    const region = userInfoResp.data?.body?.botRegion;
-    if (typeof region === 'string' && region) botRegion = region;
-  } catch {
-    // Non-fatal — fall back to "us"
-  }
-
-  // Allowlist: reject any region value that is not 2–8 lowercase ASCII letters.
-  if (!/^[a-z]{2,8}$/.test(botRegion)) botRegion = 'us';
-
-  const wonderHost = WONDER_API_BASE.replace('.us.api', `.${botRegion}.api`);
-
   const resp = await axios.post<{
     statusCode?: number;
-    resultCode?: number;
     body?: Record<string, unknown>;
-    data?: Record<string, unknown>;
   }>(
-    `${wonderHost}${ENDPOINTS.openUserToken}`,
+    `${WONDER_API_BASE}${ENDPOINTS.openUserToken}`,
     { operation: 'get', version: 2 },
     {
       headers: { 'Content-Type': 'application/json', Authorization: accessToken },
@@ -147,23 +131,18 @@ async function fetchCredentials(accessToken: string): Promise<CredentialBundle> 
     },
   );
 
-  // API may nest credentials under `body` or `data`
-  const payload = (resp.data?.body ?? resp.data?.data ?? resp.data) as Record<string, unknown>;
-  const token = [payload['openToken'], payload['token']].find(
-    (v): v is string => typeof v === 'string' && !!v,
-  );
-  const secret = [payload['secretKey'], payload['secret']].find(
-    (v): v is string => typeof v === 'string' && !!v,
-  );
+  const body = (resp.data?.body ?? {}) as Record<string, unknown>;
+  const encToken  = typeof body['token']     === 'string' ? body['token']     : undefined;
+  const encSecret = typeof body['secretKey'] === 'string' ? body['secretKey'] : undefined;
 
-  if (!token || !secret) {
-    const code = resp.data?.statusCode ?? resp.data?.resultCode;
+  if (!encToken || !encSecret) {
     throw new Error(
-      `openUser/token returned code=${code} but openToken/secretKey missing. ` +
-        `Response: ${JSON.stringify(resp.data)}`,
+      `openUser/token returned statusCode=${resp.data?.statusCode} ` +
+        `but token/secretKey missing. Body: ${JSON.stringify(resp.data?.body)}`,
     );
   }
-  return { token, secret };
+
+  return { token: decryptField(encToken), secret: decryptField(encSecret) };
 }
 
 /** Exchange authorization code → access_token → CredentialBundle. */

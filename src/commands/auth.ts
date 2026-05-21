@@ -426,6 +426,7 @@ export function registerAuthCommand(program: Command): void {
       }
 
       console.log(`Logged in. Credentials saved to backend "${store.name}" for profile "${profile}".`);
-      console.log(`token : ${maskValue(creds!.token)}`);
+      console.log(`token : ${maskValue(creds!.token)} (${creds!.token.length} chars)`);
+      console.log(`secret: ${maskValue(creds!.secret)} (${creds!.secret.length} chars)`);
     });
 }
