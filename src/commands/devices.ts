@@ -106,7 +106,7 @@ Run any subcommand with --help for its own flags and examples.
     .alias('ls')
     .description('List all physical devices and IR remote devices on the account')
     .addHelpText('after', `
-Default columns: deviceId, deviceName, type, category
+Default columns: deviceId, deviceName, type, category, family, room
 Pass --wide for the full operator view: + controlType, family, roomID, room, hub, cloud
 --fields accepts any subset of all column names (exit 2 on unknown names).
 
@@ -239,7 +239,7 @@ Cache note:
           return;
         }
 
-        const narrowHeaders = ['deviceId', 'deviceName', 'type', 'category'];
+        const narrowHeaders = ['deviceId', 'deviceName', 'type', 'category', 'family', 'room'];
         const wideHeaders = ['deviceId', 'deviceName', 'type', 'category', 'controlType', 'family', 'roomID', 'room', 'hub', 'cloud', 'alias'];
         const userFields = resolveFields();
         const headers = userFields ? wideHeaders : (options.wide ? wideHeaders : narrowHeaders);
