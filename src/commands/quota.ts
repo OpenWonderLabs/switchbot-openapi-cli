@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { printJson, isJsonMode } from '../utils/output.js';
+import { isDryRun } from '../utils/flags.js';
 import {
   DAILY_QUOTA,
   loadQuota,
@@ -91,6 +92,11 @@ Examples:
     .command('reset')
     .description('Delete the local quota counter file')
     .action(() => {
+      if (isDryRun()) {
+        if (isJsonMode()) printJson({ dryRun: true, reset: false });
+        else console.log('[dry-run] quota reset skipped — no files changed');
+        return;
+      }
       resetQuota();
       if (isJsonMode()) {
         printJson({ reset: true });
