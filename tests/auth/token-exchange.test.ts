@@ -1,4 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import crypto from 'node:crypto';
+
+// Must match TOKEN_AES_KEY / TOKEN_AES_IV in src/auth/constants.ts
+const AES_KEY = Buffer.from('lrQ0OTvwp9RTsXxk', 'utf8');
+const AES_IV  = Buffer.from('4mdN27rI3bk2LzWa', 'utf8');
+
+function encryptField(plaintext: string): string {
+  const cipher = crypto.createCipheriv('aes-128-cbc', AES_KEY, AES_IV);
+  return Buffer.concat([cipher.update(Buffer.from(plaintext, 'utf8')), cipher.final()]).toString('hex');
+}
+
+const FIXTURE_TOKEN  = 'test-open-token-value';
+const FIXTURE_SECRET = 'test-secret-key-value';
 
 const mockPost = vi.hoisted(() => vi.fn());
 
@@ -23,12 +36,18 @@ function makeAxiosError(status: number, data: unknown) {
 const TOKEN_RESP = { data: { access_token: 'tok-abc', token_type: 'Bearer' } };
 // userinfo response
 const USERINFO_RESP = { data: { statusCode: 100, body: { botRegion: 'us' } } };
-// Wonder API response with AES-encrypted placeholders (non-empty hex strings)
+// Wonder API response with properly AES-encrypted fixture values
 const OPEN_TOKEN_RESP = {
-  data: { statusCode: 100, body: { token: '00', secretKey: '00' } },
+  data: {
+    statusCode: 100,
+    body: {
+      token: encryptField(FIXTURE_TOKEN),
+      secretKey: encryptField(FIXTURE_SECRET),
+    },
+  },
 };
 
-describe('exchangeCodeForCredentials — happy path', () => {
+describe("exchangeCodeForCredentials — happy path", () => {
   beforeEach(() => {
     mockPost.mockReset();
     mockPost
@@ -38,7 +57,7 @@ describe('exchangeCodeForCredentials — happy path', () => {
   });
 
   it('calls token endpoint with form-encoded params', async () => {
-    await exchangeCodeForCredentials('code-x', 'http://127.0.0.1:53245/callback').catch(() => {});
+    await exchangeCodeForCredentials('code-x', 'http://127.0.0.1:53245/callback');
     const [url, body] = mockPost.mock.calls[0] as [string, URLSearchParams];
     expect(url).toContain('/merchant/v1/oauth/token');
     expect(body.get('grant_type')).toBe('authorization_code');
@@ -47,14 +66,14 @@ describe('exchangeCodeForCredentials — happy path', () => {
   });
 
   it('calls userinfo with access_token', async () => {
-    await exchangeCodeForCredentials('code-x', 'http://127.0.0.1:53245/callback').catch(() => {});
+    await exchangeCodeForCredentials('code-x', 'http://127.0.0.1:53245/callback');
     const [url, , config] = mockPost.mock.calls[1] as [string, unknown, { headers: Record<string, string> }];
     expect(url).toContain('/account/api/v1/user/userinfo');
     expect(config.headers['Authorization']).toBe('tok-abc');
   });
 
   it('calls Wonder API with correct region and access_token', async () => {
-    await exchangeCodeForCredentials('code-x', 'http://127.0.0.1:53245/callback').catch(() => {});
+    await exchangeCodeForCredentials('code-x', 'http://127.0.0.1:53245/callback');
     const [url, body, config] = mockPost.mock.calls[2] as [string, Record<string, unknown>, { headers: Record<string, string> }];
     expect(url).toContain('wonderlabs.us.api.switchbot.net');
     expect(url).toContain('/openapi/openUser/token');
@@ -63,7 +82,7 @@ describe('exchangeCodeForCredentials — happy path', () => {
   });
 });
 
-describe('exchangeCodeForCredentials — token endpoint errors', () => {
+describe("exchangeCodeForCredentials — token endpoint errors", () => {
   beforeEach(() => { mockPost.mockReset(); });
 
   it('throws with HTTP status when token endpoint returns 4xx', async () => {
@@ -85,7 +104,7 @@ describe('exchangeCodeForCredentials — token endpoint errors', () => {
   });
 });
 
-describe('exchangeCodeForCredentials — Wonder API errors', () => {
+describe("exchangeCodeForCredentials — Wonder API errors", () => {
   beforeEach(() => { mockPost.mockReset(); });
 
   it('throws with HTTP status when Wonder API returns 5xx', async () => {
@@ -118,5 +137,21 @@ describe('exchangeCodeForCredentials — Wonder API errors', () => {
       const [url] = wonderCall as [string];
       expect(url).toContain('wonderlabs.us.api.switchbot.net');
     }
+  });
+});
+
+describe("exchangeCodeForCredentials — decrypts Wonder API response", () => {
+  beforeEach(() => {
+    mockPost.mockReset();
+    mockPost
+      .mockResolvedValueOnce(TOKEN_RESP)
+      .mockResolvedValueOnce(USERINFO_RESP)
+      .mockResolvedValueOnce(OPEN_TOKEN_RESP);
+  });
+
+  it('returns correctly decrypted token and secret', async () => {
+    const res = await exchangeCodeForCredentials('code-x', 'http://127.0.0.1:53245/callback');
+    expect(res.token).toBe(FIXTURE_TOKEN);
+    expect(res.secret).toBe(FIXTURE_SECRET);
   });
 });

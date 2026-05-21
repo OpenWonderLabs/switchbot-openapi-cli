@@ -425,27 +425,30 @@ export function registerAuthCommand(program: Command): void {
           kind: 'runtime',
           message: `Login failed: ${err instanceof Error ? err.message : String(err)}`,
         });
+        return;
       }
 
       (isJsonMode() ? console.error : console.log)('Verifying credentials…');
-      const check = await verifyCredentials(creds!);
+      const check = await verifyCredentials(creds);
       if (!check.ok) {
         exitWithError({
           code: 1,
           kind: 'runtime',
           message: `Credential verification failed: ${check.reason}`,
         });
+        return;
       }
 
       const store = await selectCredentialStore();
       try {
-        await store.set(profile, creds!);
+        await store.set(profile, creds);
       } catch (err) {
         exitWithError({
           code: 1,
           kind: 'runtime',
           message: `Failed to save credentials: ${err instanceof Error ? err.message : String(err)}`,
         });
+        return;
       }
 
       if (isJsonMode()) {
@@ -454,13 +457,13 @@ export function registerAuthCommand(program: Command): void {
           backend: store.name,
           loggedIn: true,
           verified: true,
-          token: { length: creds!.token.length, masked: maskValue(creds!.token) },
+          token: { length: creds.token.length, masked: maskValue(creds.token) },
         });
         return;
       }
 
       console.log(`✓ Credentials verified and saved to backend "${store.name}" for profile "${profile}".`);
-      console.log(`token : ${maskValue(creds!.token)} (${creds!.token.length} chars)`);
-      console.log(`secret: ${maskValue(creds!.secret)} (${creds!.secret.length} chars)`);
+      console.log(`token : ${maskValue(creds.token)} (${creds.token.length} chars)`);
+      console.log(`secret: ${maskValue(creds.secret)} (${creds.secret.length} chars)`);
     });
 }

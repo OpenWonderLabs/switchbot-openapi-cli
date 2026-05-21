@@ -400,3 +400,68 @@ describe('auth keychain migrate', () => {
     }
   });
 });
+
+// ── auth login ────────────────────────────────────────────────────────────────
+
+const browserLoginMock = vi.fn();
+const axiosGetMock = vi.fn();
+
+vi.mock('../../src/auth/browser-login.js', () => ({
+  browserLogin: (...args: unknown[]) => browserLoginMock(...args),
+}));
+
+vi.mock('axios', async () => {
+  const actual = await vi.importActual<typeof import('axios')>('axios');
+  return {
+    ...actual,
+    default: {
+      ...(actual.default as object),
+      get: (...args: unknown[]) => axiosGetMock(...args),
+    },
+  };
+});
+
+describe('auth login', () => {
+  beforeEach(() => {
+    browserLoginMock.mockReset();
+    axiosGetMock.mockReset();
+  });
+
+  it('saves credentials and exits 0 on success', async () => {
+    browserLoginMock.mockResolvedValue({ token: 'tok-abc123', secret: 'sec-xyz987' });
+    axiosGetMock.mockResolvedValue({ data: { statusCode: 100 } });
+    const store = makeStore({ writable: true });
+    selectMock.mockResolvedValue(store);
+
+    const res = await runCli(['auth', 'login', '--no-open']);
+    expect(res.exitCode).toBe(0);
+    expect(store.set).toHaveBeenCalledWith('default', { token: 'tok-abc123', secret: 'sec-xyz987' });
+  });
+
+  it('exits 1 when browserLogin rejects', async () => {
+    browserLoginMock.mockRejectedValue(new Error('user cancelled'));
+    const res = await runCli(['auth', 'login', '--no-open']);
+    expect(res.exitCode).toBe(1);
+  });
+
+  it('exits 1 when credential verification fails (non-100 statusCode)', async () => {
+    browserLoginMock.mockResolvedValue({ token: 'bad-tok', secret: 'bad-sec' });
+    axiosGetMock.mockResolvedValue({ data: { statusCode: 401 } });
+    const res = await runCli(['auth', 'login', '--no-open']);
+    expect(res.exitCode).toBe(1);
+  });
+
+  it('emits JSON on success under --json', async () => {
+    browserLoginMock.mockResolvedValue({ token: 'tok-abc123', secret: 'sec-xyz987' });
+    axiosGetMock.mockResolvedValue({ data: { statusCode: 100 } });
+    const store = makeStore({ writable: true });
+    selectMock.mockResolvedValue(store);
+
+    const res = await runCli(['--json', 'auth', 'login', '--no-open']);
+    expect(res.exitCode).toBe(0);
+    const parsed = JSON.parse(res.stdout[0]) as Record<string, unknown>;
+    const data = (parsed['data'] ?? parsed) as Record<string, unknown>;
+    expect(data).toHaveProperty('loggedIn', true);
+    expect(data).toHaveProperty('verified', true);
+  });
+});
