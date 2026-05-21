@@ -1,0 +1,19 @@
+src/config.ts
+  s_e9b1caed467e20::t_1d0b2ea216655b 86-87
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "60303f7700175a7f015be59ceaf26f8ad699cc6b",
+  "prompts": {},
+  "sessions": {
+    "s_e9b1caed467e20": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1609372a-454e-4580-90c6-e351730798f2",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
