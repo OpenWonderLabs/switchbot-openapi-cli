@@ -130,13 +130,11 @@ describe("exchangeCodeForCredentials — Wonder API errors", () => {
       .mockResolvedValueOnce(TOKEN_RESP)
       .mockRejectedValueOnce(new Error('userinfo network error'))
       .mockResolvedValueOnce(OPEN_TOKEN_RESP);
-    // Should not throw due to userinfo error; uses default region
+    await exchangeCodeForCredentials('code-x', 'http://127.0.0.1:53245/callback');
     const [, , wonderCall] = mockPost.mock.calls;
-    await exchangeCodeForCredentials('code-x', 'http://127.0.0.1:53245/callback').catch(() => {});
-    if (wonderCall) {
-      const [url] = wonderCall as [string];
-      expect(url).toContain('wonderlabs.us.api.switchbot.net');
-    }
+    expect(wonderCall).toBeDefined();
+    const [url] = wonderCall as [string];
+    expect(url).toContain('wonderlabs.us.api.switchbot.net');
   });
 });
 
