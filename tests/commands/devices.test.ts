@@ -38,7 +38,7 @@ vi.mock('../../src/api/client.js', () => ({
 import { registerDevicesCommand } from '../../src/commands/devices.js';
 import { ApiError } from '../../src/api/client.js';
 import { runCli } from '../helpers/cli.js';
-import { updateCacheFromDeviceList, resetListCache } from '../../src/devices/cache.js';
+import { updateCacheFromDeviceList, resetListCache, setCachedStatus, resetStatusCache } from '../../src/devices/cache.js';
 
 // ---- Helpers -----------------------------------------------------------
 const DID = 'DEV-ID';
@@ -132,6 +132,7 @@ describe('devices command', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     resetListCache();
+    resetStatusCache();
     try {
       fs.rmSync(tmpHome, { recursive: true, force: true });
     } catch {
@@ -1075,6 +1076,29 @@ describe('devices command', () => {
           'devices', 'status', 'D1', '--format', 'tsv', '--fields', 'humid,power,batt',
         ]);
         expect(res.stdout.join('\n').split('\n')[0]).toBe('humidity\tpower\tbattery');
+      });
+    });
+
+    describe('fetchedAt from cache (C-1)', () => {
+      it('fetchedAt reflects stored cache timestamp, not render time', async () => {
+        // Use a timestamp in the past but within the 1h TTL window
+        const storedDate = new Date(Date.now() - 5 * 60 * 1000); // 5 minutes ago
+        const storedTime = storedDate.toISOString();
+        const cachedBody = { power: 'on', battery: 90 };
+        // Seed the in-memory status cache with a fixed past timestamp
+        setCachedStatus('CACHED-DEV', cachedBody, storedDate);
+
+        // No HTTP call should be needed; the cache should be used
+        const res = await runCli(registerDevicesCommand, [
+          '--cache', '1h',
+          'devices', 'status', 'CACHED-DEV', '--json',
+        ]);
+        expect(apiMock.__instance.get).not.toHaveBeenCalledWith(
+          '/v1.1/devices/CACHED-DEV/status'
+        );
+        const out = JSON.parse(res.stdout.join('\n'));
+        const data: Record<string, unknown> = out.data ?? out;
+        expect(data.fetchedAt).toBe(storedTime);
       });
     });
   });

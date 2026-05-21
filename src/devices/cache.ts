@@ -297,6 +297,22 @@ export function getCachedStatus(
   return entry.body;
 }
 
+/** Read a status entry with its stored fetchedAt timestamp; null when missing or expired. */
+export function getCachedStatusEntry(
+  deviceId: string,
+  ttlMs: number,
+  now = Date.now()
+): { body: Record<string, unknown>; fetchedAt: string } | null {
+  if (!ttlMs || ttlMs <= 0) return null;
+  const cache = loadStatusCache();
+  const entry = cache.entries[deviceId];
+  if (!entry) return null;
+  const ts = Date.parse(entry.fetchedAt);
+  if (!Number.isFinite(ts)) return null;
+  if (now - ts >= ttlMs) return null;
+  return { body: entry.body, fetchedAt: entry.fetchedAt };
+}
+
 /** Evict status entries older than max(ttlMs × 10, 24 h) to bound file growth. */
 function evictExpiredStatusEntries(cache: StatusCache, ttlMs: number, now = Date.now()): void {
   const cutoff = now - Math.max(ttlMs * 10, 24 * 60 * 60 * 1000);

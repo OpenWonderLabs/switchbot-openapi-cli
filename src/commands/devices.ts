@@ -9,7 +9,7 @@ import {
   getCommandSafetyReason,
   DeviceCatalogEntry,
 } from '../devices/catalog.js';
-import { getCachedDevice, loadCache } from '../devices/cache.js';
+import { getCachedDevice, loadCache, getCachedStatusEntry } from '../devices/cache.js';
 import { loadDeviceMeta } from '../devices/device-meta.js';
 import { resolveDeviceId, NameResolveStrategy, ALL_STRATEGIES } from '../utils/name-resolver.js';
 import {
@@ -31,7 +31,7 @@ import { registerWatchCommand } from './watch.js';
 import { registerExplainCommand } from './explain.js';
 import { registerExpandCommand } from './expand.js';
 import { registerDevicesMetaCommand } from './device-meta.js';
-import { isDryRun } from '../utils/flags.js';
+import { isDryRun, getCacheMode } from '../utils/flags.js';
 import { DryRunSignal } from '../api/client.js';
 import { resolveField, resolveFieldList, listSupportedFieldInputs } from '../schema/field-aliases.js';
 import { allowsDirectDestructiveExecution, destructiveExecutionHint } from '../lib/destructive-mode.js';
@@ -403,8 +403,13 @@ Examples:
           // so there is nothing to translate into a non-zero exit code.
           console.error('warning: --strict has no effect without --ids or multiple device IDs (batch mode only)');
         }
-        const body = annotateStatusPayload(deviceId, await fetchDeviceStatus(deviceId));
-        const fetchedAt = new Date().toISOString();
+        const mode = getCacheMode();
+        const cacheEntry = mode.statusTtlMs > 0
+          ? getCachedStatusEntry(deviceId, mode.statusTtlMs)
+          : null;
+        const rawStatus = cacheEntry ? cacheEntry.body : await fetchDeviceStatus(deviceId);
+        const fetchedAt = cacheEntry ? cacheEntry.fetchedAt : new Date().toISOString();
+        const body = annotateStatusPayload(deviceId, rawStatus);
         const fmt = resolveFormat();
 
         if (fmt === 'json' && process.argv.includes('--json')) {
