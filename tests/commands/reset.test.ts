@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { registerResetCommand } from '../../src/commands/reset.js';
 import { runCli } from '../helpers/cli.js';
+import * as nodeFsMock from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 
 const selectMock = vi.fn();
 
@@ -21,12 +24,13 @@ vi.mock('../../src/lib/request-context.js', () => ({
 
 vi.mock('node:fs', async () => {
   const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
-  return {
+  const mocked = {
     ...actual,
     existsSync: vi.fn().mockReturnValue(false),
     rmSync: vi.fn(),
     unlinkSync: vi.fn(),
   };
+  return { ...mocked, default: mocked };
 });
 
 beforeEach(() => { selectMock.mockReset(); });
@@ -97,5 +101,30 @@ describe('reset --json', () => {
     const data = parsed['data'] as Record<string, unknown>;
     expect(data).toHaveProperty('reset', true);
     expect(Array.isArray(data['results'])).toBe(true);
+  });
+});
+
+describe('reset --config <path>', () => {
+  it('checks for data files adjacent to the --config file, not under ~/.switchbot', async () => {
+    const altConfigDir = path.join(os.tmpdir(), 'sb-alt-reset-test');
+    const altConfigFile = path.join(altConfigDir, 'config.json');
+
+    await runCli(registerResetCommand, [
+      '--config', altConfigFile,
+      'reset', '--yes', '--keep-credentials',
+    ]);
+
+    const existsSpy = vi.mocked(nodeFsMock.existsSync);
+    const checkedPaths = existsSpy.mock.calls.map((c) => path.normalize(String(c[0])));
+
+    // Config-aware files should be checked in the alt dir
+    expect(checkedPaths).toContain(path.normalize(path.join(altConfigDir, 'devices.json')));
+    expect(checkedPaths).toContain(path.normalize(path.join(altConfigDir, 'status.json')));
+    expect(checkedPaths).toContain(path.normalize(path.join(altConfigDir, 'device-meta.json')));
+
+    // ~/.switchbot/devices.json must NOT be checked when --config is set
+    expect(checkedPaths).not.toContain(
+      path.normalize(path.join(os.homedir(), '.switchbot', 'devices.json')),
+    );
   });
 });

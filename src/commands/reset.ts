@@ -5,22 +5,12 @@ import os from 'node:os';
 import readline from 'node:readline';
 import chalk from 'chalk';
 import { isJsonMode, printJson } from '../utils/output.js';
-import { isDryRun } from '../utils/flags.js';
+import { isDryRun, getConfigPath } from '../utils/flags.js';
 import { selectCredentialStore } from '../credentials/keychain.js';
 import { listProfiles } from '../config.js';
 import { getActiveProfile } from '../lib/request-context.js';
 
 const BASE = path.join(os.homedir(), '.switchbot');
-
-const DATA_ITEMS = [
-  { key: 'cache',          label: 'Device cache',      path: path.join(BASE, 'cache'),          type: 'dir'  },
-  { key: 'devices',        label: 'Devices list cache', path: path.join(BASE, 'devices.json'),   type: 'file' },
-  { key: 'quota',          label: 'Quota counter',      path: path.join(BASE, 'quota.json'),     type: 'file' },
-  { key: 'device-history', label: 'Device history',     path: path.join(BASE, 'device-history'), type: 'dir'  },
-  { key: 'device-meta',    label: 'Device metadata',    path: path.join(BASE, 'device-meta.json'), type: 'file' },
-  { key: 'status',         label: 'Status cache',       path: path.join(BASE, 'status.json'),      type: 'file' },
-  { key: 'audit',          label: 'Audit log',          path: path.join(BASE, 'audit.log'),      type: 'file' },
-] as const;
 
 type ResetResult = { key: string; label: string; status: 'removed' | 'absent' | 'failed'; error?: string };
 
@@ -49,6 +39,18 @@ function removeItem(itemPath: string, type: 'file' | 'dir'): 'removed' | 'absent
   }
 }
 
+function makeDataItems(dataDir: string): Array<{ key: string; label: string; path: string; type: 'file' | 'dir' }> {
+  return [
+    { key: 'cache',          label: 'Device cache',       path: path.join(dataDir, 'cache'),            type: 'dir'  },
+    { key: 'devices',        label: 'Devices list cache', path: path.join(dataDir, 'devices.json'),     type: 'file' },
+    { key: 'quota',          label: 'Quota counter',      path: path.join(BASE, 'quota.json'),          type: 'file' },
+    { key: 'device-history', label: 'Device history',     path: path.join(BASE, 'device-history'),      type: 'dir'  },
+    { key: 'device-meta',    label: 'Device metadata',    path: path.join(dataDir, 'device-meta.json'), type: 'file' },
+    { key: 'status',         label: 'Status cache',       path: path.join(dataDir, 'status.json'),      type: 'file' },
+    { key: 'audit',          label: 'Audit log',          path: path.join(BASE, 'audit.log'),           type: 'file' },
+  ];
+}
+
 function statusIcon(status: ResetResult['status']): string {
   if (status === 'removed') return chalk.green('✓');
   if (status === 'absent')  return chalk.dim('–');
@@ -65,14 +67,21 @@ export function registerResetCommand(program: Command): void {
       const profile = getActiveProfile() ?? 'default';
       const extraProfiles = listProfiles();
 
+      const configOverride = getConfigPath();
+      const dataDir = configOverride
+        ? path.dirname(path.resolve(configOverride))
+        : BASE;
+      const dataItems = makeDataItems(dataDir);
+
       if (isDryRun()) {
         const preview: string[] = [];
         if (!opts.keepCredentials) {
           const profilesToWipe = [profile, ...extraProfiles.filter(p => p !== profile)];
           for (const p of profilesToWipe) preview.push(`Credentials (${p})`);
-          preview.push('Config file (config.json)', 'Profiles directory');
+          preview.push('Config file (config.json)');
+          if (!configOverride) preview.push('Profiles directory');
         }
-        for (const item of DATA_ITEMS) preview.push(item.label);
+        for (const item of dataItems) preview.push(item.label);
         if (isJsonMode()) {
           printJson({ dryRun: true, wouldDelete: preview });
         } else {
@@ -87,7 +96,7 @@ export function registerResetCommand(program: Command): void {
         if (!opts.keepCredentials) {
           console.error(`  • Credentials for profile "${profile}"${extraProfiles.length ? ` and ${extraProfiles.length} other profile(s)` : ''} (keychain + config files)`);
         }
-        for (const item of DATA_ITEMS) {
+        for (const item of dataItems) {
           console.error(`  • ${item.label}`);
         }
         console.error('');
@@ -115,21 +124,25 @@ export function registerResetCommand(program: Command): void {
         }
 
         // Also remove file-based credential files
-        const configFile = path.join(BASE, 'config.json');
-        const profilesDir = path.join(BASE, 'profiles');
+        const configFile = configOverride
+          ? path.resolve(configOverride)
+          : path.join(BASE, 'config.json');
         const cfgStatus = removeItem(configFile, 'file');
         if (cfgStatus !== 'absent') {
           results.push({ key: 'config-file', label: 'Config file (config.json)', status: cfgStatus });
         }
-        const profStatus = removeItem(profilesDir, 'dir');
-        if (profStatus !== 'absent') {
-          results.push({ key: 'profiles-dir', label: 'Profiles directory', status: profStatus });
+        if (!configOverride) {
+          const profilesDir = path.join(BASE, 'profiles');
+          const profStatus = removeItem(profilesDir, 'dir');
+          if (profStatus !== 'absent') {
+            results.push({ key: 'profiles-dir', label: 'Profiles directory', status: profStatus });
+          }
         }
       }
 
       // ── Data files ───────────────────────────────────────────────────────────
-      for (const item of DATA_ITEMS) {
-        const status = removeItem(item.path, item.type as 'file' | 'dir');
+      for (const item of dataItems) {
+        const status = removeItem(item.path, item.type);
         results.push({ key: item.key, label: item.label, status });
       }
 
