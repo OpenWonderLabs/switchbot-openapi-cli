@@ -3,7 +3,7 @@ import crypto, { randomUUID } from 'node:crypto';
 import axios from 'axios';
 import { getFreePort, escapeHtml, SECURITY_HEADERS } from './utils.js';
 import {
-  OAUTH_CLIENT_ID,
+  ACCOUNT_CLIENT_ID,
   ACCOUNT_API_BASE,
   TOKEN_AES_KEY,
   TOKEN_AES_IV,
@@ -250,7 +250,7 @@ async function handleEmailLogin(
   }>(
     `${ACCOUNT_API_BASE}/account/api/v2/user/login`,
     {
-      clientId: OAUTH_CLIENT_ID,
+      clientId: ACCOUNT_CLIENT_ID,
       deviceInfo: {
         deviceId: randomUUID().replace(/-/g, ''),
         model: 'CLI',

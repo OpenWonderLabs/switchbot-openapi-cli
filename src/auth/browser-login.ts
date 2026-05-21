@@ -42,9 +42,17 @@ export async function browserLogin(options: BrowserLoginOptions = {}): Promise<C
   }
 
   log('Waiting for browser login to complete…');
-  const { code } = await wait();
-  log('Exchanging authorization code for credentials…');
-  return exchangeCodeForCredentials(code, redirectUri);
+  const deadline = Date.now() + timeoutMs;
+  const countdown = startCountdown(deadline);
+  try {
+    const { code } = await wait();
+    countdown.stop();
+    log('Exchanging authorization code for credentials…');
+    return exchangeCodeForCredentials(code, redirectUri);
+  } catch (err) {
+    countdown.stop();
+    throw err;
+  }
 }
 
 function buildLoginUrl(params: { redirectUri: string; state: string }): string {
@@ -55,4 +63,24 @@ function buildLoginUrl(params: { redirectUri: string; state: string }): string {
   url.searchParams.set('redirect_uri', params.redirectUri);
   url.searchParams.set('state', params.state);
   return url.toString();
+}
+
+function startCountdown(deadline: number): { stop(): void } {
+  if (!process.stderr.isTTY) return { stop() {} };
+
+  const write = (s: string) => process.stderr.write(s);
+  const tick = () => {
+    const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+    write(`\r  ${remaining}s remaining…   `);
+  };
+
+  tick();
+  const id = setInterval(tick, 1000);
+
+  return {
+    stop() {
+      clearInterval(id);
+      write('\r\x1b[K'); // erase countdown line
+    },
+  };
 }

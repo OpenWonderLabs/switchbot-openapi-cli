@@ -23,10 +23,17 @@ export const SP_OAUTH_LOGIN_URL = 'https://sp.oauth.switchbot.net/login';
 export const OAUTH_SCOPE = 'api_login';
 
 /**
- * Client ID from config.js on www.switch-bot.com/pages/customize-login.
- * Used in the direct login request body (not as an OAuth client_id for localhost redirects).
+ * Consumer app client ID (from customize-login page).
+ * Used in the email/password login request body sent to account API.
  */
-export const OAUTH_CLIENT_ID = 'emvg3hk2tqu3q37fcw6cwyl4bi';
+export const ACCOUNT_CLIENT_ID = 'emvg3hk2tqu3q37fcw6cwyl4bi';
+
+/**
+ * Merchant OAuth2 client registered with sp.oauth.switchbot.net.
+ * Used as client_id when opening the hosted login page and exchanging codes.
+ */
+export const OAUTH_CLIENT_ID = 'wrZlijGQevZHVyGeINSQGUVEHw';
+export const OAUTH_CLIENT_SECRET = 'aFDbbDdGiUSGCgRbCvAHpMNokcQDnIDbDhaVYbWWpRaZxuuwugR';
 
 /** Milliseconds the CLI waits for the user to complete browser login. */
 export const LOGIN_TIMEOUT_MS = 120_000;

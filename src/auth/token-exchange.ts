@@ -2,6 +2,7 @@ import axios from 'axios';
 import type { CredentialBundle } from '../credentials/keychain.js';
 import {
   OAUTH_CLIENT_ID,
+  OAUTH_CLIENT_SECRET,
   ACCOUNT_API_BASE,
   MOBILE_API_BASE,
   ENDPOINTS,
@@ -64,6 +65,7 @@ export async function exchangeCodeForCredentials(
       `${ACCOUNT_API_BASE}${ENDPOINTS.oauthToken}`,
       {
         clientId: OAUTH_CLIENT_ID,
+        clientSecret: OAUTH_CLIENT_SECRET,
         redirectUri,
         grantType: 'authorization_code',
         code,
