@@ -2929,4 +2929,38 @@ describe('devices command', () => {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     });
   });
+
+  // =====================================================================
+  // E-1: validation failures must exit 2
+  // =====================================================================
+  describe('E-1 exit code — validation failures must exit 2', () => {
+    it('devices status with empty deviceId exits 2', async () => {
+      const result = await runCli(registerDevicesCommand, ['devices', 'status', '']);
+      expect(result.exitCode).toBe(2);
+    });
+
+    it('devices command with unsupported command (setColor on Relay Switch) exits 2', async () => {
+      updateCacheFromDeviceList({
+        deviceList: [
+          { deviceId: 'RELAY1', deviceName: 'relay', deviceType: 'Relay Switch 1PM', hubDeviceId: 'HUB-1', enableCloudService: true },
+        ],
+        infraredRemoteList: [],
+      });
+      const result = await runCli(registerDevicesCommand,
+        ['devices', 'command', 'RELAY1', 'setColor', '255:0:0']);
+      expect(result.exitCode).toBe(2);
+    });
+
+    it('devices command setBrightness with missing parameter exits 2', async () => {
+      updateCacheFromDeviceList({
+        deviceList: [
+          { deviceId: 'BULB1', deviceName: 'bulb', deviceType: 'Color Bulb', hubDeviceId: 'HUB-1', enableCloudService: true },
+        ],
+        infraredRemoteList: [],
+      });
+      const result = await runCli(registerDevicesCommand,
+        ['devices', 'command', 'BULB1', 'setBrightness']);
+      expect(result.exitCode).toBe(2);
+    });
+  });
 });
