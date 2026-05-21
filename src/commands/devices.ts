@@ -44,7 +44,7 @@ export const DEVICE_FIELD_ALIAS: Record<string, string> = {
   roomID: 'roomID', alias: 'alias',
 };
 
-export const DEVICE_ALL_COLS = new Set([
+export const DEVICE_ALL_COLS: Set<string> = new Set([
   'deviceId', 'deviceName', 'type', 'category', 'controlType',
   'family', 'roomID', 'room', 'hub', 'cloud', 'alias',
 ]);
