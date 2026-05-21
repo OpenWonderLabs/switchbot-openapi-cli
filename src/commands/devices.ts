@@ -36,6 +36,19 @@ import { DryRunSignal } from '../api/client.js';
 import { resolveField, resolveFieldList, listSupportedFieldInputs } from '../schema/field-aliases.js';
 import { allowsDirectDestructiveExecution, destructiveExecutionHint } from '../lib/destructive-mode.js';
 
+export const DEVICE_FIELD_ALIAS: Record<string, string> = {
+  id: 'deviceId', name: 'deviceName', deviceType: 'type', type: 'type',
+  roomName: 'room', familyName: 'family', hubDeviceId: 'hub',
+  enableCloudService: 'cloud', controlType: 'controlType',
+  deviceName: 'deviceName', deviceId: 'deviceId', category: 'category',
+  roomID: 'roomID', alias: 'alias',
+};
+
+export const DEVICE_ALL_COLS = new Set([
+  'deviceId', 'deviceName', 'type', 'category', 'controlType',
+  'family', 'roomID', 'room', 'hub', 'cloud', 'alias',
+]);
+
 const EXPAND_HINTS: Record<string, { command: string; flags: string }> = {
   'Air Conditioner':  { command: 'setAll',      flags: '--temp 26 --mode cool --fan low --power on' },
   'Curtain':          { command: 'setPosition',  flags: '--position 50 --mode silent' },
@@ -207,18 +220,8 @@ Cache note:
         if (fmt === 'json' && process.argv.includes('--json')) {
           const jsonFields = resolveFields();
 
-          // Alias → canonical column name (same as table output).
-          const ALIAS: Record<string, string> = {
-            id: 'deviceId', name: 'deviceName', deviceType: 'type', type: 'type',
-            roomName: 'room', familyName: 'family', hubDeviceId: 'hub',
-            enableCloudService: 'cloud', controlType: 'controlType',
-            deviceName: 'deviceName', deviceId: 'deviceId', category: 'category',
-            roomID: 'roomID', alias: 'alias',
-          };
-          const ALL_COLS = new Set(['deviceId','deviceName','type','category','controlType','family','roomID','room','hub','cloud','alias']);
-
           if (jsonFields) {
-            const unknown = jsonFields.filter(k => !ALL_COLS.has(ALIAS[k] ?? k));
+            const unknown = jsonFields.filter(k => !DEVICE_ALL_COLS.has(DEVICE_FIELD_ALIAS[k] ?? k));
             if (unknown.length) {
               exitWithError({ code: 2, kind: 'usage', message: `Unknown --fields value(s): ${unknown.join(', ')}` });
             }
@@ -245,7 +248,7 @@ Cache note:
           };
           const project = jsonFields
             ? (norm: Record<string, unknown>) =>
-                Object.fromEntries(jsonFields.map(k => [k, norm[ALIAS[k] ?? k] ?? null]))
+                Object.fromEntries(jsonFields.map(k => [k, norm[DEVICE_FIELD_ALIAS[k] ?? k] ?? null]))
             : (norm: Record<string, unknown>) => norm;
 
           if (listClauses) {
@@ -321,22 +324,7 @@ Cache note:
 
         const defaultFields = options.wide ? undefined : narrowHeaders;
         // Accept API field names and short aliases alongside canonical column names
-        const DEVICE_LIST_ALIASES: Record<string, string> = {
-          id: 'deviceId',
-          name: 'deviceName',
-          deviceType: 'type',
-          type: 'type',
-          roomName: 'room',
-          familyName: 'family',
-          hubDeviceId: 'hub',
-          enableCloudService: 'cloud',
-          controlType: 'controlType',
-          deviceName: 'deviceName',
-          deviceId: 'deviceId',
-          category: 'category',
-          alias: 'alias',
-        };
-        renderRows(wideHeaders, rows, fmt, userFields ?? defaultFields, DEVICE_LIST_ALIASES);
+        renderRows(wideHeaders, rows, fmt, userFields ?? defaultFields, DEVICE_FIELD_ALIAS);
         if (fmt === 'table') {
           const totalLabel = listClauses
             ? `${rows.length} match(es) (${deviceList.length} physical + ${infraredRemoteList.length} IR before filter)`
