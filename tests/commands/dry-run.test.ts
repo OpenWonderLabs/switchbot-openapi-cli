@@ -4,6 +4,7 @@
  * and must NOT call the API mock.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { parseErrorText } from '../helpers/mcp-test-utils.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -58,15 +59,6 @@ vi.mock('../../src/devices/cache.js', () => ({
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createSwitchBotMcpServer } from '../../src/commands/mcp.js';
-
-/** Extract the structured JSON block from an mcpError content text. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function parseErrorText(text: string): any {
-  const marker = '--- structured ---\n';
-  const idx = text.indexOf(marker);
-  if (idx === -1) return JSON.parse(text); // fallback for non-error text
-  return JSON.parse(text.slice(idx + marker.length));
-}
 
 async function pair() {
   const server = createSwitchBotMcpServer();

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { parseErrorText } from '../helpers/mcp-test-utils.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -202,15 +203,6 @@ describe('mcp server', () => {
       expect(t.inputSchema.type).toBe('object');
     }
   });
-
-  /** Extract the structured JSON block from an mcpError content text. */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  function parseErrorText(text: string): any {
-    const marker = '--- structured ---\n';
-    const idx = text.indexOf(marker);
-    if (idx === -1) return JSON.parse(text); // fallback for non-error text
-    return JSON.parse(text.slice(idx + marker.length));
-  }
 
   it('send_command rejects destructive commands without confirm:true', async () => {
     cacheMock.map.set('LOCK1', { type: 'Smart Lock', name: 'Front Door', category: 'physical' });
