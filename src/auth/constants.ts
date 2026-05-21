@@ -33,7 +33,11 @@ export const ACCOUNT_CLIENT_ID = 'emvg3hk2tqu3q37fcw6cwyl4bi';
  * Used as client_id when opening the hosted login page and exchanging codes.
  */
 export const OAUTH_CLIENT_ID = 'wrZlijGQevZHVyGeINSQGUVEHw';
-export const OAUTH_CLIENT_SECRET = 'aFDbbDdGiUSGCgRbCvAHpMNokcQDnIDbDhaVYbWWpRaZxuuwugR';
+// Baked-in consumer app credentials from the SwitchBot mobile app.
+// Override with SWITCHBOT_OAUTH_CLIENT_SECRET if you obtain fresh credentials
+// from SwitchBot (the bundled value is embedded in the published open-source repo).
+export const OAUTH_CLIENT_SECRET =
+  process.env.SWITCHBOT_OAUTH_CLIENT_SECRET ?? 'aFDbbDdGiUSGCgRbCvAHpMNokcQDnIDbDhaVYbWWpRaZxuuwugR';
 
 /** Milliseconds the CLI waits for the user to complete browser login. */
 export const LOGIN_TIMEOUT_MS = 120_000;
@@ -49,9 +53,11 @@ export const MOBILE_API_BASE = 'https://wonderlabs.us.api.switchbot.net/homepage
 
 export const WONDER_API_BASE = 'https://wonderlabs.us.api.switchbot.net/wonder';
 
-/** AES-128-CBC key/IV for decrypting token + secretKey from openUser/token v2. */
-export const TOKEN_AES_KEY = 'lrQ0OTvwp9RTsXxk';
-export const TOKEN_AES_IV  = '4mdN27rI3bk2LzWa';
+// AES-128-CBC key/IV for decrypting token + secretKey from openUser/token v2.
+// These are reverse-engineered from the SwitchBot mobile app binary.
+// Override with SWITCHBOT_TOKEN_AES_KEY / SWITCHBOT_TOKEN_AES_IV if SwitchBot rotates them.
+export const TOKEN_AES_KEY = process.env.SWITCHBOT_TOKEN_AES_KEY ?? 'lrQ0OTvwp9RTsXxk';
+export const TOKEN_AES_IV  = process.env.SWITCHBOT_TOKEN_AES_IV  ?? '4mdN27rI3bk2LzWa';
 
 export const ENDPOINTS = {
   mobileLogin: '/v2/mobile/management/login',
