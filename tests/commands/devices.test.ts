@@ -372,6 +372,24 @@ describe('devices command', () => {
       expect(out).not.toContain('| deviceName');
     });
 
+    it('applies --fields projection even when --json shorthand is used', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const result = await runCli(
+        registerDevicesCommand,
+        ['--json', '--fields', 'deviceId,deviceName', 'devices', 'list'],
+      );
+      expect(result.exitCode).toBeNull();
+      const parsed = JSON.parse(result.stdout.join('\n')) as Record<string, unknown>;
+      const data = (parsed.data ?? parsed) as Record<string, unknown>;
+      const deviceList = data.deviceList as Array<Record<string, unknown>>;
+      expect(deviceList).toHaveLength(3);
+      expect(deviceList[0]).toHaveProperty('deviceId');
+      expect(deviceList[0]).toHaveProperty('deviceName');
+      // Must NOT contain deviceType or hubDeviceId
+      expect(deviceList[0]).not.toHaveProperty('deviceType');
+      expect(deviceList[0]).not.toHaveProperty('hubDeviceId');
+    });
+
     it('prints "No devices found" when both lists are empty', async () => {
       apiMock.__instance.get.mockResolvedValue({
         data: { body: { deviceList: [], infraredRemoteList: [] } },

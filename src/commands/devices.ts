@@ -200,6 +200,12 @@ Examples:
         };
 
         if (fmt === 'json' && process.argv.includes('--json')) {
+          const jsonFields = resolveFields();
+          const projectDevice = jsonFields
+            ? (obj: Record<string, unknown>): Record<string, unknown> =>
+                Object.fromEntries(jsonFields.map((k) => [k, obj[k] ?? null]))
+            : null;
+
           if (listClauses) {
             const filteredDeviceList = deviceList.filter((d) =>
               matchesFilter({ deviceId: d.deviceId, type: d.deviceType || '', name: d.deviceName, category: 'physical', room: d.roomName || '', controlType: d.controlType || '', family: d.familyName || '', hub: d.hubDeviceId || '', roomID: d.roomID || '', cloud: String(d.enableCloudService), alias: deviceMeta.devices[d.deviceId]?.alias || '' })
@@ -208,9 +214,22 @@ Examples:
               const inherited = hubLocation.get(d.hubDeviceId);
               return matchesFilter({ deviceId: d.deviceId, type: d.remoteType, name: d.deviceName, category: 'ir', room: inherited?.room || '', controlType: d.controlType || '', family: inherited?.family || '', hub: d.hubDeviceId || '', roomID: inherited?.roomID || '', cloud: '', alias: deviceMeta.devices[d.deviceId]?.alias || '' });
             });
-            printJson({ ok: true, deviceList: filteredDeviceList, infraredRemoteList: filteredIrList });
+            printJson({
+              ok: true,
+              deviceList: projectDevice ? filteredDeviceList.map((d) => projectDevice(d as unknown as Record<string, unknown>)) : filteredDeviceList,
+              infraredRemoteList: projectDevice ? filteredIrList.map((d) => projectDevice(d as unknown as Record<string, unknown>)) : filteredIrList,
+            });
           } else {
-            printJson({ ok: true, ...(body as object) });
+            const rawBody = body as { deviceList?: unknown[]; infraredRemoteList?: unknown[] };
+            if (projectDevice && rawBody.deviceList) {
+              printJson({
+                ok: true,
+                deviceList: rawBody.deviceList.map((d) => projectDevice(d as Record<string, unknown>)),
+                infraredRemoteList: (rawBody.infraredRemoteList ?? []).map((d) => projectDevice(d as Record<string, unknown>)),
+              });
+            } else {
+              printJson({ ok: true, ...(body as object) });
+            }
           }
           return;
         }
