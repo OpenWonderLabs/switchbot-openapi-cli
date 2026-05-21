@@ -1262,4 +1262,34 @@ describe('mcp server', () => {
       expect(sc.riskProfile.idempotencyHint).toBe('non-idempotent');
     });
   });
+
+  describe('list_devices — roomID nullable', () => {
+    it('succeeds when a device has roomID: null', async () => {
+      const { client } = await pair();
+      apiMock.__instance.get.mockResolvedValueOnce({
+        data: {
+          statusCode: 100,
+          body: {
+            deviceList: [
+              {
+                deviceId: 'EEC6089351B7',
+                deviceName: 'Outdoor Meter',
+                deviceType: 'MeterOutdoor',
+                enableCloudService: true,
+                hubDeviceId: 'AABBCCDDEE01',
+                roomID: null,       // ← THIS must not break validation
+                roomName: null,
+              },
+            ],
+            infraredRemoteList: [],
+          },
+        },
+      });
+
+      const result = await client.callTool({ name: 'list_devices', arguments: {} });
+      expect(result.isError).toBeFalsy();
+      const sc = (result as { structuredContent: { deviceList: unknown[] } }).structuredContent;
+      expect(sc.deviceList).toHaveLength(1);
+    });
+  });
 });

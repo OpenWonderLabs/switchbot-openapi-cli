@@ -300,7 +300,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
           deviceType: z.string().optional(),
           enableCloudService: z.boolean(),
           hubDeviceId: z.string(),
-          roomID: z.string().optional(),
+          roomID: z.string().nullable().optional(),
           roomName: z.string().nullable().optional(),
           familyName: z.string().optional(),
           controlType: z.string().optional(),
