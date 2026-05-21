@@ -1,0 +1,20 @@
+src/commands/devices.ts
+  s_fb6d2a8e0883f1::t_83352a9e4d4b4c 140-144
+  s_fb6d2a8e0883f1::t_94eeaf333dd40d 350-354
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "1d95b466d6ed67f1a67ead0d4d666ed95f59c09d",
+  "prompts": {},
+  "sessions": {
+    "s_fb6d2a8e0883f1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "82c94bf3-3326-4bff-8e54-af5800a1f153",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
