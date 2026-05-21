@@ -137,6 +137,11 @@ Examples:
   $ switchbot devices list --filter name=living,category=physical
   $ switchbot devices list --filter 'name~living'              # explicit substring
   $ switchbot devices list --filter 'type=/Air.*/'             # regex (case-insensitive)
+
+Cache note:
+  --cache is a global flag and must be placed BEFORE the subcommand:
+    switchbot --cache 5m devices list    ✓
+    switchbot devices list --cache 5m    ✗ (silently ignored)
 `)
     .option('--wide', 'Show all columns (controlType, family, roomID, room, hub, cloud)')
     .option('--show-hidden', 'Include devices hidden via "devices meta set --hide"')
@@ -342,6 +347,11 @@ Examples:
   $ switchbot devices status ABC123DEF456 --json | jq '.data.battery'
   $ switchbot devices status --ids ABC123,DEF456,GHI789
   $ switchbot devices status --ids ABC123,DEF456 --fields power,battery
+
+Cache note:
+  --cache is a global flag and must be placed BEFORE the subcommand:
+    switchbot --cache 5m devices status <id>    ✓
+    switchbot devices status <id> --cache 5m    ✗ (silently ignored)
 `)
     .action(async (deviceIdArgs: string[], options: { name?: string; nameStrategy?: string; nameType?: string; nameCategory?: 'physical' | 'ir'; nameRoom?: string; ids?: string; strict?: boolean }) => {
       try {
