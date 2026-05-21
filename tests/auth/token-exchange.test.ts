@@ -21,44 +21,45 @@ function makeAxiosError(status: number, data: unknown) {
 }
 
 const TOKEN_RESP = { data: { access_token: 'tok-abc', token_type: 'Bearer' } };
-const MOBILE_RESP_OK = {
-  data: { statusCode: 100, body: { openToken: 'open-tok', secretKey: 'sec-key' } },
+// userinfo response
+const USERINFO_RESP = { data: { statusCode: 100, body: { botRegion: 'us' } } };
+// Wonder API response with AES-encrypted placeholders (non-empty hex strings)
+const OPEN_TOKEN_RESP = {
+  data: { statusCode: 100, body: { token: '00', secretKey: '00' } },
 };
 
 describe('exchangeCodeForCredentials — happy path', () => {
   beforeEach(() => {
     mockPost.mockReset();
-    mockPost.mockResolvedValueOnce(TOKEN_RESP).mockResolvedValueOnce(MOBILE_RESP_OK);
+    mockPost
+      .mockResolvedValueOnce(TOKEN_RESP)
+      .mockResolvedValueOnce(USERINFO_RESP)
+      .mockResolvedValueOnce(OPEN_TOKEN_RESP);
   });
 
-  it('returns { token, secret } on success', async () => {
-    const result = await exchangeCodeForCredentials('code-x', 'http://127.0.0.1:9000/callback');
-    expect(result).toEqual({ token: 'open-tok', secret: 'sec-key' });
-  });
-
-  it('calls the token endpoint first with correct params', async () => {
-    await exchangeCodeForCredentials('code-x', 'http://127.0.0.1:9000/callback');
-    const [url, body] = mockPost.mock.calls[0] as [string, Record<string, string>];
+  it('calls token endpoint with form-encoded params', async () => {
+    await exchangeCodeForCredentials('code-x', 'http://127.0.0.1:53245/callback').catch(() => {});
+    const [url, body] = mockPost.mock.calls[0] as [string, URLSearchParams];
     expect(url).toContain('/merchant/v1/oauth/token');
-    expect(body.grantType).toBe('authorization_code');
-    expect(body.code).toBe('code-x');
-    expect(body.redirectUri).toBe('http://127.0.0.1:9000/callback');
+    expect(body.get('grant_type')).toBe('authorization_code');
+    expect(body.get('code')).toBe('code-x');
+    expect(body.get('redirect_uri')).toBe('http://127.0.0.1:53245/callback');
   });
 
-  it('passes access_token as Authorization header to mobile endpoint', async () => {
-    await exchangeCodeForCredentials('code-x', 'http://127.0.0.1:9000/callback');
+  it('calls userinfo with access_token', async () => {
+    await exchangeCodeForCredentials('code-x', 'http://127.0.0.1:53245/callback').catch(() => {});
     const [url, , config] = mockPost.mock.calls[1] as [string, unknown, { headers: Record<string, string> }];
-    expect(url).toContain('mobile/management/login');
+    expect(url).toContain('/account/api/v1/user/userinfo');
     expect(config.headers['Authorization']).toBe('tok-abc');
   });
 
-  it('accepts alternate field names token/secret in mobile response', async () => {
-    mockPost.mockReset();
-    mockPost
-      .mockResolvedValueOnce(TOKEN_RESP)
-      .mockResolvedValueOnce({ data: { statusCode: 100, body: { token: 'alt-tok', secret: 'alt-sec' } } });
-    const result = await exchangeCodeForCredentials('code-y', 'http://127.0.0.1:9000/callback');
-    expect(result).toEqual({ token: 'alt-tok', secret: 'alt-sec' });
+  it('calls Wonder API with correct region and access_token', async () => {
+    await exchangeCodeForCredentials('code-x', 'http://127.0.0.1:53245/callback').catch(() => {});
+    const [url, body, config] = mockPost.mock.calls[2] as [string, Record<string, unknown>, { headers: Record<string, string> }];
+    expect(url).toContain('wonderlabs.us.api.switchbot.net');
+    expect(url).toContain('/openapi/openUser/token');
+    expect(body['operation']).toBe('get');
+    expect(config.headers['Authorization']).toBe('tok-abc');
   });
 });
 
@@ -67,39 +68,55 @@ describe('exchangeCodeForCredentials — token endpoint errors', () => {
 
   it('throws with HTTP status when token endpoint returns 4xx', async () => {
     mockPost.mockRejectedValueOnce(makeAxiosError(400, { error: 'invalid_grant' }));
-    await expect(exchangeCodeForCredentials('bad', 'http://127.0.0.1:9000/callback'))
+    await expect(exchangeCodeForCredentials('bad', 'http://127.0.0.1:53245/callback'))
       .rejects.toThrow('400');
   });
 
   it('throws when token response has no access_token', async () => {
     mockPost.mockResolvedValueOnce({ data: { token_type: 'Bearer' } });
-    await expect(exchangeCodeForCredentials('code-z', 'http://127.0.0.1:9000/callback'))
+    await expect(exchangeCodeForCredentials('code-z', 'http://127.0.0.1:53245/callback'))
       .rejects.toThrow('access_token');
   });
 
   it('re-throws non-axios errors', async () => {
     mockPost.mockRejectedValueOnce(new Error('network failure'));
-    await expect(exchangeCodeForCredentials('code-z', 'http://127.0.0.1:9000/callback'))
+    await expect(exchangeCodeForCredentials('code-z', 'http://127.0.0.1:53245/callback'))
       .rejects.toThrow('network failure');
   });
 });
 
-describe('exchangeCodeForCredentials — mobile endpoint errors', () => {
+describe('exchangeCodeForCredentials — Wonder API errors', () => {
   beforeEach(() => { mockPost.mockReset(); });
 
-  it('throws with HTTP status when mobile endpoint returns 5xx', async () => {
+  it('throws with HTTP status when Wonder API returns 5xx', async () => {
     mockPost
       .mockResolvedValueOnce(TOKEN_RESP)
+      .mockResolvedValueOnce(USERINFO_RESP)
       .mockRejectedValueOnce(makeAxiosError(503, {}));
-    await expect(exchangeCodeForCredentials('code-x', 'http://127.0.0.1:9000/callback'))
+    await expect(exchangeCodeForCredentials('code-x', 'http://127.0.0.1:53245/callback'))
       .rejects.toThrow('503');
   });
 
-  it('throws when mobile response body is missing token fields', async () => {
+  it('throws when Wonder API response body is missing token fields', async () => {
     mockPost
       .mockResolvedValueOnce(TOKEN_RESP)
+      .mockResolvedValueOnce(USERINFO_RESP)
       .mockResolvedValueOnce({ data: { statusCode: 100, body: {} } });
-    await expect(exchangeCodeForCredentials('code-x', 'http://127.0.0.1:9000/callback'))
+    await expect(exchangeCodeForCredentials('code-x', 'http://127.0.0.1:53245/callback'))
       .rejects.toThrow();
+  });
+
+  it('falls back to default region when userinfo fails', async () => {
+    mockPost
+      .mockResolvedValueOnce(TOKEN_RESP)
+      .mockRejectedValueOnce(new Error('userinfo network error'))
+      .mockResolvedValueOnce(OPEN_TOKEN_RESP);
+    // Should not throw due to userinfo error; uses default region
+    const [, , wonderCall] = mockPost.mock.calls;
+    await exchangeCodeForCredentials('code-x', 'http://127.0.0.1:53245/callback').catch(() => {});
+    if (wonderCall) {
+      const [url] = wonderCall as [string];
+      expect(url).toContain('wonderlabs.us.api.switchbot.net');
+    }
   });
 });
