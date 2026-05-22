@@ -1,0 +1,21 @@
+tests/auth/token-exchange.test.ts
+  s_520af120fc1410::t_c518e3f26b7118 8-43,45,70,75-76,172,181,183,186-193
+src/auth/token-exchange.ts
+  s_520af120fc1410::t_23aab2be93579f 17-22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "73bfdd13a462974126250a7a80d8e97055ac7af7",
+  "prompts": {},
+  "sessions": {
+    "s_520af120fc1410": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f3d073ef-c5ef-45c0-9189-9f2d32f9d203",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
