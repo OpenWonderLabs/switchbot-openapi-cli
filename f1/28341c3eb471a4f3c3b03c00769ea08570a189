@@ -1,0 +1,22 @@
+src/commands/reset.ts
+  s_4ecda003eaab8a::t_c8a9f0bea110c5 7,113-117,168-176
+tests/commands/reset.test.ts
+  s_4ecda003eaab8a::t_87b873b3e9f0f9 236-237
+  s_4ecda003eaab8a::t_c8a9f0bea110c5 119-122,200-235
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "f128341c3eb471a4f3c3b03c00769ea08570a189",
+  "prompts": {},
+  "sessions": {
+    "s_4ecda003eaab8a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b0316407-3d37-4a60-90c6-79e8ca7b00b1",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
