@@ -1,0 +1,19 @@
+tests/devices/history-agg.test.ts
+  s_4ecda003eaab8a::t_c8a9f0bea110c5 338-355
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "c3cb2f8220401c922e9ff75321d41175c83831eb",
+  "prompts": {},
+  "sessions": {
+    "s_4ecda003eaab8a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b0316407-3d37-4a60-90c6-79e8ca7b00b1",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
