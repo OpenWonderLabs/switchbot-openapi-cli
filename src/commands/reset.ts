@@ -110,11 +110,14 @@ export function registerResetCommand(program: Command): void {
         console.error('');
         const ok = await confirm('Continue?');
         if (!ok) {
-          if (isJsonMode()) {
-            exitWithError({ code: 1, kind: 'runtime', message: 'Aborted (non-interactive terminal — pass --yes to skip confirmation).' });
+          if (!process.stdin.isTTY) {
+            if (isJsonMode()) {
+              exitWithError({ code: 1, kind: 'runtime', message: 'Aborted (non-interactive terminal — pass --yes to skip confirmation).' });
+            }
+            console.error('Aborted (non-interactive terminal — pass --yes to skip confirmation).');
+            process.exit(1);
           }
-          console.error('Aborted (non-interactive terminal — pass --yes to skip confirmation).');
-          process.exit(1);
+          console.error('Aborted.');
           return;
         }
       }
