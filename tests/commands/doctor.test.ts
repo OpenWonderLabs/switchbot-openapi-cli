@@ -13,6 +13,23 @@ vi.mock('node:child_process', async (importOriginal) => {
   };
 });
 
+const credStoreGetMock = vi.fn().mockResolvedValue(null);
+const credStoreMock = {
+  name: 'file',
+  get: (...args: unknown[]) => credStoreGetMock(...args),
+  set: vi.fn(),
+  delete: vi.fn(),
+  describe: () => ({ backend: 'file', tag: 'file', writable: true }),
+};
+
+vi.mock('../../src/credentials/keychain.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/credentials/keychain.js')>();
+  return {
+    ...actual,
+    selectCredentialStore: () => Promise.resolve(credStoreMock),
+  };
+});
+
 import { registerDoctorCommand } from '../../src/commands/doctor.js';
 import { TOOL_PROFILES } from '../../src/mcp/tool-profiles.js';
 import { runCli } from '../helpers/cli.js';
@@ -34,6 +51,8 @@ describe('doctor command', () => {
     process.env.SHELL = '/bin/bash';
     // Default: execSync throws (simulates binary not on PATH / npm not available)
     vi.mocked(execSync).mockReset().mockImplementation(() => { throw new Error('not found'); });
+    // Default: credential store has no credentials (isolate from real OS keychain)
+    credStoreGetMock.mockReset().mockResolvedValue(null);
   });
   afterEach(() => {
     resetListCache();
