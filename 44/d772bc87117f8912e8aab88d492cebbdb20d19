@@ -1,0 +1,38 @@
+src/auth/token-exchange.ts
+  s_3dd03e979c4833::t_995c0863ca6920 22
+src/commands/mcp.ts
+  s_520af120fc1410::t_2d37ee6b44d025 305
+  s_520af120fc1410::t_fdfed40353a773 315
+src/auth/oauth-callback.ts
+  s_520af120fc1410::t_441c416ebb9f57 79
+  s_520af120fc1410::t_319acfd358f877 123
+tests/auth/oauth-callback.test.ts
+  s_520af120fc1410::t_d3ae5043327c7b 108-119,123-128,130-133,135,137,140-141,145-148,152,155-156,160-163,167-168
+  s_520af120fc1410::t_f1b05504e08fcb 2
+  s_520af120fc1410::t_54af782757fabc 3
+  s_520af120fc1410::t_0a21c131ab8e11 107,120-122,129,134,136,138-139,142-144,149-151,153-154,157-159,164-166,169-170
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "44d772bc87117f8912e8aab88d492cebbdb20d19",
+  "prompts": {},
+  "sessions": {
+    "s_3dd03e979c4833": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "713c07e6-bd25-4725-9dcf-4f282fa2540b",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    },
+    "s_520af120fc1410": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f3d073ef-c5ef-45c0-9189-9f2d32f9d203",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
