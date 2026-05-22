@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { DEVICE_FIELD_ALIAS, DEVICE_ALL_COLS } from '../../src/commands/devices.js';
+import { DEVICE_FIELD_ALIAS, DEVICE_ALL_COLS } from '../../src/commands/devices-columns.js';
 
 describe('devices — column constants', () => {
   it('DEVICE_FIELD_ALIAS maps "id" to "deviceId"', () => {

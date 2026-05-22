@@ -35,19 +35,7 @@ import { isDryRun, getCacheMode } from '../utils/flags.js';
 import { DryRunSignal } from '../api/client.js';
 import { resolveField, resolveFieldList, listSupportedFieldInputs } from '../schema/field-aliases.js';
 import { allowsDirectDestructiveExecution, destructiveExecutionHint } from '../lib/destructive-mode.js';
-
-export const DEVICE_FIELD_ALIAS: Record<string, string> = {
-  id: 'deviceId', name: 'deviceName', deviceType: 'type', type: 'type',
-  roomName: 'room', familyName: 'family', hubDeviceId: 'hub',
-  enableCloudService: 'cloud', controlType: 'controlType',
-  deviceName: 'deviceName', deviceId: 'deviceId', category: 'category',
-  roomID: 'roomID', alias: 'alias',
-};
-
-export const DEVICE_ALL_COLS: Set<string> = new Set([
-  'deviceId', 'deviceName', 'type', 'category', 'controlType',
-  'family', 'roomID', 'room', 'hub', 'cloud', 'alias',
-]);
+import { DEVICE_FIELD_ALIAS, DEVICE_ALL_COLS } from './devices-columns.js';
 
 const EXPAND_HINTS: Record<string, { command: string; flags: string }> = {
   'Air Conditioner':  { command: 'setAll',      flags: '--temp 26 --mode cool --fan low --power on' },
