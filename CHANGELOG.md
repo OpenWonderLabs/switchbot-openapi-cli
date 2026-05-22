@@ -7,36 +7,28 @@ All notable changes to `@switchbot/openapi-cli` are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [3.7.0]
 
 ### Added
 
-- `auth login` — browser-based OAuth 2.0 sign-in via `sp.oauth.switchbot.net`; stores credentials in OS keychain after verification
-- `auth keychain set/get/delete/migrate/describe` — manage OS keychain credential backend
-- `SWITCHBOT_OAUTH_CLIENT_SECRET`, `SWITCHBOT_TOKEN_AES_KEY`, `SWITCHBOT_TOKEN_AES_IV` env vars to override baked-in OAuth/AES constants
-- **`devices expand` supports lighting commands**: `setBrightness` (`--brightness`), `setColor` (`--color`), and `setColorTemperature` (`--color-temp`) flags now expand for Color Bulb, Strip Light, Ceiling Light, and similar devices.
+- `auth login` — browser-based OAuth 2.0 login; stores credentials in OS keychain
+- `reset` command — clear all local data (credentials, cache, quota, history, metadata)
+- `SWITCHBOT_OAUTH_CLIENT_SECRET`, `SWITCHBOT_TOKEN_AES_KEY`, `SWITCHBOT_TOKEN_AES_IV` env-var overrides
+- `devices expand` supports `setBrightness`, `setColor`, `setColorTemperature`
 
 ### Fixed
 
-- `reset`: aborting at the confirmation prompt no longer continues the reset action in test environments
-- `reset`: credential deletion failures are now reported as `failed` instead of `not found`
-- `reset --config <path>`: no longer recursively deletes a sibling `cache/` directory next to the override file. The CLI never creates that path in `--config` mode, so removing it could wipe an unrelated project's data.
-- `devices list --json --fields`: alias inputs (e.g. `id,name`) now resolve to canonical output keys (`deviceId`, `deviceName`), matching `--format json`. The JSON schema is now stable regardless of which input form callers used.
-- `config`: credential-missing hint now preserves `--config <path>` in both the `auth login` and `config set-token` recovery commands. Without this, the suggested `auth login` would write to the default backend, which `loadConfig` ignores while `--config` is active.
-- **Daemon start failed in bundled builds** (BUG-001): CLI entry path resolution navigated above the dist/ directory when running from the single-file bundle. Now correctly detects the bundled scenario.
-- **`rules run` exited 0 when `automation.enabled` was false** (BUG-002): daemon interpreted this as success. Now exits 1 with a clear message.
-- **Unknown subcommands exited 0** (BUG-005/BUG-008): `cache list`, `history list`, and other invalid subcommand inputs triggered Commander help display and exited 0. Now exits 2 (usage error).
-- **`mcp tools --json` omitted description and inputSchema** (BUG-007): tool directory only listed names. Now includes full tool metadata.
-- **Pino logger wrote to stdout** (BUG-009): redirected to stderr so it doesn't corrupt JSON/MCP output.
+- `reset --config`: scoped data paths correctly; no longer deletes unrelated `cache/` directory
+- `devices list --json --fields`: alias inputs resolve to canonical output keys
+- `config`: credential-missing hint preserves `--config` in recovery commands
+- Daemon start in bundled builds (BUG-001), `rules run` exit code (BUG-002), unknown subcommand exit code (BUG-005/008), `mcp tools --json` metadata (BUG-007), Pino stdout leak (BUG-009)
 
 ### Changed (Breaking)
 
-- **`schemaVersion` bumped from `1.1` to `1.2`**: all `--json` responses now carry `schemaVersion: "1.2"`. Consumers that pin on the exact string must update their check. Parsers that only read `data`/`error` are unaffected.
-- **`catalog show <Type> --json`**: `data` is now always an array (single-entry array when filtering by type). Previously was a bare object for single-type queries.
-- **`devices commands <Type> --json`**: same change — `data` is always an array.
-- **`_fetchedAt` renamed to `fetchedAt`**: removed underscore prefix from the CLI-added timestamp field in `devices status` JSON output.
-- **`rules run --json` when `automation.enabled` is false**: previously emitted `{data: {kind:"control", controlKind:"disabled"}}` (success envelope) with exit 1. Now emits `{error: {code:1, kind:"runtime", message:"..."}}` (error envelope) — consistent with the JSON protocol.
-- **MCP `list_devices` outputSchema**: `roomID` and `controlType` fields now accept `null` in addition to `string | undefined`. Consumers with strict JSON-Schema or Zod validation may need to update their parsers.
+- `schemaVersion` bumped to `1.2`
+- `catalog show <Type> --json` / `devices commands <Type> --json`: `data` is always an array
+- `_fetchedAt` renamed to `fetchedAt` in `devices status` JSON output
+- MCP `list_devices`: `roomID` and `controlType` now accept `null`
 
 ## [3.6.3]
 

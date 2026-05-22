@@ -19,8 +19,7 @@ Run scenes, stream real-time events over MQTT, and plug AI agents into your home
 > separate repository.
 > See [`docs/agent-guide.md`](./docs/agent-guide.md) for the authoritative
 > surfaces (MCP, `agent-bootstrap`, `schema export`, `capabilities --json`)
-> the skill consumes. Skill packaging + registry entry is tracked
-> as Phase 3B — see [`docs/design/roadmap.md`](./docs/design/roadmap.md).
+> the skill consumes.
 
 ---
 
@@ -50,7 +49,7 @@ Under the hood every surface shares the same catalog, cache, and HMAC client —
 - [Credentials](#credentials)
 - [Policy](#policy) · [Rules engine](#rules-engine)
 - [Global options](#global-options)
-- [Commands](#commands): [config](#config--credential-management) · [devices](#devices--list-status-control) · [scenes](#scenes--run-manual-scenes) · [webhook](#webhook--receive-device-events-over-http) · [events](#events--receive-device-events) · [status-sync](#status-sync--mqttopenclaw-bridge) · [daemon](#daemon--background-rules-engine-process) · [plan](#plan--declarative-batch-operations) · [mcp](#mcp--model-context-protocol-server) · [doctor](#doctor--self-check) · [health](#health--runtime-health-report) · [upgrade-check](#upgrade-check--version-check) · [quota](#quota--api-request-counter) · [history](#history--audit-log) · [catalog](#catalog--device-type-catalog) · [schema](#schema--export-catalog-as-json) · [capabilities](#capabilities--cli-manifest) · [cache](#cache--inspect-and-clear-local-cache) · [policy cmd](#policy--validate-scaffold-and-migrate-policyyaml) · [completion](#completion--shell-tab-completion)
+- [Commands](#commands): [auth](#auth--login-and-credential-management) · [config](#config--credential-management) · [devices](#devices--list-status-control) · [scenes](#scenes--run-manual-scenes) · [webhook](#webhook--receive-device-events-over-http) · [events](#events--receive-device-events) · [status-sync](#status-sync--mqttopenclaw-bridge) · [daemon](#daemon--background-rules-engine-process) · [plan](#plan--declarative-batch-operations) · [mcp](#mcp--model-context-protocol-server) · [doctor](#doctor--self-check) · [health](#health--runtime-health-report) · [upgrade-check](#upgrade-check--version-check) · [quota](#quota--api-request-counter) · [history](#history--audit-log) · [catalog](#catalog--device-type-catalog) · [schema](#schema--export-catalog-as-json) · [capabilities](#capabilities--cli-manifest) · [cache](#cache--inspect-and-clear-local-cache) · [reset](#reset--clear-local-data) · [policy cmd](#policy--validate-scaffold-and-migrate-policyyaml) · [completion](#completion--shell-tab-completion)
 - [Output modes](#output-modes) · [Cache](#cache) · [Exit codes](#exit-codes--error-codes) · [Environment variables](#environment-variables)
 - [Scripting examples](#scripting-examples) · [Development](#development) · [License](#license)
 
@@ -176,7 +175,21 @@ The CLI reads credentials in this order (first match wins):
 2. **OS keychain** — native keychain (macOS Keychain / Windows Credential Manager / libsecret on Linux) when populated via `switchbot auth keychain set`
 3. **Config file** — `~/.switchbot/config.json` (written by `config set-token`, mode `0600`)
 
-Obtain the token and secret from the SwitchBot mobile app:
+### Browser login (recommended)
+
+The fastest way to get started — sign in with your SwitchBot account in the browser:
+
+```bash
+switchbot auth login              # opens browser, saves credentials to OS keychain
+switchbot auth login --no-open    # print URL instead of auto-opening
+switchbot auth login --timeout 60 # custom timeout (default 120s)
+```
+
+The flow uses OAuth 2.0 via `sp.oauth.switchbot.net`, decrypts the API token/secret from the response, verifies them against the SwitchBot API, and stores the result in the OS keychain.
+
+### Manual setup
+
+Alternatively, obtain the token and secret from the SwitchBot mobile app:
 **Profile → Preferences → Developer Options → Get Token**.
 
 ```bash
@@ -193,31 +206,12 @@ switchbot config show
 
 ### OS keychain
 
-Prefer native OS storage over the `0600` JSON on disk:
-
-```bash
-# See which backend is active on this machine
-switchbot auth keychain describe
-
-# Move existing ~/.switchbot/config.json into the keychain.
-#   With --delete-file, the CLI deletes the source only when it contains
-#   nothing except token/secret; otherwise it scrubs those fields and keeps
-#   profile metadata such as labels and limits.
-switchbot auth keychain migrate
-
-# Or write credentials directly (TTY prompt or --stdin-file <path>)
-switchbot auth keychain set
-
-# Verify a profile has credentials without leaking the material
-switchbot auth keychain get
-```
-
 Backends: `security(1)` on macOS, `libsecret` / `secret-tool` on Linux,
 Credential Manager (via PowerShell + Win32 `CredReadW`/`CredWriteW`) on
 Windows. If no native backend is available, the file backend takes
 over transparently so the CLI keeps working. `switchbot doctor`
 surfaces which backend is active and warns when file-stored credentials
-could be moved into a writable keychain.
+could be moved into a writable keychain. See [`auth` command](#auth--login-and-credential-management) for usage.
 
 ## Policy
 
@@ -332,7 +326,7 @@ switchbot rules trace-explain --rule "motion on" --last   # why a rule fired/was
 switchbot rules simulate "motion on" --since 7d --json    # replay without running the engine
 ```
 
-LLM-generated rules always have `dry_run: true` — flip it yourself after review. Notify URLs must be `http://` or `https://`. See [`docs/design/phase4-rules.md`](./docs/design/phase4-rules.md) for the full pipeline.
+LLM-generated rules always have `dry_run: true` — flip it yourself after review. Notify URLs must be `http://` or `https://`.
 
 ## Global options
 
@@ -370,6 +364,22 @@ switchbot devices command ABC123 turnOn --dry-run
 ```
 
 ## Commands
+
+### `auth` — login and credential management
+
+```bash
+# Browser-based OAuth login (recommended for first-time setup)
+switchbot auth login                     # opens browser, saves to OS keychain
+switchbot auth login --no-open           # print URL instead of auto-opening
+switchbot auth login --timeout 60        # custom timeout (default 120s)
+
+# OS keychain management
+switchbot auth keychain describe         # show active backend
+switchbot auth keychain set              # write credentials directly
+switchbot auth keychain get              # verify credentials exist
+switchbot auth keychain migrate          # move config.json into keychain
+switchbot auth keychain delete           # remove stored credentials
+```
 
 ### `config` — credential management
 
@@ -748,6 +758,16 @@ switchbot cache clear                  # clear everything
 switchbot cache clear --key list       # list cache only
 switchbot cache clear --key status     # status cache only
 ```
+
+### `reset` — clear local data
+
+```bash
+switchbot reset                # interactive confirmation, then wipe everything
+switchbot reset --yes          # skip confirmation (for scripts)
+switchbot reset --keep-credentials   # only clear cache/quota/history, keep credentials
+```
+
+Removes credentials (keychain + config), device cache, quota counter, device history, device metadata, status cache, and audit log. Use `--keep-credentials` to preserve login state while clearing cached data.
 
 ### `policy` — validate, scaffold, and migrate policy.yaml
 
