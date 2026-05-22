@@ -36,6 +36,7 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`devices commands <Type> --json`**: same change — `data` is always an array.
 - **`_fetchedAt` renamed to `fetchedAt`**: removed underscore prefix from the CLI-added timestamp field in `devices status` JSON output.
 - **`rules run --json` when `automation.enabled` is false**: previously emitted `{data: {kind:"control", controlKind:"disabled"}}` (success envelope) with exit 1. Now emits `{error: {code:1, kind:"runtime", message:"..."}}` (error envelope) — consistent with the JSON protocol.
+- **MCP `list_devices` outputSchema**: `roomID` and `controlType` fields now accept `null` in addition to `string | undefined`. Consumers with strict JSON-Schema or Zod validation may need to update their parsers.
 
 ## [3.6.3]
 
