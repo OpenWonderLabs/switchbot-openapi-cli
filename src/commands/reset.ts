@@ -25,17 +25,17 @@ async function confirm(question: string): Promise<boolean> {
   });
 }
 
-function removeItem(itemPath: string, type: 'file' | 'dir'): 'removed' | 'absent' | 'failed' {
-  if (!fs.existsSync(itemPath)) return 'absent';
+function removeItem(itemPath: string, type: 'file' | 'dir'): { status: 'removed' | 'absent' | 'failed'; error?: string } {
+  if (!fs.existsSync(itemPath)) return { status: 'absent' };
   try {
     if (type === 'dir') {
       fs.rmSync(itemPath, { recursive: true, force: true });
     } else {
       fs.unlinkSync(itemPath);
     }
-    return 'removed';
-  } catch {
-    return 'failed';
+    return { status: 'removed' };
+  } catch (err) {
+    return { status: 'failed', error: err instanceof Error ? err.message : String(err) };
   }
 }
 
@@ -129,22 +129,22 @@ export function registerResetCommand(program: Command): void {
           ? path.resolve(configOverride)
           : path.join(BASE, 'config.json');
         const cfgStatus = removeItem(configFile, 'file');
-        if (cfgStatus !== 'absent') {
-          results.push({ key: 'config-file', label: 'Config file (config.json)', status: cfgStatus });
+        if (cfgStatus.status !== 'absent') {
+          results.push({ key: 'config-file', label: 'Config file (config.json)', ...cfgStatus });
         }
         if (!configOverride) {
           const profilesDir = path.join(BASE, 'profiles');
           const profStatus = removeItem(profilesDir, 'dir');
-          if (profStatus !== 'absent') {
-            results.push({ key: 'profiles-dir', label: 'Profiles directory', status: profStatus });
+          if (profStatus.status !== 'absent') {
+            results.push({ key: 'profiles-dir', label: 'Profiles directory', ...profStatus });
           }
         }
       }
 
       // ── Data files ───────────────────────────────────────────────────────────
       for (const item of dataItems) {
-        const status = removeItem(item.path, item.type);
-        results.push({ key: item.key, label: item.label, status });
+        const result = removeItem(item.path, item.type);
+        results.push({ key: item.key, label: item.label, ...result });
       }
 
       if (isJsonMode()) {
