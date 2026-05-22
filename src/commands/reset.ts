@@ -112,15 +112,21 @@ export function registerResetCommand(program: Command): void {
 
       // ── Credentials ──────────────────────────────────────────────────────────
       if (!opts.keepCredentials) {
-        const profilesToWipe = [profile, ...extraProfiles.filter(p => p !== profile)];
-        const store = await selectCredentialStore();
+        // Only touch the global credential store when NOT in --config mode.
+        // In --config mode the override file is the credential store; it is
+        // removed below via removeItem(configFile). Calling store.delete() here
+        // would also wipe the user's normal keychain / ~/.switchbot/config.json.
+        if (!configOverride) {
+          const profilesToWipe = [profile, ...extraProfiles.filter(p => p !== profile)];
+          const store = await selectCredentialStore();
 
-        for (const p of profilesToWipe) {
-          try {
-            await store.delete(p);
-            results.push({ key: `creds:${p}`, label: `Credentials (${p})`, status: 'removed' });
-          } catch {
-            results.push({ key: `creds:${p}`, label: `Credentials (${p})`, status: 'failed' });
+          for (const p of profilesToWipe) {
+            try {
+              await store.delete(p);
+              results.push({ key: `creds:${p}`, label: `Credentials (${p})`, status: 'removed' });
+            } catch {
+              results.push({ key: `creds:${p}`, label: `Credentials (${p})`, status: 'failed' });
+            }
           }
         }
 

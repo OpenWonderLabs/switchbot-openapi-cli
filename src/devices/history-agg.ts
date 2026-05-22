@@ -75,11 +75,13 @@ export async function aggregateDeviceHistory(
   );
 
   const now = Date.now();
+  // When fromMs is open-ended (-Infinity), fall back to toMs so the synthetic
+  // bucket key stays within the queried window. Using `now` as the fallback
+  // produces a key > toMs for past-only --to queries.
+  const effectiveFrom = Number.isFinite(fromMs) ? fromMs : (Number.isFinite(toMs) ? toMs : now);
+  const effectiveTo   = Number.isFinite(toMs)   ? toMs   : now;
   const stableKey = bucketMs === null
-    ? Math.floor(
-        ((Number.isFinite(fromMs) ? fromMs : now) +
-         (Number.isFinite(toMs) ? toMs : now)) / 2,
-      )
+    ? Math.floor((effectiveFrom + effectiveTo) / 2)
     : 0;
 
   let partial = false;
