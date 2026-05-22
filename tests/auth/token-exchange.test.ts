@@ -5,13 +5,45 @@ import crypto from 'node:crypto';
 const AES_KEY = Buffer.from('lrQ0OTvwp9RTsXxk', 'utf8');
 const AES_IV  = Buffer.from('4mdN27rI3bk2LzWa', 'utf8');
 
-function encryptField(plaintext: string): string {
-  const cipher = crypto.createCipheriv('aes-128-cbc', AES_KEY, AES_IV);
-  return Buffer.concat([cipher.update(Buffer.from(plaintext, 'utf8')), cipher.final()]).toString('hex');
-}
+// ── Fixture design ────────────────────────────────────────────────────────────
+//
+// The SwitchBot Wonder API stores credentials as raw binary bytes, not as
+// human-readable strings.  It AES-128-CBC-encrypts those binary bytes and
+// returns the ciphertext hex-encoded in the openUser/token response.
+//
+// `decryptField` therefore decrypts the ciphertext and calls .toString('hex')
+// to produce a stable, header-safe hex representation of the binary payload.
+// Using .toString('utf8') here was incorrect: it produced garbled output when
+// the plaintext bytes fell outside printable ASCII, which caused HTTP header
+// validation errors ("invalid header characters" bug).
+//
+// IMPORTANT: Do NOT change encryptField below to encrypt a UTF-8 string and
+// expect it back as a string — that model does not match the real API.  The
+// fixture intentionally uses fixed binary buffers so that the tests mirror the
+// actual Wonder API encoding contract.
 
-const FIXTURE_TOKEN  = 'test-open-token-value';
-const FIXTURE_SECRET = 'test-secret-key-value';
+/** Fixed 48-byte binary token payload (matches real token length after decryption). */
+const FIXTURE_TOKEN_BIN  = Buffer.from(
+  'b1a2c3d4e5f6a7b8c9d0e1f2a3b4c5d6' +
+  'f7e8d9ca0b1c2d3e4f5a6b7c8d9e0f1a' ,
+  'hex',
+); // 48 raw bytes → 96-char hex string (matches observed live token length)
+
+/** Fixed 16-byte binary secret payload. */
+const FIXTURE_SECRET_BIN = Buffer.from('8cabcdef12345678fedcba9876543210', 'hex'); // 16 raw bytes → 32-char hex
+
+/** What decryptField must return: hex representation of the binary payload. */
+const FIXTURE_TOKEN  = FIXTURE_TOKEN_BIN.toString('hex');   // 96 chars
+const FIXTURE_SECRET = FIXTURE_SECRET_BIN.toString('hex');  // 32 chars
+
+/**
+ * Mirrors the Wonder API server-side encryption:
+ * AES-128-CBC encrypt raw binary bytes → return hex-encoded ciphertext.
+ */
+function encryptField(rawBytes: Buffer): string {
+  const cipher = crypto.createCipheriv('aes-128-cbc', AES_KEY, AES_IV);
+  return Buffer.concat([cipher.update(rawBytes), cipher.final()]).toString('hex');
+}
 
 const mockPost = vi.hoisted(() => vi.fn());
 
@@ -34,15 +66,14 @@ function makeAxiosError(status: number, data: unknown) {
 }
 
 const TOKEN_RESP = { data: { access_token: 'tok-abc', token_type: 'Bearer' } };
-// userinfo response
 const USERINFO_RESP = { data: { statusCode: 100, body: { botRegion: 'us' } } };
-// Wonder API response with properly AES-encrypted fixture values
+// Wonder API response: binary credential bytes AES-encrypted, ciphertext hex-encoded
 const OPEN_TOKEN_RESP = {
   data: {
     statusCode: 100,
     body: {
-      token: encryptField(FIXTURE_TOKEN),
-      secretKey: encryptField(FIXTURE_SECRET),
+      token:     encryptField(FIXTURE_TOKEN_BIN),
+      secretKey: encryptField(FIXTURE_SECRET_BIN),
     },
   },
 };
@@ -138,7 +169,7 @@ describe("exchangeCodeForCredentials — Wonder API errors", () => {
   });
 });
 
-describe("exchangeCodeForCredentials — decrypts Wonder API response", () => {
+describe("exchangeCodeForCredentials — decrypts Wonder API binary payload as hex", () => {
   beforeEach(() => {
     mockPost.mockReset();
     mockPost
@@ -147,9 +178,18 @@ describe("exchangeCodeForCredentials — decrypts Wonder API response", () => {
       .mockResolvedValueOnce(OPEN_TOKEN_RESP);
   });
 
-  it('returns correctly decrypted token and secret', async () => {
+  it('returns binary credential bytes as hex strings (96-char token, 32-char secret)', async () => {
     const res = await exchangeCodeForCredentials('code-x', 'http://127.0.0.1:53245/callback');
+    // Hex strings: only [0-9a-f], no whitespace or non-ASCII that would break HTTP headers
     expect(res.token).toBe(FIXTURE_TOKEN);
     expect(res.secret).toBe(FIXTURE_SECRET);
+    expect(res.token).toMatch(/^[0-9a-f]+$/);
+    expect(res.secret).toMatch(/^[0-9a-f]+$/);
+  });
+
+  it('token and secret lengths match hex-encoded binary payload', async () => {
+    const res = await exchangeCodeForCredentials('code-x', 'http://127.0.0.1:53245/callback');
+    expect(res.token.length).toBe(FIXTURE_TOKEN_BIN.length * 2);
+    expect(res.secret.length).toBe(FIXTURE_SECRET_BIN.length * 2);
   });
 });
