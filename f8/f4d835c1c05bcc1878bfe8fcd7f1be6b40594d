@@ -1,0 +1,23 @@
+src/auth/verify.ts
+  s_4ecda003eaab8a::t_258d75e69288b2 1-24
+src/commands/auth.ts
+  s_4ecda003eaab8a::t_c8a9f0bea110c5 33
+tests/commands/auth.test.ts
+  s_4ecda003eaab8a::t_c8a9f0bea110c5 408,414-416,421,426,443,450,468
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "f8f4d835c1c05bcc1878bfe8fcd7f1be6b40594d",
+  "prompts": {},
+  "sessions": {
+    "s_4ecda003eaab8a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b0316407-3d37-4a60-90c6-79e8ca7b00b1",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
