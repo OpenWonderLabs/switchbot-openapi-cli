@@ -116,9 +116,10 @@ describe('reset --json', () => {
 
     const output = res.stdout.join('\n');
     const parsed = JSON.parse(output) as Record<string, unknown>;
-    const data = parsed['data'] as Record<string, unknown>;
-    const results = data['results'] as Array<{ status: string }>;
-    expect(results.some((r) => r.status === 'failed')).toBe(true);
+    expect(parsed).toHaveProperty('error');
+    const err = parsed['error'] as Record<string, unknown>;
+    expect(err['kind']).toBe('runtime');
+    expect(typeof err['message']).toBe('string');
   });
 });
 
@@ -194,5 +195,43 @@ describe('reset --config <path>', () => {
       .mocked(nodeFsMock.existsSync)
       .mock.calls.map((c) => path.normalize(String(c[0])));
     expect(existsTargets).not.toContain(path.normalize(siblingCacheDir));
+  });
+});
+
+describe('reset — non-interactive abort', () => {
+  it('prints reason and exits 1 when stdin is not a TTY and --yes is absent', async () => {
+    const origIsTTY = process.stdin.isTTY;
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+    try {
+      const res = await runCli(registerResetCommand, ['reset']);
+      expect(res.exitCode).toBe(1);
+      const output = [...res.stdout, ...res.stderr].join('\n');
+      expect(output).toContain('--yes');
+      expect(output).toContain('non-interactive');
+    } finally {
+      Object.defineProperty(process.stdin, 'isTTY', { value: origIsTTY, configurable: true });
+    }
+  });
+});
+
+describe('reset --json — error exit uses structured error envelope', () => {
+  it('emits error envelope (not data envelope) when a step fails', async () => {
+    const store = {
+      name: 'file',
+      delete: vi.fn().mockRejectedValue(new Error('keychain locked')),
+      describe: () => ({ backend: 'mock', tag: 'file', writable: true }),
+    };
+    selectMock.mockResolvedValue(store);
+
+    const res = await runCli(registerResetCommand, ['--json', 'reset', '--yes']);
+    expect(res.exitCode).toBe(1);
+
+    const output = res.stdout.join('\n');
+    const parsed = JSON.parse(output) as Record<string, unknown>;
+    expect(parsed).toHaveProperty('error');
+    expect(parsed).not.toHaveProperty('data');
+    const err = parsed['error'] as Record<string, unknown>;
+    expect(err['kind']).toBe('runtime');
+    expect(err['code']).toBe(1);
   });
 });

@@ -4,7 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import readline from 'node:readline';
 import chalk from 'chalk';
-import { isJsonMode, printJson } from '../utils/output.js';
+import { isJsonMode, printJson, exitWithError } from '../utils/output.js';
 import { isDryRun, getConfigPath } from '../utils/flags.js';
 import { selectCredentialStore } from '../credentials/keychain.js';
 import { listProfiles } from '../config.js';
@@ -110,7 +110,11 @@ export function registerResetCommand(program: Command): void {
         console.error('');
         const ok = await confirm('Continue?');
         if (!ok) {
-          console.error('Aborted.');
+          if (isJsonMode()) {
+            exitWithError({ code: 1, kind: 'runtime', message: 'Aborted (non-interactive terminal — pass --yes to skip confirmation).' });
+          }
+          console.error('Aborted (non-interactive terminal — pass --yes to skip confirmation).');
+          process.exit(1);
           return;
         }
       }
@@ -161,8 +165,16 @@ export function registerResetCommand(program: Command): void {
       }
 
       if (isJsonMode()) {
+        const failed = results.filter(r => r.status === 'failed').length;
+        if (failed > 0) {
+          exitWithError({
+            code: 1,
+            kind: 'runtime',
+            message: `Reset completed with ${failed} error(s). Some items may need manual cleanup.`,
+            extra: { results },
+          });
+        }
         printJson({ reset: true, results });
-        if (results.some(r => r.status === 'failed')) process.exit(1);
         return;
       }
 
