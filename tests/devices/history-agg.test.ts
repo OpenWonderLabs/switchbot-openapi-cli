@@ -334,4 +334,23 @@ describe('aggregateDeviceHistory — single bucket', () => {
     expect(res.buckets[0].metrics.temperature.min).toBe(21);
     expect(res.buckets[0].metrics.temperature.max).toBe(21);
   });
+
+  it('produces one bucket with all records when --from/--to are omitted and no --bucket', async () => {
+    const file = path.join(historyDir, 'DEV1.jsonl');
+    writeJsonl(file, [
+      { t: '2026-04-19T10:00:00.000Z', topic: 'status', payload: { temperature: 20 } },
+      { t: '2026-04-20T10:00:00.000Z', topic: 'status', payload: { temperature: 22 } },
+      { t: '2026-04-21T10:00:00.000Z', topic: 'status', payload: { temperature: 24 } },
+    ]);
+
+    const res = await aggregateDeviceHistory('DEV1', {
+      metrics: ['temperature'],
+      aggs: ['count', 'min', 'max'],
+    });
+
+    expect(res.buckets).toHaveLength(1);
+    expect(res.buckets[0].metrics.temperature.count).toBe(3);
+    expect(res.buckets[0].metrics.temperature.min).toBe(20);
+    expect(res.buckets[0].metrics.temperature.max).toBe(24);
+  });
 });
