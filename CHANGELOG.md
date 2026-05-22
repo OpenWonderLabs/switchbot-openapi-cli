@@ -10,12 +10,14 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+
 - `auth login` — browser-based OAuth 2.0 sign-in via `sp.oauth.switchbot.net`; stores credentials in OS keychain after verification
 - `auth keychain set/get/delete/migrate/describe` — manage OS keychain credential backend
 - `SWITCHBOT_OAUTH_CLIENT_SECRET`, `SWITCHBOT_TOKEN_AES_KEY`, `SWITCHBOT_TOKEN_AES_IV` env vars to override baked-in OAuth/AES constants
 - **`devices expand` supports lighting commands**: `setBrightness` (`--brightness`), `setColor` (`--color`), and `setColorTemperature` (`--color-temp`) flags now expand for Color Bulb, Strip Light, Ceiling Light, and similar devices.
 
 ### Fixed
+
 - `reset`: aborting at the confirmation prompt no longer continues the reset action in test environments
 - `reset`: credential deletion failures are now reported as `failed` instead of `not found`
 - **Daemon start failed in bundled builds** (BUG-001): CLI entry path resolution navigated above the dist/ directory when running from the single-file bundle. Now correctly detects the bundled scenario.
