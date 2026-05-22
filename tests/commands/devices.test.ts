@@ -1100,6 +1100,26 @@ describe('devices command', () => {
         const data: Record<string, unknown> = out.data ?? out;
         expect(data.fetchedAt).toBe(storedTime);
       });
+
+      it('falls back to live API when cached entry is older than the TTL', async () => {
+        // Seed an entry that is 10 minutes old with a 5-minute TTL → stale
+        const staleDate = new Date(Date.now() - 10 * 60 * 1000);
+        setCachedStatus('STALE-DEV', { power: 'on' }, staleDate);
+
+        apiMock.__instance.get.mockResolvedValue({
+          data: { statusCode: 100, body: { power: 'off', battery: 70 } },
+        });
+
+        const res = await runCli(registerDevicesCommand, [
+          '--cache', '5m',
+          'devices', 'status', 'STALE-DEV', '--json',
+        ]);
+
+        expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/devices/STALE-DEV/status');
+        const out = JSON.parse(res.stdout.join('\n'));
+        const data: Record<string, unknown> = out.data ?? out;
+        expect(data.power).toBe('off');
+      });
     });
   });
 

@@ -12,6 +12,7 @@ import {
   isListCacheFresh,
   loadStatusCache,
   getCachedStatus,
+  getCachedStatusEntry,
   setCachedStatus,
   clearStatusCache,
   describeCache,
@@ -293,6 +294,31 @@ describe('status cache', () => {
     expect(loadStatusCache().entries.BOT1?.body).toEqual({ power: 'on' });
     resetStatusCache();
     expect(loadStatusCache().entries.BOT1?.body).toEqual({ power: 'off' });
+  });
+});
+
+describe('getCachedStatusEntry', () => {
+  it('returns null when ttl is 0 (cache disabled)', () => {
+    setCachedStatus('BOT1', { power: 'on' });
+    expect(getCachedStatusEntry('BOT1', 0)).toBeNull();
+  });
+
+  it('returns { body, fetchedAt } when entry is fresh', () => {
+    const storedDate = new Date();
+    setCachedStatus('BOT1', { power: 'on', battery: 82 }, storedDate);
+    const entry = getCachedStatusEntry('BOT1', 60_000);
+    expect(entry).not.toBeNull();
+    expect(entry!.body).toEqual({ power: 'on', battery: 82 });
+    expect(entry!.fetchedAt).toBe(storedDate.toISOString());
+  });
+
+  it('returns null when entry is older than ttl', () => {
+    setCachedStatus('BOT1', { power: 'on' }, new Date(Date.now() - 10 * 60_000));
+    expect(getCachedStatusEntry('BOT1', 60_000)).toBeNull();
+  });
+
+  it('returns null for unknown deviceId', () => {
+    expect(getCachedStatusEntry('UNKNOWN', 60_000)).toBeNull();
   });
 });
 
