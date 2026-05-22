@@ -1,0 +1,23 @@
+src/auth/token-exchange.ts
+  s_4ecda003eaab8a::t_fd139ae5cc05f9 22
+package.json
+  s_4ecda003eaab8a::t_a1f7cf5d076856 3
+CHANGELOG.md
+  s_4ecda003eaab8a::t_28bdee7c3d4a79 10-15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "96e2291f09a07b60ca3dfbaa5091feeaf80854bd",
+  "prompts": {},
+  "sessions": {
+    "s_4ecda003eaab8a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b0316407-3d37-4a60-90c6-79e8ca7b00b1",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
