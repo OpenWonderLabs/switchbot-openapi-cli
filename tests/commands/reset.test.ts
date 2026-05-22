@@ -147,4 +147,19 @@ describe('reset --config <path>', () => {
       path.normalize(path.join(os.homedir(), '.switchbot', 'devices.json')),
     );
   });
+
+  it('does not call the global credential store when --config is set', async () => {
+    const altConfigDir = path.join(os.tmpdir(), 'sb-alt-reset-creds-test');
+    const altConfigFile = path.join(altConfigDir, 'config.json');
+
+    // No --keep-credentials — without the fix, store.delete() would be called here
+    await runCli(registerResetCommand, [
+      '--config', altConfigFile,
+      'reset', '--yes',
+    ]);
+
+    // The global credential store must never be touched when --config is active;
+    // the override file is removed directly via unlinkSync instead.
+    expect(selectMock).not.toHaveBeenCalled();
+  });
 });

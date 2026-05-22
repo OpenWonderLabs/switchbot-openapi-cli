@@ -272,6 +272,29 @@ describe('aggregateDeviceHistory — single bucket', () => {
     expect(res.buckets[0].metrics.temperature.avg).toBe(22);
   });
 
+  it('when only --to is given, single bucket t does not exceed the upper bound', async () => {
+    const toMs = new Date('2026-04-19T23:59:59.000Z').getTime();
+    const file = path.join(historyDir, 'DEV_TO_ONLY.jsonl');
+    writeJsonl(file, [
+      { t: '2026-04-19T10:00:00.000Z', topic: 'status', payload: { temperature: 20 } },
+      { t: '2026-04-19T14:00:00.000Z', topic: 'status', payload: { temperature: 22 } },
+    ]);
+
+    // Pin Date.now() to 1 h after toMs — before the fix this would produce
+    // stableKey = (now + toMs) / 2 which lands after toMs.
+    vi.spyOn(Date, 'now').mockReturnValue(toMs + 3_600_000);
+
+    const res = await aggregateDeviceHistory('DEV_TO_ONLY', {
+      to: '2026-04-19T23:59:59.000Z', // fromMs = -Infinity
+      metrics: ['temperature'],
+      aggs: ['avg'],
+    });
+
+    expect(res.buckets).toHaveLength(1);
+    const bucketT = new Date(res.buckets[0].t).getTime();
+    expect(bucketT).toBeLessThanOrEqual(toMs);
+  });
+
   it('skips rotated files whose mtime is older than --since window', async () => {
     const id = 'DEV4';
     const rotatedFile = path.join(historyDir, `${id}.jsonl.1`);
