@@ -11,7 +11,9 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- `auth login`: trim decrypted token/secret to remove trailing whitespace that caused "Invalid character in header content" errors
+- **`auth login`** — credentials now decoded as hex instead of UTF-8 after AES-128-CBC decryption. The Wonder API returns raw binary bytes; decoding as UTF-8 produced non-ASCII characters that caused "Invalid character in header content" HTTP errors on subsequent API calls.
+- **`auth login`** — OAuth callback server now calls `closeAllConnections()` in every termination path (success, OAuth error, timeout). Previously, browser keep-alive TCP sockets prevented the CLI process from exiting after login completed.
+- **MCP `list_devices`** — `hubDeviceId` schema relaxed to `nullable().optional()` in both `deviceList` and `infraredRemoteList` output schemas. Devices without a hub (standalone Wi-Fi devices, IR remotes) return `null` or omit the field; the strict `z.string()` schema caused tool call validation failures for these devices.
 
 ## [3.7.0]
 
