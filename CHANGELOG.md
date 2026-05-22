@@ -7,6 +7,12 @@ All notable changes to `@switchbot/openapi-cli` are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.7.1]
+
+### Fixed
+
+- `auth login`: trim decrypted token/secret to remove trailing whitespace that caused "Invalid character in header content" errors
+
 ## [3.7.0]
 
 ### Added
