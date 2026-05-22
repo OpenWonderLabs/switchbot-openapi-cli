@@ -405,32 +405,25 @@ describe('auth keychain migrate', () => {
 // ── auth login ────────────────────────────────────────────────────────────────
 
 const browserLoginMock = vi.fn();
-const axiosGetMock = vi.fn();
+const verifyCredsMock = vi.fn();
 
 vi.mock('../../src/auth/browser-login.js', () => ({
   browserLogin: (...args: unknown[]) => browserLoginMock(...args),
 }));
 
-vi.mock('axios', async () => {
-  const actual = await vi.importActual<typeof import('axios')>('axios');
-  return {
-    ...actual,
-    default: {
-      ...(actual.default as object),
-      get: (...args: unknown[]) => axiosGetMock(...args),
-    },
-  };
-});
+vi.mock('../../src/auth/verify.js', () => ({
+  verifyCredentials: (...args: unknown[]) => verifyCredsMock(...args),
+}));
 
 describe('auth login', () => {
   beforeEach(() => {
     browserLoginMock.mockReset();
-    axiosGetMock.mockReset();
+    verifyCredsMock.mockReset();
   });
 
   it('saves credentials and exits 0 on success', async () => {
     browserLoginMock.mockResolvedValue({ token: 'tok-abc123', secret: 'sec-xyz987' });
-    axiosGetMock.mockResolvedValue({ data: { statusCode: 100 } });
+    verifyCredsMock.mockResolvedValue({ ok: true });
     const store = makeStore({ writable: true });
     selectMock.mockResolvedValue(store);
 
@@ -447,14 +440,14 @@ describe('auth login', () => {
 
   it('exits 1 when credential verification fails (non-100 statusCode)', async () => {
     browserLoginMock.mockResolvedValue({ token: 'bad-tok', secret: 'bad-sec' });
-    axiosGetMock.mockResolvedValue({ data: { statusCode: 401 } });
+    verifyCredsMock.mockResolvedValue({ ok: false, reason: 'API returned statusCode 401' });
     const res = await runCli(['auth', 'login', '--no-open']);
     expect(res.exitCode).toBe(1);
   });
 
   it('emits JSON on success under --json', async () => {
     browserLoginMock.mockResolvedValue({ token: 'tok-abc123', secret: 'sec-xyz987' });
-    axiosGetMock.mockResolvedValue({ data: { statusCode: 100 } });
+    verifyCredsMock.mockResolvedValue({ ok: true });
     const store = makeStore({ writable: true });
     selectMock.mockResolvedValue(store);
 
@@ -472,7 +465,7 @@ describe('auth login', () => {
 
     try {
       browserLoginMock.mockResolvedValue({ token: 'tok-portable', secret: 'sec-portable' });
-      axiosGetMock.mockResolvedValue({ data: { statusCode: 100 } });
+      verifyCredsMock.mockResolvedValue({ ok: true });
       // selectMock is already reset in beforeEach — it must not be called at all
 
       const res = await runCli([

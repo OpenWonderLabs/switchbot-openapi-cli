@@ -20,7 +20,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import readline from 'node:readline';
-import axios from 'axios';
 import { exitWithError, isJsonMode, printJson } from '../utils/output.js';
 import { stringArg } from '../utils/arg-parsers.js';
 import { getActiveProfile } from '../lib/request-context.js';
@@ -31,31 +30,10 @@ import {
   selectCredentialStore,
 } from '../credentials/keychain.js';
 import { browserLogin } from '../auth/browser-login.js';
-import { buildAuthHeaders } from '../auth.js';
+import { verifyCredentials } from '../auth/verify.js';
 
 function activeProfile(): string {
   return getActiveProfile() ?? 'default';
-}
-
-type VerifyResult = { ok: true } | { ok: false; reason: string };
-
-async function verifyCredentials(creds: CredentialBundle): Promise<VerifyResult> {
-  try {
-    const resp = await axios.get<{ statusCode: number }>(
-      'https://api.switch-bot.com/v1.1/devices',
-      { headers: buildAuthHeaders(creds.token, creds.secret), timeout: 10_000 },
-    );
-    if (resp.data?.statusCode === 100) return { ok: true };
-    return { ok: false, reason: `API returned statusCode ${resp.data?.statusCode}` };
-  } catch (err) {
-    if (axios.isAxiosError(err)) {
-      if (err.response?.status === 401) {
-        return { ok: false, reason: 'API rejected the credentials (401). The decrypted token or secret may be wrong.' };
-      }
-      return { ok: false, reason: `Network error: ${err.message}` };
-    }
-    return { ok: false, reason: String(err) };
-  }
 }
 
 function maskValue(value: string): string {
