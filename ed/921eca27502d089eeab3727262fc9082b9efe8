@@ -1,0 +1,29 @@
+package.json
+  s_4ecda003eaab8a::t_90b02879b26c58 3
+README.md
+  s_4ecda003eaab8a::t_e97992e4939073 329
+  s_4ecda003eaab8a::t_d3a190b46b403b 762-771
+  s_4ecda003eaab8a::t_abb7119310f6d2 52
+  s_4ecda003eaab8a::t_987e49a76b19f8 214
+  s_4ecda003eaab8a::t_7cf781ce8e08b7 368-383
+  s_4ecda003eaab8a::t_8368a5955c679e 178-192
+  s_4ecda003eaab8a::t_700ab1613c8223 22
+CHANGELOG.md
+  s_4ecda003eaab8a::t_fe1bfdf6c7998f 10,14-17,21-24,28-31
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "ed921eca27502d089eeab3727262fc9082b9efe8",
+  "prompts": {},
+  "sessions": {
+    "s_4ecda003eaab8a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b0316407-3d37-4a60-90c6-79e8ca7b00b1",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
