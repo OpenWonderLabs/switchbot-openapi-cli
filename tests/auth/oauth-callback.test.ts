@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import http from 'node:http';
+import net from 'node:net';
 import { bindCallbackServer } from '../../src/auth/oauth-callback.js';
 
 async function get(port: number, path: string) {
@@ -100,5 +102,69 @@ describe('bindCallbackServer — double-close guard', () => {
     const handle = await bindCallbackServer('race', 50, RAND);
     const fetchP = get(handle.port, '/callback?code=c&state=race').catch(() => null);
     await expect(Promise.all([handle.wait().catch(e => e), fetchP])).resolves.toBeDefined();
+  });
+});
+
+// ── keep-alive connection teardown ────────────────────────────────────────────
+//
+// The real problem closeAllConnections() solves: a browser keeps its TCP
+// connection alive after receiving the response, preventing the Node.js process
+// from exiting (the event loop stays open). These tests open a raw TCP socket
+// to simulate that scenario and verify the connection is destroyed promptly.
+
+function openPersistentSocket(port: number): Promise<net.Socket> {
+  return new Promise((resolve, reject) => {
+    const socket = net.createConnection(port, '127.0.0.1');
+    socket.once('connect', () => resolve(socket));
+    socket.once('error', reject);
+  });
+}
+
+function socketClosedWithin(socket: net.Socket, ms: number): Promise<boolean> {
+  return Promise.race([
+    new Promise<boolean>((r) => socket.once('close', () => r(true))),
+    new Promise<boolean>((r) => setTimeout(() => r(false), ms)),
+  ]);
+}
+
+describe('bindCallbackServer — keep-alive teardown on success', () => {
+  it('closes lingering TCP connections after a successful callback', async () => {
+    const handle = await bindCallbackServer('ka-ok', 5_000, RAND);
+    const socket = await openPersistentSocket(handle.port);
+
+    await Promise.all([
+      handle.wait(),
+      get(handle.port, `/callback?code=c&state=ka-ok`),
+    ]);
+
+    expect(await socketClosedWithin(socket, 300)).toBe(true);
+    socket.destroy();
+  });
+});
+
+describe('bindCallbackServer — keep-alive teardown on OAuth error', () => {
+  it('closes lingering TCP connections when the provider returns an error', async () => {
+    const handle = await bindCallbackServer('ka-err', 5_000, RAND);
+    const socket = await openPersistentSocket(handle.port);
+
+    await Promise.allSettled([
+      handle.wait(),
+      get(handle.port, `/callback?error=access_denied&state=ka-err`),
+    ]);
+
+    expect(await socketClosedWithin(socket, 300)).toBe(true);
+    socket.destroy();
+  });
+});
+
+describe('bindCallbackServer — keep-alive teardown on timeout', () => {
+  it('closes lingering TCP connections when the login times out', async () => {
+    const handle = await bindCallbackServer('ka-timeout', 50, RAND);
+    const socket = await openPersistentSocket(handle.port);
+
+    await expect(handle.wait()).rejects.toThrow('Login timed out');
+
+    expect(await socketClosedWithin(socket, 300)).toBe(true);
+    socket.destroy();
   });
 });
