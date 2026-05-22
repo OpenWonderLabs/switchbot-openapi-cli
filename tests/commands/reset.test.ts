@@ -162,4 +162,37 @@ describe('reset --config <path>', () => {
     // the override file is removed directly via unlinkSync instead.
     expect(selectMock).not.toHaveBeenCalled();
   });
+
+  it('does not touch a sibling cache/ directory in --config mode', async () => {
+    // In --config mode the CLI stores cache files as siblings (devices.json,
+    // status.json) — it never creates a `cache/` sub-directory next to the
+    // override file. Reset must not blindly rm -rf <configDir>/cache because
+    // that path can belong to an unrelated project.
+    const altConfigDir = path.join(os.tmpdir(), 'sb-alt-reset-cachedir-test');
+    const altConfigFile = path.join(altConfigDir, 'portable.json');
+    const siblingCacheDir = path.join(altConfigDir, 'cache');
+
+    // Pretend a cache/ directory exists next to the override (the user's
+    // unrelated project files). If reset were to call rmSync on this path,
+    // it would silently delete real data.
+    vi.mocked(nodeFsMock.existsSync).mockImplementation(
+      (p) => path.normalize(String(p)) === path.normalize(siblingCacheDir),
+    );
+
+    await runCli(registerResetCommand, [
+      '--config', altConfigFile,
+      'reset', '--yes', '--keep-credentials',
+    ]);
+
+    const rmSpy = vi.mocked(nodeFsMock.rmSync);
+    const rmTargets = rmSpy.mock.calls.map((c) => path.normalize(String(c[0])));
+    expect(rmTargets).not.toContain(path.normalize(siblingCacheDir));
+
+    // existsSync should never even probe the sibling cache path — the entry
+    // must be omitted from dataItems entirely in --config mode.
+    const existsTargets = vi
+      .mocked(nodeFsMock.existsSync)
+      .mock.calls.map((c) => path.normalize(String(c[0])));
+    expect(existsTargets).not.toContain(path.normalize(siblingCacheDir));
+  });
 });

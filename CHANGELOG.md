@@ -20,6 +20,9 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - `reset`: aborting at the confirmation prompt no longer continues the reset action in test environments
 - `reset`: credential deletion failures are now reported as `failed` instead of `not found`
+- `reset --config <path>`: no longer recursively deletes a sibling `cache/` directory next to the override file. The CLI never creates that path in `--config` mode, so removing it could wipe an unrelated project's data.
+- `devices list --json --fields`: alias inputs (e.g. `id,name`) now resolve to canonical output keys (`deviceId`, `deviceName`), matching `--format json`. The JSON schema is now stable regardless of which input form callers used.
+- `config`: credential-missing hint now preserves `--config <path>` in both the `auth login` and `config set-token` recovery commands. Without this, the suggested `auth login` would write to the default backend, which `loadConfig` ignores while `--config` is active.
 - **Daemon start failed in bundled builds** (BUG-001): CLI entry path resolution navigated above the dist/ directory when running from the single-file bundle. Now correctly detects the bundled scenario.
 - **`rules run` exited 0 when `automation.enabled` was false** (BUG-002): daemon interpreted this as success. Now exits 1 with a clear message.
 - **Unknown subcommands exited 0** (BUG-005/BUG-008): `cache list`, `history list`, and other invalid subcommand inputs triggered Commander help display and exited 0. Now exits 2 (usage error).

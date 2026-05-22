@@ -117,6 +117,34 @@ describe('config', () => {
       }
     });
 
+    it('includes --config <path> in auth login + set-token hints when --config is active', () => {
+      // When the user reached the credential-missing path through --config, the
+      // recovery commands must round-trip the override; bare `auth login` writes
+      // to the default keychain, which loadConfig() ignores while --config is
+      // present, so the suggestion would not actually unblock the workflow.
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {
+        throw new Error('__exit');
+      });
+      fsMock.existsSync.mockReturnValue(false);
+
+      const overridePath = '/tmp/portable.json';
+      const origArgv = process.argv;
+      process.argv = ['node', 'test', '--config', overridePath];
+      try {
+        expect(() => loadConfig()).toThrow('__exit');
+        const msg = errSpy.mock.calls[0][0] as string;
+        expect(msg).toContain(`switchbot --config ${overridePath} auth login`);
+        expect(msg).toContain(`switchbot --config ${overridePath} config set-token`);
+        // Without the fix, the bare command would be suggested — guard that.
+        expect(msg).not.toMatch(/^\s*1\.\s+switchbot auth login\b/m);
+      } finally {
+        process.argv = origArgv;
+        exitSpy.mockRestore();
+        errSpy.mockRestore();
+      }
+    });
+
     it('exits(1) when config file has invalid JSON', () => {
       const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {

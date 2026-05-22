@@ -39,10 +39,9 @@ function removeItem(itemPath: string, type: 'file' | 'dir'): { status: 'removed'
   }
 }
 
-function makeDataItems(dataDir: string): Array<{ key: string; label: string; path: string; type: 'file' | 'dir' }> {
+function makeDataItems(dataDir: string, configOverride: boolean): Array<{ key: string; label: string; path: string; type: 'file' | 'dir' }> {
   // quota / device-history / audit are always global (their writers hardcode ~/.switchbot regardless of --config)
-  return [
-    { key: 'cache',          label: 'Device cache',       path: path.join(dataDir, 'cache'),            type: 'dir'  },
+  const items: Array<{ key: string; label: string; path: string; type: 'file' | 'dir' }> = [
     { key: 'devices',        label: 'Devices list cache', path: path.join(dataDir, 'devices.json'),     type: 'file' },
     { key: 'quota',          label: 'Quota counter',      path: path.join(BASE, 'quota.json'),          type: 'file' },
     { key: 'device-history', label: 'Device history',     path: path.join(BASE, 'device-history'),      type: 'dir'  },
@@ -50,6 +49,14 @@ function makeDataItems(dataDir: string): Array<{ key: string; label: string; pat
     { key: 'status',         label: 'Status cache',       path: path.join(dataDir, 'status.json'),      type: 'file' },
     { key: 'audit',          label: 'Audit log',          path: path.join(BASE, 'audit.log'),           type: 'file' },
   ];
+  // The `cache/` sub-directory is only ever created under ~/.switchbot (per
+  // src/devices/cache.ts:scopedCacheDir). In --config mode the override path
+  // is the data dir directly, so a sibling `cache/` would belong to the user's
+  // unrelated project — never touch it.
+  if (!configOverride) {
+    items.unshift({ key: 'cache', label: 'Device cache', path: path.join(dataDir, 'cache'), type: 'dir' });
+  }
+  return items;
 }
 
 function statusIcon(status: ResetResult['status']): string {
@@ -72,7 +79,7 @@ export function registerResetCommand(program: Command): void {
       const dataDir = configOverride
         ? path.dirname(path.resolve(configOverride))
         : BASE;
-      const dataItems = makeDataItems(dataDir);
+      const dataItems = makeDataItems(dataDir, Boolean(configOverride));
 
       if (isDryRun()) {
         const preview: string[] = [];

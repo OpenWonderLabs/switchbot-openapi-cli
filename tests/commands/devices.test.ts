@@ -391,6 +391,27 @@ describe('devices command', () => {
       expect(deviceList[0]).not.toHaveProperty('hubDeviceId');
     });
 
+    it('--json --fields id,name resolves alias inputs to canonical output keys', async () => {
+      // Stable schema: response keys must be canonical regardless of whether
+      // the user passed an alias (id/name) or the canonical name (deviceId/
+      // deviceName). Tools that consume --json should not have to know which
+      // form the caller used.
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const result = await runCli(
+        registerDevicesCommand,
+        ['--json', '--fields', 'id,name', 'devices', 'list'],
+      );
+      expect(result.exitCode).toBeNull();
+      const parsed = JSON.parse(result.stdout.join('\n')) as Record<string, unknown>;
+      const data = (parsed.data ?? parsed) as Record<string, unknown>;
+      const deviceList = data.deviceList as Array<Record<string, unknown>>;
+      expect(deviceList[0]).toHaveProperty('deviceId');
+      expect(deviceList[0]).toHaveProperty('deviceName');
+      // Aliases must NOT leak into the output schema.
+      expect(deviceList[0]).not.toHaveProperty('id');
+      expect(deviceList[0]).not.toHaveProperty('name');
+    });
+
     it('prints "No devices found" when both lists are empty', async () => {
       apiMock.__instance.get.mockResolvedValue({
         data: { body: { deviceList: [], infraredRemoteList: [] } },

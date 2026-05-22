@@ -248,7 +248,15 @@ Cache note:
           };
           const project = jsonFields
             ? (norm: Record<string, unknown>) =>
-                Object.fromEntries(jsonFields.map(k => [k, norm[DEVICE_FIELD_ALIAS[k] ?? k] ?? null]))
+                Object.fromEntries(jsonFields.map(k => {
+                  // Always emit the canonical key. Without this, --json --fields id,name
+                  // would echo the alias keys (id/name) while --format json --fields id,name
+                  // still emits canonical (deviceId/deviceName) — making the output schema
+                  // depend on which form the caller used. Canonicalize here so consumers
+                  // see a stable shape regardless of input alias.
+                  const canonical = DEVICE_FIELD_ALIAS[k] ?? k;
+                  return [canonical, norm[canonical] ?? null];
+                }))
             : (norm: Record<string, unknown>) => norm;
 
           if (listClauses) {
