@@ -4,6 +4,7 @@
  * and must NOT call the API mock.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { parseErrorText } from '../helpers/mcp-test-utils.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -158,7 +159,7 @@ describe('dryRun support on mutating tools', () => {
     });
 
     expect(res.isError).toBe(true);
-    const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    const parsed = parseErrorText((res.content as Array<{ text: string }>)[0].text);
     expect(parsed.error.context?.validationKind).toBe('unknown-command');
     expect(apiMock.__instance.post).not.toHaveBeenCalled();
   });
@@ -204,7 +205,7 @@ describe('dryRun support on mutating tools', () => {
     });
 
     expect(res.isError).toBe(true);
-    const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    const parsed = parseErrorText((res.content as Array<{ text: string }>)[0].text);
     expect(parsed.error.context?.validationKind).toBe('read-only-device');
     expect(apiMock.__instance.post).not.toHaveBeenCalled();
   });
@@ -219,7 +220,7 @@ describe('dryRun support on mutating tools', () => {
     });
 
     expect(res.isError).toBe(true);
-    const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    const parsed = parseErrorText((res.content as Array<{ text: string }>)[0].text);
     expect(parsed.error.context?.validationKind).toBe('unknown-command');
     expect(parsed.error.hint).toContain('turnOn');
     expect(parsed.error.hint).toContain('press');
@@ -272,7 +273,7 @@ describe('dryRun support on mutating tools', () => {
     });
 
     expect(res.isError).toBe(true);
-    const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    const parsed = parseErrorText((res.content as Array<{ text: string }>)[0].text);
     expect(parsed.error.subKind).toBe('scene-not-found');
     expect(parsed.error.message).toContain('FAKE');
     expect(apiMock.__instance.post).not.toHaveBeenCalled();

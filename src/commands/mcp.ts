@@ -110,9 +110,12 @@ function mcpError(
   if (options?.errorClass !== undefined) obj.errorClass = options.errorClass;
   if (options?.transient !== undefined) obj.transient = options.transient;
   if (options?.retryAfterMs !== undefined) obj.retryAfterMs = options.retryAfterMs;
+  const summary = `${kind} error (code ${code}): ${message}`;
+  const hintLine = options?.hint ? `\n${options.hint}` : '';
+  const textBody = `${summary}${hintLine}\n--- structured ---\n${JSON.stringify({ error: obj }, null, 2)}`;
   return {
     isError: true as const,
-    content: [{ type: 'text' as const, text: JSON.stringify({ error: obj }, null, 2) }],
+    content: [{ type: 'text' as const, text: textBody }],
     structuredContent: { error: obj },
   };
 }
@@ -300,17 +303,17 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
           deviceType: z.string().optional(),
           enableCloudService: z.boolean(),
           hubDeviceId: z.string(),
-          roomID: z.string().optional(),
+          roomID: z.string().nullable().optional(),
           roomName: z.string().nullable().optional(),
           familyName: z.string().optional(),
-          controlType: z.string().optional(),
+          controlType: z.string().nullable().optional(),
         }).passthrough()).describe('Physical SwitchBot devices'),
         infraredRemoteList: z.array(z.object({
           deviceId: z.string(),
           deviceName: z.string(),
           remoteType: z.string(),
           hubDeviceId: z.string(),
-          controlType: z.string().optional(),
+          controlType: z.string().nullable().optional(),
         }).passthrough()).describe('IR remote devices'),
       },
     },
@@ -1616,7 +1619,29 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
       outputSchema: {
         ran: z.boolean(),
         plan: z.unknown(),
-        results: z.array(z.unknown()),
+        results: z.array(z.discriminatedUnion('type', [
+          z.object({
+            step: z.number(),
+            type: z.literal('command'),
+            deviceId: z.string(),
+            command: z.string(),
+            status: z.enum(['ok', 'error', 'skipped']),
+            error: z.string().optional(),
+          }).passthrough(),
+          z.object({
+            step: z.number(),
+            type: z.literal('scene'),
+            sceneId: z.string(),
+            status: z.enum(['ok', 'error']),
+            error: z.string().optional(),
+          }).passthrough(),
+          z.object({
+            step: z.number(),
+            type: z.literal('wait'),
+            ms: z.number(),
+            status: z.literal('ok'),
+          }).passthrough(),
+        ])),
         summary: z.object({
           total: z.number().int(),
           ok: z.number().int(),

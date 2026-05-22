@@ -82,10 +82,25 @@ export function loadConfig(): SwitchBotConfig {
   const file = configFilePath();
   if (!fs.existsSync(file)) {
     const profile = getActiveProfile();
-    const hint = profile
-      ? `No credentials configured for profile "${profile}". Run: switchbot --profile ${profile} config set-token <token> <secret>`
-      : 'No credentials configured. Run: switchbot config set-token <token> <secret>';
-    const msg = `${hint}\nOr set SWITCHBOT_TOKEN and SWITCHBOT_SECRET environment variables.`;
+    const override = getConfigPath();
+    // --config takes precedence over --profile (mirrors configFilePath ordering).
+    // The recovery commands must round-trip the active scope; otherwise the
+    // suggested `auth login` would write to the default keychain, which
+    // loadConfig() ignores while --config is set.
+    const prefix = override
+      ? `switchbot --config ${override}`
+      : profile
+      ? `switchbot --profile ${profile}`
+      : 'switchbot';
+    const setToken = `${prefix} config set-token <token> <secret>`;
+    const authLogin = `${prefix} auth login`;
+    const profileMsg = override
+      ? ` for config "${override}"`
+      : profile
+      ? ` for profile "${profile}"`
+      : '';
+    const hint = `No credentials configured${profileMsg}.`;
+    const msg = `${hint} Choose one:\n  1. ${authLogin}   (browser login)\n  2. ${setToken}   (manual)\n  3. Set SWITCHBOT_TOKEN and SWITCHBOT_SECRET environment variables`;
     if (isJsonMode()) {
       emitJsonError({ code: 1, kind: 'runtime', message: hint });
     } else {

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { parseErrorText } from '../helpers/mcp-test-utils.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -214,7 +215,7 @@ describe('mcp server', () => {
 
     expect(res.isError).toBe(true);
     const text = (res.content as Array<{ type: string; text: string }>)[0].text;
-    const parsed = JSON.parse(text);
+    const parsed = parseErrorText(text);
     expect(parsed.error.kind).toBe('guard');
     expect(parsed.error.code).toBe(3);
     expect(parsed.error.context.command).toBe('unlock');
@@ -236,7 +237,7 @@ describe('mcp server', () => {
     });
 
     expect(res.isError).toBe(true);
-    const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    const parsed = parseErrorText((res.content as Array<{ text: string }>)[0].text);
     expect(parsed.error.kind).toBe('guard');
     expect(parsed.error.hint).toMatch(/plan save|plan execute/);
     expect(apiMock.__instance.post).not.toHaveBeenCalled();
@@ -269,7 +270,7 @@ describe('mcp server', () => {
     });
 
     expect(res.isError).toBe(true);
-    const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    const parsed = parseErrorText((res.content as Array<{ text: string }>)[0].text);
     expect(parsed.error.kind).toBe('usage');
     expect(parsed.error.code).toBe(2);
     expect(parsed.error.context.validationKind).toBe('unknown-command');
@@ -286,7 +287,7 @@ describe('mcp server', () => {
     });
 
     expect(res.isError).toBe(true);
-    const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    const parsed = parseErrorText((res.content as Array<{ text: string }>)[0].text);
     expect(parsed.error.kind).toBe('usage');
     expect(parsed.error.context.validationKind).toBe('read-only-device');
     expect(apiMock.__instance.post).not.toHaveBeenCalled();
@@ -720,9 +721,10 @@ describe('mcp server', () => {
     expect(sc?.error?.subKind).toBe('device-offline');
     expect(sc?.error?.transient).toBe(false);
     expect(sc?.error?.hint).toMatch(/Hub/);
-    // content[0].text must still be a JSON string (backwards compat)
+    // content[0].text must start with human-readable summary; structured section must be valid JSON
     const text = (res.content as Array<{ type: string; text: string }>)[0].text;
-    expect(() => JSON.parse(text)).not.toThrow();
+    expect(text).toMatch(/^(api|runtime|usage|guard) error \(code \d+\): /);
+    expect(() => parseErrorText(text)).not.toThrow();
   });
 
   it('describe_device preserves structured error metadata on ApiError (code 401 auth-failed)', async () => {
@@ -764,6 +766,29 @@ describe('mcp server', () => {
     expect(sc?.error?.subKind).toBe('device-internal-error');
   });
 
+  describe('mcpError — content text format', () => {
+    it('content[0].text starts with human-readable summary line', async () => {
+      const { client } = await pair();
+      // Trigger an API error by calling describe_device with a device ID that returns 404
+      apiMock.__instance.get.mockRejectedValueOnce(
+        new ApiError('device not found', 190)
+      );
+
+      const result = await client.callTool({
+        name: 'describe_device',
+        arguments: { deviceId: 'NONEXISTENT' },
+      });
+
+      expect(result.isError).toBe(true);
+      const textContent = (result.content as Array<{ type: string; text: string }>).find(
+        (c) => c.type === 'text'
+      );
+      expect(textContent).toBeDefined();
+      // Must start with "api error (code" or similar pattern
+      expect(textContent!.text).toMatch(/^(api|runtime|usage|guard) error \(code \d+\): /);
+    });
+  });
+
   describe('plan/audit tools', () => {
     it('plan_run skips destructive steps when yes is not set', async () => {
       cacheMock.map.set('LOCK1', { type: 'Smart Lock', name: 'Front Door', category: 'physical' });
@@ -803,7 +828,7 @@ describe('mcp server', () => {
       });
 
       expect(res.isError).toBe(true);
-      const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+      const parsed = parseErrorText((res.content as Array<{ text: string }>)[0].text);
       expect(parsed.error.kind).toBe('guard');
       expect(parsed.error.hint).toMatch(/plan save|plan execute/);
     });
@@ -1260,6 +1285,68 @@ describe('mcp server', () => {
       expect(res.isError).toBeFalsy();
       const sc = res.structuredContent as { ok: boolean; riskProfile: RiskProfile };
       expect(sc.riskProfile.idempotencyHint).toBe('non-idempotent');
+    });
+  });
+
+  describe('list_devices — roomID nullable', () => {
+    it('succeeds when a device has roomID: null', async () => {
+      const { client } = await pair();
+      apiMock.__instance.get.mockResolvedValueOnce({
+        data: {
+          statusCode: 100,
+          body: {
+            deviceList: [
+              {
+                deviceId: 'EEC6089351B7',
+                deviceName: 'Outdoor Meter',
+                deviceType: 'MeterOutdoor',
+                enableCloudService: true,
+                hubDeviceId: 'AABBCCDDEE01',
+                roomID: null,       // ← THIS must not break validation
+                roomName: null,
+              },
+            ],
+            infraredRemoteList: [],
+          },
+        },
+      });
+
+      const result = await client.callTool({ name: 'list_devices', arguments: {} });
+      expect(result.isError).toBeFalsy();
+      const sc = (result as { structuredContent: { deviceList: unknown[] } }).structuredContent;
+      expect(sc.deviceList).toHaveLength(1);
+    });
+  });
+
+  describe('plan_run — outputSchema structuredContent shape', () => {
+    it('returns typed results array with step/type/status fields', async () => {
+      const { client } = await pair();
+      // Mock the device command API call
+      apiMock.__instance.post.mockResolvedValueOnce({ data: { statusCode: 100, body: {} } });
+      cacheMock.map.set('DEVICE1', { type: 'Bot', name: 'test bot', category: 'physical' });
+
+      const plan = {
+        version: '1.0',
+        description: 'test',
+        steps: [{ type: 'command', deviceId: 'DEVICE1', command: 'turnOn' }],
+      };
+
+      const result = await client.callTool({
+        name: 'plan_run',
+        arguments: { plan },
+      });
+
+      expect(result.isError).toBeFalsy();
+      const sc = (result as { structuredContent: {
+        ran: boolean;
+        results: Array<{ step: number; type: string; status: string }>;
+        summary: { total: number; ok: number; error: number; skipped: number };
+      } }).structuredContent;
+
+      expect(sc.ran).toBe(true);
+      expect(sc.results).toHaveLength(1);
+      expect(sc.results[0]).toMatchObject({ step: 1, type: 'command', status: 'ok' });
+      expect(sc.summary).toMatchObject({ total: 1, ok: 1, error: 0, skipped: 0 });
     });
   });
 });

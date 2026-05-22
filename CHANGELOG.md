@@ -9,8 +9,20 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `auth login` — browser-based OAuth 2.0 sign-in via `sp.oauth.switchbot.net`; stores credentials in OS keychain after verification
+- `auth keychain set/get/delete/migrate/describe` — manage OS keychain credential backend
+- `SWITCHBOT_OAUTH_CLIENT_SECRET`, `SWITCHBOT_TOKEN_AES_KEY`, `SWITCHBOT_TOKEN_AES_IV` env vars to override baked-in OAuth/AES constants
+- **`devices expand` supports lighting commands**: `setBrightness` (`--brightness`), `setColor` (`--color`), and `setColorTemperature` (`--color-temp`) flags now expand for Color Bulb, Strip Light, Ceiling Light, and similar devices.
+
 ### Fixed
 
+- `reset`: aborting at the confirmation prompt no longer continues the reset action in test environments
+- `reset`: credential deletion failures are now reported as `failed` instead of `not found`
+- `reset --config <path>`: no longer recursively deletes a sibling `cache/` directory next to the override file. The CLI never creates that path in `--config` mode, so removing it could wipe an unrelated project's data.
+- `devices list --json --fields`: alias inputs (e.g. `id,name`) now resolve to canonical output keys (`deviceId`, `deviceName`), matching `--format json`. The JSON schema is now stable regardless of which input form callers used.
+- `config`: credential-missing hint now preserves `--config <path>` in both the `auth login` and `config set-token` recovery commands. Without this, the suggested `auth login` would write to the default backend, which `loadConfig` ignores while `--config` is active.
 - **Daemon start failed in bundled builds** (BUG-001): CLI entry path resolution navigated above the dist/ directory when running from the single-file bundle. Now correctly detects the bundled scenario.
 - **`rules run` exited 0 when `automation.enabled` was false** (BUG-002): daemon interpreted this as success. Now exits 1 with a clear message.
 - **Unknown subcommands exited 0** (BUG-005/BUG-008): `cache list`, `history list`, and other invalid subcommand inputs triggered Commander help display and exited 0. Now exits 2 (usage error).
@@ -24,10 +36,7 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`devices commands <Type> --json`**: same change — `data` is always an array.
 - **`_fetchedAt` renamed to `fetchedAt`**: removed underscore prefix from the CLI-added timestamp field in `devices status` JSON output.
 - **`rules run --json` when `automation.enabled` is false**: previously emitted `{data: {kind:"control", controlKind:"disabled"}}` (success envelope) with exit 1. Now emits `{error: {code:1, kind:"runtime", message:"..."}}` (error envelope) — consistent with the JSON protocol.
-
-### Added
-
-- **`devices expand` supports lighting commands**: `setBrightness` (`--brightness`), `setColor` (`--color`), and `setColorTemperature` (`--color-temp`) flags now expand for Color Bulb, Strip Light, Ceiling Light, and similar devices.
+- **MCP `list_devices` outputSchema**: `roomID` and `controlType` fields now accept `null` in addition to `string | undefined`. Consumers with strict JSON-Schema or Zod validation may need to update their parsers.
 
 ## [3.6.3]
 

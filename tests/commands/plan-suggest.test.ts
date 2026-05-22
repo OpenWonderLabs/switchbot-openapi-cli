@@ -95,4 +95,24 @@ describe('suggestPlan', () => {
     expect(plan.steps).toHaveLength(1);
     expect(plan.steps[0]).toMatchObject({ deviceId: 'LOCK-01', command: 'lock' });
   });
+
+  it('infers unlock (not lock) from "open the lock"', () => {
+    const { plan } = suggestPlan({ intent: 'open the lock', devices: [{ id: 'D1' }] });
+    expect(plan.steps[0]).toMatchObject({ command: 'unlock' });
+  });
+
+  it('infers unlock from "open the front door lock"', () => {
+    const { plan } = suggestPlan({ intent: 'open the front door lock', devices: [{ id: 'D1' }] });
+    expect(plan.steps[0]).toMatchObject({ command: 'unlock' });
+  });
+
+  it('still infers lock from "lock the door"', () => {
+    const { plan } = suggestPlan({ intent: 'lock the door', devices: [{ id: 'D1' }] });
+    expect(plan.steps[0]).toMatchObject({ command: 'lock' });
+  });
+
+  it('still infers open from "open the curtains"', () => {
+    const { plan } = suggestPlan({ intent: 'open the curtains', devices: [{ id: 'D1' }] });
+    expect(plan.steps[0]).toMatchObject({ command: 'open' });
+  });
 });

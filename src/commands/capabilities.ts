@@ -122,6 +122,7 @@ export const COMMAND_META: Record<string, CommandMeta> = {
   'auth keychain set': DESTRUCTIVE_LOCAL,
   'auth keychain delete': DESTRUCTIVE_LOCAL,
   'auth keychain migrate': DESTRUCTIVE_LOCAL,
+  'auth login': DESTRUCTIVE_LOCAL,
   'cache show': READ_LOCAL,
   'cache clear': ACTION_LOCAL,
   'capabilities': READ_LOCAL,
@@ -213,6 +214,7 @@ export const COMMAND_META: Record<string, CommandMeta> = {
   'status-sync start': ACTION_LOCAL,
   'status-sync stop': ACTION_LOCAL,
   'status-sync status': READ_LOCAL,
+  'reset': ACTION_LOCAL,
   'uninstall': ACTION_LOCAL,
   'upgrade-check': READ_REMOTE,
   'webhook setup': ACTION_REMOTE,
@@ -264,7 +266,7 @@ export interface CompactLeaf {
   recommendedMode: RecommendedMode;
 }
 
-function enumerateLeafNames(program: Command, prefix = ''): string[] {
+export function enumerateLeafNames(program: Command, prefix = ''): string[] {
   const out: string[] = [];
   for (const cmd of program.commands) {
     const full = prefix ? `${prefix} ${cmd.name()}` : cmd.name();

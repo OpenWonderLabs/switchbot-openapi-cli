@@ -23,10 +23,14 @@ import readline from 'node:readline';
 import { exitWithError, isJsonMode, printJson } from '../utils/output.js';
 import { stringArg } from '../utils/arg-parsers.js';
 import { getActiveProfile } from '../lib/request-context.js';
+import { getConfigPath } from '../utils/flags.js';
+import { saveConfig } from '../config.js';
 import {
   CredentialBundle,
   selectCredentialStore,
 } from '../credentials/keychain.js';
+import { browserLogin } from '../auth/browser-login.js';
+import { verifyCredentials } from '../auth/verify.js';
 
 function activeProfile(): string {
   return getActiveProfile() ?? 'default';
@@ -374,5 +378,88 @@ export function registerAuthCommand(program: Command): void {
       if (!options.deleteFile) {
         console.log('Source file kept — pass --delete-file on the next run to remove it.');
       }
+    });
+
+  // -------------------------------------------------------------------------
+  // auth login
+  // -------------------------------------------------------------------------
+  auth
+    .command('login')
+    .description('Sign in via browser and save credentials to the OS keychain')
+    .option('--no-open', 'Print the login URL instead of opening the browser automatically')
+    .option('--timeout <seconds>', 'Browser login timeout in seconds (default: 120)', '120')
+    .action(async (options: { open: boolean; timeout: string }) => {
+      const profile = activeProfile();
+      const timeoutMs = Math.max(10, parseInt(options.timeout, 10) || 120) * 1000;
+
+      let creds: CredentialBundle;
+      try {
+        creds = await browserLogin({
+          noOpen: !options.open,
+          timeoutMs,
+          log: (msg) => isJsonMode() ? console.error(msg) : console.log(msg),
+        });
+      } catch (err) {
+        exitWithError({
+          code: 1,
+          kind: 'runtime',
+          message: `Login failed: ${err instanceof Error ? err.message : String(err)}`,
+        });
+        return;
+      }
+
+      (isJsonMode() ? console.error : console.log)('Verifying credentials…');
+      const check = await verifyCredentials(creds);
+      if (!check.ok) {
+        exitWithError({
+          code: 1,
+          kind: 'runtime',
+          message: `Credential verification failed: ${check.reason}`,
+        });
+        return;
+      }
+
+      let backendName: string;
+      if (getConfigPath()) {
+        try {
+          saveConfig(creds.token, creds.secret);
+        } catch (err) {
+          exitWithError({
+            code: 1,
+            kind: 'runtime',
+            message: `Failed to save credentials: ${err instanceof Error ? err.message : String(err)}`,
+          });
+          return;
+        }
+        backendName = 'file';
+      } else {
+        const store = await selectCredentialStore();
+        try {
+          await store.set(profile, creds);
+        } catch (err) {
+          exitWithError({
+            code: 1,
+            kind: 'runtime',
+            message: `Failed to save credentials: ${err instanceof Error ? err.message : String(err)}`,
+          });
+          return;
+        }
+        backendName = store.name;
+      }
+
+      if (isJsonMode()) {
+        printJson({
+          profile,
+          backend: backendName,
+          loggedIn: true,
+          verified: true,
+          token: { length: creds.token.length, masked: maskValue(creds.token) },
+        });
+        return;
+      }
+
+      console.log(`✓ Credentials verified and saved to backend "${backendName}" for profile "${profile}".`);
+      console.log(`token : ${maskValue(creds.token)} (${creds.token.length} chars)`);
+      console.log(`secret: ${maskValue(creds.secret)} (${creds.secret.length} chars)`);
     });
 }

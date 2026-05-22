@@ -73,6 +73,17 @@ export async function aggregateDeviceHistory(
     1,
     Math.min(opts.maxBucketSamples ?? DEFAULT_SAMPLE_CAP, MAX_SAMPLE_CAP),
   );
+
+  const now = Date.now();
+  // When fromMs is open-ended (-Infinity), fall back to toMs so the synthetic
+  // bucket key stays within the queried window. Using `now` as the fallback
+  // produces a key > toMs for past-only --to queries.
+  const effectiveFrom = Number.isFinite(fromMs) ? fromMs : (Number.isFinite(toMs) ? toMs : now);
+  const effectiveTo   = Number.isFinite(toMs)   ? toMs   : now;
+  const stableKey = bucketMs === null
+    ? Math.floor((effectiveFrom + effectiveTo) / 2)
+    : 0;
+
   let partial = false;
   const notes: string[] = [];
 
@@ -95,7 +106,9 @@ export async function aggregateDeviceHistory(
       const tMs = Date.parse(rec.t);
       if (!Number.isFinite(tMs) || tMs < fromMs || tMs > toMs) continue;
 
-      const key = bucketMs !== null ? Math.floor(tMs / bucketMs) * bucketMs : 0;
+      const key = bucketMs !== null
+        ? Math.floor(tMs / bucketMs) * bucketMs
+        : stableKey;
       let bkt = buckets.get(key);
       if (!bkt) { bkt = new Map(); buckets.set(key, bkt); }
 

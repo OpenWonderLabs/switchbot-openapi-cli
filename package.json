@@ -58,6 +58,7 @@
   "dependencies": {
     "axios": "^1.7.9",
     "mqtt": "^5.3.0",
+    "open": "^10.2.0",
     "pino": "^9.0.0"
   },
   "devDependencies": {

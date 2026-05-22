@@ -28,6 +28,7 @@ function makeProgram(): Command {
   const program = new Command();
   program.exitOverride();
   program.option('--json');
+  program.option('--config <path>', 'Override credential file location');
   registerAuthCommand(program);
   return program;
 }
@@ -397,6 +398,90 @@ describe('auth keychain migrate', () => {
       expect(res.stderr.join('\n')).toContain('warning: could not remove');
     } finally {
       unlinkSpy.mockRestore();
+    }
+  });
+});
+
+// ── auth login ────────────────────────────────────────────────────────────────
+
+const browserLoginMock = vi.fn();
+const verifyCredsMock = vi.fn();
+
+vi.mock('../../src/auth/browser-login.js', () => ({
+  browserLogin: (...args: unknown[]) => browserLoginMock(...args),
+}));
+
+vi.mock('../../src/auth/verify.js', () => ({
+  verifyCredentials: (...args: unknown[]) => verifyCredsMock(...args),
+}));
+
+describe('auth login', () => {
+  beforeEach(() => {
+    browserLoginMock.mockReset();
+    verifyCredsMock.mockReset();
+  });
+
+  it('saves credentials and exits 0 on success', async () => {
+    browserLoginMock.mockResolvedValue({ token: 'tok-abc123', secret: 'sec-xyz987' });
+    verifyCredsMock.mockResolvedValue({ ok: true });
+    const store = makeStore({ writable: true });
+    selectMock.mockResolvedValue(store);
+
+    const res = await runCli(['auth', 'login', '--no-open']);
+    expect(res.exitCode).toBe(0);
+    expect(store.set).toHaveBeenCalledWith('default', { token: 'tok-abc123', secret: 'sec-xyz987' });
+  });
+
+  it('exits 1 when browserLogin rejects', async () => {
+    browserLoginMock.mockRejectedValue(new Error('user cancelled'));
+    const res = await runCli(['auth', 'login', '--no-open']);
+    expect(res.exitCode).toBe(1);
+  });
+
+  it('exits 1 when credential verification fails (non-100 statusCode)', async () => {
+    browserLoginMock.mockResolvedValue({ token: 'bad-tok', secret: 'bad-sec' });
+    verifyCredsMock.mockResolvedValue({ ok: false, reason: 'API returned statusCode 401' });
+    const res = await runCli(['auth', 'login', '--no-open']);
+    expect(res.exitCode).toBe(1);
+  });
+
+  it('emits JSON on success under --json', async () => {
+    browserLoginMock.mockResolvedValue({ token: 'tok-abc123', secret: 'sec-xyz987' });
+    verifyCredsMock.mockResolvedValue({ ok: true });
+    const store = makeStore({ writable: true });
+    selectMock.mockResolvedValue(store);
+
+    const res = await runCli(['--json', 'auth', 'login', '--no-open']);
+    expect(res.exitCode).toBe(0);
+    const parsed = JSON.parse(res.stdout[0]) as Record<string, unknown>;
+    const data = (parsed['data'] ?? parsed) as Record<string, unknown>;
+    expect(data).toHaveProperty('loggedIn', true);
+    expect(data).toHaveProperty('verified', true);
+  });
+
+  it('writes credentials directly to the --config file instead of the keychain', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-auth-login-config-'));
+    const configFile = path.join(tmpDir, 'portable.json');
+
+    try {
+      browserLoginMock.mockResolvedValue({ token: 'tok-portable', secret: 'sec-portable' });
+      verifyCredsMock.mockResolvedValue({ ok: true });
+      // selectMock is already reset in beforeEach — it must not be called at all
+
+      const res = await runCli([
+        '--config', configFile,
+        'auth', 'login', '--no-open',
+      ]);
+      expect(res.exitCode).toBe(0);
+
+      // Credentials must be written to the config file, NOT to the keychain
+      expect(selectMock).not.toHaveBeenCalled();
+      expect(fs.existsSync(configFile)).toBe(true);
+      const saved = JSON.parse(fs.readFileSync(configFile, 'utf-8')) as Record<string, unknown>;
+      expect(saved['token']).toBe('tok-portable');
+      expect(saved['secret']).toBe('sec-portable');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });
 });

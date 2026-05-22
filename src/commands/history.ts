@@ -28,6 +28,11 @@ Every 'devices command' run with --audit-log is appended as JSONL to the
 audit file (default ~/.switchbot/audit.log). 'history show' prints the file,
 'history replay <n>' re-runs the Nth entry (1-indexed, most-recent last).
 
+Cache note:
+  --cache is a global flag and must be placed BEFORE the subcommand:
+    switchbot --cache 5m history range <id>    ✓
+    switchbot history range <id> --cache 5m    ✗ (silently ignored)
+
 Examples:
   $ switchbot --audit-log devices command <id> turnOff
   $ switchbot history show --limit 10

@@ -26,11 +26,11 @@ describe('buildAuthHeaders', () => {
     vi.useRealTimers();
   });
 
-  it('returns exactly the six required headers', () => {
+  it('returns exactly the seven required headers', () => {
     uuidMock.v4.mockReturnValue('11111111-1111-4111-8111-111111111111');
     const headers = buildAuthHeaders(TOKEN, SECRET);
     expect(Object.keys(headers).sort()).toEqual(
-      ['Authorization', 'Content-Type', 'nonce', 'sign', 'src', 't'].sort()
+      ['Authorization', 'Content-Type', 'User-Agent', 'nonce', 'sign', 'src', 't'].sort()
     );
   });
 
