@@ -76,7 +76,7 @@ export async function bindCallbackServer(
       finished = true;
       res.writeHead(statusCode, { 'Content-Type': 'text/html', ...SECURITY_HEADERS });
       res.end(body);
-      server.close();
+      res.once('finish', () => { server.closeAllConnections(); server.close(); });
       clearTimeout(timer);
       if (err) rejectResult(err); else resolveResult({ code: code! });
     };
@@ -120,6 +120,7 @@ export async function bindCallbackServer(
   const timer = setTimeout(() => {
     if (finished) return;
     finished = true;
+    server.closeAllConnections();
     server.close();
     rejectResult(new Error('Login timed out. Please run `switchbot auth login` again.'));
   }, timeoutMs);

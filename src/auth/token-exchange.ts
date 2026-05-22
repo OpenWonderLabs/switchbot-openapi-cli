@@ -14,12 +14,18 @@ import {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+// The Wonder API encrypts credentials as raw binary bytes (not UTF-8 strings).
+// After AES-128-CBC decryption the plaintext is binary — return it as a hex
+// string so it is safe to use as an HTTP header value and HMAC key.
+// Using .toString('utf8') here produces garbled output containing non-ASCII
+// bytes and was the root cause of the "invalid header characters" bug fixed
+// in this branch.
 function decryptField(hexCipher: string): string {
   try {
     const key = Buffer.from(TOKEN_AES_KEY, 'utf8');
     const iv  = Buffer.from(TOKEN_AES_IV,  'utf8');
     const d   = crypto.createDecipheriv('aes-128-cbc', key, iv);
-    return Buffer.concat([d.update(Buffer.from(hexCipher, 'hex')), d.final()]).toString('utf8');
+    return Buffer.concat([d.update(Buffer.from(hexCipher, 'hex')), d.final()]).toString('hex');
   } catch {
     throw new Error(
       'Failed to decrypt credentials — the AES key/IV may be stale. ' +
