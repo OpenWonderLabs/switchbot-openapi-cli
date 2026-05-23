@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "switchbot": {
+      "command": "node",
+      "args": ["${pluginDir}/bin/start.js"],
+      "description": "SwitchBot smart-home MCP server (devices_list, devices_status, devices_describe, devices_command, scenes_list, scenes_run)"
+    }
+  }
+}
