@@ -83,7 +83,7 @@ npm workspaces handle root + `packages/*` coexistence natively.
 | Workspaces | `package.json` (root) | Add `"workspaces": ["packages/*"]`. **Do not change** the existing `test` / `typecheck` / `build` / `smoke:pack-install` / `verify:*` scripts (root CLI is not under `packages/*`, those scripts continue to target the root package only). |
 | Workspace-aware aggregates | `package.json` (root, new scripts) | Add four new scripts: `"test:workspaces": "npm test --workspaces --if-present"`, `"test:all": "npm test && npm run test:workspaces"`, `"typecheck:workspaces": "npm run typecheck --workspaces --if-present"`, `"typecheck:all": "npm run typecheck && npm run typecheck:workspaces"`. The existing `npm test` and `npm run typecheck` keep their current scope (root only); CI and the verification matrix call `:all`. |
 | Plugin source | `packages/codex-plugin/**` | Import 19 files from sibling repo. Use `git subtree add` if history is preserved (see Prerequisites). |
-| Package rename | `packages/codex-plugin/package.json` | `name: "@switchbot/codex-plugin"`, `version: "0.1.0"` (new scope, version reset), `peerDependencies: { "@switchbot/openapi-cli": "workspace:*" }`, `repository`/`homepage` → this repo. Add `scripts.test` and `scripts.typecheck` so the new aggregate scripts find it. |
+| Package rename | `packages/codex-plugin/package.json` | `name: "@switchbot/codex-plugin"`, `version: "0.1.0"` (new scope, version reset), `peerDependencies: { "@switchbot/openapi-cli": ">=3.7.1" }`, `repository`/`homepage` → this repo. Add `scripts.test` and `scripts.typecheck` so the new aggregate scripts find it. **Note**: do **not** use `"workspace:*"` here. In a hybrid monorepo (root CLI is not a workspace member, only `packages/*` are), npm cannot resolve `workspace:*` against the root package and `npm install` fails with `EUNSUPPORTEDPROTOCOL: Unsupported URL Type "workspace:"`. The plugin only needs the CLI as a runtime peer (it spawns the `switchbot` binary, never `import`s the package), so a plain semver range is sufficient and matches what the sibling repo uses today. |
 | CLI hardcoded path | `src/install/codex-checks.ts` | `path.join(npmRoot, '@cly-org', 'switchbot-codex-plugin')` → `path.join(npmRoot, '@switchbot', 'codex-plugin')` (in `resolveCodexPackageRoot()`) |
 | Doctor warning text | `src/install/codex-checks.ts` (`checkCodexPluginNpm`, `checkCodexPluginRegistered`) | `npm install -g @cly-org/switchbot-codex-plugin` → `npm install -g @switchbot/codex-plugin` in repair recipes |
 | Test expectations | `tests/install/codex-checks.test.ts` | Two `expect(msg).toContain(...)` strings updated. **Plus**: `pluginId` default value changes — `resolvePluginId` derives from dirname, so `switchbot@switchbot-codex-plugin` → `switchbot@codex-plugin`. Update all assertions. |
@@ -108,8 +108,8 @@ Every test asserting the old id needs updating. Since there are no users, no `co
 2. `npm run test:all` passes the existing 2715 CLI tests **and** any plugin tests imported from sibling.
 3. `npm run typecheck:all` passes both packages.
 4. `npm pack -w packages/codex-plugin` produces a valid tarball.
-5. **Hard check — `workspace:*` rewrite at pack time**: extract the plugin tarball produced in step 4 (`tar -xzf` into a temp dir), open the bundled `package.json`, and confirm `peerDependencies["@switchbot/openapi-cli"]` is **not** the literal string `"workspace:*"` but a concrete semver range (npm rewrites it to a version on `npm pack` / `npm publish`). If it is still `"workspace:*"` the consumer install will fail; this is a hard blocker, not a risk.
-6. `grep -ri "@cly-org" --include="*.ts" --include="*.md" --include="*.json" --include="*.yml"` returns zero hits (other than CHANGELOG history if any).
+5. **Hard check — published peerDep is a concrete range**: `npm pack -w packages/codex-plugin`, extract the tarball (`tar -xzf` into a temp dir), open the bundled `package.json`, and confirm `peerDependencies["@switchbot/openapi-cli"]` is a valid semver range (e.g. `">=3.7.1"`) and **not** any of: `"workspace:*"`, `"file:..."`, `""`, missing. The `workspace:*` failure mode was the original design's biggest hazard; this gate rules it out for any future drift (e.g. someone reverts the spec change).
+6. **Scoped grep — no `@cly-org` in shipping surfaces**: `grep -r "@cly-org" src/ packages/ .github/ tests/ scripts/ README.md` returns zero hits. **Do not** include `docs/` or `CHANGELOG.md` — those legitimately reference the old name as historical record (this spec, prior specs, and any migration changelog entry all mention `@cly-org/*` deliberately). The check is "no live code or release surface points at the old scope," not "the string never appears in the repo."
 7. Manual: on a fresh machine, `npm install -g <root-tarball> <plugin-tarball>` then `switchbot install --agent codex` registers the plugin successfully.
 
 #### Commit granularity (within the PR)
@@ -196,13 +196,14 @@ PR #3 must update **both** workflows. The single-package assumption is everywher
 
 | Category | File(s) | Operation |
 |---|---|---|
-| Publish workflow — root CLI step | `.github/workflows/publish.yml` line 34 | **Keep** the existing `npm publish --tag next --provenance --access public` step. The root CLI is **not** under `packages/*`; it is the root package. Do not change this line into `npm publish -w @switchbot/openapi-cli ...` — that form would resolve to nothing. |
-| Publish workflow — new plugin steps | `.github/workflows/publish.yml` (after line 34) | Add two steps: `npm publish -w packages/codex-plugin --tag next --provenance --access public` and `npm publish -w packages/openclaw-skill --tag next --provenance --access public`. Both inherit `NODE_AUTH_TOKEN` from the same `env`. |
+| Publish workflow — root CLI step | `.github/workflows/publish.yml` line 34 | **Keep** the existing `npm publish --tag next --provenance --access public` step but wrap it in an `if: steps.detect.outputs.cli_publish == 'true'` guard (see new "detect" step below). The root CLI is **not** under `packages/*`; it is the root package. Do not change this line into `npm publish -w @switchbot/openapi-cli ...` — that form would resolve to nothing. |
+| Publish workflow — detect-versions step (new) | `.github/workflows/publish.yml` (insert before line 34) | New step `id: detect`. For each of the three packages, read `package.json#version`, query `npm view <name>@<version> version` (returns empty if not yet published), set `<pkg>_publish=true` if version is unpublished. Outputs: `cli_publish`, `codex_publish`, `openclaw_publish`. Idempotent — running the workflow twice on the same release publishes nothing the second time. |
+| Publish workflow — new plugin steps | `.github/workflows/publish.yml` (after the root CLI publish step) | Add two steps. Each gated by its own `if: steps.detect.outputs.<pkg>_publish == 'true'` and uses `continue-on-error: true`: `npm publish -w packages/codex-plugin --tag next --provenance --access public`, then `npm publish -w packages/openclaw-skill --tag next --provenance --access public`. **`continue-on-error` is critical**: a plugin publish failure (npm outage, transient registry error, or a never-should-happen duplicate) must not fail the workflow — that would gate `npm-published-smoke.yml` (which only runs on `workflow_run.conclusion == 'success'`) and block root CLI promotion to `latest`. Add a follow-up `if: failure() || steps.codex_publish.outcome == 'failure'` step that emits a clear annotation in the workflow summary so a failed plugin publish is loud, not silent. |
 | Publish workflow — version verification | `.github/workflows/publish.yml` lines 23-30 | The current `Verify tag matches package.json version` step compares `GITHUB_REF_NAME` against the **root** `package.json#version`. Since plugins have independent versions, we cannot use the git tag for plugin version verification. Decision: tag is authoritative for the **root CLI version only**; plugin versions are taken from their own `package.json` at the time of release. Add a new step `Show resolved versions` that prints all three `package.json#version` values into the workflow log so the release notes can quote them. Do **not** add a tag-vs-plugin-version check — there is no shared tag for plugins. |
-| Publish workflow — pre-publish smoke | `.github/workflows/publish.yml` line 32 (`npm run smoke:pack-install`) | Keep — root CLI smoke is unchanged. Add **two** new steps after it: `npm pack -w packages/codex-plugin` and `npm pack -w packages/openclaw-skill`, each followed by a tarball-extraction check that confirms `peerDependencies["@switchbot/openapi-cli"]` resolved away from `workspace:*` (same gate as PR #1 hard check, but here in CI). |
-| Smoke workflow — package matrix | `.github/workflows/npm-published-smoke.yml` | **Restructure** the `smoke` job into a matrix over the three packages. The matrix entry decides: package name, smoke commands, whether the package gets promoted on success. Concretely: |
-| Smoke workflow — root CLI matrix entry | (same file) | `package: @switchbot/openapi-cli`, smoke = current offline + live commands (lines 106-128), promote = yes (line 130 keeps as-is for this entry). |
-| Smoke workflow — plugin matrix entries | (same file) | `package: @switchbot/codex-plugin` and `package: @switchbot/openclaw-skill`. Smoke commands per plugin: install in temp project, confirm `package.json#peerDependencies["@switchbot/openapi-cli"]` is a concrete range (not `workspace:*`), confirm bin entries (`switchbot-codex-auth`, `switchbot-codex-install`) are executable. **No live smoke** for plugins — they need a working CLI install + Codex CLI on PATH; the runner has neither and the value-add is low. Promote on success: yes (same `dist-tag add` pattern). Deprecate on failure: yes. |
+| Publish workflow — pre-publish smoke | `.github/workflows/publish.yml` line 32 (`npm run smoke:pack-install`) | Keep — root CLI smoke is unchanged. Add **two** new steps after it: `npm pack -w packages/codex-plugin` and `npm pack -w packages/openclaw-skill`, each followed by a tarball-extraction check that confirms `peerDependencies["@switchbot/openapi-cli"]` is a concrete semver range (same gate as PR #1 hard verification step #5). Run this before the publish steps so a malformed peerDep is caught before anything ships. |
+| Smoke workflow — package matrix | `.github/workflows/npm-published-smoke.yml` | **Restructure** the `smoke` job into a matrix over the three packages. Each matrix entry runs only if its package was actually published (re-run the same `detect-versions` logic, or pass detect outputs through). The matrix entry decides: package name, smoke commands, whether the package gets promoted on success. Concretely: |
+| Smoke workflow — root CLI matrix entry | (same file) | `package: @switchbot/openapi-cli`, smoke = current offline + live commands (lines 106-128), promote = yes (line 130 keeps as-is for this entry). Skipped if the publish workflow's `cli_publish` was false. |
+| Smoke workflow — plugin matrix entries | (same file) | `package: @switchbot/codex-plugin` and `package: @switchbot/openclaw-skill`. Skipped if their publish step did not run or did not succeed. Smoke commands per plugin: install in temp project, confirm `package.json#peerDependencies["@switchbot/openapi-cli"]` is a concrete range, confirm bin entries (`switchbot-codex-auth`, `switchbot-codex-install`) are executable. **No live smoke** for plugins — they need a working CLI install + Codex CLI on PATH; the runner has neither and the value-add is low. Promote on success: yes (same `dist-tag add` pattern). Deprecate on failure: yes. |
 | Smoke workflow — wait step generalization | `.github/workflows/npm-published-smoke.yml` lines 69-93 | The wait loop is keyed on `@switchbot/openapi-cli`. Refactor to use the matrix `package` variable everywhere; the `next` dist-tag gate works the same for all three. |
 | Smoke workflow — gate selection | `.github/workflows/npm-published-smoke.yml` lines 64-67 (`Resolve current latest dist-tag`) | Generalize to `npm view ${{ matrix.package }} dist-tags.latest`. |
 | Sibling repo (`openclaw-switchbot-skill`) | `README.md` (sibling) | Add deprecation notice at top: "This repository has been merged into [switchbot-openapi-cli](...). Future development happens there. Existing tags are preserved for history." |
@@ -212,28 +213,36 @@ PR #3 must update **both** workflows. The single-package assumption is everywher
 #### Versioning model recap
 
 - Root CLI: version still lives in root `package.json#version`. Git tag (`v3.7.x`) authoritative for this package. `publish.yml`'s tag-check still applies to the root publish step.
-- Plugins: independent versions in `packages/*/package.json#version`. **Not** keyed off the git tag. A release that bumps only the CLI version skips re-publishing plugins by virtue of npm refusing to re-publish an unchanged version (`npm publish` fails fast on duplicate); add `if: ` guards if the noise is unwanted.
-- Practical operating mode: bump whichever packages changed since the last release in their respective `package.json`, cut a single GitHub Release tagged with the root CLI version, let `publish.yml` push everything that has a new version. npm rejects duplicates harmlessly.
+- Plugins: independent versions in `packages/*/package.json#version`. **Not** keyed off the git tag.
+- Practical operating mode: bump whichever packages changed since the last release in their respective `package.json`, cut a single GitHub Release tagged with the root CLI version, let `publish.yml` push only what changed.
+- **How "publish only what changed" actually works**: the new `detect-versions` step queries npm for each package's `<name>@<version>` and sets a per-package `<pkg>_publish` output to `true` only if the version is unpublished. Each `npm publish` step is then guarded by `if: steps.detect.outputs.<pkg>_publish == 'true'`. **Do not rely on `npm publish` failing on duplicates as a "harmless" no-op** — a failed `npm publish` step in the current workflow returns non-zero, fails the workflow, and `npm-published-smoke.yml` (gated on `workflow_run.conclusion == 'success'`) does not run. Plugin steps additionally use `continue-on-error: true` so an unexpected publish failure (transient registry error, an inconsistency the detect step missed) does not block CLI promotion to `latest`. A failed plugin publish surfaces as a workflow annotation, not a hard fail.
 
 #### Verification (PR #3)
 
 1. Cut a **dry-run** release (e.g. tag `v3.7.99-dryrun` on a throwaway branch, then delete) and confirm:
-   - `publish.yml` runs all three publish steps.
-   - Each plugin tarball passes the `workspace:*` gate.
+   - `publish.yml` runs the `detect-versions` step and outputs `cli_publish=true`, `codex_publish=true`, `openclaw_publish=true` (first time all three are at unpublished versions).
+   - All three publish steps execute.
+   - Each plugin tarball passes the peerDep concrete-range gate before publish.
    - All three packages appear on dist-tag `next` within the timeout.
    - `npm-published-smoke.yml` runs the matrix; root CLI passes offline + live; plugins pass their tarball-shape checks.
    - `dist-tag add ... latest` is invoked for all three.
-2. Delete the dry-run versions immediately after via `npm unpublish` (within npm's 72-hour window) and remove the throwaway tag.
-3. Sibling repo README renders the deprecation notice on GitHub.
-4. `npm view @cly-org/switchbot-codex-plugin` still 404s (we never published the old name).
-5. `npm view @switchbot/codex-plugin` and `npm view @switchbot/openclaw-skill` show the new packages.
+2. **Re-run the same workflow without bumping versions** (workflow_dispatch on the same release). Confirm:
+   - `detect-versions` outputs `<pkg>_publish=false` for everything.
+   - All publish steps are skipped via `if:`.
+   - The workflow exits successfully with no annotations.
+   - This proves the changed-package guard prevents the "rerun blocks promotion" failure mode.
+3. Delete the dry-run versions immediately after via `npm unpublish` (within npm's 72-hour window) and remove the throwaway tag.
+4. Sibling repo README renders the deprecation notice on GitHub.
+5. `npm view @cly-org/switchbot-codex-plugin` still 404s (we never published the old name).
+6. `npm view @switchbot/codex-plugin` and `npm view @switchbot/openclaw-skill` show the new packages.
 
 #### Commit granularity
 
 ```
-ci(publish): publish CLI + codex-plugin + openclaw-skill from one workflow
-ci(smoke): convert npm-published-smoke to per-package matrix
-ci(publish): add post-pack workspace:* rewrite gate for plugin tarballs
+ci(publish): add detect-versions gate, publish CLI + plugins from one workflow
+ci(publish): make plugin publish steps continue-on-error
+ci(publish): add per-plugin peerDep concrete-range gate before publish
+ci(smoke): convert npm-published-smoke to per-package matrix with detect-aware filtering
 docs(changelog): document monorepo absorption and @cly-org→@switchbot rename
 ```
 
@@ -272,7 +281,8 @@ This is reversible — even option B can be supplemented later by importing the 
 | Plugin id change breaks existing user installs | Zero (no users) | N/A | None needed |
 | Bundling `@switchbot/agent-shared` regresses | Medium | Medium (runtime require fails) | PR #2 verification step #4: inspect packed tarball |
 | Cross-repo PR coordination during the transition | Low (PRs land in 2-3 days end-to-end) | Low | Don't touch sibling repo source until PR #3; freeze sibling repo on day 1 |
-| Plugin publish step in `publish.yml` fails for the first release while CLI succeeds | Medium (new CI path) | Medium (npm has CLI but not plugin; users hit warn-state in `doctor`) | Plugin steps run **after** CLI publish in `publish.yml`; if plugin step fails, CLI is already on `next` (not yet promoted to `latest`); fix plugin issue, re-run workflow, then `npm-published-smoke` promotes all three together. The `workspace:*` rewrite gate (added in PR #1 verification + replicated in PR #3 publish workflow) catches the most likely failure mode before it ships. |
+| Plugin publish fails (transient registry error, malformed peerDep, etc.) and silently blocks CLI promotion | Medium (new CI path) | High (CLI on `next` but never reaches `latest`; users on `latest` stay on the old version indefinitely) | Three-layer mitigation: (1) `detect-versions` step skips the publish entirely if the version is already on npm — eliminates the most common cause (rerun on same release); (2) `continue-on-error: true` on plugin publish steps so a failure annotates the workflow but does not gate `workflow_run.conclusion == 'success'`; (3) follow-up step that fails the workflow **after** smoke promotion has run if any plugin step's outcome was `failure` — surfaces the issue loudly without blocking the CLI promotion that already happened. |
+| Plugin publish step accidentally publishes a malformed peerDep range | Low (gated in CI) | High (consumer install fails) | Pre-publish step in `publish.yml` extracts each plugin tarball and verifies `peerDependencies["@switchbot/openapi-cli"]` is a valid semver range. Step fails fast before `npm publish` is invoked. Same gate as PR #1 verification step #5, replicated in CI. |
 
 ---
 
@@ -297,6 +307,9 @@ This is reversible — even option B can be supplemented later by importing the 
 - **2026-05-23 (review pass)**: `npm-published-smoke.yml` converts to a per-package matrix. Plugins get tarball-shape smoke (peerDeps resolved, bin entries executable) but **no live smoke** — the runner has no Codex CLI installed. Plugins still go through the `next` → `latest` promote gate.
 - **2026-05-23 (review pass)**: `ci.yml`'s `policy-schema-sync` (cross-repo URL fetch) becomes a local `diff` once openclaw-skill moves into `packages/openclaw-skill/` (or is deleted if the skill drops the mirrored schema). Lands in PR #2.
 - **2026-05-23 (review pass)**: `workspace:*` peerDep rewrite check promoted from a Risk row to a hard verification step in PR #1 (and re-asserted in PR #3's publish workflow). It is the single highest-leverage failure mode of this migration; demoting it to a risk row was a misjudgment.
+- **2026-05-23 (review pass 2)**: `peerDependencies` uses literal `">=3.7.1"`, **not** `"workspace:*"`. The original spec assumed npm would rewrite `workspace:*` at pack/publish time, which is true for full monorepos but **not** for hybrid layouts where the depended-on package (root CLI) is not a workspace member — `npm install` fails with `EUNSUPPORTEDPROTOCOL` before pack ever runs. Verified by minimal repro. The plugin spawns the `switchbot` binary rather than `import`-ing it, so a literal peerDep range is functionally equivalent.
+- **2026-05-23 (review pass 2)**: Publish workflow uses a `detect-versions` step + per-package `if:` guards + `continue-on-error: true` on plugin steps. The original spec claimed `npm publish` "fails harmlessly on duplicates" — false; a non-zero exit fails the workflow, which gates `npm-published-smoke.yml` (it requires `workflow_run.conclusion == 'success'`), which blocks CLI promotion to `latest`. The new design makes plugin failure observable without coupling it to CLI promotion.
+- **2026-05-23 (review pass 2)**: `@cly-org` grep verification scoped to `src/ packages/ .github/ tests/ scripts/ README.md`. The original "all `*.ts/*.md/*.json/*.yml`" form would never pass — this spec, prior specs, and any migration changelog entry legitimately reference the old name.
 
 ---
 
