@@ -14,6 +14,14 @@ SwitchBot smart home CLI — control devices, run scenes, stream events, and plu
 
 ---
 
+**Human** — start with [Quick start](#quick-start): colored tables, error hints, shell completion, `switchbot doctor`.  
+**Script** — start with [Global options](#global-options): `--json`, `--format tsv/yaml/id`, `--fields`, stable exit codes, audit log.  
+**Agent** — start with [`docs/agent-guide.md`](./docs/agent-guide.md): `mcp serve`, `schema export`, `plan run`, destructive-command guards.
+
+Every surface shares the same catalog, cache, and HMAC client.
+
+---
+
 ## Installation
 
 ```bash
