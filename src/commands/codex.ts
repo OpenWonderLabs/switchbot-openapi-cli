@@ -68,6 +68,9 @@ function registerCodexDoctorSubcommand(codex: Command): void {
         printDoctorChecks(checks, Boolean(opts.quiet));
         console.log('');
         console.log(`${summary.ok} ok, ${summary.warn} warn, ${summary.fail} fail`);
+        if (hasFail || summary.warn > 0) {
+          console.log(chalk.dim('Run: switchbot codex repair'));
+        }
       }
       process.exit(hasFail ? 1 : 0);
     });
