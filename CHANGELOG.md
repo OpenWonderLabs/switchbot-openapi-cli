@@ -9,6 +9,8 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [3.7.2]
+
 ### Added
 
 - **Monorepo absorption** — `@switchbot/codex-plugin` (formerly `@cly-org/switchbot-codex-plugin`) now ships from this repository under `packages/codex-plugin/`. A single GitHub Release publishes any package whose version was bumped since the previous release.
@@ -20,7 +22,7 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Plugin package name** — `@cly-org/switchbot-codex-plugin` → `@switchbot/codex-plugin`. The old name was verification-stage with no published users; no `npm deprecate` notice is necessary.
 - **Codex plugin `onInstall` hook** — now best-effort: it always exits 0 so a missing or broken SwitchBot CLI never rolls back the Codex plugin install. When the CLI is present it runs `switchbot codex setup --yes` to fast-path setup; when absent it prints a hint pointing at `npx @switchbot/openapi-cli codex setup`.
 - **Plugin version reset to `0.1.0`** for first publish under the new scope.
-- **Publish workflow** — `.github/workflows/publish.yml` gains a `detect-versions` step and per-package guards so plugin failures (or unbumped versions) do not block CLI promotion. Plugin steps run `continue-on-error: true` and surface failures as workflow annotations.
+- **Publish workflow** — `.github/workflows/publish.yml` gains a `detect-versions` step and per-package guards so plugin failures (or unbumped versions) do not block CLI promotion. Plugin steps run `continue-on-error: true` and surface failures as workflow annotations. `openclaw-skill` removed from publish scope (distributed via companion repo).
 - **Smoke workflow** — `.github/workflows/npm-published-smoke.yml` is now a per-package matrix. CLI keeps offline + live smoke; plugins get tarball-shape checks (concrete peerDep, executable bin entries) without live smoke.
 - **CI** — `policy-schema-sync` cross-repo job removed; the skill consumer is now in this monorepo.
 
@@ -28,6 +30,8 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **Codex `register-plugin` on Windows / npm scoped install dirs** — `codex plugin marketplace add` from `<npm-root>/@switchbot/codex-plugin` failed with `--ref is only supported for git marketplace sources` because codex CLI 0.133.0 misparses local paths containing `@` as `owner/repo@ref`. Registration now bridges via a junction at `%LOCALAPPDATA%\switchbot\codex-plugin-marketplace` (fallback `~/.switchbot/codex-plugin-marketplace`); divergent junctions are repaired in place, and any other state at the alias path surfaces an error instead of silently registering the broken `@` path.
 - **Codex plugin marketplace metadata** — `packages/codex-plugin/.agents/plugins/marketplace.json` was missing from the published tarball (file untracked + omitted from `files`). Now committed and listed under `files`, with the local-source path corrected to `../../` so `codex plugin add switchbot@codex-plugin` resolves the plugin manifest at `packageRoot/.codex-plugin/plugin.json`.
+- **Codex `plugin add` ACCESS_DENIED on Windows** — `codex plugin add` attempts to back up an existing installation before replacing it; on junction-backed paths the backup `rename()` fails with `os error 5`. Registration now issues a best-effort `codex plugin remove` before `codex plugin add` to skip the backup path entirely.
+- **OAuth callback port leak** — when `open()` threw (e.g. no default browser), the callback HTTP server stayed bound until the 120 s timeout, causing `EADDRINUSE` on immediate retry. The server is now shut down in the `open()` catch block.
 
 ### Removed
 
