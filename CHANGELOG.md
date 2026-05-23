@@ -26,7 +26,7 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- **Codex `register-plugin` on Windows / npm scoped install dirs** — `codex plugin marketplace add` from `<npm-root>/@switchbot/codex-plugin` failed with `--ref is only supported for git marketplace sources` because codex CLI 0.133.0 misparses local paths containing `@` as `owner/repo@ref`. Registration now bridges via a junction (Windows) or symlink (POSIX) in `os.tmpdir()` and falls back to the original path if the link cannot be created.
+- **Codex `register-plugin` on Windows / npm scoped install dirs** — `codex plugin marketplace add` from `<npm-root>/@switchbot/codex-plugin` failed with `--ref is only supported for git marketplace sources` because codex CLI 0.133.0 misparses local paths containing `@` as `owner/repo@ref`. Registration now bridges via a junction at `%LOCALAPPDATA%\switchbot\codex-plugin-marketplace` (fallback `~/.switchbot/codex-plugin-marketplace`); divergent junctions are repaired in place, and any other state at the alias path surfaces an error instead of silently registering the broken `@` path.
 - **Codex plugin marketplace metadata** — `packages/codex-plugin/.agents/plugins/marketplace.json` was missing from the published tarball (file untracked + omitted from `files`). Now committed and listed under `files`, with the local-source path corrected to `../../` so `codex plugin add switchbot@codex-plugin` resolves the plugin manifest at `packageRoot/.codex-plugin/plugin.json`.
 
 ### Removed
