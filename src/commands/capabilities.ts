@@ -217,6 +217,7 @@ export const COMMAND_META: Record<string, CommandMeta> = {
   'reset': ACTION_LOCAL,
   'codex doctor': READ_LOCAL,
   'codex repair': ACTION_LOCAL,
+  'codex setup': ACTION_LOCAL,
   'uninstall': ACTION_LOCAL,
   'upgrade-check': READ_REMOTE,
   'webhook setup': ACTION_REMOTE,
