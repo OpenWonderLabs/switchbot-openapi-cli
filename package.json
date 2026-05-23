@@ -51,6 +51,7 @@
     "prepare": "node scripts/install-git-hooks.mjs",
     "start": "node dist/index.js",
     "smoke:pack-install": "node scripts/smoke-pack-install.mjs",
+    "smoke:codex-pack-install": "node scripts/smoke-codex-pack-install.mjs",
     "test": "vitest run",
     "test:workspaces": "npm test --workspaces --if-present",
     "test:all": "npm test && npm run test:workspaces",
@@ -60,7 +61,7 @@
     "verify:pre-commit": "npm run build && npm test -- tests/version.test.ts",
     "verify:pre-push": "npm run build && npm test -- tests/version.test.ts && npm run smoke:pack-install",
     "verify:release": "node scripts/verify-release.mjs",
-    "prepublishOnly": "npm test && npm run build && npm run smoke:pack-install"
+    "prepublishOnly": "npm test && npm run build && npm run smoke:pack-install && npm run smoke:codex-pack-install"
   },
   "dependencies": {
     "axios": "^1.7.9",
