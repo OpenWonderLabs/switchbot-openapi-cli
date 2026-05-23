@@ -2,7 +2,7 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, basename, join } from 'node:path';
-import { existsSync, readFileSync, realpathSync, symlinkSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, symlinkSync, lstatSync, unlinkSync, mkdirSync } from 'node:fs';
 import os from 'node:os';
 import { checkCli as defaultCheckCli } from '../setup/check-cli.js';
 import { checkCredentials as defaultCheckCredentials } from '../setup/check-credentials.js';
@@ -10,6 +10,7 @@ import { makeRunAuth } from './auth.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const defaultPackageRoot = resolve(__dirname, '..');
+const defaultFsDeps = { lstatSync, realpathSync, symlinkSync, unlinkSync, mkdirSync };
 
 function defaultRunInherit(cmd, args) {
   return new Promise((resolveFn) => {
@@ -45,23 +46,40 @@ export function resolvePluginIdentifier(packageRoot) {
   return `${pluginName}@${marketplaceName}`;
 }
 
-export function resolveMarketplaceSourceRoot(packageRoot) {
+function computeAliasPath() {
+  const localAppData = process.env.LOCALAPPDATA;
+  if (localAppData) {
+    return join(localAppData, 'switchbot', 'codex-plugin-marketplace');
+  }
+  return join(os.homedir(), '.switchbot', 'codex-plugin-marketplace');
+}
+
+export function resolveMarketplaceSourceRoot(packageRoot, deps = defaultFsDeps) {
   if (process.platform !== 'win32' || !/^[A-Za-z]:[\\/].*[\\/]@[^\\/]+[\\/]/.test(packageRoot)) {
     return packageRoot;
   }
 
-  const aliasRoot = join(os.homedir(), 'switchbot');
-  try {
-    if (existsSync(aliasRoot)) {
-      const aliasReal = realpathSync(aliasRoot);
-      const packageReal = realpathSync(packageRoot);
-      return aliasReal.toLowerCase() === packageReal.toLowerCase() ? aliasRoot : packageRoot;
-    }
-    symlinkSync(packageRoot, aliasRoot, 'junction');
+  const aliasRoot = computeAliasPath();
+  deps.mkdirSync(dirname(aliasRoot), { recursive: true });
+
+  const stat = deps.lstatSync(aliasRoot, { throwIfNoEntry: false });
+  if (!stat) {
+    deps.symlinkSync(packageRoot, aliasRoot, 'junction');
     return aliasRoot;
-  } catch {
-    return packageRoot;
   }
+
+  if (stat.isSymbolicLink()) {
+    const aliasReal = deps.realpathSync(aliasRoot);
+    const packageReal = deps.realpathSync(packageRoot);
+    if (aliasReal.toLowerCase() === packageReal.toLowerCase()) {
+      return aliasRoot;
+    }
+    deps.unlinkSync(aliasRoot);
+    deps.symlinkSync(packageRoot, aliasRoot, 'junction');
+    return aliasRoot;
+  }
+
+  throw new Error(`alias path ${aliasRoot} exists and is not a junction; remove it manually and retry`);
 }
 
 function formatCodexFailure(step) {
