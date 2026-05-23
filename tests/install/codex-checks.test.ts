@@ -7,10 +7,19 @@ vi.mock('node:child_process', () => ({ spawnSync: spawnSyncMock }));
 
 const existsSyncMock = vi.hoisted(() => vi.fn());
 const readFileSyncMock = vi.hoisted(() => vi.fn());
+const realpathSyncMock = vi.hoisted(() => vi.fn());
+const symlinkSyncMock = vi.hoisted(() => vi.fn());
 vi.mock('node:fs', () => ({
-  default: { existsSync: existsSyncMock, readFileSync: readFileSyncMock },
+  default: {
+    existsSync: existsSyncMock,
+    readFileSync: readFileSyncMock,
+    realpathSync: realpathSyncMock,
+    symlinkSync: symlinkSyncMock,
+  },
   existsSync: existsSyncMock,
   readFileSync: readFileSyncMock,
+  realpathSync: realpathSyncMock,
+  symlinkSync: symlinkSyncMock,
 }));
 
 import {
@@ -18,6 +27,7 @@ import {
   checkCodexPluginNpm,
   checkCodexPluginRegistered,
   runCodexPluginRegistration,
+  resolveMarketplaceSourceRoot,
   resolvePluginId,
   registerCodexPlugin,
 } from '../../src/install/codex-checks.js';
@@ -30,6 +40,8 @@ beforeEach(() => {
   spawnSyncMock.mockReset();
   existsSyncMock.mockReset();
   readFileSyncMock.mockReset();
+  realpathSyncMock.mockReset();
+  symlinkSyncMock.mockReset();
 });
 
 describe('checkCodexCli', () => {
@@ -84,10 +96,19 @@ describe('checkCodexPluginRegistered', () => {
   it('returns ok when switchbot appears in codex plugin list', () => {
     spawnSyncMock
       .mockReturnValueOnce(makeSpawnResult(0, '/usr/local/bin/codex\n'))  // which codex
-      .mockReturnValueOnce(makeSpawnResult(0, 'switchbot@codex-plugin\n')); // codex plugin list
+      .mockReturnValueOnce(makeSpawnResult(0, 'switchbot@codex-plugin  installed, enabled  0.1.0\n')); // codex plugin list
     const result = checkCodexPluginRegistered();
     expect(result.status).toBe('ok');
     expect((result.detail as Record<string, unknown>).pluginName).toContain('switchbot');
+  });
+
+  it('returns warn when switchbot is listed but not installed', () => {
+    spawnSyncMock
+      .mockReturnValueOnce(makeSpawnResult(0, '/usr/local/bin/codex\n'))
+      .mockReturnValueOnce(makeSpawnResult(0, 'switchbot@codex-plugin  not installed  /tmp/switchbot\n'));
+    const result = checkCodexPluginRegistered();
+    expect(result.status).toBe('warn');
+    expect(String((result.detail as Record<string, unknown>).message)).toContain('not installed');
   });
 
   it('returns warn when switchbot is not in list', () => {
@@ -133,6 +154,7 @@ describe('runCodexPluginRegistration', () => {
     const result = runCodexPluginRegistration('/some/path', 'switchbot@pkg');
     expect(result.ok).toBe(false);
     expect(result.stderr).toBe('marketplace error');
+    expect(result.stage).toBe('marketplace-add');
   });
 
   it('returns failure when plugin add exits non-zero', () => {
@@ -142,6 +164,7 @@ describe('runCodexPluginRegistration', () => {
     const result = runCodexPluginRegistration('/some/path', 'switchbot@pkg');
     expect(result.ok).toBe(false);
     expect(result.stderr).toBe('plugin add error');
+    expect(result.stage).toBe('plugin-add');
   });
 });
 
@@ -177,7 +200,7 @@ describe('registerCodexPlugin (shared helper)', () => {
     const r = registerCodexPlugin();
     expect(r.ok).toBe(false);
     expect(r.pluginId).toBe('switchbot@codex-plugin');
-    expect(r.error).toMatch(/exit 1: marketplace add error/);
+    expect(r.error).toMatch(/marketplace-add exit 1: marketplace add error/);
     expect(r.exitCode).toBe(1);
   });
 });
@@ -189,15 +212,37 @@ describe('resolvePluginId', () => {
   });
 
   it('uses plugin.json name when available', () => {
-    existsSyncMock.mockReturnValue(true);
+    existsSyncMock.mockImplementation((p: string) => p.endsWith('plugin.json'));
     readFileSyncMock.mockReturnValue('{"name":"myplugin"}');
     expect(resolvePluginId('/some/path/codex-plugin')).toBe('myplugin@codex-plugin');
   });
 
+  it('uses marketplace.json name when available', () => {
+    existsSyncMock.mockImplementation((p: string) => p.endsWith('marketplace.json') || p.endsWith('plugin.json'));
+    readFileSyncMock.mockImplementation((p: string) => (
+      p.endsWith('marketplace.json') ? '{"name":"switchbot-market"}' : '{"name":"myplugin"}'
+    ));
+    expect(resolvePluginId('/some/path/package-root')).toBe('myplugin@switchbot-market');
+  });
+
   it('falls back to default when plugin.json has no name', () => {
-    existsSyncMock.mockReturnValue(true);
+    existsSyncMock.mockImplementation((p: string) => p.endsWith('plugin.json'));
     readFileSyncMock.mockReturnValue('{}');
     expect(resolvePluginId('/some/path/codex-plugin')).toBe('switchbot@codex-plugin');
+  });
+});
+
+describe('resolveMarketplaceSourceRoot', () => {
+  it('uses a stable Windows alias for scoped npm package roots', () => {
+    const root = 'C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\@switchbot\\codex-plugin';
+    existsSyncMock.mockReturnValue(false);
+    const resolved = resolveMarketplaceSourceRoot(root);
+    if (process.platform === 'win32') {
+      expect(resolved).toMatch(/switchbot$/);
+      expect(symlinkSyncMock).toHaveBeenCalledWith(root, expect.stringMatching(/switchbot$/), 'junction');
+    } else {
+      expect(resolved).toBe(root);
+    }
   });
 });
 

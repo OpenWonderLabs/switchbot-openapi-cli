@@ -2,7 +2,8 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, basename, join } from 'node:path';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, symlinkSync } from 'node:fs';
+import os from 'node:os';
 import { checkCli as defaultCheckCli } from '../setup/check-cli.js';
 import { checkCredentials as defaultCheckCredentials } from '../setup/check-credentials.js';
 import { makeRunAuth } from './auth.js';
@@ -19,17 +20,48 @@ function defaultRunInherit(cmd, args) {
 }
 
 export function resolvePluginIdentifier(packageRoot) {
+  let marketplaceName = basename(packageRoot);
+  const marketplacePath = join(packageRoot, '.agents', 'plugins', 'marketplace.json');
+  if (existsSync(marketplacePath)) {
+    try {
+      const marketplace = JSON.parse(readFileSync(marketplacePath, 'utf8'));
+      if (marketplace?.name) {
+        marketplaceName = marketplace.name;
+      }
+    } catch {}
+  }
+
+  let pluginName = 'switchbot';
   const pluginManifestPath = join(packageRoot, '.codex-plugin', 'plugin.json');
   if (existsSync(pluginManifestPath)) {
     try {
       const pluginManifest = JSON.parse(readFileSync(pluginManifestPath, 'utf8'));
       if (pluginManifest?.name) {
-        return `${pluginManifest.name}@${basename(packageRoot)}`;
+        pluginName = pluginManifest.name;
       }
     } catch {}
   }
 
-  return `switchbot@${basename(packageRoot)}`;
+  return `${pluginName}@${marketplaceName}`;
+}
+
+export function resolveMarketplaceSourceRoot(packageRoot) {
+  if (process.platform !== 'win32' || !/^[A-Za-z]:[\\/].*[\\/]@[^\\/]+[\\/]/.test(packageRoot)) {
+    return packageRoot;
+  }
+
+  const aliasRoot = join(os.homedir(), 'switchbot');
+  try {
+    if (existsSync(aliasRoot)) {
+      const aliasReal = realpathSync(aliasRoot);
+      const packageReal = realpathSync(packageRoot);
+      return aliasReal.toLowerCase() === packageReal.toLowerCase() ? aliasRoot : packageRoot;
+    }
+    symlinkSync(packageRoot, aliasRoot, 'junction');
+    return aliasRoot;
+  } catch {
+    return packageRoot;
+  }
 }
 
 function formatCodexFailure(step) {
@@ -58,8 +90,9 @@ export function makeInstall({ checkCli, runInherit, packageRoot, runAuth }) {
       process.stderr.write(`[switchbot-codex] CLI ${cliCheck.version} detected.\n`);
     }
 
-    process.stderr.write(`[switchbot-codex] Registering plugin at ${packageRoot}...\n`);
-    const marketplaceCode = await runInherit('codex', ['plugin', 'marketplace', 'add', packageRoot]);
+    const marketplaceRoot = resolveMarketplaceSourceRoot(packageRoot);
+    process.stderr.write(`[switchbot-codex] Registering plugin at ${marketplaceRoot}...\n`);
+    const marketplaceCode = await runInherit('codex', ['plugin', 'marketplace', 'add', marketplaceRoot]);
     if (marketplaceCode !== 0) {
       if (marketplaceCode === 127) {
         process.stderr.write(`${formatCodexFailure('codex plugin marketplace add')}\n`);

@@ -75,6 +75,10 @@ jobs:
         if: steps.detect.outputs.cli_publish == 'true'
         run: npm run smoke:pack-install
 
+      - name: Smoke test packed Codex install path
+        if: steps.detect.outputs.cli_publish == 'true' || steps.detect.outputs.codex_publish == 'true'
+        run: npm run smoke:codex-pack-install
+
       - name: Verify codex-plugin tarball peerDep is a concrete range
         if: steps.detect.outputs.codex_publish == 'true'
         run: |

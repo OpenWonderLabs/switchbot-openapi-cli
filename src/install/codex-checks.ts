@@ -13,6 +13,7 @@ export interface RegistrationResult {
   ok: boolean;
   exitCode: number;
   stderr: string;
+  stage: 'marketplace-add' | 'plugin-add';
 }
 
 export interface RegisterCodexPluginResult {
@@ -33,16 +34,64 @@ function spawnStr(cmd: string, args: string[]): { status: number; stdout: string
   return { status: r.status ?? -1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
 }
 
-/** Single authoritative plugin ID resolver. Mirrors install.js:resolvePluginIdentifier. */
-export function resolvePluginId(packageRoot: string): string {
+function readJsonObject(filePath: string): Record<string, unknown> | null {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf-8')) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function resolveMarketplaceName(packageRoot: string): string {
+  const marketplacePath = path.join(packageRoot, '.agents', 'plugins', 'marketplace.json');
+  if (fs.existsSync(marketplacePath)) {
+    const marketplace = readJsonObject(marketplacePath);
+    if (typeof marketplace?.name === 'string' && marketplace.name) {
+      return marketplace.name;
+    }
+  }
+  return path.basename(packageRoot);
+}
+
+function resolvePluginName(packageRoot: string): string {
   const manifestPath = path.join(packageRoot, '.codex-plugin', 'plugin.json');
   if (fs.existsSync(manifestPath)) {
-    try {
-      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as { name?: string };
-      if (manifest.name) return `${manifest.name}@${path.basename(packageRoot)}`;
-    } catch { /* fall through */ }
+    const manifest = readJsonObject(manifestPath);
+    if (typeof manifest?.name === 'string' && manifest.name) {
+      return manifest.name;
+    }
   }
-  return `switchbot@${path.basename(packageRoot)}`;
+  return 'switchbot';
+}
+
+/**
+ * Codex 0.133.0 misclassifies Windows local paths with scoped npm segments
+ * like `...\node_modules\@switchbot\codex-plugin` as ref-bearing sources.
+ * Register through a stable junction without `@`, but keep plugin IDs based
+ * on the marketplace manifest name.
+ */
+export function resolveMarketplaceSourceRoot(packageRoot: string): string {
+  if (process.platform !== 'win32' || !/^[A-Za-z]:[\\/].*[\\/]@[^\\/]+[\\/]/.test(packageRoot)) {
+    return packageRoot;
+  }
+
+  const aliasRoot = path.join(os.homedir(), 'switchbot');
+  try {
+    if (fs.existsSync(aliasRoot)) {
+      const aliasReal = fs.realpathSync(aliasRoot);
+      const packageReal = fs.realpathSync(packageRoot);
+      return aliasReal.toLowerCase() === packageReal.toLowerCase() ? aliasRoot : packageRoot;
+    }
+    fs.symlinkSync(packageRoot, aliasRoot, 'junction');
+    return aliasRoot;
+  } catch {
+    return packageRoot;
+  }
+}
+
+/** Single authoritative plugin ID resolver. Mirrors install.js:resolvePluginIdentifier. */
+export function resolvePluginId(packageRoot: string): string {
+  return `${resolvePluginName(packageRoot)}@${resolveMarketplaceName(packageRoot)}`;
 }
 
 export function checkCodexCli(): Check {
@@ -137,49 +186,27 @@ export function checkCodexPluginRegistered(): Check {
       detail: { message: 'switchbot not in codex plugin list — run: npm install -g @switchbot/codex-plugin && switchbot install --agent codex' },
     };
   }
+  if (/switchbot@/i.test(pluginName) && (/\bnot installed\b/i.test(pluginName) || !/\binstalled\b/i.test(pluginName))) {
+    return {
+      name: 'codex-plugin-registered',
+      status: 'warn',
+      detail: {
+        pluginName,
+        message: 'switchbot appears in codex plugin list but is not installed — run: switchbot codex repair',
+      },
+    };
+  }
   return { name: 'codex-plugin-registered', status: 'ok', detail: { pluginName } };
 }
 
 export function runCodexPluginRegistration(packageRoot: string, pluginId: string): RegistrationResult {
-  return withSafeMarketplacePath(packageRoot, (safePath) => {
-    const mkt = spawnStr('codex', ['plugin', 'marketplace', 'add', safePath]);
-    if (mkt.status !== 0) {
-      return { ok: false, exitCode: mkt.status, stderr: mkt.stderr };
-    }
-    const add = spawnStr('codex', ['plugin', 'add', pluginId]);
-    return { ok: add.status === 0, exitCode: add.status, stderr: add.stderr };
-  });
-}
-
-/**
- * codex CLI <= 0.133.0 misparses local paths containing `@` (e.g. the
- * `@switchbot/codex-plugin` install dir under `npm root -g`) as `owner/repo@ref`
- * git refs, rejecting them with "--ref is only supported for git marketplace
- * sources". Bridge via a junction (Windows) or symlink (POSIX) at a path
- * without `@`. The link is removed after the codex commands finish.
- *
- * If the link cannot be created (no fs perms, mocked test env), the original
- * packageRoot is passed through unchanged so a future codex release that fixes
- * the upstream parser still works.
- */
-function withSafeMarketplacePath<T>(packageRoot: string, fn: (safePath: string) => T): T {
-  if (!packageRoot.includes('@')) return fn(packageRoot);
-  const safePath = path.join(os.tmpdir(), `switchbot-codex-marketplace-${process.pid}`);
-  let linkCreated = false;
-  try {
-    try { fs.unlinkSync(safePath); } catch { /* ENOENT or stale link */ }
-    fs.symlinkSync(packageRoot, safePath, process.platform === 'win32' ? 'junction' : 'dir');
-    linkCreated = true;
-  } catch {
-    return fn(packageRoot);
+  const marketplaceRoot = resolveMarketplaceSourceRoot(packageRoot);
+  const mkt = spawnStr('codex', ['plugin', 'marketplace', 'add', marketplaceRoot]);
+  if (mkt.status !== 0) {
+    return { ok: false, exitCode: mkt.status, stderr: mkt.stderr, stage: 'marketplace-add' };
   }
-  try {
-    return fn(safePath);
-  } finally {
-    if (linkCreated) {
-      try { fs.unlinkSync(safePath); } catch { /* swallow */ }
-    }
-  }
+  const add = spawnStr('codex', ['plugin', 'add', pluginId]);
+  return { ok: add.status === 0, exitCode: add.status, stderr: add.stderr, stage: 'plugin-add' };
 }
 
 export function resolveCodexPackageRoot(): { ok: true; packageRoot: string } | { ok: false; error: string } {
@@ -210,7 +237,7 @@ export function registerCodexPlugin(): RegisterCodexPluginResult {
       ok: false,
       pluginId,
       packageRoot: root.packageRoot,
-      error: `exit ${r.exitCode}: ${r.stderr}`,
+      error: `${r.stage} exit ${r.exitCode}: ${r.stderr}`,
       exitCode: r.exitCode,
       stderr: r.stderr,
     };
