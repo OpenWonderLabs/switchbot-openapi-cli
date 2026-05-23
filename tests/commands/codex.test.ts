@@ -23,6 +23,7 @@ vi.mock('../../src/install/codex-checks.js', async (importOriginal) => {
     checkCodexPluginNpm: checkCodexPluginNpmMock,
     checkCodexPluginRegistered: checkCodexPluginRegisteredMock,
     registerCodexPlugin: registerCodexPluginMock,
+    registerCodexPluginGit: registerCodexPluginMock,
   };
 });
 

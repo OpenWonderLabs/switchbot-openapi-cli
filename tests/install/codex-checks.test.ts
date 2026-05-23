@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { stepRegisterCodexPlugin } from '../../src/install/default-steps.js';
 import type { InstallContext } from '../../src/install/default-steps.js';
 
@@ -36,9 +36,11 @@ import {
   checkCodexPluginNpm,
   checkCodexPluginRegistered,
   runCodexPluginRegistration,
+  runCodexPluginRegistrationGit,
   resolveMarketplaceSourceRoot,
   resolvePluginId,
   registerCodexPlugin,
+  registerCodexPluginGit,
 } from '../../src/install/codex-checks.js';
 
 function makeSpawnResult(status: number, stdout: string, stderr = ''): ReturnType<typeof spawnSyncMock> {
@@ -301,9 +303,138 @@ describe('resolveMarketplaceSourceRoot', () => {
   it('throws when the alias path is a real directory', () => {
     if (process.platform !== 'win32') return;
     lstatSyncMock.mockReturnValue(makeStat(false));
-    expect(() => resolveMarketplaceSourceRoot(SCOPED_ROOT)).toThrow(/exists and is not a junction/);
+    expect(() => resolveMarketplaceSourceRoot(SCOPED_ROOT)).toThrow(/not a.*junction/i);
     expect(unlinkSyncMock).not.toHaveBeenCalled();
     expect(symlinkSyncMock).not.toHaveBeenCalled();
+  });
+});
+
+// Codex misclassifies local paths containing `@`-scoped npm segments on all
+// platforms, not just Windows. The following tests verify that Linux paths like
+// `/home/user/.npm-global/lib/node_modules/@switchbot/codex-plugin` also get
+// bridged through an alias symlink so the registered path contains no `@`.
+describe('resolveMarketplaceSourceRoot — Linux @-scoped path handling', () => {
+  const LINUX_SCOPED_ROOT = '/home/user/.npm-global/lib/node_modules/@switchbot/codex-plugin';
+  const LINUX_PLAIN_ROOT  = '/home/user/.npm-global/lib/node_modules/switchbot-plugin';
+
+  const savedPlatform = process.platform;
+  function makeStat(isSymlink: boolean) {
+    return { isSymbolicLink: () => isSymlink } as unknown as ReturnType<typeof lstatSyncMock>;
+  }
+
+  beforeEach(() => {
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+  });
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', { value: savedPlatform, configurable: true });
+  });
+
+  it('returns plain Linux path unchanged (no @-scoped segment)', () => {
+    const result = resolveMarketplaceSourceRoot(LINUX_PLAIN_ROOT);
+    expect(result).toBe(LINUX_PLAIN_ROOT);
+    expect(symlinkSyncMock).not.toHaveBeenCalled();
+  });
+
+  it('creates a symlink when alias is missing', () => {
+    lstatSyncMock.mockReturnValue(null);
+    const result = resolveMarketplaceSourceRoot(LINUX_SCOPED_ROOT);
+    expect(mkdirSyncMock).toHaveBeenCalledWith(expect.stringMatching(/switchbot$/), { recursive: true });
+    expect(symlinkSyncMock).toHaveBeenCalledWith(
+      LINUX_SCOPED_ROOT,
+      expect.stringMatching(/codex-plugin-marketplace$/),
+      'dir',
+    );
+    expect(unlinkSyncMock).not.toHaveBeenCalled();
+    expect(result).toMatch(/codex-plugin-marketplace$/);
+    expect(result).not.toContain('@');
+  });
+
+  it('reuses an existing symlink pointing to current packageRoot', () => {
+    lstatSyncMock.mockReturnValue(makeStat(true));
+    realpathSyncMock
+      .mockReturnValueOnce(LINUX_SCOPED_ROOT)
+      .mockReturnValueOnce(LINUX_SCOPED_ROOT);
+    const result = resolveMarketplaceSourceRoot(LINUX_SCOPED_ROOT);
+    expect(unlinkSyncMock).not.toHaveBeenCalled();
+    expect(symlinkSyncMock).not.toHaveBeenCalled();
+    expect(result).toMatch(/codex-plugin-marketplace$/);
+  });
+
+  it('repairs a stale symlink pointing elsewhere', () => {
+    lstatSyncMock.mockReturnValue(makeStat(true));
+    realpathSyncMock
+      .mockReturnValueOnce('/old/path/@switchbot/codex-plugin')
+      .mockReturnValueOnce(LINUX_SCOPED_ROOT);
+    const result = resolveMarketplaceSourceRoot(LINUX_SCOPED_ROOT);
+    expect(unlinkSyncMock).toHaveBeenCalledWith(expect.stringMatching(/codex-plugin-marketplace$/));
+    expect(symlinkSyncMock).toHaveBeenCalledWith(
+      LINUX_SCOPED_ROOT,
+      expect.stringMatching(/codex-plugin-marketplace$/),
+      'dir',
+    );
+    expect(result).toMatch(/codex-plugin-marketplace$/);
+  });
+
+  it('throws when alias path is a real directory (not a symlink)', () => {
+    lstatSyncMock.mockReturnValue(makeStat(false));
+    expect(() => resolveMarketplaceSourceRoot(LINUX_SCOPED_ROOT)).toThrow(/not a.*symlink/i);
+    expect(unlinkSyncMock).not.toHaveBeenCalled();
+    expect(symlinkSyncMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('runCodexPluginRegistrationGit', () => {
+  it('returns ok when marketplace add and plugin add both succeed', () => {
+    spawnSyncMock
+      .mockReturnValueOnce(makeSpawnResult(0, ''))  // marketplace add (git)
+      .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (pre-clean)
+      .mockReturnValueOnce(makeSpawnResult(0, '')); // plugin add
+    const r = runCodexPluginRegistrationGit('switchbot@codex-plugin');
+    expect(r.ok).toBe(true);
+    expect(r.exitCode).toBe(0);
+  });
+
+  it('returns failure when marketplace add exits non-zero', () => {
+    spawnSyncMock.mockReturnValueOnce(makeSpawnResult(1, '', 'git clone failed'));
+    const r = runCodexPluginRegistrationGit('switchbot@codex-plugin');
+    expect(r.ok).toBe(false);
+    expect(r.stderr).toBe('git clone failed');
+    expect(r.stage).toBe('marketplace-add');
+  });
+
+  it('returns failure when plugin add exits non-zero', () => {
+    spawnSyncMock
+      .mockReturnValueOnce(makeSpawnResult(0, ''))  // marketplace add
+      .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove
+      .mockReturnValueOnce(makeSpawnResult(1, '', 'plugin add error'));
+    const r = runCodexPluginRegistrationGit('switchbot@codex-plugin');
+    expect(r.ok).toBe(false);
+    expect(r.stderr).toBe('plugin add error');
+    expect(r.stage).toBe('plugin-add');
+  });
+});
+
+describe('registerCodexPluginGit', () => {
+  it('returns ok with fixed pluginId and empty packageRoot', () => {
+    spawnSyncMock
+      .mockReturnValueOnce(makeSpawnResult(0, ''))  // marketplace add
+      .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove
+      .mockReturnValueOnce(makeSpawnResult(0, '')); // plugin add
+    const r = registerCodexPluginGit();
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.pluginId).toBe('switchbot@codex-plugin');
+      expect(r.packageRoot).toBe('');
+    }
+  });
+
+  it('returns failure when marketplace add fails', () => {
+    spawnSyncMock.mockReturnValueOnce(makeSpawnResult(1, '', 'git error'));
+    const r = registerCodexPluginGit();
+    expect(r.ok).toBe(false);
+    expect(r.pluginId).toBe('switchbot@codex-plugin');
+    expect(r.error).toMatch(/marketplace-add exit 1: git error/);
+    expect(r.exitCode).toBe(1);
   });
 });
 
@@ -320,8 +451,7 @@ describe('stepRegisterCodexPlugin', () => {
 
   it('sets codexPluginRegistered and codexPluginIdentifier on success', async () => {
     spawnSyncMock
-      .mockReturnValueOnce({ status: 0, stdout: '/usr/local/lib/node_modules\n', stderr: '' }) // npm root -g
-      .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' })  // marketplace add
+      .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' })  // marketplace add (git)
       .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' })  // plugin remove (pre-clean)
       .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' }); // plugin add
     const step = stepRegisterCodexPlugin();
@@ -331,17 +461,9 @@ describe('stepRegisterCodexPlugin', () => {
     expect(ctx.codexPluginIdentifier).toBe('switchbot@codex-plugin');
   });
 
-  it('throws when npm root -g fails', async () => {
-    spawnSyncMock.mockReturnValueOnce({ status: 1, stdout: '', stderr: 'npm error' });
-    const step = stepRegisterCodexPlugin();
-    const ctx = makeCtx();
-    await expect(step.execute(ctx)).rejects.toThrow('npm root -g failed');
-  });
-
   it('throws when runCodexPluginRegistration fails', async () => {
     spawnSyncMock
-      .mockReturnValueOnce({ status: 0, stdout: '/usr/local/lib/node_modules\n', stderr: '' })
-      .mockReturnValueOnce({ status: 1, stdout: '', stderr: 'marketplace error' });
+      .mockReturnValueOnce({ status: 1, stdout: '', stderr: 'marketplace error' }); // marketplace add
     const step = stepRegisterCodexPlugin();
     const ctx = makeCtx();
     await expect(step.execute(ctx)).rejects.toThrow('Codex plugin registration failed');

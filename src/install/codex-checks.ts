@@ -79,31 +79,41 @@ function computeAliasPath(): string {
 }
 
 export function resolveMarketplaceSourceRoot(packageRoot: string): string {
-  if (process.platform !== 'win32' || !/^[A-Za-z]:[\\/].*[\\/]@[^\\/]+[\\/]/.test(packageRoot)) {
-    return packageRoot;
-  }
+  // Codex misclassifies local paths containing `@`-scoped npm segments
+  // (e.g. `…/node_modules/@switchbot/codex-plugin`) as ref-bearing git sources,
+  // causing `marketplace add` to fail with "--ref is only supported for git
+  // marketplace sources". Affects Windows and Linux/macOS alike. Bridge through
+  // a symlink/junction at a stable `@`-free location.
+  const needsAlias = process.platform === 'win32'
+    ? /^[A-Za-z]:[\\/].*[\\/]@[^\\/]+[\\/]/.test(packageRoot)
+    : /\/@[^/]+\//.test(packageRoot);
+
+  if (!needsAlias) return packageRoot;
 
   const aliasRoot = computeAliasPath();
   fs.mkdirSync(path.dirname(aliasRoot), { recursive: true });
 
+  const linkType = process.platform === 'win32' ? 'junction' : 'dir';
+
   const stat = fs.lstatSync(aliasRoot, { throwIfNoEntry: false });
   if (!stat) {
-    fs.symlinkSync(packageRoot, aliasRoot, 'junction');
+    fs.symlinkSync(packageRoot, aliasRoot, linkType);
     return aliasRoot;
   }
 
   if (stat.isSymbolicLink()) {
     const aliasReal = fs.realpathSync(aliasRoot);
     const packageReal = fs.realpathSync(packageRoot);
-    if (aliasReal.toLowerCase() === packageReal.toLowerCase()) {
-      return aliasRoot;
-    }
+    const pathsMatch = process.platform === 'win32'
+      ? aliasReal.toLowerCase() === packageReal.toLowerCase()
+      : aliasReal === packageReal;
+    if (pathsMatch) return aliasRoot;
     fs.unlinkSync(aliasRoot);
-    fs.symlinkSync(packageRoot, aliasRoot, 'junction');
+    fs.symlinkSync(packageRoot, aliasRoot, linkType);
     return aliasRoot;
   }
 
-  throw new Error(`alias path ${aliasRoot} exists and is not a junction; remove it manually and retry`);
+  throw new Error(`alias path ${aliasRoot} exists and is not a symlink/junction; remove it manually and retry`);
 }
 
 /** Single authoritative plugin ID resolver. Mirrors install.js:resolvePluginIdentifier. */
@@ -242,8 +252,7 @@ export function resolveCodexPackageRoot(): { ok: true; packageRoot: string } | {
 
 /**
  * 共享注册 helper：封装 resolveCodexPackageRoot → resolvePluginId → runCodexPluginRegistration。
- * `install --agent codex`、`codex repair`、`codex setup` 三处注册步骤都通过此函数执行，
- * 禁止再各自内联 `npm root -g` 或 pluginId 拼接。
+ * 保留作为 npm-local 路径注册的后备；新路径请用 registerCodexPluginGit()。
  */
 export function registerCodexPlugin(): RegisterCodexPluginResult {
   const root = resolveCodexPackageRoot();
@@ -263,4 +272,38 @@ export function registerCodexPlugin(): RegisterCodexPluginResult {
     };
   }
   return { ok: true, pluginId, packageRoot: root.packageRoot };
+}
+
+// ─── Git-based marketplace registration (Route B) ────────────────────────────
+
+export const CODEX_GIT_MARKETPLACE_REPO   = 'OpenWonderLabs/switchbot-openapi-cli';
+export const CODEX_GIT_MARKETPLACE_SPARSE = 'packages/codex-plugin';
+export const CODEX_GIT_MARKETPLACE_REF    = 'main';
+
+export function runCodexPluginRegistrationGit(pluginId: string): RegistrationResult {
+  const mkt = spawnStr('codex', [
+    'plugin', 'marketplace', 'add',
+    CODEX_GIT_MARKETPLACE_REPO,
+    '--sparse', CODEX_GIT_MARKETPLACE_SPARSE,
+    '--ref',    CODEX_GIT_MARKETPLACE_REF,
+  ]);
+  if (mkt.status !== 0) {
+    return { ok: false, exitCode: mkt.status, stderr: mkt.stderr, stage: 'marketplace-add' };
+  }
+  spawnStr('codex', ['plugin', 'remove', pluginId]);
+  const add = spawnStr('codex', ['plugin', 'add', pluginId]);
+  return { ok: add.status === 0, exitCode: add.status, stderr: add.stderr, stage: 'plugin-add' };
+}
+
+export function registerCodexPluginGit(): RegisterCodexPluginResult {
+  const pluginId = 'switchbot@codex-plugin';
+  const r = runCodexPluginRegistrationGit(pluginId);
+  if (!r.ok) {
+    return {
+      ok: false, pluginId, packageRoot: '',
+      error: `${r.stage} exit ${r.exitCode}: ${r.stderr}`,
+      exitCode: r.exitCode, stderr: r.stderr,
+    };
+  }
+  return { ok: true, pluginId, packageRoot: '' };
 }

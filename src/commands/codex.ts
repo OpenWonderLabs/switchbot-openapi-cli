@@ -7,6 +7,7 @@ import {
   checkCodexPluginNpm,
   checkCodexPluginRegistered,
   registerCodexPlugin,
+  registerCodexPluginGit,
   resolvePluginId,
   resolveCodexPackageRoot,
   type Check,
@@ -156,7 +157,7 @@ function repairStepRemovePlugin(ctx: RepairContext): RepairOutcome {
 }
 
 function stepRegisterPluginShared(stepName: string, ctx: { codexPluginId?: string; packageRoot?: string | null }): StepOutcome {
-  const r = registerCodexPlugin();
+  const r = registerCodexPluginGit();
   if (!r.ok) {
     return { step: stepName, status: 'failed', message: r.error };
   }

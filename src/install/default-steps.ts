@@ -24,7 +24,7 @@ import {
 } from '../commands/policy.js';
 import { promptTokenAndSecret, readCredentialsFile } from '../commands/config.js';
 import { selectCredentialStore, type CredentialStore, type CredentialBundle } from '../credentials/keychain.js';
-import { registerCodexPlugin } from './codex-checks.js';
+import { registerCodexPlugin, registerCodexPluginGit } from './codex-checks.js';
 
 export type AgentName = 'claude-code' | 'cursor' | 'copilot' | 'codex' | 'none';
 
@@ -340,7 +340,7 @@ export function stepRegisterCodexPlugin(): InstallStep<InstallContext> {
     name: 'register-codex-plugin',
     description: 'Register @switchbot/codex-plugin with the Codex CLI (marketplace add + plugin add)',
     async execute(ctx) {
-      const r = registerCodexPlugin();
+      const r = registerCodexPluginGit();
       if (!r.ok) {
         throw new Error(`Codex plugin registration failed: ${r.error}`);
       }
