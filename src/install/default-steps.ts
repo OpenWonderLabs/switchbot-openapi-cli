@@ -24,8 +24,9 @@ import {
 } from '../commands/policy.js';
 import { promptTokenAndSecret, readCredentialsFile } from '../commands/config.js';
 import { selectCredentialStore, type CredentialStore, type CredentialBundle } from '../credentials/keychain.js';
+import { runCodexPluginRegistration, resolvePluginId } from './codex-checks.js';
 
-export type AgentName = 'claude-code' | 'cursor' | 'copilot' | 'none';
+export type AgentName = 'claude-code' | 'cursor' | 'copilot' | 'codex' | 'none';
 
 export interface InstallContext {
   /** Profile to write credentials under (default `default`). */
@@ -52,6 +53,8 @@ export interface InstallContext {
   skillRecipePrinted?: boolean;
   doctorOk?: boolean;
   doctorReport?: unknown;
+  codexPluginRegistered?: boolean;
+  codexPluginIdentifier?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -324,6 +327,47 @@ export function stepDoctorVerify(opts: { cliPath: string; spawner?: DoctorSpawne
     },
     undo() {
       return;
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Step 6: register @cly-org/switchbot-codex-plugin with the Codex CLI
+// ---------------------------------------------------------------------------
+
+export function stepRegisterCodexPlugin(): InstallStep<InstallContext> {
+  return {
+    name: 'register-codex-plugin',
+    description: 'Register @cly-org/switchbot-codex-plugin with the Codex CLI (marketplace add + plugin add)',
+    async execute(ctx) {
+      const npmRootResult = spawnSync(
+        'npm', ['root', '-g'],
+        { encoding: 'utf-8', shell: process.platform === 'win32', timeout: 10000 },
+      );
+      if ((npmRootResult.status ?? 1) !== 0) {
+        throw new Error(
+          `npm root -g failed (exit ${npmRootResult.status ?? 1}): ${npmRootResult.stderr ?? ''}`,
+        );
+      }
+      const npmRoot = (npmRootResult.stdout ?? '').trim();
+      const packageRoot = path.join(npmRoot, '@cly-org', 'switchbot-codex-plugin');
+      const pluginId = resolvePluginId(packageRoot);
+
+      const result = runCodexPluginRegistration(packageRoot, pluginId);
+      if (!result.ok) {
+        throw new Error(
+          `Codex plugin registration failed (exit ${result.exitCode}): ${result.stderr}`,
+        );
+      }
+      ctx.codexPluginRegistered = true;
+      ctx.codexPluginIdentifier = pluginId;
+    },
+    async undo(ctx) {
+      if (!ctx.codexPluginIdentifier) return;
+      spawnSync(
+        'codex', ['plugin', 'remove', ctx.codexPluginIdentifier],
+        { encoding: 'utf-8', shell: process.platform === 'win32', timeout: 10000 },
+      );
     },
   };
 }

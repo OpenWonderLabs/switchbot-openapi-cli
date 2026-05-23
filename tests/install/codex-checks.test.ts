@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { stepRegisterCodexPlugin } from '../../src/install/default-steps.js';
+import type { InstallContext } from '../../src/install/default-steps.js';
 
 const spawnSyncMock = vi.hoisted(() => vi.fn());
 vi.mock('node:child_process', () => ({ spawnSync: spawnSyncMock }));
@@ -152,5 +154,64 @@ describe('resolvePluginId', () => {
     existsSyncMock.mockReturnValue(true);
     readFileSyncMock.mockReturnValue('{}');
     expect(resolvePluginId('/some/path/switchbot-codex-plugin')).toBe('switchbot@switchbot-codex-plugin');
+  });
+});
+
+describe('stepRegisterCodexPlugin', () => {
+  function makeCtx(overrides: Partial<InstallContext> = {}): InstallContext {
+    return {
+      profile: 'default',
+      agent: 'codex',
+      policyPath: '/tmp/policy.yaml',
+      nonInteractive: true,
+      ...overrides,
+    };
+  }
+
+  it('sets codexPluginRegistered and codexPluginIdentifier on success', async () => {
+    spawnSyncMock
+      .mockReturnValueOnce({ status: 0, stdout: '/usr/local/lib/node_modules\n', stderr: '' }) // npm root -g
+      .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' })  // marketplace add
+      .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' }); // plugin add
+    const step = stepRegisterCodexPlugin();
+    const ctx = makeCtx();
+    await step.execute(ctx);
+    expect(ctx.codexPluginRegistered).toBe(true);
+    expect(ctx.codexPluginIdentifier).toBe('switchbot@switchbot-codex-plugin');
+  });
+
+  it('throws when npm root -g fails', async () => {
+    spawnSyncMock.mockReturnValueOnce({ status: 1, stdout: '', stderr: 'npm error' });
+    const step = stepRegisterCodexPlugin();
+    const ctx = makeCtx();
+    await expect(step.execute(ctx)).rejects.toThrow('npm root -g failed');
+  });
+
+  it('throws when runCodexPluginRegistration fails', async () => {
+    spawnSyncMock
+      .mockReturnValueOnce({ status: 0, stdout: '/usr/local/lib/node_modules\n', stderr: '' })
+      .mockReturnValueOnce({ status: 1, stdout: '', stderr: 'marketplace error' });
+    const step = stepRegisterCodexPlugin();
+    const ctx = makeCtx();
+    await expect(step.execute(ctx)).rejects.toThrow('Codex plugin registration failed');
+  });
+
+  it('undo calls codex plugin remove when codexPluginIdentifier is set', async () => {
+    spawnSyncMock.mockReturnValueOnce({ status: 0, stdout: '', stderr: '' });
+    const step = stepRegisterCodexPlugin();
+    const ctx = makeCtx({ codexPluginIdentifier: 'switchbot@switchbot-codex-plugin' });
+    await step.undo(ctx);
+    expect(spawnSyncMock).toHaveBeenCalledWith(
+      'codex',
+      ['plugin', 'remove', 'switchbot@switchbot-codex-plugin'],
+      expect.objectContaining({ encoding: 'utf-8' }),
+    );
+  });
+
+  it('undo is a no-op when codexPluginIdentifier is not set', async () => {
+    const step = stepRegisterCodexPlugin();
+    const ctx = makeCtx();
+    await step.undo(ctx);
+    expect(spawnSyncMock).not.toHaveBeenCalled();
   });
 });
