@@ -12,6 +12,8 @@ export interface CallbackHandle {
   port: number;
   /** Resolves with the OAuth code once the browser redirects here. */
   wait(): Promise<CallbackResult>;
+  /** Immediately close the server and release the port. */
+  close(): void;
 }
 
 function successHtml(): string {
@@ -56,6 +58,16 @@ export async function bindCallbackServer(
   });
 
   let finished = false;
+  let timer!: ReturnType<typeof setTimeout>;
+
+  const shutdown = (err: Error) => {
+    if (finished) return;
+    finished = true;
+    clearTimeout(timer);
+    server.closeAllConnections();
+    server.close();
+    rejectResult(err);
+  };
 
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? '/', `http://127.0.0.1:${port}`);
@@ -117,13 +129,9 @@ export async function bindCallbackServer(
     });
   });
 
-  const timer = setTimeout(() => {
-    if (finished) return;
-    finished = true;
-    server.closeAllConnections();
-    server.close();
-    rejectResult(new Error('Login timed out. Please run `switchbot auth login` again.'));
+  timer = setTimeout(() => {
+    shutdown(new Error('Login timed out. Please run `switchbot auth login` again.'));
   }, timeoutMs);
 
-  return { port: actualPort, wait: () => resultPromise };
+  return { port: actualPort, wait: () => resultPromise, close: () => shutdown(new Error('Login cancelled')) };
 }

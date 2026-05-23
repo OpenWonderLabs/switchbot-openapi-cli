@@ -30,7 +30,7 @@ export async function browserLogin(options: BrowserLoginOptions = {}): Promise<C
   } = options;
 
   const state = generateState();
-  const { port, wait } = await bindCallbackServer(state, timeoutMs);
+  const { port, wait, close } = await bindCallbackServer(state, timeoutMs);
   const redirectUri = `http://127.0.0.1:${port}/callback`;
   const loginUrl = buildLoginUrl({ redirectUri, state });
 
@@ -38,7 +38,12 @@ export async function browserLogin(options: BrowserLoginOptions = {}): Promise<C
     log(`Open this URL in your browser to sign in:\n\n  ${loginUrl}\n`);
   } else {
     log('Opening SwitchBot login page in your browser…');
-    await open(loginUrl);
+    try {
+      await open(loginUrl);
+    } catch (err) {
+      close();
+      throw err;
+    }
   }
 
   log('Waiting for browser login to complete…');
