@@ -41,7 +41,7 @@ Differs from `repair` in that it skips `remove-plugin` and adds `install-switchb
 | `install-switchbot-cli` | yes | `npm list -g --json --depth=0 @switchbot/openapi-cli` → install if absent |
 | `register-plugin` | no | `resolveCodexPackageRoot` + `runCodexPluginRegistration` (marketplace add + plugin add) |
 | `auth` | yes | Check credentials; spawn CLI auth login if missing (non-interactive under `--yes`) |
-| `doctor-verify` | no | `checkCodexCli() + checkCodexPluginNpm() + checkCodexPluginRegistered()` only |
+| `doctor-verify` | no | `runDoctorChecks(['node','path','credentials','mcp'])` + `checkCodexCli()` + `checkCodexPluginNpm()` + `checkCodexPluginRegistered()` (4 base + 3 Codex = 7 checks) |
 
 ### `--skip` contract
 
@@ -76,18 +76,20 @@ npm list -g --json --depth=0 @switchbot/openapi-cli
 | Credentials present | `ok` | `credentials present` |
 | Missing + `--yes` + `--json` | `failed` | `outcome.error = { reason: 'credentials-missing', hint: 'run: switchbot auth login' }` |
 | Missing + `--yes` + text | `failed` | `✗ auth  credentials missing — run: switchbot auth login` |
-| Missing + interactive | spawn `process.execPath [cliPath, '--profile', profile, 'auth', 'login']`; non-zero → `failed` |
+| Missing + interactive | spawn `process.execPath [cliPath, ...(profile !== 'default' ? ['--profile', profile] : []), ...(configPath ? ['--config', configPath] : []), 'auth', 'login']`; non-zero → `failed` |
 
-Auth always spawns via `process.execPath` + known `cliPath` to inherit the correct binary and `--profile`. Never via bare `switchbot` on PATH.
+`profile` 与 `configPath` 都来自当前命令上下文（全局 `--profile` / `--config`）；与 `codex repair re-auth` 复用同一个 `buildAuthLoginArgv` 助手，A1 / B4 修订只需改一处。
+
+Auth always spawns via `process.execPath` + known `cliPath` to inherit the correct binary and `--profile` / `--config`. Never via bare `switchbot` on PATH.
 
 ### `doctor-verify` scope
 
-Runs exactly:
-- `checkCodexCli()`
-- `checkCodexPluginNpm()`
-- `checkCodexPluginRegistered()`
+Runs (matches `codex repair doctor-verify` — same semantics across both commands):
 
-Does **not** run `runDoctorChecks(['node', 'path', 'credentials', 'mcp'])`. Those check general CLI health, not Codex integration health.
+- `runDoctorChecks(['node', 'path', 'credentials', 'mcp'])` → 4 base checks
+- `checkCodexCli()` + `checkCodexPluginNpm()` + `checkCodexPluginRegistered()` → 3 Codex checks
+
+**Total: 7 checks.** Codex integration health depends on CLI base health (PATH, credentials, MCP supervisor); a green `register-plugin` step is meaningless if any base check is red, so both `codex setup` and `codex repair` confirm the full picture before declaring success.
 
 ### Exit codes
 
@@ -104,6 +106,17 @@ Does **not** run `runDoctorChecks(['node', 'path', 'credentials', 'mcp'])`. Thos
 - `--skip <names>` — Comma-separated; only skippable steps allowed
 - `--dry-run` (global) — Print step list with skip annotations, no execution
 - `--json` (global) — Emit `{ ok, preflightFailed, outcomes }` to stdout
+
+### 与 `switchbot install --agent codex` 的关系
+
+`install --agent codex` 与 `codex setup` 是同一栈的两层，通过同一个共享 helper 协作：
+
+| 命令 | 定位 | 前置条件 | 行为 |
+|---|---|---|---|
+| `switchbot install --agent codex` | 底层 register-only | 用户已自行 `npm install -g @cly-org/switchbot-codex-plugin` | 仅做 marketplace add + plugin add；npm 包缺失则 preflight `fail`。 |
+| `switchbot codex setup` | 一键 bootstrap | 仅需 Codex CLI 已安装 | 自动 `npm install -g @switchbot/openapi-cli`（若缺）+ 调用相同的注册 helper + auth + Codex 专属 doctor。 |
+
+**实现共享：** 三处注册步骤（`install --agent codex` 的 `stepRegisterCodexPlugin`、`codex repair` 的 `repairStepRegisterPlugin`、`codex setup` 的 `register-plugin`）都**必须**调用 `src/install/codex-checks.ts` 导出的 `registerCodexPlugin()` helper，禁止各自再内联 `npm root -g` 解析、pluginId 拼接或 marketplace/plugin add 调用顺序。
 
 ---
 
@@ -199,7 +212,9 @@ switchbot codex setup
 
 ## Component 4: `onInstall` hook hardening
 
-**File:** `packages/codex-plugin/bin/auth.js` (or `bin/install.js`, whichever is the current hook entry)
+**File:** `packages/codex-plugin/bin/auth.js`
+
+> Verified against `packages/codex-plugin/.codex-plugin/hooks.json` — `onInstall.args = ["../bin/auth.js"]`. Pinned to this path; no fallback to `install.js`.
 
 ### Current behavior
 
@@ -246,7 +261,7 @@ A non-zero exit from `onInstall` causes Codex to roll back the entire plugin ins
 | switchbot-cli | `src/commands/codex.ts` | Add `registerCodexSetupSubcommand` + register in `registerCodexCommand` |
 | openclaw-switchbot-skill | `packages/codex-plugin/AGENTS.md` | Add `## Setup` section |
 | openclaw-switchbot-skill | `packages/codex-plugin/README.md` | Add bootstrap prompt section |
-| openclaw-switchbot-skill | `packages/codex-plugin/bin/auth.js` (or `install.js`) | Harden onInstall hook |
+| openclaw-switchbot-skill | `packages/codex-plugin/bin/auth.js` | Harden onInstall hook |
 
 ---
 

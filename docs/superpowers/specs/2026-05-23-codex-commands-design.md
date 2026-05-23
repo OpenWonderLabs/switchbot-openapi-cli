@@ -89,17 +89,21 @@ export function stepRegisterCodexPlugin(): InstallStep<InstallContext> {
     name: 'register-codex-plugin',
     description: 'Register @cly-org/switchbot-codex-plugin with the Codex CLI (marketplace add + plugin add)',
     async execute(ctx) {
-      // 1. npm root -g → npmRoot; packageRoot = join(npmRoot, '@cly-org', 'switchbot-codex-plugin')
-      // 2. pluginId = resolvePluginId(packageRoot)   ← shared function from codex-checks.ts
-      // 3. runCodexPluginRegistration(packageRoot, pluginId)  ← throws if !ok
-      // 4. ctx.codexPluginRegistered = true; ctx.codexPluginIdentifier = pluginId
+      const result = await registerCodexPlugin();   // 共享 helper，封装 4 步：npm root -g → packageRoot → resolvePluginId → runCodexPluginRegistration
+      if (!result.ok) throw new Error(result.error);
+      ctx.codexPluginRegistered = true;
+      ctx.codexPluginIdentifier = result.pluginId;
     },
     async undo(ctx) {
-      // best-effort: codex plugin remove <ctx.codexPluginIdentifier>
+      if (ctx.codexPluginIdentifier) {
+        spawnSync('codex', ['plugin', 'remove', ctx.codexPluginIdentifier]);
+      }
     },
   };
 }
 ```
+
+> 本方法体不允许直接调用 `npm root -g` 或 `runCodexPluginRegistration`；统一通过 `registerCodexPlugin()`（见 `src/install/codex-checks.ts`）。同一个 helper 也被 `codex repair` 与 `codex setup` 调用，三处共享单一实现。
 
 **`resolvePluginId(packageRoot): string` — single authoritative implementation**
 
@@ -134,6 +138,8 @@ codexPluginIdentifier?: string;   // e.g. 'switchbot@switchbot-codex-plugin'
 ### `--dry-run` / `--json` / rollback
 
 All inherited from the existing `runInstall` framework — no changes required.
+
+> **关系：** `switchbot install --agent codex` 是底层 register-only 命令；面向终端用户的一键 bootstrap 是 `switchbot codex setup`（详见 `2026-05-23-codex-install-paths-design.md`）。两者通过共享 helper `registerCodexPlugin()`（见 `src/install/codex-checks.ts`）协作执行注册步骤，不存在职责重复，也不允许内联实现。
 
 ---
 
@@ -214,7 +220,7 @@ Implementation: extracts the base subset from CHECK_REGISTRY via `runDoctorCheck
 | 2 | `re-auth` | **Interactive mode**: spawn auth login via `process.execPath` + `cliPath`, forwarding all active scope flags. Build argv as: `[...profileArgs, ...configArgs, 'auth', 'login']` where `profileArgs = profile !== 'default' ? ['--profile', profile] : []` and `configArgs = ctx.configPath ? ['--config', ctx.configPath] : []`. This ensures credentials round-trip to the correct scope regardless of whether `--profile`, `--config`, both, or neither are active. **`--yes` mode**: check credentials only, return `failed` + `{ reason: 'credentials-missing' }` if absent | Yes |
 | 3 | `remove-plugin` | `codex plugin remove <id>` (best-effort, exit ≠ 0 is non-fatal) | Yes |
 | 4 | `register-plugin` | `codex plugin marketplace add` + `codex plugin add` (calls `runCodexPluginRegistration` + `resolvePluginId`) | No |
-| 5 | `doctor-verify` | Run all 7 Codex doctor checks, print summary | No |
+| 5 | `doctor-verify` | Run 7 checks: 4 base from CHECK_REGISTRY (node, path, credentials, mcp) + 3 Codex (`checkCodexCli`, `checkCodexPluginNpm`, `checkCodexPluginRegistered`). Print summary | No |
 
 > **Strong constraint (P1-B):** In interactive mode (no `--yes`), the `re-auth` step MUST actually execute `switchbot auth login` when credentials are missing. Returning a hint message is only acceptable in `--yes` / non-interactive mode. "Repair" means repair, not diagnose.
 
