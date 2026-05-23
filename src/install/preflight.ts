@@ -264,7 +264,7 @@ function checkCodexCliForPreflight(opts: PreflightOptions): PreflightCheck | nul
 function checkCodexPluginForPreflight(opts: PreflightOptions): PreflightCheck | null {
   if (opts.agent !== 'codex') return null;
   const r = spawnSync('npm', ['list', '-g', '--json', '@switchbot/codex-plugin'], {
-    encoding: 'utf-8', timeout: 10000,
+    encoding: 'utf-8', timeout: 10000, shell: process.platform === 'win32',
   });
   let installed = false;
   try {

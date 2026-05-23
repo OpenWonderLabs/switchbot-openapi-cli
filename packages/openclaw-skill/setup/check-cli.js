@@ -5,9 +5,11 @@ import { formatError } from '../lib/error-messages.js';
 
 const exec = promisify(execFile);
 
+const SHELL = process.platform === 'win32';
+
 async function cliExists() {
   try {
-    await exec('switchbot', ['--version'], { timeout: 8000 });
+    await exec('switchbot', ['--version'], { timeout: 8000, shell: SHELL });
     return true;
   } catch {
     return false;
@@ -16,7 +18,7 @@ async function cliExists() {
 
 function npmExists() {
   try {
-    execFileSync('npm', ['--version'], { timeout: 8000, stdio: 'pipe' });
+    execFileSync('npm', ['--version'], { timeout: 8000, stdio: 'pipe', shell: SHELL });
     return true;
   } catch {
     return false;
@@ -41,6 +43,7 @@ export async function checkCli() {
     execFileSync('npm', ['install', '-g', '@switchbot/openapi-cli'], {
       stdio: 'inherit',
       timeout: 120_000,
+      shell: SHELL,
     });
   } catch (err) {
     return {
