@@ -6,8 +6,6 @@ import {
   checkCodexCli,
   checkCodexPluginNpm,
   checkCodexPluginRegistered,
-  registerCodexPlugin,
-  registerCodexPluginGit,
   registerCodexPluginAuto,
   resolvePluginId,
   resolveCodexPackageRoot,

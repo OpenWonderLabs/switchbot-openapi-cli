@@ -55,6 +55,7 @@ export async function browserLogin(options: BrowserLoginOptions = {}): Promise<C
     return exchangeCodeForCredentials(code, redirectUri);
   } catch (err) {
     countdown.stop();
+    close();
     throw err;
   }
 }

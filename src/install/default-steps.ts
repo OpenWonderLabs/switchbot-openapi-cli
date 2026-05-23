@@ -24,7 +24,7 @@ import {
 } from '../commands/policy.js';
 import { promptTokenAndSecret, readCredentialsFile } from '../commands/config.js';
 import { selectCredentialStore, type CredentialStore, type CredentialBundle } from '../credentials/keychain.js';
-import { registerCodexPlugin, registerCodexPluginGit, registerCodexPluginAuto } from './codex-checks.js';
+import { registerCodexPluginAuto } from './codex-checks.js';
 
 export type AgentName = 'claude-code' | 'cursor' | 'copilot' | 'codex' | 'none';
 

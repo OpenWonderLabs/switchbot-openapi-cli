@@ -6,6 +6,7 @@ import { SP_OAUTH_LOGIN_URL, OAUTH_CLIENT_ID, OAUTH_SCOPE } from '../../src/auth
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
 const waitMock    = vi.fn();
+const closeMock   = vi.fn();
 const bindMock    = vi.fn();
 const exchangeMock = vi.fn();
 const openMock    = vi.fn();
@@ -38,7 +39,7 @@ function captureLog(): { log: (m: string) => void; lines: string[] } {
 describe('browserLogin', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    bindMock.mockResolvedValue({ port: 53245, wait: waitMock });
+    bindMock.mockResolvedValue({ port: 53245, wait: waitMock, close: closeMock });
     exchangeMock.mockResolvedValue({ token: 'tok', secret: 'sec' });
   });
 
@@ -101,5 +102,6 @@ describe('browserLogin', () => {
     await expect(browserLogin({ noOpen: true, log: () => {} }))
       .rejects.toThrow('Login timed out');
     expect(exchangeMock).not.toHaveBeenCalled();
+    expect(closeMock).toHaveBeenCalledOnce();
   });
 });

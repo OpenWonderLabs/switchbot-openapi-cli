@@ -278,14 +278,15 @@ export function registerCodexPlugin(): RegisterCodexPluginResult {
 
 export const CODEX_GIT_MARKETPLACE_REPO   = 'OpenWonderLabs/switchbot-openapi-cli';
 export const CODEX_GIT_MARKETPLACE_SPARSE = 'packages/codex-plugin';
-export const CODEX_GIT_MARKETPLACE_REF    = process.env['CODEX_GIT_MARKETPLACE_REF'] ?? 'main';
+export const CODEX_GIT_MARKETPLACE_REF    = 'main';
 
 export function runCodexPluginRegistrationGit(pluginId: string): RegistrationResult {
+  const ref = process.env['CODEX_GIT_MARKETPLACE_REF'] ?? CODEX_GIT_MARKETPLACE_REF;
   const mkt = spawnStr('codex', [
     'plugin', 'marketplace', 'add',
     CODEX_GIT_MARKETPLACE_REPO,
     '--sparse', CODEX_GIT_MARKETPLACE_SPARSE,
-    '--ref',    CODEX_GIT_MARKETPLACE_REF,
+    '--ref',    ref,
   ]);
   if (mkt.status !== 0) {
     return { ok: false, exitCode: mkt.status, stderr: mkt.stderr, stage: 'marketplace-add' };
@@ -316,5 +317,10 @@ export function registerCodexPluginGit(): RegisterCodexPluginResult {
 export function registerCodexPluginAuto(): RegisterCodexPluginResult {
   const git = registerCodexPluginGit();
   if (git.ok) return git;
-  return registerCodexPlugin();
+  const npm = registerCodexPlugin();
+  if (npm.ok) return npm;
+  return {
+    ...npm,
+    error: `Route B failed (${git.error}); local npm fallback also failed (${npm.error})`,
+  };
 }

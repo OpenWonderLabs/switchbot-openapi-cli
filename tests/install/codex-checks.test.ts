@@ -445,6 +445,8 @@ describe('registerCodexPluginAuto', () => {
       .mockReturnValueOnce(makeSpawnResult(1, '', 'npm error'));        // npm root -g — fails
     const r = registerCodexPluginAuto();
     expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/git clone failed/);
+    expect(r.error).toMatch(/npm error/);
   });
 });
 
