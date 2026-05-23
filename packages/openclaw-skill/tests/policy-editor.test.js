@@ -14,19 +14,19 @@ describe('policy editor server', () => {
   });
 
   it('GET / returns HTML', async () => {
-    const res = await fetch(`http://localhost:${server.port}/`);
+    const res = await fetch(`http://127.0.0.1:${server.port}/`);
     assert.equal(res.status, 200);
     const text = await res.text();
     assert.ok(text.includes('<html'));
   });
 
   it('GET /policy returns text', async () => {
-    const res = await fetch(`http://localhost:${server.port}/policy`);
+    const res = await fetch(`http://127.0.0.1:${server.port}/policy`);
     assert.equal(res.status, 200);
   });
 
   it('POST /policy returns saved', async () => {
-    const res = await fetch(`http://localhost:${server.port}/policy`, {
+    const res = await fetch(`http://127.0.0.1:${server.port}/policy`, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain' },
       body: 'version: "0.2"',
