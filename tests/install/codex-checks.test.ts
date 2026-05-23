@@ -95,9 +95,7 @@ describe('checkCodexPluginNpm', () => {
     const result = checkCodexPluginNpm();
     expect(result.status).toBe('warn');
     const msg = String((result.detail as Record<string, unknown>).message);
-    // A4: warning must include the full repair recipe (npm install + switchbot install)
-    expect(msg).toContain('npm install -g @switchbot/codex-plugin');
-    expect(msg).toContain('switchbot install --agent codex');
+    expect(msg).toContain('npx @switchbot/openapi-cli codex setup');
   });
 
   it('returns warn when npm list json is malformed', () => {
@@ -133,9 +131,7 @@ describe('checkCodexPluginRegistered', () => {
     const result = checkCodexPluginRegistered();
     expect(result.status).toBe('warn');
     const msg = String((result.detail as Record<string, unknown>).message);
-    // A4: warning must include the full repair recipe (npm install + switchbot install)
-    expect(msg).toContain('npm install -g @switchbot/codex-plugin');
-    expect(msg).toContain('switchbot install --agent codex');
+    expect(msg).toContain('switchbot codex repair');
   });
 
   it('returns warn with reason codex-cli-missing when codex is not on PATH', () => {

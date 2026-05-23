@@ -255,7 +255,7 @@ function checkCodexCliForPreflight(opts: PreflightOptions): PreflightCheck | nul
       name: 'codex-cli',
       status: 'fail',
       message: 'codex CLI not found on PATH',
-      hint: 'Install Codex (https://github.com/openai/codex), then re-run switchbot install --agent codex',
+      hint: 'Install Codex (https://github.com/openai/codex), then run: npx @switchbot/openapi-cli codex setup',
     };
   }
   return { name: 'codex-cli', status: 'ok', message: 'codex CLI found on PATH' };
@@ -278,7 +278,7 @@ function checkCodexPluginForPreflight(opts: PreflightOptions): PreflightCheck | 
       name: 'codex-plugin-npm',
       status: 'fail',
       message: '@switchbot/codex-plugin not installed globally',
-      hint: 'Run: npm install -g @switchbot/codex-plugin (this command only registers an already-installed package)',
+      hint: 'Run the full bootstrap instead: npx @switchbot/openapi-cli codex setup',
     };
   }
   return { name: 'codex-plugin-npm', status: 'ok', message: '@switchbot/codex-plugin installed' };

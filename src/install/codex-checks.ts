@@ -130,7 +130,7 @@ export function checkCodexCli(): Check {
       status: 'fail',
       detail: {
         message: 'codex CLI not found on PATH. Install from https://github.com/openai/codex',
-        hint: 'Install Codex, then re-run: switchbot install --agent codex',
+        hint: 'Install Codex, then re-run: npx @switchbot/openapi-cli codex setup',
       },
     };
   }
@@ -157,7 +157,7 @@ export function checkCodexPluginNpm(): Check {
     return {
       name: 'codex-plugin-npm',
       status: 'warn',
-      detail: { message: 'not installed — run: npm install -g @switchbot/codex-plugin && switchbot install --agent codex' },
+      detail: { message: 'npm fallback package not installed — run: npx @switchbot/openapi-cli codex setup' },
     };
   }
   let packageRoot: string | null = null;
@@ -210,7 +210,7 @@ export function checkCodexPluginRegistered(): Check {
     return {
       name: 'codex-plugin-registered',
       status: 'warn',
-      detail: { message: 'switchbot not in codex plugin list — run: npm install -g @switchbot/codex-plugin && switchbot install --agent codex' },
+      detail: { message: 'switchbot not in codex plugin list — run: switchbot codex repair' },
     };
   }
   if (/switchbot@/i.test(pluginName) && (/\bnot installed\b/i.test(pluginName) || !/\binstalled\b/i.test(pluginName))) {

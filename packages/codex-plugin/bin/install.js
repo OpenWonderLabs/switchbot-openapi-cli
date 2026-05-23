@@ -55,37 +55,46 @@ function computeAliasPath() {
 }
 
 export function resolveMarketplaceSourceRoot(packageRoot, deps = defaultFsDeps) {
-  if (process.platform !== 'win32' || !/^[A-Za-z]:[\\/].*[\\/]@[^\\/]+[\\/]/.test(packageRoot)) {
+  const needsAlias = process.platform === 'win32'
+    ? /^[A-Za-z]:[\\/].*[\\/]@[^\\/]+[\\/]/.test(packageRoot)
+    : /\/node_modules\/@[^/]+\//.test(packageRoot);
+
+  if (!needsAlias) {
     return packageRoot;
   }
 
   const aliasRoot = computeAliasPath();
   deps.mkdirSync(dirname(aliasRoot), { recursive: true });
+  const linkType = process.platform === 'win32' ? 'junction' : 'dir';
 
   const stat = deps.lstatSync(aliasRoot, { throwIfNoEntry: false });
   if (!stat) {
-    deps.symlinkSync(packageRoot, aliasRoot, 'junction');
+    deps.symlinkSync(packageRoot, aliasRoot, linkType);
     return aliasRoot;
   }
 
   if (stat.isSymbolicLink()) {
     const aliasReal = deps.realpathSync(aliasRoot);
     const packageReal = deps.realpathSync(packageRoot);
-    if (aliasReal.toLowerCase() === packageReal.toLowerCase()) {
+    const pathsMatch = process.platform === 'win32'
+      ? aliasReal.toLowerCase() === packageReal.toLowerCase()
+      : aliasReal === packageReal;
+    if (pathsMatch) {
       return aliasRoot;
     }
     deps.unlinkSync(aliasRoot);
-    deps.symlinkSync(packageRoot, aliasRoot, 'junction');
+    deps.symlinkSync(packageRoot, aliasRoot, linkType);
     return aliasRoot;
   }
 
-  throw new Error(`alias path ${aliasRoot} exists and is not a junction; remove it manually and retry`);
+  const expected = process.platform === 'win32' ? 'junction' : 'symlink';
+  throw new Error(`alias path ${aliasRoot} exists and is not a ${expected}; remove it manually and retry`);
 }
 
 function formatCodexFailure(step) {
   return [
     `[switchbot-codex] Codex CLI not found while running ${step}.`,
-    '[switchbot-codex] Install or open Codex first, then re-run switchbot-codex-install.',
+    '[switchbot-codex] Install or open Codex first, then run: npx @switchbot/openapi-cli codex setup',
   ].join('\n');
 }
 
@@ -121,6 +130,8 @@ export function makeInstall({ checkCli, runInherit, packageRoot, runAuth }) {
     }
 
     const pluginName = resolvePluginIdentifier(packageRoot);
+    process.stderr.write(`[switchbot-codex] Removing stale plugin ${pluginName} if present...\n`);
+    await runInherit('codex', ['plugin', 'remove', pluginName]);
     process.stderr.write(`[switchbot-codex] Adding plugin ${pluginName}...\n`);
     const pluginCode = await runInherit('codex', ['plugin', 'add', pluginName]);
     if (pluginCode !== 0) {
@@ -130,7 +141,7 @@ export function makeInstall({ checkCli, runInherit, packageRoot, runAuth }) {
       }
       process.stderr.write(
         '[switchbot-codex] "codex plugin add" failed — your Codex version may not support it.\n' +
-        '[switchbot-codex] Fallback: follow the legacy install steps in CODEX_INSTALL.md.\n'
+        '[switchbot-codex] Fallback: run npx @switchbot/openapi-cli codex setup after updating Codex.\n'
       );
       return pluginCode;
     }

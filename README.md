@@ -195,13 +195,16 @@ Codex will run the setup, walk you through signing in, and let you know when it'
 npx @switchbot/openapi-cli codex setup
 ```
 
-**Manual install** (if you prefer explicit control):
+**Advanced manual registration** (only if you already installed both packages):
 
 ```bash
 npm install -g @switchbot/openapi-cli @switchbot/codex-plugin
-switchbot install --agent codex   # register-only; package must already be installed
+switchbot install --agent codex   # register-only fallback
 switchbot auth login
 ```
+
+For normal use, prefer `npx @switchbot/openapi-cli codex setup`; it handles
+package install, plugin registration, auth, and verification together.
 
 **Health check and repair:**
 

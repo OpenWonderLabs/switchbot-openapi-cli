@@ -39,10 +39,11 @@ describe('makeInstall', () => {
     });
     const code = await install();
     assert.equal(code, 0);
-    assert.equal(calls.length, 3);
+    assert.equal(calls.length, 4);
     assert.deepEqual(calls[0], { cmd: 'codex', args: ['plugin', 'marketplace', 'add', TEST_ROOT] });
-    assert.deepEqual(calls[1], { cmd: 'codex', args: ['plugin', 'add', 'switchbot@codex-plugin'] });
-    assert.deepEqual(calls[2], { cmd: 'switchbot', args: ['doctor'] });
+    assert.deepEqual(calls[1], { cmd: 'codex', args: ['plugin', 'remove', 'switchbot@codex-plugin'] });
+    assert.deepEqual(calls[2], { cmd: 'codex', args: ['plugin', 'add', 'switchbot@codex-plugin'] });
+    assert.deepEqual(calls[3], { cmd: 'switchbot', args: ['doctor'] });
     assert.equal(auth.calls.length, 1);
   });
 
@@ -57,11 +58,12 @@ describe('makeInstall', () => {
     });
     const code = await install();
     assert.equal(code, 0);
-    assert.equal(calls.length, 4);
+    assert.equal(calls.length, 5);
     assert.deepEqual(calls[0], { cmd: 'npm', args: ['install', '-g', '@switchbot/openapi-cli@latest'] });
     assert.deepEqual(calls[1], { cmd: 'codex', args: ['plugin', 'marketplace', 'add', TEST_ROOT] });
-    assert.deepEqual(calls[2], { cmd: 'codex', args: ['plugin', 'add', 'switchbot@codex-plugin'] });
-    assert.deepEqual(calls[3], { cmd: 'switchbot', args: ['doctor'] });
+    assert.deepEqual(calls[2], { cmd: 'codex', args: ['plugin', 'remove', 'switchbot@codex-plugin'] });
+    assert.deepEqual(calls[3], { cmd: 'codex', args: ['plugin', 'add', 'switchbot@codex-plugin'] });
+    assert.deepEqual(calls[4], { cmd: 'switchbot', args: ['doctor'] });
     assert.equal(auth.calls.length, 1);
   });
 
@@ -105,7 +107,7 @@ describe('makeInstall', () => {
     const auth = makeRunAuth(0);
     const spawn = (cmd, args) => {
       callCount++;
-      return Promise.resolve(callCount === 2 ? 3 : 0);
+      return Promise.resolve(callCount === 3 ? 3 : 0);
     };
     const install = makeInstall({
       checkCli: makeOkCliCheck(),
@@ -115,7 +117,7 @@ describe('makeInstall', () => {
     });
     const code = await install();
     assert.equal(code, 3);
-    assert.equal(callCount, 2);
+    assert.equal(callCount, 3);
     assert.equal(auth.calls.length, 0);
   });
 
@@ -130,7 +132,7 @@ describe('makeInstall', () => {
     });
     const code = await install();
     assert.equal(code, 4);
-    assert.equal(calls.length, 2);
+    assert.equal(calls.length, 3);
     assert.equal(auth.calls.length, 1);
   });
 
@@ -149,8 +151,8 @@ describe('makeInstall', () => {
     });
     const code = await install();
     assert.equal(code, 5);
-    assert.equal(calls.length, 3);
-    assert.deepEqual(calls[2], { cmd: 'switchbot', args: ['doctor'] });
+    assert.equal(calls.length, 4);
+    assert.deepEqual(calls[3], { cmd: 'switchbot', args: ['doctor'] });
     assert.equal(auth.calls.length, 1);
   });
 
