@@ -26,7 +26,7 @@ import { getActiveProfile } from '../lib/request-context.js';
 import { readDaemonState, DAEMON_PID_FILE } from '../lib/daemon-state.js';
 import { isPidAlive, readPidFile } from '../rules/pid-file.js';
 
-interface Check {
+export interface Check {
   name: string;
   status: 'ok' | 'warn' | 'fail';
   detail: string | Record<string, unknown>;
@@ -1106,7 +1106,7 @@ interface DoctorRunOpts {
   probe: boolean;
 }
 
-const CHECK_REGISTRY: CheckDef[] = [
+export const CHECK_REGISTRY: CheckDef[] = [
   { name: 'node', description: 'Node.js version compatibility', run: () => checkNodeVersion() },
   { name: 'path', description: 'switchbot binary reachable on PATH', run: () => checkPathDiscoverability() },
   { name: 'credentials', description: 'credentials file present and parseable', run: () => checkCredentials() },
@@ -1192,6 +1192,18 @@ interface DoctorCliOptions {
   yes?: boolean;
   probe?: boolean;
   quiet?: boolean;
+}
+
+export async function runDoctorChecks(
+  sections: readonly string[],
+  opts: DoctorRunOpts = { probe: false },
+): Promise<Check[]> {
+  const selected = CHECK_REGISTRY.filter((c) => sections.includes(c.name));
+  const checks: Check[] = [];
+  for (const def of selected) {
+    checks.push(await def.run(opts));
+  }
+  return checks;
 }
 
 export function registerDoctorCommand(program: Command): void {
