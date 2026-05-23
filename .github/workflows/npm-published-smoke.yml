@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       package:
-        description: 'Package to verify (defaults: matrix runs all three)'
+        description: 'Package to verify (defaults: matrix runs all published packages)'
         required: false
       version:
         description: 'Published npm version to verify (defaults to package.json from checked-out commit)'
@@ -31,9 +31,6 @@ jobs:
             kind: cli
           - package: '@switchbot/codex-plugin'
             version_path: 'packages/codex-plugin/package.json'
-            kind: plugin
-          - package: '@switchbot/openclaw-skill'
-            version_path: 'packages/openclaw-skill/package.json'
             kind: plugin
     steps:
       - uses: actions/checkout@v4

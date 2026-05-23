@@ -45,7 +45,7 @@ Under the hood every surface shares the same catalog, cache, and HMAC client —
 ## Table of contents
 
 - [Features](#features) · [Supported devices](#supported-devices) · [Requirements](#requirements) · [Installation](#installation)
-- [Quick start](#quick-start) · [Codex integration](#codex-integration) · [OpenClaw integration](#openclaw-integration)
+- [Quick start](#quick-start) · [Codex integration](#codex-integration)
 - [Credentials](#credentials)
 - [Policy](#policy) · [Rules engine](#rules-engine)
 - [Global options](#global-options)
@@ -119,7 +119,7 @@ switchbot --help
 
 ## Quick start
 
-> **Using Codex or OpenClaw?** Skip this section and jump to [Codex integration](#codex-integration) or [OpenClaw integration](#openclaw-integration) — those agents use separate plugin packages, not the `--skill-path` link below.
+> **Using Codex?** Skip this section and jump to [Codex integration](#codex-integration) — Codex uses a separate plugin package, not the `--skill-path` link below.
 
 The fast path (credentials + policy + skill link, with rollback on failure):
 
@@ -236,45 +236,6 @@ switchbot --config /path/to/cfg.json codex doctor
 ```
 
 > Run `switchbot codex setup --help` (or `repair --help`, `doctor --help`) for the full flag list.
-
-## OpenClaw integration
-
-For [OpenClaw](https://openclaw.ai) users, the SwitchBot MCP skill ships as a separate plugin package — `@switchbot/openclaw-skill` — which exposes all 24 MCP tools (`devices_list`, `devices_command`, `scenes_run`, `rules_*`, `audit_query`, …) over stdio.
-
-### Install
-
-```bash
-# Via OpenClaw plugin manager (recommended)
-openclaw plugins install @switchbot/openclaw-skill
-
-# Or global npm
-npm install -g @switchbot/openclaw-skill
-
-# Bootstrap the underlying CLI + credentials (safe to re-run)
-switchbot-openclaw setup
-```
-
-`switchbot-openclaw setup` verifies that `@switchbot/openapi-cli` is installed at `>=3.7.1`, prompts for credentials if needed, and confirms the keychain is reachable.
-
-### How the skill launches
-
-OpenClaw discovers the skill from two manifest files inside the package:
-
-- `.claude-plugin/plugin.json` — bundle identity
-- `.mcp.json` — stdio launcher: `node ${pluginDir}/bin/start.js`
-
-On first launch, `bin/start.js` auto-installs the CLI if missing, then proxies the full 24-tool MCP server. If credentials are missing, it emits a `setupRequired` JSON line so the host agent can prompt the user instead of failing silently.
-
-### Policy editor
-
-The package also ships a local browser-based editor for `~/.config/openclaw/switchbot/policy.yaml`:
-
-```bash
-switchbot-policy-edit
-# Opens http://localhost:18799
-```
-
-See [Policy](#policy) for the schema and authoring flow — both the CLI and the OpenClaw skill read the same `policy.yaml`.
 
 ## Credentials
 
