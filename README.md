@@ -171,7 +171,7 @@ for the agent surface.
 
 ## Codex integration
 
-For [OpenAI Codex CLI](https://github.com/openai/codex) users, the SwitchBot integration ships as a separate plugin package — `@cly-org/switchbot-codex-plugin` — registered via `codex plugin add`. The `switchbot codex` command group orchestrates setup, health checks, and repair end-to-end.
+For [OpenAI Codex CLI](https://github.com/openai/codex) users, the SwitchBot integration ships as a separate plugin package — `@switchbot/codex-plugin` — registered via `codex plugin add`. The `switchbot codex` command group orchestrates setup, health checks, and repair end-to-end.
 
 ### Prerequisites
 
@@ -190,7 +190,7 @@ This works because `setup` runs five steps in order, the second of which fixes t
 
 1. `check-codex-cli` — verify `codex` is on `$PATH`
 2. `install-switchbot-cli` — if `@switchbot/openapi-cli` is not in `npm list -g`, install it globally (so the `switchbot` binary stays after the `npx` invocation exits)
-3. `register-plugin` — `codex plugin marketplace add` + `codex plugin add` for `@cly-org/switchbot-codex-plugin`
+3. `register-plugin` — `codex plugin marketplace add` + `codex plugin add` for `@switchbot/codex-plugin`
 4. `auth` — prompt for SwitchBot credentials if missing (spawns `switchbot auth login`, inheriting your active `--profile` and `--config`)
 5. `doctor-verify` — run 7 checks (4 base: node, path, credentials, mcp + 3 codex: cli, npm package, plugin registered)
 
@@ -205,12 +205,12 @@ switchbot devices list
 If you prefer step-by-step control:
 
 ```bash
-npm install -g @switchbot/openapi-cli @cly-org/switchbot-codex-plugin
+npm install -g @switchbot/openapi-cli @switchbot/codex-plugin
 switchbot install --agent codex     # registers the already-installed plugin
 switchbot auth login                # if you don't already have credentials
 ```
 
-`switchbot install --agent codex` is **register-only** — it fails fast if `@cly-org/switchbot-codex-plugin` is not present in `npm list -g`. Use `codex setup` instead if you want the package install bundled in.
+`switchbot install --agent codex` is **register-only** — it fails fast if `@switchbot/codex-plugin` is not present in `npm list -g`. Use `codex setup` instead if you want the package install bundled in.
 
 ### Health checks and repair
 

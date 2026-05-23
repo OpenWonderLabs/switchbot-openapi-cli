@@ -332,13 +332,13 @@ export function stepDoctorVerify(opts: { cliPath: string; spawner?: DoctorSpawne
 }
 
 // ---------------------------------------------------------------------------
-// Step 6: register @cly-org/switchbot-codex-plugin with the Codex CLI
+// Step 6: register @switchbot/codex-plugin with the Codex CLI
 // ---------------------------------------------------------------------------
 
 export function stepRegisterCodexPlugin(): InstallStep<InstallContext> {
   return {
     name: 'register-codex-plugin',
-    description: 'Register @cly-org/switchbot-codex-plugin with the Codex CLI (marketplace add + plugin add)',
+    description: 'Register @switchbot/codex-plugin with the Codex CLI (marketplace add + plugin add)',
     async execute(ctx) {
       const r = registerCodexPlugin();
       if (!r.ok) {

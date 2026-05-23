@@ -92,7 +92,7 @@ function printRecipe(ctx: InstallContext): void {
       break;
     case 'codex':
       lines.push(
-        '  # Prerequisite: npm install -g @cly-org/switchbot-codex-plugin',
+        '  # Prerequisite: npm install -g @switchbot/codex-plugin',
         '  # Codex plugin was registered with the Codex CLI.',
         '  # To re-register: switchbot install --agent codex',
       );

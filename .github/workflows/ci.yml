@@ -43,6 +43,7 @@ jobs:
             exit 1
           fi
       - run: npm test
+      - run: npm run test:workspaces
 
   bundle-smoke:
     name: esbuild bundle smoke test (Node ${{ matrix.node-version }})

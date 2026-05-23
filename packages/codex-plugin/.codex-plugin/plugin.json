@@ -1,0 +1,42 @@
+{
+  "name": "switchbot",
+  "version": "0.8.2",
+  "description": "Control SwitchBot smart-home devices and scenes from Codex via the SwitchBot CLI and MCP server.",
+  "author": {
+    "name": "chenliuyun",
+    "url": "https://github.com/chenliuyun"
+  },
+  "homepage": "https://github.com/chenliuyun/switchbot-skill",
+  "repository": "https://github.com/chenliuyun/switchbot-skill",
+  "license": "MIT",
+  "keywords": [
+    "switchbot",
+    "smart-home",
+    "iot",
+    "home-automation",
+    "mcp",
+    "codex"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "hooks": "./.codex-plugin/hooks.json",
+  "interface": {
+    "displayName": "SwitchBot",
+    "shortDescription": "Control SwitchBot devices and scenes from Codex.",
+    "longDescription": "Use the SwitchBot OpenAPI CLI through a Codex skill and MCP server to inspect devices, run scenes, control smart-home hardware, and respect policy-based safety gates.",
+    "developerName": "chenliuyun",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/chenliuyun/switchbot-skill",
+    "defaultPrompt": [
+      "List my SwitchBot devices.",
+      "Check the status of my lights.",
+      "Run a SwitchBot scene safely."
+    ],
+    "brandColor": "#E7462E"
+  }
+}

@@ -140,7 +140,7 @@ function repairStepRemovePlugin(ctx: RepairContext): RepairOutcome {
   let pluginId = ctx.codexPluginId;
   if (!pluginId) {
     const root = resolveCodexPackageRoot();
-    pluginId = root.ok ? resolvePluginId(root.packageRoot) : 'switchbot@switchbot-codex-plugin';
+    pluginId = root.ok ? resolvePluginId(root.packageRoot) : 'switchbot@codex-plugin';
     ctx.codexPluginId = pluginId;
   }
   const r = spawnSync(

@@ -263,7 +263,7 @@ function checkCodexCliForPreflight(opts: PreflightOptions): PreflightCheck | nul
 
 function checkCodexPluginForPreflight(opts: PreflightOptions): PreflightCheck | null {
   if (opts.agent !== 'codex') return null;
-  const r = spawnSync('npm', ['list', '-g', '--json', '@cly-org/switchbot-codex-plugin'], {
+  const r = spawnSync('npm', ['list', '-g', '--json', '@switchbot/codex-plugin'], {
     encoding: 'utf-8', timeout: 10000,
   });
   let installed = false;
@@ -271,17 +271,17 @@ function checkCodexPluginForPreflight(opts: PreflightOptions): PreflightCheck | 
     const parsed = JSON.parse(r.stdout ?? '{}') as {
       dependencies?: Record<string, unknown>;
     };
-    installed = Boolean(parsed.dependencies?.['@cly-org/switchbot-codex-plugin']);
+    installed = Boolean(parsed.dependencies?.['@switchbot/codex-plugin']);
   } catch { /* treat as not installed */ }
   if (!installed) {
     return {
       name: 'codex-plugin-npm',
       status: 'fail',
-      message: '@cly-org/switchbot-codex-plugin not installed globally',
-      hint: 'Run: npm install -g @cly-org/switchbot-codex-plugin (this command only registers an already-installed package)',
+      message: '@switchbot/codex-plugin not installed globally',
+      hint: 'Run: npm install -g @switchbot/codex-plugin (this command only registers an already-installed package)',
     };
   }
-  return { name: 'codex-plugin-npm', status: 'ok', message: '@cly-org/switchbot-codex-plugin installed' };
+  return { name: 'codex-plugin-npm', status: 'ok', message: '@switchbot/codex-plugin installed' };
 }
 
 /**

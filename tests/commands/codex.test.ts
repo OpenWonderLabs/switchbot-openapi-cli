@@ -175,8 +175,8 @@ describe('switchbot codex repair', () => {
     // C4.3: register-plugin now mocks at the registerCodexPlugin boundary, not spawnSync.
     registerCodexPluginMock.mockReturnValueOnce({
       ok: true,
-      pluginId: 'switchbot@switchbot-codex-plugin',
-      packageRoot: '/usr/local/lib/node_modules/@cly-org/switchbot-codex-plugin',
+      pluginId: 'switchbot@codex-plugin',
+      packageRoot: '/usr/local/lib/node_modules/@switchbot/codex-plugin',
     });
     // doctor-verify: all 7 checks ok (via runAllCodexDoctorChecks which calls runDoctorChecks + 3 codex checks)
     runDoctorChecksMock.mockResolvedValueOnce(makeBaseChecks()); // base 4 for doctor-verify
@@ -207,8 +207,8 @@ describe('switchbot codex repair', () => {
     // C4.3: register-plugin failure surfaces via the shared helper's normalized error.
     registerCodexPluginMock.mockReturnValueOnce({
       ok: false,
-      pluginId: 'switchbot@switchbot-codex-plugin',
-      packageRoot: '/usr/local/lib/node_modules/@cly-org/switchbot-codex-plugin',
+      pluginId: 'switchbot@codex-plugin',
+      packageRoot: '/usr/local/lib/node_modules/@switchbot/codex-plugin',
       error: 'exit 1: marketplace error',
       exitCode: 1,
       stderr: 'marketplace error',
@@ -241,7 +241,7 @@ describe('switchbot codex repair', () => {
     spawnSyncRepairMock.mockReturnValueOnce({ status: 0, stdout: '', stderr: '' });
     // remove-plugin is skipped via --skip; register-plugin is not skippable → mock helper
     registerCodexPluginMock.mockReturnValueOnce({
-      ok: true, pluginId: 'switchbot@switchbot-codex-plugin', packageRoot: '/some/path',
+      ok: true, pluginId: 'switchbot@codex-plugin', packageRoot: '/some/path',
     });
     // doctor-verify still runs
     runDoctorChecksMock.mockResolvedValueOnce(makeBaseChecks());
@@ -279,7 +279,7 @@ describe('switchbot codex repair', () => {
     tryLoadConfigMock.mockReturnValue(null);
     spawnSyncRepairMock.mockReturnValueOnce({ status: 0, stdout: '', stderr: '' });
     registerCodexPluginMock.mockReturnValueOnce({
-      ok: true, pluginId: 'switchbot@switchbot-codex-plugin', packageRoot: '/some/path',
+      ok: true, pluginId: 'switchbot@codex-plugin', packageRoot: '/some/path',
     });
     runDoctorChecksMock.mockResolvedValueOnce(makeBaseChecks());
     checkCodexCliMock.mockReturnValue({ name: 'codex-cli', status: 'ok', detail: 'ok' });
@@ -400,8 +400,8 @@ describe('switchbot codex setup', () => {
     });
     // register-plugin succeeds
     registerCodexPluginMock.mockReturnValueOnce({
-      ok: true, pluginId: 'switchbot@switchbot-codex-plugin',
-      packageRoot: '/usr/local/lib/node_modules/@cly-org/switchbot-codex-plugin',
+      ok: true, pluginId: 'switchbot@codex-plugin',
+      packageRoot: '/usr/local/lib/node_modules/@switchbot/codex-plugin',
     });
     // credentials missing
     tryLoadConfigMock.mockReturnValue(null);
@@ -440,7 +440,7 @@ describe('switchbot codex setup', () => {
       stderr: '',
     });
     registerCodexPluginMock.mockReturnValueOnce({
-      ok: true, pluginId: 'switchbot@switchbot-codex-plugin', packageRoot: '/some/path',
+      ok: true, pluginId: 'switchbot@codex-plugin', packageRoot: '/some/path',
     });
     // credentials missing → spawn auth login
     tryLoadConfigMock.mockReturnValue(null);
@@ -475,7 +475,7 @@ describe('switchbot codex setup', () => {
       name: 'codex-cli', status: 'ok', detail: { path: '/usr/local/bin/codex' },
     });
     registerCodexPluginMock.mockReturnValueOnce({
-      ok: true, pluginId: 'switchbot@switchbot-codex-plugin', packageRoot: '/some/path',
+      ok: true, pluginId: 'switchbot@codex-plugin', packageRoot: '/some/path',
     });
     // credentials present → auth ok without spawn
     tryLoadConfigMock.mockReturnValue({ token: 't', secret: 's' });
@@ -508,7 +508,7 @@ describe('switchbot codex setup', () => {
     spawnSyncRepairMock.mockReturnValueOnce({ status: 1, stdout: '', stderr: 'EACCES' });
     // register-plugin still runs (continues after non-preflight failure)
     registerCodexPluginMock.mockReturnValueOnce({
-      ok: true, pluginId: 'switchbot@switchbot-codex-plugin', packageRoot: '/some/path',
+      ok: true, pluginId: 'switchbot@codex-plugin', packageRoot: '/some/path',
     });
     // auth: credentials present
     tryLoadConfigMock.mockReturnValue({ token: 't', secret: 's' });

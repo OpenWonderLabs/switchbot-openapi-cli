@@ -68,25 +68,25 @@ export function checkCodexCli(): Check {
 }
 
 export function checkCodexPluginNpm(): Check {
-  const list = spawnStr('npm', ['list', '-g', '--json', '@cly-org/switchbot-codex-plugin']);
+  const list = spawnStr('npm', ['list', '-g', '--json', '@switchbot/codex-plugin']);
   let parsed: { dependencies?: Record<string, { version?: string }> } = {};
   try {
     parsed = JSON.parse(list.stdout) as typeof parsed;
   } catch {
     return { name: 'codex-plugin-npm', status: 'warn', detail: { message: 'npm list output could not be parsed' } };
   }
-  const pkg = parsed?.dependencies?.['@cly-org/switchbot-codex-plugin'];
+  const pkg = parsed?.dependencies?.['@switchbot/codex-plugin'];
   if (!pkg) {
     return {
       name: 'codex-plugin-npm',
       status: 'warn',
-      detail: { message: 'not installed — run: npm install -g @cly-org/switchbot-codex-plugin && switchbot install --agent codex' },
+      detail: { message: 'not installed — run: npm install -g @switchbot/codex-plugin && switchbot install --agent codex' },
     };
   }
   let packageRoot: string | null = null;
   const rootResult = spawnStr('npm', ['root', '-g']);
   if (rootResult.status === 0) {
-    packageRoot = path.join(rootResult.stdout.trim(), '@cly-org', 'switchbot-codex-plugin');
+    packageRoot = path.join(rootResult.stdout.trim(), '@switchbot', 'codex-plugin');
   }
   return {
     name: 'codex-plugin-npm',
@@ -133,7 +133,7 @@ export function checkCodexPluginRegistered(): Check {
     return {
       name: 'codex-plugin-registered',
       status: 'warn',
-      detail: { message: 'switchbot not in codex plugin list — run: npm install -g @cly-org/switchbot-codex-plugin && switchbot install --agent codex' },
+      detail: { message: 'switchbot not in codex plugin list — run: npm install -g @switchbot/codex-plugin && switchbot install --agent codex' },
     };
   }
   return { name: 'codex-plugin-registered', status: 'ok', detail: { pluginName } };
@@ -155,7 +155,7 @@ export function resolveCodexPackageRoot(): { ok: true; packageRoot: string } | {
   if (!r || (r.status ?? 1) !== 0) {
     return { ok: false, error: `npm root -g failed (exit ${r?.status ?? 1}): ${r?.stderr ?? ''}` };
   }
-  const packageRoot = path.join((r.stdout ?? '').trim(), '@cly-org', 'switchbot-codex-plugin');
+  const packageRoot = path.join((r.stdout ?? '').trim(), '@switchbot', 'codex-plugin');
   return { ok: true, packageRoot };
 }
 
