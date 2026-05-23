@@ -171,72 +171,40 @@ for the agent surface.
 
 ## Codex integration
 
-For [OpenAI Codex CLI](https://github.com/openai/codex) users, the SwitchBot integration ships as a separate plugin package — `@switchbot/codex-plugin` — registered via `codex plugin add`. The `switchbot codex` command group orchestrates setup, health checks, and repair end-to-end.
+Use SwitchBot with [OpenAI Codex CLI](https://github.com/openai/codex) to control your smart home devices through natural-language AI conversations.
 
-### Prerequisites
+### Requirements
 
-- **Codex CLI** installed and on `$PATH` (see the link above)
-- **Node.js ≥ 18** (same as the base CLI)
+- [Codex CLI](https://github.com/openai/codex) installed
+- Node.js 18 or later
 
-### One-command bootstrap (recommended)
+### Install
 
-On a brand-new machine — no SwitchBot CLI installed yet — use `npx`:
+Run this single command in your terminal:
 
 ```bash
 npx @switchbot/openapi-cli codex setup
 ```
 
-This works because `setup` runs six steps in order, the package-install steps fix the chicken-and-egg:
+The setup wizard will:
 
-1. `check-codex-cli` — verify `codex` is on `$PATH`
-2. `install-switchbot-cli` — if `@switchbot/openapi-cli` is not in `npm list -g`, install it globally (so the `switchbot` binary stays after the `npx` invocation exits)
-3. `install-codex-plugin` — if `@switchbot/codex-plugin` is not in `npm list -g`, install it globally
-4. `register-plugin` — `codex plugin marketplace add` + `codex plugin add` for `@switchbot/codex-plugin`
-5. `auth` — prompt for SwitchBot credentials if missing (spawns `switchbot auth login`, inheriting your active `--profile` and `--config`)
-6. `doctor-verify` — run 7 checks (4 base: node, path, credentials, mcp + 3 codex: cli, npm package, plugin registered)
+1. Install the SwitchBot CLI and Codex plugin (if not already installed)
+2. Register the plugin with Codex
+3. Sign you in to your SwitchBot account
+4. Verify everything is working
 
-Restart Codex when complete, then verify:
+Restart Codex when prompted, then ask it something like _"List my SwitchBot devices"_.
 
-```bash
-switchbot devices list
-```
+### Troubleshooting
 
-### Manual install
-
-If you prefer step-by-step control:
+If something stops working after setup:
 
 ```bash
-npm install -g @switchbot/openapi-cli @switchbot/codex-plugin
-switchbot install --agent codex     # registers the already-installed plugin
-switchbot auth login                # if you don't already have credentials
+switchbot codex doctor    # show a health summary
+switchbot codex repair    # automatically fix common issues
 ```
 
-`switchbot install --agent codex` is **register-only** — it fails fast if `@switchbot/codex-plugin` is not present in `npm list -g`. Use `codex setup` instead if you want the package install bundled in.
-
-### Health checks and repair
-
-```bash
-switchbot codex doctor              # 7-check health summary; exits 1 on any fail
-switchbot codex repair              # re-verify, re-auth, re-register, re-check
-```
-
-`codex repair` runs five steps: `verify-cli` → `re-auth` → `remove-plugin` (best-effort) → `register-plugin` → `doctor-verify`. Both `setup` and `repair` support:
-
-- `--dry-run` — print the step list without mutating anything
-- `--json` — machine-readable outcome
-- `--yes` — non-interactive; auth prompts become `failed` instead of spawning `auth login`
-- `--skip <names>` — comma-separated. Only `install-switchbot-cli` / `install-codex-plugin` / `auth` (setup) and `re-auth` / `remove-plugin` (repair) are skippable; passing any other step name exits 2.
-
-### Profile and config scope
-
-All `codex` subcommands honor the global `--profile` and `--config` flags. Auth credentials are written to (and read from) the active profile, and the spawned `auth login` inherits both:
-
-```bash
-switchbot --profile staging codex setup
-switchbot --config /path/to/cfg.json codex doctor
-```
-
-> Run `switchbot codex setup --help` (or `repair --help`, `doctor --help`) for the full flag list.
+> Run `switchbot codex setup --help` for advanced options (dry-run, non-interactive, profile scoping).
 
 ## Credentials
 
