@@ -155,6 +155,7 @@ describe('runCodexPluginRegistration', () => {
   it('returns ok when both marketplace add and plugin add succeed', () => {
     spawnSyncMock
       .mockReturnValueOnce(makeSpawnResult(0, ''))  // marketplace add
+      .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (pre-clean)
       .mockReturnValueOnce(makeSpawnResult(0, '')); // plugin add
     const result = runCodexPluginRegistration('/some/path', 'switchbot@pkg');
     expect(result.ok).toBe(true);
@@ -172,6 +173,7 @@ describe('runCodexPluginRegistration', () => {
   it('returns failure when plugin add exits non-zero', () => {
     spawnSyncMock
       .mockReturnValueOnce(makeSpawnResult(0, ''))
+      .mockReturnValueOnce(makeSpawnResult(0, ''))                // plugin remove (pre-clean)
       .mockReturnValueOnce(makeSpawnResult(1, '', 'plugin add error'));
     const result = runCodexPluginRegistration('/some/path', 'switchbot@pkg');
     expect(result.ok).toBe(false);
@@ -186,6 +188,7 @@ describe('registerCodexPlugin (shared helper)', () => {
     spawnSyncMock
       .mockReturnValueOnce(makeSpawnResult(0, '/usr/local/lib/node_modules\n')) // npm root -g
       .mockReturnValueOnce(makeSpawnResult(0, ''))                                // marketplace add
+      .mockReturnValueOnce(makeSpawnResult(0, ''))                                // plugin remove (pre-clean)
       .mockReturnValueOnce(makeSpawnResult(0, ''));                               // plugin add
     const r = registerCodexPlugin();
     expect(r.ok).toBe(true);
@@ -319,6 +322,7 @@ describe('stepRegisterCodexPlugin', () => {
     spawnSyncMock
       .mockReturnValueOnce({ status: 0, stdout: '/usr/local/lib/node_modules\n', stderr: '' }) // npm root -g
       .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' })  // marketplace add
+      .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' })  // plugin remove (pre-clean)
       .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' }); // plugin add
     const step = stepRegisterCodexPlugin();
     const ctx = makeCtx();
