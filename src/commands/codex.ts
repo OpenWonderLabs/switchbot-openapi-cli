@@ -6,6 +6,8 @@ import {
   checkCodexCli,
   checkCodexPluginNpm,
   checkCodexPluginRegistered,
+  registerCodexPlugin,
+  registerCodexPluginGit,
   registerCodexPluginAuto,
   resolvePluginId,
   resolveCodexPackageRoot,
@@ -331,12 +333,11 @@ interface SetupContext {
 type SetupOutcome = StepOutcome;
 
 const SETUP_STEPS: readonly StepDef[] = [
-  { name: 'check-codex-cli',       description: 'Verify codex CLI on PATH',                              skippable: false },
-  { name: 'install-switchbot-cli', description: 'Install @switchbot/openapi-cli if missing',             skippable: true  },
-  { name: 'install-codex-plugin',  description: 'Install @switchbot/codex-plugin if missing',            skippable: true  },
-  { name: 'register-plugin',       description: 'Register plugin via shared registerCodexPlugin()',      skippable: false },
-  { name: 'auth',                  description: 'Verify credentials; spawn auth login if missing',      skippable: true  },
-  { name: 'doctor-verify',         description: 'Run 4 base + 3 Codex checks and report health',        skippable: false },
+  { name: 'check-codex-cli',       description: 'Verify codex CLI on PATH',                                        skippable: false },
+  { name: 'install-switchbot-cli', description: 'Install @switchbot/openapi-cli if missing',                       skippable: true  },
+  { name: 'register-plugin',       description: 'Register plugin (Route B git; npm install + Route A on fallback)', skippable: false },
+  { name: 'auth',                  description: 'Verify credentials; spawn auth login if missing',                 skippable: true  },
+  { name: 'doctor-verify',         description: 'Run 4 base + 3 Codex checks and report health',                   skippable: false },
 ];
 
 function setupStepCheckCodexCli(): SetupOutcome {
@@ -358,13 +359,6 @@ function setupStepInstallSwitchbotCli(): SetupOutcome {
   return setupStepInstallGlobalPackage(
     'install-switchbot-cli',
     SWITCHBOT_CLI_PACKAGE,
-  );
-}
-
-function setupStepInstallCodexPlugin(): SetupOutcome {
-  return setupStepInstallGlobalPackage(
-    'install-codex-plugin',
-    CODEX_PLUGIN_PACKAGE,
   );
 }
 
@@ -396,7 +390,35 @@ function setupStepInstallGlobalPackage(step: string, packageName: string): Setup
 }
 
 function setupStepRegisterPlugin(ctx: SetupContext): SetupOutcome {
-  return stepRegisterPluginShared('register-plugin', ctx);
+  // Try Route B (git marketplace) — no npm package required
+  const gitResult = registerCodexPluginGit();
+  if (gitResult.ok) {
+    ctx.codexPluginId = gitResult.pluginId;
+    ctx.packageRoot = gitResult.packageRoot;
+    return { step: 'register-plugin', status: 'ok', message: 'registered via git marketplace (Route B)' };
+  }
+
+  // Route B failed — install @switchbot/codex-plugin on demand, then try Route A
+  const installOutcome = setupStepInstallGlobalPackage('register-plugin', CODEX_PLUGIN_PACKAGE);
+  if (installOutcome.status === 'failed') {
+    return {
+      step: 'register-plugin',
+      status: 'failed',
+      message: `Route B failed (${gitResult.error}); npm install also failed: ${installOutcome.message ?? ''}`,
+    };
+  }
+
+  const npmResult = registerCodexPlugin();
+  if (!npmResult.ok) {
+    return {
+      step: 'register-plugin',
+      status: 'failed',
+      message: `Route B failed (${gitResult.error}); Route A also failed: ${npmResult.error ?? ''}`,
+    };
+  }
+  ctx.codexPluginId = npmResult.pluginId;
+  ctx.packageRoot = npmResult.packageRoot;
+  return { step: 'register-plugin', status: 'ok', message: 'registered via local npm (Route A fallback)' };
 }
 
 async function setupStepAuth(ctx: SetupContext): Promise<SetupOutcome> {
@@ -447,7 +469,6 @@ async function runSetup(
     let outcome: SetupOutcome;
     if (step.name === 'check-codex-cli')             outcome = setupStepCheckCodexCli();
     else if (step.name === 'install-switchbot-cli')  outcome = setupStepInstallSwitchbotCli();
-    else if (step.name === 'install-codex-plugin')   outcome = setupStepInstallCodexPlugin();
     else if (step.name === 'register-plugin')        outcome = setupStepRegisterPlugin(ctx);
     else if (step.name === 'auth')                   outcome = await setupStepAuth(ctx);
     else                                             outcome = await setupStepDoctorVerify();
@@ -465,7 +486,7 @@ function registerCodexSetupSubcommand(codex: Command): void {
   codex
     .command('setup')
     .description('Bootstrap the Codex integration end-to-end: install packages if missing, register plugin, auth, verify')
-    .option('--skip <names>', 'Comma-separated step names to skip (only "install-switchbot-cli", "install-codex-plugin", or "auth" allowed)')
+    .option('--skip <names>', 'Comma-separated step names to skip (only "install-switchbot-cli" or "auth" allowed)')
     .option('--yes', 'Non-interactive mode: do not spawn auth login, fail fast if credentials missing')
     .action(async (opts: { skip?: string; yes?: boolean }, command: Command) => {
       const skip = new Set(
