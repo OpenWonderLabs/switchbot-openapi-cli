@@ -19,7 +19,7 @@ export interface RegistrationResult {
 export interface RegisterCodexPluginResult {
   ok: boolean;
   pluginId: string;
-  packageRoot: string;
+  packageRoot: string | null;
   error?: string;
   exitCode?: number;
   stderr?: string;
@@ -86,7 +86,7 @@ export function resolveMarketplaceSourceRoot(packageRoot: string): string {
   // a symlink/junction at a stable `@`-free location.
   const needsAlias = process.platform === 'win32'
     ? /^[A-Za-z]:[\\/].*[\\/]@[^\\/]+[\\/]/.test(packageRoot)
-    : /\/@[^/]+\//.test(packageRoot);
+    : /\/node_modules\/@[^/]+\//.test(packageRoot);
 
   if (!needsAlias) return packageRoot;
 
@@ -257,7 +257,7 @@ export function resolveCodexPackageRoot(): { ok: true; packageRoot: string } | {
 export function registerCodexPlugin(): RegisterCodexPluginResult {
   const root = resolveCodexPackageRoot();
   if (!root.ok) {
-    return { ok: false, pluginId: '', packageRoot: '', error: root.error };
+    return { ok: false, pluginId: '', packageRoot: null, error: root.error };
   }
   const pluginId = resolvePluginId(root.packageRoot);
   const r = runCodexPluginRegistration(root.packageRoot, pluginId);
@@ -278,7 +278,7 @@ export function registerCodexPlugin(): RegisterCodexPluginResult {
 
 export const CODEX_GIT_MARKETPLACE_REPO   = 'OpenWonderLabs/switchbot-openapi-cli';
 export const CODEX_GIT_MARKETPLACE_SPARSE = 'packages/codex-plugin';
-export const CODEX_GIT_MARKETPLACE_REF    = 'main';
+export const CODEX_GIT_MARKETPLACE_REF    = process.env['CODEX_GIT_MARKETPLACE_REF'] ?? 'main';
 
 export function runCodexPluginRegistrationGit(pluginId: string): RegistrationResult {
   const mkt = spawnStr('codex', [
@@ -300,10 +300,10 @@ export function registerCodexPluginGit(): RegisterCodexPluginResult {
   const r = runCodexPluginRegistrationGit(pluginId);
   if (!r.ok) {
     return {
-      ok: false, pluginId, packageRoot: '',
+      ok: false, pluginId, packageRoot: null,
       error: `${r.stage} exit ${r.exitCode}: ${r.stderr}`,
       exitCode: r.exitCode, stderr: r.stderr,
     };
   }
-  return { ok: true, pluginId, packageRoot: '' };
+  return { ok: true, pluginId, packageRoot: null };
 }

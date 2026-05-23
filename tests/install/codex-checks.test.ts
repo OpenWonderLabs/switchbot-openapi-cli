@@ -206,7 +206,7 @@ describe('registerCodexPlugin (shared helper)', () => {
     expect(r.ok).toBe(false);
     expect(r.error).toMatch(/npm root -g failed/);
     expect(r.pluginId).toBe('');
-    expect(r.packageRoot).toBe('');
+    expect(r.packageRoot).toBeNull();
   });
 
   it('returns failure with normalized error when registration step fails', () => {
@@ -415,7 +415,7 @@ describe('runCodexPluginRegistrationGit', () => {
 });
 
 describe('registerCodexPluginGit', () => {
-  it('returns ok with fixed pluginId and empty packageRoot', () => {
+  it('returns ok with fixed pluginId and null packageRoot', () => {
     spawnSyncMock
       .mockReturnValueOnce(makeSpawnResult(0, ''))  // marketplace add
       .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove
@@ -424,7 +424,7 @@ describe('registerCodexPluginGit', () => {
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.pluginId).toBe('switchbot@codex-plugin');
-      expect(r.packageRoot).toBe('');
+      expect(r.packageRoot).toBeNull();
     }
   });
 

@@ -75,9 +75,11 @@ function buildLoginUrl(params: { redirectUri: string; state: string }): string {
 // around `await open()` can intercept it and the process crashes. Pre-check the
 // executable path in WSL to avoid the unhandled 'error' event entirely.
 async function tryOpenBrowser(url: string): Promise<boolean> {
-  if (process.platform === 'linux') {
-    // Default WSL mount; if the user has a custom root= in /etc/wsl.conf and
-    // PowerShell lives there, open() will work fine and this check is skipped.
+  if (process.platform === 'linux' && process.env['WSL_DISTRO_NAME'] !== undefined) {
+    // WSL: open delegates to PowerShell via wsl-utils. Check the default Windows
+    // mount path; if missing, fall back to printing the URL rather than crashing.
+    // Known limitation: non-default root= mounts in /etc/wsl.conf are not checked —
+    // if PS lives elsewhere open() will still be skipped here.
     const wslPsPath = '/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe';
     if (!existsSync(wslPsPath)) return false;
   }
