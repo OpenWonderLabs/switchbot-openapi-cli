@@ -9,6 +9,7 @@ import {
   checkCodexPluginRegistered,
   runCodexPluginRegistration,
   resolvePluginId,
+  resolveCodexPackageRoot,
   type Check,
 } from '../install/codex-checks.js';
 import { isJsonMode, printJson } from '../utils/output.js';
@@ -77,6 +78,7 @@ function registerCodexDoctorSubcommand(codex: Command): void {
 interface RepairContext {
   profile: string;
   codexPluginId: string;
+  packageRoot: string | null;
   nonInteractive: boolean;
 }
 
@@ -98,30 +100,27 @@ async function repairStepVerifyCli(_ctx: RepairContext): Promise<RepairOutcome> 
   return { step: 'verify-cli', status: 'ok', message: 'node + path ok' };
 }
 
+async function credentialsPresent(): Promise<boolean> {
+  try {
+    const { tryLoadConfig } = await import('../config.js');
+    const cfg = tryLoadConfig();
+    return Boolean(cfg && cfg.token && cfg.secret);
+  } catch {
+    return false;
+  }
+}
+
 async function repairStepReAuth(ctx: RepairContext): Promise<RepairOutcome> {
+  if (await credentialsPresent()) {
+    return { step: 're-auth', status: 'ok', message: 'credentials present' };
+  }
   if (ctx.nonInteractive) {
-    // Non-interactive (--yes): check credentials only
-    try {
-      const { tryLoadConfig } = await import('../config.js');
-      const cfg = tryLoadConfig();
-      if (cfg && cfg.token && cfg.secret) {
-        return { step: 're-auth', status: 'ok', message: 'credentials present' };
-      }
-    } catch { /* fall through */ }
     return {
       step: 're-auth',
       status: 'failed',
       message: JSON.stringify({ reason: 'credentials-missing', hint: 'run: switchbot auth login' }),
     };
   }
-  // Interactive: check first, then spawn auth login if missing
-  try {
-    const { tryLoadConfig } = await import('../config.js');
-    const cfg = tryLoadConfig();
-    if (cfg && cfg.token && cfg.secret) {
-      return { step: 're-auth', status: 'ok', message: 'credentials present' };
-    }
-  } catch { /* fall through */ }
   const r = spawnSync('switchbot', ['auth', 'login'], {
     stdio: 'inherit',
     shell: process.platform === 'win32',
@@ -143,16 +142,17 @@ function repairStepRemovePlugin(ctx: RepairContext): RepairOutcome {
   return { step: 'remove-plugin', status: 'ok' };
 }
 
-function repairStepRegisterPlugin(_ctx: RepairContext): RepairOutcome {
-  const npmRoot = spawnSync('npm', ['root', '-g'], {
-    encoding: 'utf-8', shell: process.platform === 'win32', timeout: 10000,
-  });
-  if ((npmRoot.status ?? 1) !== 0) {
-    return { step: 'register-plugin', status: 'failed', message: 'npm root -g failed' };
+function repairStepRegisterPlugin(ctx: RepairContext): RepairOutcome {
+  let packageRoot: string;
+  if (ctx.packageRoot) {
+    packageRoot = ctx.packageRoot;
+  } else {
+    const root = resolveCodexPackageRoot();
+    if (!root.ok) {
+      return { step: 'register-plugin', status: 'failed', message: root.error };
+    }
+    packageRoot = root.packageRoot;
   }
-  const packageRoot = path.join(
-    (npmRoot.stdout ?? '').trim(), '@cly-org', 'switchbot-codex-plugin',
-  );
   const pluginId = resolvePluginId(packageRoot);
   const result = runCodexPluginRegistration(packageRoot, pluginId);
   if (!result.ok) {
@@ -224,11 +224,6 @@ function registerCodexRepairSubcommand(codex: Command): void {
       const globalOpts = command.parent?.parent?.opts() ?? {};
       const dryRun = Boolean(globalOpts.dryRun);
       const profile = getActiveProfile() ?? 'default';
-      const ctx: RepairContext = {
-        profile,
-        codexPluginId: 'switchbot@switchbot-codex-plugin',
-        nonInteractive: Boolean(opts.yes),
-      };
 
       if (dryRun) {
         if (isJsonMode()) {
@@ -255,6 +250,14 @@ function registerCodexRepairSubcommand(codex: Command): void {
         process.exit(0);
         return;
       }
+
+      const root = resolveCodexPackageRoot();
+      const ctx: RepairContext = {
+        profile,
+        codexPluginId: root.ok ? resolvePluginId(root.packageRoot) : 'switchbot@switchbot-codex-plugin',
+        packageRoot: root.ok ? root.packageRoot : null,
+        nonInteractive: Boolean(opts.yes),
+      };
 
       if (!isJsonMode()) console.log(chalk.bold('Repairing Codex integration...'));
       if (!isJsonMode()) console.log('');

@@ -138,3 +138,14 @@ export function runCodexPluginRegistration(packageRoot: string, pluginId: string
   const add = spawnStr('codex', ['plugin', 'add', pluginId]);
   return { ok: add.status === 0, exitCode: add.status, stderr: add.stderr };
 }
+
+export function resolveCodexPackageRoot(): { ok: true; packageRoot: string } | { ok: false; error: string } {
+  const r = spawnSync('npm', ['root', '-g'], {
+    encoding: 'utf-8', shell: process.platform === 'win32', timeout: 10000,
+  });
+  if (!r || (r.status ?? 1) !== 0) {
+    return { ok: false, error: `npm root -g failed (exit ${r?.status ?? 1}): ${r?.stderr ?? ''}` };
+  }
+  const packageRoot = path.join((r.stdout ?? '').trim(), '@cly-org', 'switchbot-codex-plugin');
+  return { ok: true, packageRoot };
+}
