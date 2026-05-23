@@ -1,0 +1,10 @@
+body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+header h1 { font-size: 1.4rem; margin-bottom: 1.5rem; }
+section { margin-bottom: 2rem; border: 1px solid #e0e0e0; border-radius: 6px; padding: 1rem; }
+h2 { margin-top: 0; font-size: 1rem; color: #555; }
+label { display: block; margin: 0.4rem 0; }
+input[type="time"] { margin: 0 0.5rem; }
+textarea { width: 100%; font-family: monospace; font-size: 0.85rem; border: 1px solid #ccc; border-radius: 4px; padding: 0.5rem; box-sizing: border-box; }
+button { padding: 0.5rem 1rem; border-radius: 4px; border: 1px solid #ccc; cursor: pointer; }
+#save-btn { background: #1a56db; color: white; border-color: #1a56db; }
+#status { margin-left: 1rem; color: #555; }

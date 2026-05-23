@@ -15,6 +15,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { spawnSync } from 'node:child_process';
 import { resolvePolicyPath, loadPolicyFile, PolicyFileNotFoundError } from '../policy/load.js';
 import { validateLoadedPolicy } from '../policy/validate.js';
 import { selectCredentialStore } from '../credentials/keychain.js';
@@ -54,7 +55,7 @@ export interface PreflightOptions {
    * the later symlink-skill step fails fast with a clear message.
    * Unset (or `none`/`cursor`/`copilot`) skips the check.
    */
-  agent?: 'claude-code' | 'cursor' | 'copilot' | 'none';
+  agent?: 'claude-code' | 'cursor' | 'copilot' | 'codex' | 'none';
   /**
    * Whether this install run will actually attempt to create the Claude
    * skill link. When false, the agent-skills-dir check is skipped even if
@@ -243,6 +244,46 @@ function checkAgentSkillDirWritable(opts: PreflightOptions): PreflightCheck | nu
   }
 }
 
+function checkCodexCliForPreflight(opts: PreflightOptions): PreflightCheck | null {
+  if (opts.agent !== 'codex') return null;
+  const isWin = (opts.platform ?? process.platform) === 'win32';
+  const r = spawnSync(isWin ? 'where' : 'which', ['codex'], {
+    encoding: 'utf-8', timeout: 3000,
+  });
+  if ((r.status ?? 1) !== 0) {
+    return {
+      name: 'codex-cli',
+      status: 'fail',
+      message: 'codex CLI not found on PATH',
+      hint: 'Install Codex (https://github.com/openai/codex), then re-run switchbot install --agent codex',
+    };
+  }
+  return { name: 'codex-cli', status: 'ok', message: 'codex CLI found on PATH' };
+}
+
+function checkCodexPluginForPreflight(opts: PreflightOptions): PreflightCheck | null {
+  if (opts.agent !== 'codex') return null;
+  const r = spawnSync('npm', ['list', '-g', '--json', '@switchbot/codex-plugin'], {
+    encoding: 'utf-8', timeout: 10000, shell: process.platform === 'win32',
+  });
+  let installed = false;
+  try {
+    const parsed = JSON.parse(r.stdout ?? '{}') as {
+      dependencies?: Record<string, unknown>;
+    };
+    installed = Boolean(parsed.dependencies?.['@switchbot/codex-plugin']);
+  } catch { /* treat as not installed */ }
+  if (!installed) {
+    return {
+      name: 'codex-plugin-npm',
+      status: 'fail',
+      message: '@switchbot/codex-plugin not installed globally',
+      hint: 'Run: npm install -g @switchbot/codex-plugin (this command only registers an already-installed package)',
+    };
+  }
+  return { name: 'codex-plugin-npm', status: 'ok', message: '@switchbot/codex-plugin installed' };
+}
+
 /**
  * Run every pre-flight check and return a combined result. Safe to
  * call multiple times; no state is cached.
@@ -255,6 +296,10 @@ export async function runPreflight(options: PreflightOptions = {}): Promise<Pref
   checks.push(checkHomeDirWritable());
   const agentCheck = checkAgentSkillDirWritable(options);
   if (agentCheck) checks.push(agentCheck);
+  const codexCliCheck = checkCodexCliForPreflight(options);
+  if (codexCliCheck) checks.push(codexCliCheck);
+  const codexPluginCheck = checkCodexPluginForPreflight(options);
+  if (codexPluginCheck) checks.push(codexPluginCheck);
   const ok = checks.every((c) => c.status !== 'fail');
   return { checks, ok };
 }

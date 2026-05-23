@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import chalk from 'chalk';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -26,7 +27,7 @@ import { getActiveProfile } from '../lib/request-context.js';
 import { readDaemonState, DAEMON_PID_FILE } from '../lib/daemon-state.js';
 import { isPidAlive, readPidFile } from '../rules/pid-file.js';
 
-interface Check {
+export interface Check {
   name: string;
   status: 'ok' | 'warn' | 'fail';
   detail: string | Record<string, unknown>;
@@ -1106,7 +1107,7 @@ interface DoctorRunOpts {
   probe: boolean;
 }
 
-const CHECK_REGISTRY: CheckDef[] = [
+export const CHECK_REGISTRY: CheckDef[] = [
   { name: 'node', description: 'Node.js version compatibility', run: () => checkNodeVersion() },
   { name: 'path', description: 'switchbot binary reachable on PATH', run: () => checkPathDiscoverability() },
   { name: 'credentials', description: 'credentials file present and parseable', run: () => checkCredentials() },
@@ -1192,6 +1193,41 @@ interface DoctorCliOptions {
   yes?: boolean;
   probe?: boolean;
   quiet?: boolean;
+}
+
+export async function runDoctorChecks(
+  sections: readonly string[],
+  opts: DoctorRunOpts = { probe: false },
+): Promise<Check[]> {
+  const selected = CHECK_REGISTRY.filter((c) => sections.includes(c.name));
+  const checks: Check[] = [];
+  for (const def of selected) {
+    checks.push(await def.run(opts));
+  }
+  return checks;
+}
+
+/**
+ * Shared check-list formatter used by `switchbot doctor` (when run via this
+ * file's CLI handler, see below) and by `switchbot codex doctor` /
+ * `switchbot codex repair` / `switchbot codex setup`. Produces the chalk
+ * coloured tick/bang/cross output with a 24-wide name column.
+ */
+export function formatDoctorChecks(checks: Check[], quiet: boolean): void {
+  for (const c of checks) {
+    if (quiet && c.status === 'ok') continue;
+    const icon =
+      c.status === 'ok'   ? chalk.green('✓') :
+      c.status === 'warn' ? chalk.yellow('!') :
+                            chalk.red('✗');
+    const detailStr =
+      typeof c.detail === 'string'
+        ? c.detail
+        : typeof (c.detail as { message?: unknown }).message === 'string'
+          ? (c.detail as { message: string }).message
+          : JSON.stringify(c.detail);
+    console.log(`${icon} ${c.name.padEnd(24)} ${detailStr}`);
+  }
 }
 
 export function registerDoctorCommand(program: Command): void {
