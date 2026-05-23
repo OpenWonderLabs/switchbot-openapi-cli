@@ -307,3 +307,14 @@ export function registerCodexPluginGit(): RegisterCodexPluginResult {
   }
   return { ok: true, pluginId, packageRoot: null };
 }
+
+/**
+ * Try Route B (git marketplace) first; fall back to local npm path if GitHub
+ * is unreachable or the clone fails. This preserves air-gapped / corporate
+ * environments where @switchbot/codex-plugin is already installed locally.
+ */
+export function registerCodexPluginAuto(): RegisterCodexPluginResult {
+  const git = registerCodexPluginGit();
+  if (git.ok) return git;
+  return registerCodexPlugin();
+}

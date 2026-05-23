@@ -41,6 +41,7 @@ import {
   resolvePluginId,
   registerCodexPlugin,
   registerCodexPluginGit,
+  registerCodexPluginAuto,
 } from '../../src/install/codex-checks.js';
 
 function makeSpawnResult(status: number, stdout: string, stderr = ''): ReturnType<typeof spawnSyncMock> {
@@ -414,27 +415,36 @@ describe('runCodexPluginRegistrationGit', () => {
   });
 });
 
-describe('registerCodexPluginGit', () => {
-  it('returns ok with fixed pluginId and null packageRoot', () => {
+describe('registerCodexPluginAuto', () => {
+  it('returns git result when Route B succeeds', () => {
     spawnSyncMock
-      .mockReturnValueOnce(makeSpawnResult(0, ''))  // marketplace add
+      .mockReturnValueOnce(makeSpawnResult(0, ''))  // marketplace add (git)
       .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove
       .mockReturnValueOnce(makeSpawnResult(0, '')); // plugin add
-    const r = registerCodexPluginGit();
+    const r = registerCodexPluginAuto();
     expect(r.ok).toBe(true);
-    if (r.ok) {
-      expect(r.pluginId).toBe('switchbot@codex-plugin');
-      expect(r.packageRoot).toBeNull();
-    }
+    expect(r.packageRoot).toBeNull();
   });
 
-  it('returns failure when marketplace add fails', () => {
-    spawnSyncMock.mockReturnValueOnce(makeSpawnResult(1, '', 'git error'));
-    const r = registerCodexPluginGit();
+  it('falls back to local npm path when Route B fails', () => {
+    existsSyncMock.mockReturnValue(true);
+    spawnSyncMock
+      .mockReturnValueOnce(makeSpawnResult(1, '', 'git clone failed')) // marketplace add (git) — fails
+      .mockReturnValueOnce(makeSpawnResult(0, '/usr/local/lib/node_modules\n', '')) // npm root -g
+      .mockReturnValueOnce(makeSpawnResult(0, ''))  // marketplace add (local)
+      .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove
+      .mockReturnValueOnce(makeSpawnResult(0, '')); // plugin add
+    const r = registerCodexPluginAuto();
+    expect(r.ok).toBe(true);
+    expect(r.packageRoot).toMatch(/codex-plugin/);
+  });
+
+  it('returns failure when both Route B and local path fail', () => {
+    spawnSyncMock
+      .mockReturnValueOnce(makeSpawnResult(1, '', 'git clone failed')) // marketplace add (git) — fails
+      .mockReturnValueOnce(makeSpawnResult(1, '', 'npm error'));        // npm root -g — fails
+    const r = registerCodexPluginAuto();
     expect(r.ok).toBe(false);
-    expect(r.pluginId).toBe('switchbot@codex-plugin');
-    expect(r.error).toMatch(/marketplace-add exit 1: git error/);
-    expect(r.exitCode).toBe(1);
   });
 });
 
