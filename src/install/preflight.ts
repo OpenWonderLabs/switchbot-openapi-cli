@@ -276,9 +276,9 @@ function checkCodexPluginForPreflight(opts: PreflightOptions): PreflightCheck | 
   if (!installed) {
     return {
       name: 'codex-plugin-npm',
-      status: 'warn',
+      status: 'fail',
       message: '@cly-org/switchbot-codex-plugin not installed globally',
-      hint: 'Run: npm install -g @cly-org/switchbot-codex-plugin',
+      hint: 'Run: npm install -g @cly-org/switchbot-codex-plugin (this command only registers an already-installed package)',
     };
   }
   return { name: 'codex-plugin-npm', status: 'ok', message: '@cly-org/switchbot-codex-plugin installed' };

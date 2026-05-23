@@ -19,6 +19,7 @@ import {
   checkCodexPluginRegistered,
   runCodexPluginRegistration,
   resolvePluginId,
+  registerCodexPlugin,
 } from '../../src/install/codex-checks.js';
 
 function makeSpawnResult(status: number, stdout: string, stderr = ''): ReturnType<typeof spawnSyncMock> {
@@ -66,7 +67,10 @@ describe('checkCodexPluginNpm', () => {
     spawnSyncMock.mockReturnValueOnce(makeSpawnResult(1, '{}', ''));
     const result = checkCodexPluginNpm();
     expect(result.status).toBe('warn');
-    expect((result.detail as Record<string, unknown>).message).toContain('switchbot install --agent codex');
+    const msg = String((result.detail as Record<string, unknown>).message);
+    // A4: warning must include the full repair recipe (npm install + switchbot install)
+    expect(msg).toContain('npm install -g @cly-org/switchbot-codex-plugin');
+    expect(msg).toContain('switchbot install --agent codex');
   });
 
   it('returns warn when npm list json is malformed', () => {
@@ -92,7 +96,10 @@ describe('checkCodexPluginRegistered', () => {
       .mockReturnValueOnce(makeSpawnResult(0, 'some-other-plugin\n'));
     const result = checkCodexPluginRegistered();
     expect(result.status).toBe('warn');
-    expect((result.detail as Record<string, unknown>).message).toContain('switchbot install --agent codex');
+    const msg = String((result.detail as Record<string, unknown>).message);
+    // A4: warning must include the full repair recipe (npm install + switchbot install)
+    expect(msg).toContain('npm install -g @cly-org/switchbot-codex-plugin');
+    expect(msg).toContain('switchbot install --agent codex');
   });
 
   it('returns warn with reason codex-cli-missing when codex is not on PATH', () => {
@@ -135,6 +142,43 @@ describe('runCodexPluginRegistration', () => {
     const result = runCodexPluginRegistration('/some/path', 'switchbot@pkg');
     expect(result.ok).toBe(false);
     expect(result.stderr).toBe('plugin add error');
+  });
+});
+
+describe('registerCodexPlugin (shared helper)', () => {
+  it('returns ok with pluginId and packageRoot when both inner steps succeed', () => {
+    existsSyncMock.mockReturnValue(false); // no .codex-plugin/plugin.json
+    spawnSyncMock
+      .mockReturnValueOnce(makeSpawnResult(0, '/usr/local/lib/node_modules\n')) // npm root -g
+      .mockReturnValueOnce(makeSpawnResult(0, ''))                                // marketplace add
+      .mockReturnValueOnce(makeSpawnResult(0, ''));                               // plugin add
+    const r = registerCodexPlugin();
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.pluginId).toBe('switchbot@switchbot-codex-plugin');
+      expect(r.packageRoot).toMatch(/switchbot-codex-plugin/);
+    }
+  });
+
+  it('returns failure with normalized error when npm root -g fails', () => {
+    spawnSyncMock.mockReturnValueOnce(makeSpawnResult(1, '', 'npm error'));
+    const r = registerCodexPlugin();
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/npm root -g failed/);
+    expect(r.pluginId).toBe('');
+    expect(r.packageRoot).toBe('');
+  });
+
+  it('returns failure with normalized error when registration step fails', () => {
+    existsSyncMock.mockReturnValue(false);
+    spawnSyncMock
+      .mockReturnValueOnce(makeSpawnResult(0, '/usr/local/lib/node_modules\n')) // npm root -g
+      .mockReturnValueOnce(makeSpawnResult(1, '', 'marketplace add error'));    // marketplace add
+    const r = registerCodexPlugin();
+    expect(r.ok).toBe(false);
+    expect(r.pluginId).toBe('switchbot@switchbot-codex-plugin');
+    expect(r.error).toMatch(/exit 1: marketplace add error/);
+    expect(r.exitCode).toBe(1);
   });
 });
 

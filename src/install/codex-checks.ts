@@ -14,6 +14,15 @@ export interface RegistrationResult {
   stderr: string;
 }
 
+export interface RegisterCodexPluginResult {
+  ok: boolean;
+  pluginId: string;
+  packageRoot: string;
+  error?: string;
+  exitCode?: number;
+  stderr?: string;
+}
+
 function spawnStr(cmd: string, args: string[]): { status: number; stdout: string; stderr: string } {
   const r = spawnSync(cmd, args, {
     encoding: 'utf-8',
@@ -71,7 +80,7 @@ export function checkCodexPluginNpm(): Check {
     return {
       name: 'codex-plugin-npm',
       status: 'warn',
-      detail: { message: 'not installed globally — run: switchbot install --agent codex' },
+      detail: { message: 'not installed — run: npm install -g @cly-org/switchbot-codex-plugin && switchbot install --agent codex' },
     };
   }
   let packageRoot: string | null = null;
@@ -124,7 +133,7 @@ export function checkCodexPluginRegistered(): Check {
     return {
       name: 'codex-plugin-registered',
       status: 'warn',
-      detail: { message: 'switchbot plugin not in codex plugin list — run: switchbot install --agent codex' },
+      detail: { message: 'switchbot not in codex plugin list — run: npm install -g @cly-org/switchbot-codex-plugin && switchbot install --agent codex' },
     };
   }
   return { name: 'codex-plugin-registered', status: 'ok', detail: { pluginName } };
@@ -148,4 +157,29 @@ export function resolveCodexPackageRoot(): { ok: true; packageRoot: string } | {
   }
   const packageRoot = path.join((r.stdout ?? '').trim(), '@cly-org', 'switchbot-codex-plugin');
   return { ok: true, packageRoot };
+}
+
+/**
+ * 共享注册 helper：封装 resolveCodexPackageRoot → resolvePluginId → runCodexPluginRegistration。
+ * `install --agent codex`、`codex repair`、`codex setup` 三处注册步骤都通过此函数执行，
+ * 禁止再各自内联 `npm root -g` 或 pluginId 拼接。
+ */
+export function registerCodexPlugin(): RegisterCodexPluginResult {
+  const root = resolveCodexPackageRoot();
+  if (!root.ok) {
+    return { ok: false, pluginId: '', packageRoot: '', error: root.error };
+  }
+  const pluginId = resolvePluginId(root.packageRoot);
+  const r = runCodexPluginRegistration(root.packageRoot, pluginId);
+  if (!r.ok) {
+    return {
+      ok: false,
+      pluginId,
+      packageRoot: root.packageRoot,
+      error: `exit ${r.exitCode}: ${r.stderr}`,
+      exitCode: r.exitCode,
+      stderr: r.stderr,
+    };
+  }
+  return { ok: true, pluginId, packageRoot: root.packageRoot };
 }

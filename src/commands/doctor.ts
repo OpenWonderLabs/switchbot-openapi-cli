@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import chalk from 'chalk';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -1204,6 +1205,29 @@ export async function runDoctorChecks(
     checks.push(await def.run(opts));
   }
   return checks;
+}
+
+/**
+ * Shared check-list formatter used by `switchbot doctor` (when run via this
+ * file's CLI handler, see below) and by `switchbot codex doctor` /
+ * `switchbot codex repair` / `switchbot codex setup`. Produces the chalk
+ * coloured tick/bang/cross output with a 24-wide name column.
+ */
+export function formatDoctorChecks(checks: Check[], quiet: boolean): void {
+  for (const c of checks) {
+    if (quiet && c.status === 'ok') continue;
+    const icon =
+      c.status === 'ok'   ? chalk.green('✓') :
+      c.status === 'warn' ? chalk.yellow('!') :
+                            chalk.red('✗');
+    const detailStr =
+      typeof c.detail === 'string'
+        ? c.detail
+        : typeof (c.detail as { message?: unknown }).message === 'string'
+          ? (c.detail as { message: string }).message
+          : JSON.stringify(c.detail);
+    console.log(`${icon} ${c.name.padEnd(24)} ${detailStr}`);
+  }
 }
 
 export function registerDoctorCommand(program: Command): void {
