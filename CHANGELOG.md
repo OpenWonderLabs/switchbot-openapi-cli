@@ -24,6 +24,11 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Smoke workflow** — `.github/workflows/npm-published-smoke.yml` is now a per-package matrix. CLI keeps offline + live smoke; plugins get tarball-shape checks (concrete peerDep, executable bin entries) without live smoke.
 - **CI** — `policy-schema-sync` cross-repo job removed; the skill consumer is now in this monorepo.
 
+### Fixed
+
+- **Codex `register-plugin` on Windows / npm scoped install dirs** — `codex plugin marketplace add` from `<npm-root>/@switchbot/codex-plugin` failed with `--ref is only supported for git marketplace sources` because codex CLI 0.133.0 misparses local paths containing `@` as `owner/repo@ref`. Registration now bridges via a junction (Windows) or symlink (POSIX) in `os.tmpdir()` and falls back to the original path if the link cannot be created.
+- **Codex plugin marketplace metadata** — `packages/codex-plugin/.agents/plugins/marketplace.json` was missing from the published tarball (file untracked + omitted from `files`). Now committed and listed under `files`, with the local-source path corrected to `../../` so `codex plugin add switchbot@codex-plugin` resolves the plugin manifest at `packageRoot/.codex-plugin/plugin.json`.
+
 ### Removed
 
 - Sibling repository `openclaw-switchbot-skill` is archived; future development happens here.

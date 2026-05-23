@@ -23,6 +23,7 @@
     "setup/",
     "skills/",
     ".codex-plugin/",
+    ".agents/",
     ".mcp.json",
     "README.md"
   ],

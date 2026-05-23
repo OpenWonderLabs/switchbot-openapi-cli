@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
 
 export interface Check {
   name: string;
@@ -140,12 +141,45 @@ export function checkCodexPluginRegistered(): Check {
 }
 
 export function runCodexPluginRegistration(packageRoot: string, pluginId: string): RegistrationResult {
-  const mkt = spawnStr('codex', ['plugin', 'marketplace', 'add', packageRoot]);
-  if (mkt.status !== 0) {
-    return { ok: false, exitCode: mkt.status, stderr: mkt.stderr };
+  return withSafeMarketplacePath(packageRoot, (safePath) => {
+    const mkt = spawnStr('codex', ['plugin', 'marketplace', 'add', safePath]);
+    if (mkt.status !== 0) {
+      return { ok: false, exitCode: mkt.status, stderr: mkt.stderr };
+    }
+    const add = spawnStr('codex', ['plugin', 'add', pluginId]);
+    return { ok: add.status === 0, exitCode: add.status, stderr: add.stderr };
+  });
+}
+
+/**
+ * codex CLI <= 0.133.0 misparses local paths containing `@` (e.g. the
+ * `@switchbot/codex-plugin` install dir under `npm root -g`) as `owner/repo@ref`
+ * git refs, rejecting them with "--ref is only supported for git marketplace
+ * sources". Bridge via a junction (Windows) or symlink (POSIX) at a path
+ * without `@`. The link is removed after the codex commands finish.
+ *
+ * If the link cannot be created (no fs perms, mocked test env), the original
+ * packageRoot is passed through unchanged so a future codex release that fixes
+ * the upstream parser still works.
+ */
+function withSafeMarketplacePath<T>(packageRoot: string, fn: (safePath: string) => T): T {
+  if (!packageRoot.includes('@')) return fn(packageRoot);
+  const safePath = path.join(os.tmpdir(), `switchbot-codex-marketplace-${process.pid}`);
+  let linkCreated = false;
+  try {
+    try { fs.unlinkSync(safePath); } catch { /* ENOENT or stale link */ }
+    fs.symlinkSync(packageRoot, safePath, process.platform === 'win32' ? 'junction' : 'dir');
+    linkCreated = true;
+  } catch {
+    return fn(packageRoot);
   }
-  const add = spawnStr('codex', ['plugin', 'add', pluginId]);
-  return { ok: add.status === 0, exitCode: add.status, stderr: add.stderr };
+  try {
+    return fn(safePath);
+  } finally {
+    if (linkCreated) {
+      try { fs.unlinkSync(safePath); } catch { /* swallow */ }
+    }
+  }
 }
 
 export function resolveCodexPackageRoot(): { ok: true; packageRoot: string } | { ok: false; error: string } {
