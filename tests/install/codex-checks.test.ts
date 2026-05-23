@@ -9,17 +9,26 @@ const existsSyncMock = vi.hoisted(() => vi.fn());
 const readFileSyncMock = vi.hoisted(() => vi.fn());
 const realpathSyncMock = vi.hoisted(() => vi.fn());
 const symlinkSyncMock = vi.hoisted(() => vi.fn());
+const lstatSyncMock = vi.hoisted(() => vi.fn());
+const unlinkSyncMock = vi.hoisted(() => vi.fn());
+const mkdirSyncMock = vi.hoisted(() => vi.fn());
 vi.mock('node:fs', () => ({
   default: {
     existsSync: existsSyncMock,
     readFileSync: readFileSyncMock,
     realpathSync: realpathSyncMock,
     symlinkSync: symlinkSyncMock,
+    lstatSync: lstatSyncMock,
+    unlinkSync: unlinkSyncMock,
+    mkdirSync: mkdirSyncMock,
   },
   existsSync: existsSyncMock,
   readFileSync: readFileSyncMock,
   realpathSync: realpathSyncMock,
   symlinkSync: symlinkSyncMock,
+  lstatSync: lstatSyncMock,
+  unlinkSync: unlinkSyncMock,
+  mkdirSync: mkdirSyncMock,
 }));
 
 import {
@@ -42,6 +51,9 @@ beforeEach(() => {
   readFileSyncMock.mockReset();
   realpathSyncMock.mockReset();
   symlinkSyncMock.mockReset();
+  lstatSyncMock.mockReset();
+  unlinkSyncMock.mockReset();
+  mkdirSyncMock.mockReset();
 });
 
 describe('checkCodexCli', () => {
@@ -233,16 +245,62 @@ describe('resolvePluginId', () => {
 });
 
 describe('resolveMarketplaceSourceRoot', () => {
-  it('uses a stable Windows alias for scoped npm package roots', () => {
-    const root = 'C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\@switchbot\\codex-plugin';
-    existsSyncMock.mockReturnValue(false);
-    const resolved = resolveMarketplaceSourceRoot(root);
+  const SCOPED_ROOT = 'C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\@switchbot\\codex-plugin';
+
+  function makeStat(isSymlink: boolean) {
+    return { isSymbolicLink: () => isSymlink } as unknown as ReturnType<typeof lstatSyncMock>;
+  }
+
+  it('non-Windows or non-scoped paths short-circuit to packageRoot', () => {
     if (process.platform === 'win32') {
-      expect(resolved).toMatch(/switchbot$/);
-      expect(symlinkSyncMock).toHaveBeenCalledWith(root, expect.stringMatching(/switchbot$/), 'junction');
+      expect(resolveMarketplaceSourceRoot('C:\\plain\\path')).toBe('C:\\plain\\path');
     } else {
-      expect(resolved).toBe(root);
+      expect(resolveMarketplaceSourceRoot(SCOPED_ROOT)).toBe(SCOPED_ROOT);
     }
+    expect(symlinkSyncMock).not.toHaveBeenCalled();
+    expect(unlinkSyncMock).not.toHaveBeenCalled();
+  });
+
+  it('creates a junction when the alias path is missing', () => {
+    if (process.platform !== 'win32') return;
+    lstatSyncMock.mockReturnValue(null);
+    const resolved = resolveMarketplaceSourceRoot(SCOPED_ROOT);
+    expect(mkdirSyncMock).toHaveBeenCalledWith(expect.stringMatching(/switchbot$/), { recursive: true });
+    expect(symlinkSyncMock).toHaveBeenCalledWith(SCOPED_ROOT, expect.stringMatching(/codex-plugin-marketplace$/), 'junction');
+    expect(unlinkSyncMock).not.toHaveBeenCalled();
+    expect(resolved).toMatch(/codex-plugin-marketplace$/);
+  });
+
+  it('reuses an existing junction that points at the current packageRoot', () => {
+    if (process.platform !== 'win32') return;
+    lstatSyncMock.mockReturnValue(makeStat(true));
+    realpathSyncMock
+      .mockReturnValueOnce(SCOPED_ROOT)  // alias real
+      .mockReturnValueOnce(SCOPED_ROOT); // package real
+    const resolved = resolveMarketplaceSourceRoot(SCOPED_ROOT);
+    expect(unlinkSyncMock).not.toHaveBeenCalled();
+    expect(symlinkSyncMock).not.toHaveBeenCalled();
+    expect(resolved).toMatch(/codex-plugin-marketplace$/);
+  });
+
+  it('repairs a stale junction pointing elsewhere', () => {
+    if (process.platform !== 'win32') return;
+    lstatSyncMock.mockReturnValue(makeStat(true));
+    realpathSyncMock
+      .mockReturnValueOnce('D:\\old\\node_modules\\@switchbot\\codex-plugin')
+      .mockReturnValueOnce(SCOPED_ROOT);
+    const resolved = resolveMarketplaceSourceRoot(SCOPED_ROOT);
+    expect(unlinkSyncMock).toHaveBeenCalledWith(expect.stringMatching(/codex-plugin-marketplace$/));
+    expect(symlinkSyncMock).toHaveBeenCalledWith(SCOPED_ROOT, expect.stringMatching(/codex-plugin-marketplace$/), 'junction');
+    expect(resolved).toMatch(/codex-plugin-marketplace$/);
+  });
+
+  it('throws when the alias path is a real directory', () => {
+    if (process.platform !== 'win32') return;
+    lstatSyncMock.mockReturnValue(makeStat(false));
+    expect(() => resolveMarketplaceSourceRoot(SCOPED_ROOT)).toThrow(/exists and is not a junction/);
+    expect(unlinkSyncMock).not.toHaveBeenCalled();
+    expect(symlinkSyncMock).not.toHaveBeenCalled();
   });
 });
 

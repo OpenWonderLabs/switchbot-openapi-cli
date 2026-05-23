@@ -67,26 +67,43 @@ function resolvePluginName(packageRoot: string): string {
 /**
  * Codex 0.133.0 misclassifies Windows local paths with scoped npm segments
  * like `...\node_modules\@switchbot\codex-plugin` as ref-bearing sources.
- * Register through a stable junction without `@`, but keep plugin IDs based
- * on the marketplace manifest name.
+ * Bridge through a junction at a stable, app-owned location so the registered
+ * marketplace path contains no `@` segment and survives across runs.
  */
+function computeAliasPath(): string {
+  const localAppData = process.env.LOCALAPPDATA;
+  if (localAppData) {
+    return path.join(localAppData, 'switchbot', 'codex-plugin-marketplace');
+  }
+  return path.join(os.homedir(), '.switchbot', 'codex-plugin-marketplace');
+}
+
 export function resolveMarketplaceSourceRoot(packageRoot: string): string {
   if (process.platform !== 'win32' || !/^[A-Za-z]:[\\/].*[\\/]@[^\\/]+[\\/]/.test(packageRoot)) {
     return packageRoot;
   }
 
-  const aliasRoot = path.join(os.homedir(), 'switchbot');
-  try {
-    if (fs.existsSync(aliasRoot)) {
-      const aliasReal = fs.realpathSync(aliasRoot);
-      const packageReal = fs.realpathSync(packageRoot);
-      return aliasReal.toLowerCase() === packageReal.toLowerCase() ? aliasRoot : packageRoot;
-    }
+  const aliasRoot = computeAliasPath();
+  fs.mkdirSync(path.dirname(aliasRoot), { recursive: true });
+
+  const stat = fs.lstatSync(aliasRoot, { throwIfNoEntry: false });
+  if (!stat) {
     fs.symlinkSync(packageRoot, aliasRoot, 'junction');
     return aliasRoot;
-  } catch {
-    return packageRoot;
   }
+
+  if (stat.isSymbolicLink()) {
+    const aliasReal = fs.realpathSync(aliasRoot);
+    const packageReal = fs.realpathSync(packageRoot);
+    if (aliasReal.toLowerCase() === packageReal.toLowerCase()) {
+      return aliasRoot;
+    }
+    fs.unlinkSync(aliasRoot);
+    fs.symlinkSync(packageRoot, aliasRoot, 'junction');
+    return aliasRoot;
+  }
+
+  throw new Error(`alias path ${aliasRoot} exists and is not a junction; remove it manually and retry`);
 }
 
 /** Single authoritative plugin ID resolver. Mirrors install.js:resolvePluginIdentifier. */
