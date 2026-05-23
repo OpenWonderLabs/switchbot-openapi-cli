@@ -173,38 +173,44 @@ for the agent surface.
 
 Use SwitchBot with [OpenAI Codex CLI](https://github.com/openai/codex) to control your smart home devices through natural-language AI conversations.
 
-### Requirements
+### Quick start — just paste this into Codex
 
-- [Codex CLI](https://github.com/openai/codex) installed
-- Node.js 18 or later
+Not sure how to run commands? Copy the block below and paste it directly into your Codex chat:
 
-### Install
+```
+Please set up the SwitchBot integration for me by running:
+npx @switchbot/openapi-cli codex setup
+Then restart Codex and confirm it's working.
+```
 
-Run this single command in your terminal:
+Codex will run the setup, walk you through signing in, and let you know when it's ready.
+
+### For developers
+
+**Requirements:** [Codex CLI](https://github.com/openai/codex) on `$PATH`, Node.js ≥ 18.
+
+**One-command bootstrap** (installs CLI + plugin + auth + health check in one shot):
 
 ```bash
 npx @switchbot/openapi-cli codex setup
 ```
 
-The setup wizard will:
-
-1. Install the SwitchBot CLI and Codex plugin (if not already installed)
-2. Register the plugin with Codex
-3. Sign you in to your SwitchBot account
-4. Verify everything is working
-
-Restart Codex when prompted, then ask it something like _"List my SwitchBot devices"_.
-
-### Troubleshooting
-
-If something stops working after setup:
+**Manual install** (if you prefer explicit control):
 
 ```bash
-switchbot codex doctor    # show a health summary
-switchbot codex repair    # automatically fix common issues
+npm install -g @switchbot/openapi-cli @switchbot/codex-plugin
+switchbot install --agent codex   # register-only; package must already be installed
+switchbot auth login
 ```
 
-> Run `switchbot codex setup --help` for advanced options (dry-run, non-interactive, profile scoping).
+**Health check and repair:**
+
+```bash
+switchbot codex doctor    # 7-check summary; exits 1 on any failure
+switchbot codex repair    # re-auth + re-register + re-check
+```
+
+Both `setup` and `repair` accept `--dry-run`, `--json`, `--yes`, and `--profile` / `--config` (global flags). Run `switchbot codex setup --help` for the full flag list.
 
 ## Credentials
 
