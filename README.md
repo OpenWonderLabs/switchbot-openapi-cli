@@ -173,6 +173,8 @@ for the agent surface.
 
 Use SwitchBot with [OpenAI Codex CLI](https://github.com/openai/codex) to control your smart home devices through natural-language AI conversations.
 
+The Codex plugin is **self-hosted in this repository** (`packages/codex-plugin/`) and registered directly via Codex's git marketplace — no separate plugin npm package required.
+
 ### Quick start — just paste this into Codex
 
 Not sure how to run commands? Copy the block below and paste it directly into your Codex chat:
@@ -183,28 +185,29 @@ npx @switchbot/openapi-cli codex setup
 Then restart Codex and confirm it's working.
 ```
 
-Codex will run the setup, walk you through signing in, and let you know when it's ready.
+Codex will install the CLI, register the plugin from this repo's git marketplace, walk you through signing in, and let you know when it's ready.
 
 ### For developers
 
 **Requirements:** [Codex CLI](https://github.com/openai/codex) on `$PATH`, Node.js ≥ 18.
 
-**One-command bootstrap** (installs CLI + plugin + auth + health check in one shot):
+**One-command bootstrap** (installs CLI + registers plugin via git marketplace + auth + health check):
 
 ```bash
 npx @switchbot/openapi-cli codex setup
 ```
 
-**Advanced manual registration** (only if you already installed both packages):
+**Direct git marketplace registration** (if the CLI is already installed):
 
 ```bash
-npm install -g @switchbot/openapi-cli @switchbot/codex-plugin
-switchbot install --agent codex   # register-only fallback
+# Register the plugin directly from this repo — no npm package install needed
+codex plugin marketplace add OpenWonderLabs/switchbot-openapi-cli \
+  --sparse packages/codex-plugin --ref main
+codex plugin add switchbot@codex-plugin
 switchbot auth login
 ```
 
-For normal use, prefer `npx @switchbot/openapi-cli codex setup`; it handles
-package install, plugin registration, auth, and verification together.
+`packages/codex-plugin/` in this repo is the Codex marketplace source. Registration always pulls from `main`; set `CODEX_GIT_MARKETPLACE_REF` to pin a different branch or tag.
 
 **Health check and repair:**
 
