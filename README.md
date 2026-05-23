@@ -171,72 +171,46 @@ for the agent surface.
 
 ## Codex integration
 
-For [OpenAI Codex CLI](https://github.com/openai/codex) users, the SwitchBot integration ships as a separate plugin package — `@switchbot/codex-plugin` — registered via `codex plugin add`. The `switchbot codex` command group orchestrates setup, health checks, and repair end-to-end.
+Use SwitchBot with [OpenAI Codex CLI](https://github.com/openai/codex) to control your smart home devices through natural-language AI conversations.
 
-### Prerequisites
+### Quick start — just paste this into Codex
 
-- **Codex CLI** installed and on `$PATH` (see the link above)
-- **Node.js ≥ 18** (same as the base CLI)
+Not sure how to run commands? Copy the block below and paste it directly into your Codex chat:
 
-### One-command bootstrap (recommended)
+```
+Please set up the SwitchBot integration for me by running:
+npx @switchbot/openapi-cli codex setup
+Then restart Codex and confirm it's working.
+```
 
-On a brand-new machine — no SwitchBot CLI installed yet — use `npx`:
+Codex will run the setup, walk you through signing in, and let you know when it's ready.
+
+### For developers
+
+**Requirements:** [Codex CLI](https://github.com/openai/codex) on `$PATH`, Node.js ≥ 18.
+
+**One-command bootstrap** (installs CLI + plugin + auth + health check in one shot):
 
 ```bash
 npx @switchbot/openapi-cli codex setup
 ```
 
-This works because `setup` runs six steps in order, the package-install steps fix the chicken-and-egg:
-
-1. `check-codex-cli` — verify `codex` is on `$PATH`
-2. `install-switchbot-cli` — if `@switchbot/openapi-cli` is not in `npm list -g`, install it globally (so the `switchbot` binary stays after the `npx` invocation exits)
-3. `install-codex-plugin` — if `@switchbot/codex-plugin` is not in `npm list -g`, install it globally
-4. `register-plugin` — `codex plugin marketplace add` + `codex plugin add` for `@switchbot/codex-plugin`
-5. `auth` — prompt for SwitchBot credentials if missing (spawns `switchbot auth login`, inheriting your active `--profile` and `--config`)
-6. `doctor-verify` — run 7 checks (4 base: node, path, credentials, mcp + 3 codex: cli, npm package, plugin registered)
-
-Restart Codex when complete, then verify:
-
-```bash
-switchbot devices list
-```
-
-### Manual install
-
-If you prefer step-by-step control:
+**Manual install** (if you prefer explicit control):
 
 ```bash
 npm install -g @switchbot/openapi-cli @switchbot/codex-plugin
-switchbot install --agent codex     # registers the already-installed plugin
-switchbot auth login                # if you don't already have credentials
+switchbot install --agent codex   # register-only; package must already be installed
+switchbot auth login
 ```
 
-`switchbot install --agent codex` is **register-only** — it fails fast if `@switchbot/codex-plugin` is not present in `npm list -g`. Use `codex setup` instead if you want the package install bundled in.
-
-### Health checks and repair
+**Health check and repair:**
 
 ```bash
-switchbot codex doctor              # 7-check health summary; exits 1 on any fail
-switchbot codex repair              # re-verify, re-auth, re-register, re-check
+switchbot codex doctor    # 7-check summary; exits 1 on any failure
+switchbot codex repair    # re-auth + re-register + re-check
 ```
 
-`codex repair` runs five steps: `verify-cli` → `re-auth` → `remove-plugin` (best-effort) → `register-plugin` → `doctor-verify`. Both `setup` and `repair` support:
-
-- `--dry-run` — print the step list without mutating anything
-- `--json` — machine-readable outcome
-- `--yes` — non-interactive; auth prompts become `failed` instead of spawning `auth login`
-- `--skip <names>` — comma-separated. Only `install-switchbot-cli` / `install-codex-plugin` / `auth` (setup) and `re-auth` / `remove-plugin` (repair) are skippable; passing any other step name exits 2.
-
-### Profile and config scope
-
-All `codex` subcommands honor the global `--profile` and `--config` flags. Auth credentials are written to (and read from) the active profile, and the spawned `auth login` inherits both:
-
-```bash
-switchbot --profile staging codex setup
-switchbot --config /path/to/cfg.json codex doctor
-```
-
-> Run `switchbot codex setup --help` (or `repair --help`, `doctor --help`) for the full flag list.
+Both `setup` and `repair` accept `--dry-run`, `--json`, `--yes`, and `--profile` / `--config` (global flags). Run `switchbot codex setup --help` for the full flag list.
 
 ## Credentials
 
