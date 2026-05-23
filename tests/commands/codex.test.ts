@@ -315,7 +315,7 @@ describe('switchbot codex setup', () => {
     tryLoadConfigMock.mockReset();
   });
 
-  it('--dry-run prints the 5-step list without mutating', async () => {
+  it('--dry-run prints the 6-step list without mutating', async () => {
     const { exitCode, stderr } = await runCli(
       registerCodexCommand,
       ['codex', 'setup', '--dry-run'],
@@ -324,6 +324,7 @@ describe('switchbot codex setup', () => {
     const out = stderr.join('\n');
     expect(out).toContain('check-codex-cli');
     expect(out).toContain('install-switchbot-cli');
+    expect(out).toContain('install-codex-plugin');
     expect(out).toContain('register-plugin');
     expect(out).toContain('auth');
     expect(out).toContain('doctor-verify');
@@ -332,7 +333,7 @@ describe('switchbot codex setup', () => {
     expect(registerCodexPluginMock).not.toHaveBeenCalled();
   });
 
-  it('--dry-run --json emits 5 ordered steps with skippable flags', async () => {
+  it('--dry-run --json emits 6 ordered steps with skippable flags', async () => {
     const { exitCode, stdout } = await runCli(
       registerCodexCommand,
       ['codex', 'setup', '--dry-run', '--json'],
@@ -345,12 +346,13 @@ describe('switchbot codex setup', () => {
     };
     const data = parsed.data ?? parsed;
     expect(data.dryRun).toBe(true);
-    expect(data.steps).toHaveLength(5);
+    expect(data.steps).toHaveLength(6);
     expect(data.steps?.map((s) => s.name)).toEqual([
-      'check-codex-cli', 'install-switchbot-cli', 'register-plugin', 'auth', 'doctor-verify',
+      'check-codex-cli', 'install-switchbot-cli', 'install-codex-plugin', 'register-plugin', 'auth', 'doctor-verify',
     ]);
     const skippable = Object.fromEntries(data.steps!.map((s) => [s.name, s.skippable]));
     expect(skippable['install-switchbot-cli']).toBe(true);
+    expect(skippable['install-codex-plugin']).toBe(true);
     expect(skippable['auth']).toBe(true);
     expect(skippable['check-codex-cli']).toBe(false);
     expect(skippable['register-plugin']).toBe(false);
@@ -398,6 +400,12 @@ describe('switchbot codex setup', () => {
       stdout: JSON.stringify({ dependencies: { '@switchbot/openapi-cli': { version: '1.0.0' } } }),
       stderr: '',
     });
+    // install-codex-plugin step: npm list -g returns the package as already installed
+    spawnSyncRepairMock.mockReturnValueOnce({
+      status: 0,
+      stdout: JSON.stringify({ dependencies: { '@switchbot/codex-plugin': { version: '0.1.0' } } }),
+      stderr: '',
+    });
     // register-plugin succeeds
     registerCodexPluginMock.mockReturnValueOnce({
       ok: true, pluginId: 'switchbot@codex-plugin',
@@ -439,6 +447,12 @@ describe('switchbot codex setup', () => {
       stdout: JSON.stringify({ dependencies: { '@switchbot/openapi-cli': { version: '1.0.0' } } }),
       stderr: '',
     });
+    // install-codex-plugin: already installed
+    spawnSyncRepairMock.mockReturnValueOnce({
+      status: 0,
+      stdout: JSON.stringify({ dependencies: { '@switchbot/codex-plugin': { version: '0.1.0' } } }),
+      stderr: '',
+    });
     registerCodexPluginMock.mockReturnValueOnce({
       ok: true, pluginId: 'switchbot@codex-plugin', packageRoot: '/some/path',
     });
@@ -474,6 +488,12 @@ describe('switchbot codex setup', () => {
     checkCodexCliMock.mockReturnValueOnce({
       name: 'codex-cli', status: 'ok', detail: { path: '/usr/local/bin/codex' },
     });
+    // install-codex-plugin still runs when only install-switchbot-cli is skipped
+    spawnSyncRepairMock.mockReturnValueOnce({
+      status: 0,
+      stdout: JSON.stringify({ dependencies: { '@switchbot/codex-plugin': { version: '0.1.0' } } }),
+      stderr: '',
+    });
     registerCodexPluginMock.mockReturnValueOnce({
       ok: true, pluginId: 'switchbot@codex-plugin', packageRoot: '/some/path',
     });
@@ -494,8 +514,9 @@ describe('switchbot codex setup', () => {
     };
     const step = parsed.data!.outcomes.find((o) => o.step === 'install-switchbot-cli');
     expect(step?.status).toBe('skipped');
-    // npm list -g was NOT spawned for install-switchbot-cli (the only spawn that step uses)
-    expect(spawnSyncRepairMock).not.toHaveBeenCalled();
+    // npm list -g was NOT spawned for install-switchbot-cli; the only npm call was the plugin check.
+    expect(spawnSyncRepairMock).toHaveBeenCalledTimes(1);
+    expect(spawnSyncRepairMock.mock.calls[0][1]).toContain('@switchbot/codex-plugin');
   });
 
   it('install-switchbot-cli failure exits 1 (not 2 — only check-codex-cli is preflight)', async () => {
@@ -506,6 +527,12 @@ describe('switchbot codex setup', () => {
     spawnSyncRepairMock.mockReturnValueOnce({ status: 1, stdout: '{}', stderr: '' });
     // npm install -g fails
     spawnSyncRepairMock.mockReturnValueOnce({ status: 1, stdout: '', stderr: 'EACCES' });
+    // install-codex-plugin still runs
+    spawnSyncRepairMock.mockReturnValueOnce({
+      status: 0,
+      stdout: JSON.stringify({ dependencies: { '@switchbot/codex-plugin': { version: '0.1.0' } } }),
+      stderr: '',
+    });
     // register-plugin still runs (continues after non-preflight failure)
     registerCodexPluginMock.mockReturnValueOnce({
       ok: true, pluginId: 'switchbot@codex-plugin', packageRoot: '/some/path',
@@ -527,9 +554,47 @@ describe('switchbot codex setup', () => {
       data?: { preflightFailed: boolean; outcomes: Array<{ step: string; status: string }> };
     };
     expect(parsed.data!.preflightFailed).toBe(false);
-    expect(parsed.data!.outcomes).toHaveLength(5); // all 5 steps ran (no preflight halt)
+    expect(parsed.data!.outcomes).toHaveLength(6); // all 6 steps ran (no preflight halt)
     expect(parsed.data!.outcomes.find((o) => o.step === 'install-switchbot-cli')?.status).toBe('failed');
     // register-plugin still got called despite the earlier failure
+    expect(registerCodexPluginMock).toHaveBeenCalledOnce();
+  });
+
+  it('installs @switchbot/codex-plugin before registering when missing', async () => {
+    checkCodexCliMock.mockReturnValueOnce({
+      name: 'codex-cli', status: 'ok', detail: { path: '/usr/local/bin/codex' },
+    });
+    // switchbot CLI already installed
+    spawnSyncRepairMock.mockReturnValueOnce({
+      status: 0,
+      stdout: JSON.stringify({ dependencies: { '@switchbot/openapi-cli': { version: '1.0.0' } } }),
+      stderr: '',
+    });
+    // codex plugin missing, then install succeeds
+    spawnSyncRepairMock.mockReturnValueOnce({ status: 1, stdout: '{}', stderr: '' });
+    spawnSyncRepairMock.mockReturnValueOnce({ status: 0, stdout: '', stderr: '' });
+    registerCodexPluginMock.mockReturnValueOnce({
+      ok: true, pluginId: 'switchbot@codex-plugin', packageRoot: '/some/path',
+    });
+    tryLoadConfigMock.mockReturnValue({ token: 't', secret: 's' });
+    runDoctorChecksMock.mockResolvedValueOnce(makeBaseChecks());
+    checkCodexCliMock.mockReturnValue({ name: 'codex-cli', status: 'ok', detail: 'ok' });
+    checkCodexPluginNpmMock.mockReturnValue({ name: 'codex-plugin-npm', status: 'ok', detail: 'ok' });
+    checkCodexPluginRegisteredMock.mockReturnValue({ name: 'codex-plugin-registered', status: 'ok', detail: 'ok' });
+
+    const { exitCode, stdout } = await runCli(
+      registerCodexCommand,
+      ['codex', 'setup', '--json'],
+    );
+    expect(exitCode).toBe(0);
+    const parsed = JSON.parse(stdout.join('')) as {
+      data?: { outcomes: Array<{ step: string; status: string; message?: string }> };
+    };
+    const pluginStep = parsed.data!.outcomes.find((o) => o.step === 'install-codex-plugin');
+    expect(pluginStep?.status).toBe('ok');
+    expect(pluginStep?.message).toContain('installed @switchbot/codex-plugin@latest');
+    expect(spawnSyncRepairMock.mock.calls[1][1]).toEqual(['list', '-g', '--json', '--depth=0', '@switchbot/codex-plugin']);
+    expect(spawnSyncRepairMock.mock.calls[2][1]).toEqual(['install', '-g', '@switchbot/codex-plugin@latest']);
     expect(registerCodexPluginMock).toHaveBeenCalledOnce();
   });
 });

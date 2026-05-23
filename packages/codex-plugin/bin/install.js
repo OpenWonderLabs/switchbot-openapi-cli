@@ -43,7 +43,7 @@ export function makeInstall({ checkCli, runInherit, packageRoot, runAuth }) {
   return async function install() {
     process.stderr.write(
       '[switchbot-codex] WARNING: switchbot-codex-install is deprecated.\n' +
-      '[switchbot-codex] Preferred: npm install -g @switchbot/codex-plugin && switchbot install --agent codex\n' +
+      '[switchbot-codex] Preferred: npx @switchbot/openapi-cli codex setup\n' +
       '[switchbot-codex] This binary continues to work during the transition period.\n'
     );
     const cliCheck = await checkCli();

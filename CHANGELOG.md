@@ -13,10 +13,12 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **Monorepo absorption** — `@switchbot/codex-plugin` (formerly `@cly-org/switchbot-codex-plugin`) now ships from this repository under `packages/codex-plugin/`. A single GitHub Release publishes any package whose version was bumped since the previous release.
 - **Codex command group** — `switchbot codex setup`, `switchbot codex doctor`, `switchbot codex repair` orchestrate Codex plugin install, the 7-check health summary, and end-to-end repair. `switchbot install --agent codex` is the register-only sibling.
+- **`codex setup` 6-step flow** — adds `install-codex-plugin` between `install-switchbot-cli` and `register-plugin`, so a single `npx @switchbot/openapi-cli codex setup` invocation can bootstrap a brand-new machine end-to-end without a separate `npm install -g @switchbot/codex-plugin`. Both install steps are skippable via `--skip`.
 
 ### Changed
 
 - **Plugin package name** — `@cly-org/switchbot-codex-plugin` → `@switchbot/codex-plugin`. The old name was verification-stage with no published users; no `npm deprecate` notice is necessary.
+- **Codex plugin `onInstall` hook** — now best-effort: it always exits 0 so a missing or broken SwitchBot CLI never rolls back the Codex plugin install. When the CLI is present it runs `switchbot codex setup --yes` to fast-path setup; when absent it prints a hint pointing at `npx @switchbot/openapi-cli codex setup`.
 - **Plugin version reset to `0.1.0`** for first publish under the new scope.
 - **Publish workflow** — `.github/workflows/publish.yml` gains a `detect-versions` step and per-package guards so plugin failures (or unbumped versions) do not block CLI promotion. Plugin steps run `continue-on-error: true` and surface failures as workflow annotations.
 - **Smoke workflow** — `.github/workflows/npm-published-smoke.yml` is now a per-package matrix. CLI keeps offline + live smoke; plugins get tarball-shape checks (concrete peerDep, executable bin entries) without live smoke.

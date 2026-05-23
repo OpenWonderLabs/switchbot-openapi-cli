@@ -29,9 +29,9 @@ Introduce `switchbot codex setup` as the single authoritative post-CLI-install c
 
 ### Purpose
 
-Full install from a known-CLI-present state: detect missing switchbot CLI → install if needed → register plugin → auth → verify. Serves as the single entry point for both new users (after one npm install) and existing users (re-setup / repair).
+Full install from a known-CLI-present state: detect missing switchbot CLI → install if needed → detect missing Codex plugin package → install if needed → register plugin → auth → verify. Serves as the single entry point for both new users (via `npx @switchbot/openapi-cli codex setup`) and existing users (re-setup / repair).
 
-Differs from `repair` in that it skips `remove-plugin` and adds `install-switchbot-cli`.
+Differs from `repair` in that it skips `remove-plugin` and adds package installation steps.
 
 ### Steps
 
@@ -39,13 +39,14 @@ Differs from `repair` in that it skips `remove-plugin` and adds `install-switchb
 |---|---|---|
 | `check-codex-cli` | no | Verify `codex` is on PATH. Always written to outcomes. |
 | `install-switchbot-cli` | yes | `npm list -g --json --depth=0 @switchbot/openapi-cli` → install if absent |
+| `install-codex-plugin` | yes | `npm list -g --json --depth=0 @switchbot/codex-plugin` → install if absent |
 | `register-plugin` | no | `resolveCodexPackageRoot` + `runCodexPluginRegistration` (marketplace add + plugin add) |
 | `auth` | yes | Check credentials; spawn CLI auth login if missing (non-interactive under `--yes`) |
 | `doctor-verify` | no | `runDoctorChecks(['node','path','credentials','mcp'])` + `checkCodexCli()` + `checkCodexPluginNpm()` + `checkCodexPluginRegistered()` (4 base + 3 Codex = 7 checks) |
 
 ### `--skip` contract
 
-Allowed values: `install-switchbot-cli`, `auth` only.
+Allowed values: `install-switchbot-cli`, `install-codex-plugin`, `auth` only.
 
 Any other name passed to `--skip` → exit 2 with message:
 ```
@@ -68,6 +69,18 @@ npm list -g --json --depth=0 @switchbot/openapi-cli
 - JSON parse failure → treat as not installed (npm itself may be broken, but attempt install anyway)
 - On install: `npm install -g @switchbot/openapi-cli@latest`
 - Install failure → record `failed`, continue (non-preflight)
+
+### `install-codex-plugin` detection
+
+```sh
+npm list -g --json --depth=0 @switchbot/codex-plugin
+```
+
+- Parse JSON; absent `dependencies['@switchbot/codex-plugin']` → treat as not installed
+- JSON parse failure → treat as not installed
+- On install: `npm install -g @switchbot/codex-plugin@latest`
+- Install failure → record `failed`, continue (non-preflight)
+- This step must run before `register-plugin`; otherwise a brand-new `npx @switchbot/openapi-cli codex setup` flow cannot resolve the package root that registration needs.
 
 ### `auth` step — exact failure shape
 
@@ -113,8 +126,8 @@ Runs (matches `codex repair doctor-verify` — same semantics across both comman
 
 | 命令 | 定位 | 前置条件 | 行为 |
 |---|---|---|---|
-| `switchbot install --agent codex` | 底层 register-only | 用户已自行 `npm install -g @cly-org/switchbot-codex-plugin` | 仅做 marketplace add + plugin add；npm 包缺失则 preflight `fail`。 |
-| `switchbot codex setup` | 一键 bootstrap | 仅需 Codex CLI 已安装 | 自动 `npm install -g @switchbot/openapi-cli`（若缺）+ 调用相同的注册 helper + auth + Codex 专属 doctor。 |
+| `switchbot install --agent codex` | 底层 register-only | 用户已自行 `npm install -g @switchbot/codex-plugin` | 仅做 marketplace add + plugin add；npm 包缺失则 preflight `fail`。 |
+| `switchbot codex setup` | 一键 bootstrap | 仅需 Codex CLI 已安装 | 自动 `npm install -g @switchbot/openapi-cli` / `@switchbot/codex-plugin`（若缺）+ 调用相同的注册 helper + auth + Codex 专属 doctor。 |
 
 **实现共享：** 三处注册步骤（`install --agent codex` 的 `stepRegisterCodexPlugin`、`codex repair` 的 `repairStepRegisterPlugin`、`codex setup` 的 `register-plugin`）都**必须**调用 `src/install/codex-checks.ts` 导出的 `registerCodexPlugin()` helper，禁止各自再内联 `npm root -g` 解析、pluginId 拼接或 marketplace/plugin add 调用顺序。
 
@@ -138,22 +151,12 @@ Serves two roles:
 When asked to install, set up, or repair the SwitchBot integration, run the
 following steps in order. Stop and report the error if any step fails.
 
-1. Check whether the SwitchBot CLI is installed:
+1. Bootstrap the SwitchBot CLI and Codex plugin packages:
    ```sh
-   npm list -g --json --depth=0 @switchbot/openapi-cli
-   ```
-   If not installed, install both packages first:
-   ```sh
-   npm install -g @switchbot/openapi-cli@latest
-   npm install -g @cly-org/switchbot-codex-plugin
+   npx @switchbot/openapi-cli codex setup
    ```
 
-2. Run the setup command:
-   ```sh
-   switchbot codex setup
-   ```
-
-3. Restart Codex so the plugin is loaded, then verify:
+2. Restart Codex so the plugin is loaded, then verify:
    ```sh
    switchbot codex doctor
    switchbot devices list
@@ -162,7 +165,7 @@ following steps in order. Stop and report the error if any step fails.
 
 ### Design decisions
 
-- Step 1 covers new users (zero prerequisites); existing CLI users pass npm list immediately
+- Step 1 covers new users (zero SwitchBot prerequisites); existing CLI users can run `switchbot codex setup` directly
 - `switchbot codex setup` is the single authoritative command; AGENTS.md does not duplicate step logic
 - "Restart Codex" is explicit to prevent confusion when plugin loads but skill is not yet in context
 - Section name `## Setup` is intentionally broad — covers first install and repair alike
@@ -187,10 +190,8 @@ into any Codex conversation, then say **"set up SwitchBot"**:
 >
 > When asked to set up SwitchBot, run in order:
 >
-> 1. `npm list -g --json --depth=0 @switchbot/openapi-cli` — if not found, run:
->    `npm install -g @switchbot/openapi-cli@latest && npm install -g @cly-org/switchbot-codex-plugin`
-> 2. `switchbot codex setup`
-> 3. Restart Codex, then confirm with `switchbot codex doctor`
+> 1. `npx @switchbot/openapi-cli codex setup`
+> 2. Restart Codex, then confirm with `switchbot codex doctor`
 
 ---
 
@@ -214,7 +215,7 @@ switchbot codex setup
 
 **File:** `packages/codex-plugin/bin/auth.js`
 
-> Verified against `packages/codex-plugin/.codex-plugin/hooks.json` — `onInstall.args = ["../bin/auth.js"]`. Pinned to this path; no fallback to `install.js`.
+> Verified against `packages/codex-plugin/.codex-plugin/hooks.json` — `onInstall.args = ["../bin/auth.js", "--hook"]`. Pinned to this path; no fallback to `install.js`.
 
 ### Current behavior
 
@@ -227,7 +228,7 @@ Runs interactive auth only.
    → Found: run `switchbot codex setup --yes`
              exit 0 regardless of setup outcome (see rationale below)
    → Not found: print hint to stdout:
-       "SwitchBot CLI not found. Run: npm install -g @switchbot/openapi-cli@latest && switchbot codex setup"
+       "SwitchBot CLI not found. Run: npx @switchbot/openapi-cli codex setup"
        exit 0
 ```
 

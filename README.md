@@ -186,13 +186,14 @@ On a brand-new machine — no SwitchBot CLI installed yet — use `npx`:
 npx @switchbot/openapi-cli codex setup
 ```
 
-This works because `setup` runs five steps in order, the second of which fixes the chicken-and-egg:
+This works because `setup` runs six steps in order, the package-install steps fix the chicken-and-egg:
 
 1. `check-codex-cli` — verify `codex` is on `$PATH`
 2. `install-switchbot-cli` — if `@switchbot/openapi-cli` is not in `npm list -g`, install it globally (so the `switchbot` binary stays after the `npx` invocation exits)
-3. `register-plugin` — `codex plugin marketplace add` + `codex plugin add` for `@switchbot/codex-plugin`
-4. `auth` — prompt for SwitchBot credentials if missing (spawns `switchbot auth login`, inheriting your active `--profile` and `--config`)
-5. `doctor-verify` — run 7 checks (4 base: node, path, credentials, mcp + 3 codex: cli, npm package, plugin registered)
+3. `install-codex-plugin` — if `@switchbot/codex-plugin` is not in `npm list -g`, install it globally
+4. `register-plugin` — `codex plugin marketplace add` + `codex plugin add` for `@switchbot/codex-plugin`
+5. `auth` — prompt for SwitchBot credentials if missing (spawns `switchbot auth login`, inheriting your active `--profile` and `--config`)
+6. `doctor-verify` — run 7 checks (4 base: node, path, credentials, mcp + 3 codex: cli, npm package, plugin registered)
 
 Restart Codex when complete, then verify:
 
@@ -224,7 +225,7 @@ switchbot codex repair              # re-verify, re-auth, re-register, re-check
 - `--dry-run` — print the step list without mutating anything
 - `--json` — machine-readable outcome
 - `--yes` — non-interactive; auth prompts become `failed` instead of spawning `auth login`
-- `--skip <names>` — comma-separated. Only `install-switchbot-cli` / `auth` (setup) and `re-auth` / `remove-plugin` (repair) are skippable; passing any other step name exits 2.
+- `--skip <names>` — comma-separated. Only `install-switchbot-cli` / `install-codex-plugin` / `auth` (setup) and `re-auth` / `remove-plugin` (repair) are skippable; passing any other step name exits 2.
 
 ### Profile and config scope
 

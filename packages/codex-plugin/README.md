@@ -7,7 +7,7 @@ Codex plugin for SwitchBot smart-home control through the authoritative
 
 - A Codex skill at `skills/switchbot/SKILL.md`
 - An MCP server definition that runs `switchbot mcp serve --tools all`
-- An `onInstall` hook that checks the CLI and credentials
+- A best-effort `onInstall` hook that runs non-interactive setup when the CLI is present
 - A bootstrap binary: `switchbot-codex-install`
 
 ## Requirements
@@ -21,27 +21,29 @@ Codex plugin for SwitchBot smart-home control through the authoritative
 ### Recommended
 
 ```bash
-npm install -g @switchbot/codex-plugin
-switchbot-codex-install
+npx @switchbot/openapi-cli codex setup
 ```
 
-`switchbot-codex-install` installs or upgrades the CLI if needed, registers the
-plugin with Codex, adds it, then verifies credentials. If credentials are
-missing it launches `switchbot auth login` directly, so successful setup does
-not depend on Codex `plugin_hooks` being enabled.
+`switchbot codex setup` installs or upgrades the CLI and Codex plugin packages
+if needed, registers the plugin with Codex, prompts for credentials when
+needed, then verifies the integration.
 
 ### Direct Codex install
 
 If you install the plugin from Codex itself, enable plugin hooks for automatic
-first-run auth:
+best-effort setup:
 
 ```toml
 [features]
 plugin_hooks = true
 ```
 
-Without hooks, install still succeeds, but you must run `switchbot auth login`
-manually before using the plugin.
+The hook never blocks plugin installation. If setup needs credentials or the
+SwitchBot CLI is missing, finish with:
+
+```bash
+npx @switchbot/openapi-cli codex setup
+```
 
 ## Verify
 

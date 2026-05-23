@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { makeRunAuth } from '../bin/auth.js';
+import { makeRunAuth, makeRunOnInstall } from '../bin/auth.js';
 
 function makeOkCliCheck(version = '3.7.1') {
   return async () => ({ ok: true, version });
@@ -132,5 +132,46 @@ describe('runAuth', () => {
     assert.equal(result.code, 2);
     assert.equal(credentialChecks, 2);
     assert.match(result.output, /post-login health check/i);
+  });
+});
+
+describe('runOnInstall', () => {
+  it('exits 0 and prints setup hint when CLI is missing', async () => {
+    const { spawn, calls } = makeSpawn(0);
+    const runOnInstall = makeRunOnInstall({
+      checkCli: makeFailCliCheck('CLI not found'),
+      runInherit: spawn,
+    });
+
+    const result = await captureStderr(() => runOnInstall());
+    assert.equal(result.code, 0);
+    assert.equal(calls.length, 0);
+    assert.match(result.output, /npx @switchbot\/openapi-cli codex setup/);
+  });
+
+  it('runs codex setup --yes but still exits 0 when setup fails', async () => {
+    const { spawn, calls } = makeSpawn(1);
+    const runOnInstall = makeRunOnInstall({
+      checkCli: makeOkCliCheck(),
+      runInherit: spawn,
+    });
+
+    const result = await captureStderr(() => runOnInstall());
+    assert.equal(result.code, 0);
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0], { cmd: 'switchbot', args: ['codex', 'setup', '--yes'] });
+    assert.match(result.output, /plugin install will continue/i);
+  });
+
+  it('runs codex setup --yes and exits 0 when setup succeeds', async () => {
+    const { spawn, calls } = makeSpawn(0);
+    const runOnInstall = makeRunOnInstall({
+      checkCli: makeOkCliCheck(),
+      runInherit: spawn,
+    });
+
+    const code = await runOnInstall();
+    assert.equal(code, 0);
+    assert.deepEqual(calls[0], { cmd: 'switchbot', args: ['codex', 'setup', '--yes'] });
   });
 });

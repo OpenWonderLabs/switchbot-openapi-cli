@@ -50,14 +50,44 @@ export function makeRunAuth({ checkCli, checkCredentials, runInherit }) {
   };
 }
 
+export function makeRunOnInstall({ checkCli, runInherit }) {
+  return async function runOnInstall() {
+    const cliCheck = await checkCli();
+    if (!cliCheck.ok) {
+      process.stderr.write(
+        '[switchbot-codex] SwitchBot CLI not found. Plugin install will continue.\n' +
+        '[switchbot-codex] To finish setup, run: npx @switchbot/openapi-cli codex setup\n'
+      );
+      return 0;
+    }
+
+    process.stderr.write(`[switchbot-codex] CLI ${cliCheck.version} detected. Running non-interactive setup...\n`);
+    const setupCode = await runInherit('switchbot', ['codex', 'setup', '--yes']);
+    if (setupCode !== 0) {
+      process.stderr.write(
+        '[switchbot-codex] Setup needs attention, but plugin install will continue.\n' +
+        '[switchbot-codex] To finish setup, run: switchbot codex setup\n'
+      );
+    } else {
+      process.stderr.write('[switchbot-codex] Non-interactive setup complete.\n');
+    }
+    return 0;
+  };
+}
+
 const isMain = process.argv[1]?.replace(/\\/g, '/').endsWith('bin/auth.js');
 if (isMain) {
-  const runAuth = makeRunAuth({
+  const common = {
     checkCli: defaultCheckCli,
-    checkCredentials: defaultCheckCredentials,
     runInherit: defaultRunInherit,
-  });
-  runAuth().then(code => process.exit(code)).catch(err => {
+  };
+  const run = process.argv.includes('--hook')
+    ? makeRunOnInstall(common)
+    : makeRunAuth({
+        ...common,
+        checkCredentials: defaultCheckCredentials,
+      });
+  run().then(code => process.exit(code)).catch(err => {
     process.stderr.write(`[switchbot-codex] Fatal: ${err instanceof Error ? err.message : String(err)}\n`);
     process.exit(1);
   });

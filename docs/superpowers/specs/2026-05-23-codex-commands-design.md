@@ -51,7 +51,7 @@ tests/
 
 ## Section 1: `switchbot install --agent codex` (register only — not full bootstrap)
 
-> **P0-C constraint:** This command registers an already-installed npm package with the Codex CLI. It is NOT a full one-step installer. All user-facing text (command description, `--help`, `--dry-run` output, error messages) must use "register" semantics, never "install Codex integration". The prerequisite `npm install -g @cly-org/switchbot-codex-plugin` must be stated wherever the command is documented.
+> **P0-C constraint:** This command registers an already-installed npm package with the Codex CLI. It is NOT a full one-step installer. All user-facing text (command description, `--help`, `--dry-run` output, error messages) must use "register" semantics, never "install Codex integration". The prerequisite `npm install -g @switchbot/codex-plugin` must be stated wherever the command is documented.
 
 ### AgentName extension
 
@@ -87,7 +87,7 @@ Step name and description must use "register" language. Prerequisite (npm packag
 export function stepRegisterCodexPlugin(): InstallStep<InstallContext> {
   return {
     name: 'register-codex-plugin',
-    description: 'Register @cly-org/switchbot-codex-plugin with the Codex CLI (marketplace add + plugin add)',
+    description: 'Register @switchbot/codex-plugin with the Codex CLI (marketplace add + plugin add)',
     async execute(ctx) {
       const result = await registerCodexPlugin();   // 共享 helper，封装 4 步：npm root -g → packageRoot → resolvePluginId → runCodexPluginRegistration
       if (!result.ok) throw new Error(result.error);
@@ -126,14 +126,14 @@ export function resolvePluginId(packageRoot: string): string {
 `InstallContext` gains two optional fields:
 ```typescript
 codexPluginRegistered?: boolean;
-codexPluginIdentifier?: string;   // e.g. 'switchbot@switchbot-codex-plugin'
+codexPluginIdentifier?: string;   // e.g. 'switchbot@codex-plugin'
 ```
 
 ### Preflight additions
 
 `src/install/preflight.ts` adds a codex-specific preflight check when `agent === 'codex'`:
 - `codex` binary on PATH (fail if missing — user must install Codex first)
-- `@cly-org/switchbot-codex-plugin` npm package installed globally (**fail** if missing — user must `npm install -g @cly-org/switchbot-codex-plugin` first; this is a register-only command)
+- `@switchbot/codex-plugin` npm package installed globally (**fail** if missing — user must `npm install -g @switchbot/codex-plugin` first; this is a register-only command)
 
 ### `--dry-run` / `--json` / rollback
 
@@ -155,17 +155,17 @@ Four exported check functions, each returning `Check` (the same interface used t
 - `fail` → hint pointing to Codex install docs
 
 **`checkCodexPluginNpm()`**
-- Runs `npm list -g --json @cly-org/switchbot-codex-plugin`
+- Runs `npm list -g --json @switchbot/codex-plugin`
 - Parses stdout to extract version and package root
 - `ok` → `{ version, packageRoot }`
-- `warn` → `{ message: 'not installed — run: npm install -g @cly-org/switchbot-codex-plugin && switchbot install --agent codex' }`
+- `warn` → `{ message: 'not installed — run: npm install -g @switchbot/codex-plugin && switchbot install --agent codex' }`
 
 **`checkCodexPluginRegistered()`**
 - Runs `codex plugin list --json` (or plain text fallback)
 - Checks if any entry matches `switchbot`
 - If `codex` not on PATH: returns `warn` with `{ reason: 'codex-cli-missing' }` (not `fail`, to avoid double-failing with checkCodexCli)
 - `ok` → `{ pluginName }`
-- `warn` → `{ message: 'switchbot not in codex plugin list — run: npm install -g @cly-org/switchbot-codex-plugin && switchbot install --agent codex' }`
+- `warn` → `{ message: 'switchbot not in codex plugin list — run: npm install -g @switchbot/codex-plugin && switchbot install --agent codex' }`
 
 **`runCodexPluginRegistration(packageRoot, pluginId)` — shared utility**  
 Extracted from `stepRegisterCodexPlugin` and reused verbatim by repair step 4. Runs `codex plugin marketplace add` then `codex plugin add`. Returns `{ ok, exitCode, stderr }`. Neither the install step nor the repair step contain this logic inline — both call this function.
@@ -230,7 +230,7 @@ Implementation: extracts the base subset from CHECK_REGISTRY via `runDoctorCheck
 interface RepairContext {
   profile: string;          // active profile (--profile or 'default')
   configPath?: string;      // active --config override path, if any
-  codexPluginId?: string;   // resolved from npm list, e.g. 'switchbot@switchbot-codex-plugin'
+  codexPluginId?: string;   // resolved from npm list, e.g. 'switchbot@codex-plugin'
   nonInteractive: boolean;  // true when --yes is passed
 }
 
@@ -295,7 +295,7 @@ Add a deprecation banner at the top of the `install()` function (before any othe
 ```js
 process.stderr.write(
   '[switchbot-codex] WARNING: switchbot-codex-install is deprecated.\n' +
-  '[switchbot-codex] Preferred: npm install -g @cly-org/switchbot-codex-plugin && switchbot install --agent codex\n' +
+  '[switchbot-codex] Preferred: npx @switchbot/openapi-cli codex setup\n' +
   '[switchbot-codex] This binary will continue to work during the transition period.\n'
 );
 // existing install logic continues below...
@@ -307,7 +307,7 @@ The binary must exit with the same codes as today. Final no-op redirect happens 
 
 ```json
 "codexPlugin": {
-  "install": "npm install -g @cly-org/switchbot-codex-plugin && switchbot install --agent codex"
+  "install": "npx @switchbot/openapi-cli codex setup"
 }
 ```
 
@@ -315,7 +315,7 @@ The binary must exit with the same codes as today. Final no-op redirect happens 
 
 Update install instructions to show the new recommended path as primary:
 ```
-Recommended: npm install -g @cly-org/switchbot-codex-plugin && switchbot install --agent codex
+Recommended: npx @switchbot/openapi-cli codex setup
 Legacy (still works): switchbot-codex-install
 ```
 
@@ -351,7 +351,7 @@ Legacy (still works): switchbot-codex-install
 - `codex repair --skip re-auth`: assert step 2 has status `skipped`
 - `codex repair --skip verify-cli`: assert exit 2 with message `"invalid --skip: 'verify-cli' is not skippable"`
 - `codex repair --config <path>` with credentials missing: assert re-auth spawn argv includes `['--config', path]`, not the default keychain path
-- `codex doctor` with npm package absent: assert warning message contains `npm install -g @cly-org/switchbot-codex-plugin`
+- `codex doctor` with npm package absent: assert warning message contains `npm install -g @switchbot/codex-plugin`
 
 ### install --agent codex
 
@@ -363,7 +363,7 @@ Legacy (still works): switchbot-codex-install
 
 ## Constraints & Non-goals
 
-- CLI does **not** install the `@cly-org/switchbot-codex-plugin` npm package; it assumes the package is globally installed (preflight **fails** if not — `switchbot install --agent codex` is a register-only command). The user installs the npm package once; CLI manages registration only.
+- `switchbot install --agent codex` does **not** install the `@switchbot/codex-plugin` npm package; it assumes the package is globally installed (preflight **fails** if not — this is a register-only command). `switchbot codex setup` is the user-facing bootstrap path and installs the package if missing before registration.
 - `switchbot codex` does not handle Cursor / Copilot / Claude Code — those remain under `--agent` flags.
 - No changes to `switchbot uninstall` in this phase; Codex-specific uninstall is out of scope.
 - **`switchbot doctor` default run is unaffected.** No Codex-specific checks are added to the global CHECK_REGISTRY. Codex health is only visible via `switchbot codex doctor`.

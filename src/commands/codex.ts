@@ -16,6 +16,8 @@ import { getActiveProfile } from '../lib/request-context.js';
 import { getConfigPath } from '../utils/flags.js';
 
 const CODEX_BASE_SECTIONS = ['node', 'path', 'credentials', 'mcp'] as const;
+const SWITCHBOT_CLI_PACKAGE = '@switchbot/openapi-cli';
+const CODEX_PLUGIN_PACKAGE = '@switchbot/codex-plugin';
 
 async function runAllCodexDoctorChecks(): Promise<Check[]> {
   const base = await runDoctorChecks(CODEX_BASE_SECTIONS);
@@ -331,6 +333,7 @@ type SetupOutcome = StepOutcome;
 const SETUP_STEPS: readonly StepDef[] = [
   { name: 'check-codex-cli',       description: 'Verify codex CLI on PATH',                              skippable: false },
   { name: 'install-switchbot-cli', description: 'Install @switchbot/openapi-cli if missing',             skippable: true  },
+  { name: 'install-codex-plugin',  description: 'Install @switchbot/codex-plugin if missing',            skippable: true  },
   { name: 'register-plugin',       description: 'Register plugin via shared registerCodexPlugin()',      skippable: false },
   { name: 'auth',                  description: 'Verify credentials; spawn auth login if missing',      skippable: true  },
   { name: 'doctor-verify',         description: 'Run 4 base + 3 Codex checks and report health',        skippable: false },
@@ -352,30 +355,44 @@ function setupStepCheckCodexCli(): SetupOutcome {
 }
 
 function setupStepInstallSwitchbotCli(): SetupOutcome {
+  return setupStepInstallGlobalPackage(
+    'install-switchbot-cli',
+    SWITCHBOT_CLI_PACKAGE,
+  );
+}
+
+function setupStepInstallCodexPlugin(): SetupOutcome {
+  return setupStepInstallGlobalPackage(
+    'install-codex-plugin',
+    CODEX_PLUGIN_PACKAGE,
+  );
+}
+
+function setupStepInstallGlobalPackage(step: string, packageName: string): SetupOutcome {
   const list = spawnSync(
-    'npm', ['list', '-g', '--json', '--depth=0', '@switchbot/openapi-cli'],
+    'npm', ['list', '-g', '--json', '--depth=0', packageName],
     { encoding: 'utf-8', shell: process.platform === 'win32', timeout: 15000 },
   );
   let installed = false;
   try {
     const parsed = JSON.parse(list.stdout ?? '{}') as { dependencies?: Record<string, unknown> };
-    installed = Boolean(parsed?.dependencies?.['@switchbot/openapi-cli']);
+    installed = Boolean(parsed?.dependencies?.[packageName]);
   } catch { /* treat as not installed */ }
   if (installed) {
-    return { step: 'install-switchbot-cli', status: 'ok', message: 'already installed' };
+    return { step, status: 'ok', message: 'already installed' };
   }
   const inst = spawnSync(
-    'npm', ['install', '-g', '@switchbot/openapi-cli@latest'],
+    'npm', ['install', '-g', `${packageName}@latest`],
     { encoding: 'utf-8', shell: process.platform === 'win32', timeout: 120000 },
   );
   if ((inst.status ?? 1) !== 0) {
     return {
-      step: 'install-switchbot-cli',
+      step,
       status: 'failed',
       message: `npm install -g failed (exit ${inst.status ?? 1}): ${inst.stderr ?? ''}`,
     };
   }
-  return { step: 'install-switchbot-cli', status: 'ok', message: 'installed @switchbot/openapi-cli@latest' };
+  return { step, status: 'ok', message: `installed ${packageName}@latest` };
 }
 
 function setupStepRegisterPlugin(ctx: SetupContext): SetupOutcome {
@@ -430,9 +447,10 @@ async function runSetup(
     let outcome: SetupOutcome;
     if (step.name === 'check-codex-cli')             outcome = setupStepCheckCodexCli();
     else if (step.name === 'install-switchbot-cli')  outcome = setupStepInstallSwitchbotCli();
+    else if (step.name === 'install-codex-plugin')   outcome = setupStepInstallCodexPlugin();
     else if (step.name === 'register-plugin')        outcome = setupStepRegisterPlugin(ctx);
     else if (step.name === 'auth')                   outcome = await setupStepAuth(ctx);
-    else                                              outcome = await setupStepDoctorVerify();
+    else                                             outcome = await setupStepDoctorVerify();
     outcomes.push(outcome);
     if (step.name === 'check-codex-cli' && outcome.status === 'failed') {
       preflightFailed = true;
@@ -446,8 +464,8 @@ async function runSetup(
 function registerCodexSetupSubcommand(codex: Command): void {
   codex
     .command('setup')
-    .description('Bootstrap the Codex integration end-to-end: install CLI if missing, register plugin, auth, verify')
-    .option('--skip <names>', 'Comma-separated step names to skip (only "install-switchbot-cli" or "auth" allowed)')
+    .description('Bootstrap the Codex integration end-to-end: install packages if missing, register plugin, auth, verify')
+    .option('--skip <names>', 'Comma-separated step names to skip (only "install-switchbot-cli", "install-codex-plugin", or "auth" allowed)')
     .option('--yes', 'Non-interactive mode: do not spawn auth login, fail fast if credentials missing')
     .action(async (opts: { skip?: string; yes?: boolean }, command: Command) => {
       const skip = new Set(
