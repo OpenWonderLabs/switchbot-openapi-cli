@@ -45,7 +45,7 @@ Under the hood every surface shares the same catalog, cache, and HMAC client —
 ## Table of contents
 
 - [Features](#features) · [Supported devices](#supported-devices) · [Requirements](#requirements) · [Installation](#installation)
-- [Quick start](#quick-start)
+- [Quick start](#quick-start) · [Codex integration](#codex-integration)
 - [Credentials](#credentials)
 - [Policy](#policy) · [Rules engine](#rules-engine)
 - [Global options](#global-options)
@@ -119,6 +119,8 @@ switchbot --help
 
 ## Quick start
 
+> **Using Codex?** Skip this section and jump to [Codex integration](#codex-integration) — Codex uses a separate plugin package, not a skill-path link.
+
 The fast path (credentials + policy + skill link, with rollback on failure):
 
 ```bash
@@ -166,6 +168,74 @@ switchbot status-sync start --openclaw-model home-agent
 See [Policy](#policy) for the authoring flow, [Rules engine](#rules-engine)
 for automations, and [`docs/agent-guide.md`](./docs/agent-guide.md)
 for the agent surface.
+
+## Codex integration
+
+For [OpenAI Codex CLI](https://github.com/openai/codex) users, the SwitchBot integration ships as a separate plugin package — `@cly-org/switchbot-codex-plugin` — registered via `codex plugin add`. The `switchbot codex` command group orchestrates setup, health checks, and repair end-to-end.
+
+### Prerequisites
+
+- **Codex CLI** installed and on `$PATH` (see the link above)
+- **Node.js ≥ 18** (same as the base CLI)
+
+### One-command bootstrap (recommended)
+
+On a brand-new machine — no SwitchBot CLI installed yet — use `npx`:
+
+```bash
+npx @switchbot/openapi-cli codex setup
+```
+
+This works because `setup` runs five steps in order, the second of which fixes the chicken-and-egg:
+
+1. `check-codex-cli` — verify `codex` is on `$PATH`
+2. `install-switchbot-cli` — if `@switchbot/openapi-cli` is not in `npm list -g`, install it globally (so the `switchbot` binary stays after the `npx` invocation exits)
+3. `register-plugin` — `codex plugin marketplace add` + `codex plugin add` for `@cly-org/switchbot-codex-plugin`
+4. `auth` — prompt for SwitchBot credentials if missing (spawns `switchbot auth login`, inheriting your active `--profile` and `--config`)
+5. `doctor-verify` — run 7 checks (4 base: node, path, credentials, mcp + 3 codex: cli, npm package, plugin registered)
+
+Restart Codex when complete, then verify:
+
+```bash
+switchbot devices list
+```
+
+### Manual install
+
+If you prefer step-by-step control:
+
+```bash
+npm install -g @switchbot/openapi-cli @cly-org/switchbot-codex-plugin
+switchbot install --agent codex     # registers the already-installed plugin
+switchbot auth login                # if you don't already have credentials
+```
+
+`switchbot install --agent codex` is **register-only** — it fails fast if `@cly-org/switchbot-codex-plugin` is not present in `npm list -g`. Use `codex setup` instead if you want the package install bundled in.
+
+### Health checks and repair
+
+```bash
+switchbot codex doctor              # 7-check health summary; exits 1 on any fail
+switchbot codex repair              # re-verify, re-auth, re-register, re-check
+```
+
+`codex repair` runs five steps: `verify-cli` → `re-auth` → `remove-plugin` (best-effort) → `register-plugin` → `doctor-verify`. Both `setup` and `repair` support:
+
+- `--dry-run` — print the step list without mutating anything
+- `--json` — machine-readable outcome
+- `--yes` — non-interactive; auth prompts become `failed` instead of spawning `auth login`
+- `--skip <names>` — comma-separated. Only `install-switchbot-cli` / `auth` (setup) and `re-auth` / `remove-plugin` (repair) are skippable; passing any other step name exits 2.
+
+### Profile and config scope
+
+All `codex` subcommands honor the global `--profile` and `--config` flags. Auth credentials are written to (and read from) the active profile, and the spawned `auth login` inherits both:
+
+```bash
+switchbot --profile staging codex setup
+switchbot --config /path/to/cfg.json codex doctor
+```
+
+> Run `switchbot codex setup --help` (or `repair --help`, `doctor --help`) for the full flag list.
 
 ## Credentials
 
