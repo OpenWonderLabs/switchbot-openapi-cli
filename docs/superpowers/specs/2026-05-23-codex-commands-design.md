@@ -152,14 +152,14 @@ Four exported check functions, each returning `Check` (the same interface used t
 - Runs `npm list -g --json @cly-org/switchbot-codex-plugin`
 - Parses stdout to extract version and package root
 - `ok` → `{ version, packageRoot }`
-- `warn` → `{ message: 'not installed — run switchbot install --agent codex' }`
+- `warn` → `{ message: 'not installed — run: npm install -g @cly-org/switchbot-codex-plugin && switchbot install --agent codex' }`
 
 **`checkCodexPluginRegistered()`**
 - Runs `codex plugin list --json` (or plain text fallback)
 - Checks if any entry matches `switchbot`
 - If `codex` not on PATH: returns `warn` with `{ reason: 'codex-cli-missing' }` (not `fail`, to avoid double-failing with checkCodexCli)
 - `ok` → `{ pluginName }`
-- `warn` → `{ message: 'switchbot not in codex plugin list — run switchbot install --agent codex' }`
+- `warn` → `{ message: 'switchbot not in codex plugin list — run: npm install -g @cly-org/switchbot-codex-plugin && switchbot install --agent codex' }`
 
 **`runCodexPluginRegistration(packageRoot, pluginId)` — shared utility**  
 Extracted from `stepRegisterCodexPlugin` and reused verbatim by repair step 4. Runs `codex plugin marketplace add` then `codex plugin add`. Returns `{ ok, exitCode, stderr }`. Neither the install step nor the repair step contain this logic inline — both call this function.
@@ -202,7 +202,7 @@ const CODEX_DOCTOR_SECTIONS = [
 //   checkCodexCli(), checkCodexPluginNpm(), checkCodexPluginRegistered()
 ```
 
-Implementation: extracts the subset from CHECK_REGISTRY, runs them, formats with the existing `printDoctorResult` logic. Supports `--json` and `-q/--quiet` (inherited from shared formatting). Exits 1 on any `fail`.
+Implementation: extracts the base subset from CHECK_REGISTRY via `runDoctorChecks()`, then calls the three Codex check functions directly. Output formatting must be **extracted into a shared `formatDoctorChecks(checks, quiet)` function in `doctor.ts`** (not inlined in the command handler) so `codex.ts` can import and reuse it without duplicating the output contract. Supports `--json` and `-q/--quiet`. Exits 1 on any `fail`.
 
 ### `switchbot codex repair`
 
@@ -211,7 +211,7 @@ Implementation: extracts the subset from CHECK_REGISTRY, runs them, formats with
 | # | Name | Action | Skippable |
 |---|------|--------|-----------|
 | 1 | `verify-cli` | `doctor --section node,path` (silent) | No |
-| 2 | `re-auth` | **Interactive mode**: spawn auth login via `process.execPath [cliPath, '--profile', profile, 'auth', 'login']` (inherits active `--profile` / `--config` to ensure credentials are written to the correct scope); **`--yes` mode**: check credentials only, return `failed` + `{ reason: 'credentials-missing' }` if absent | Yes |
+| 2 | `re-auth` | **Interactive mode**: spawn auth login via `process.execPath` + `cliPath`, forwarding all active scope flags. Build argv as: `[...profileArgs, ...configArgs, 'auth', 'login']` where `profileArgs = profile !== 'default' ? ['--profile', profile] : []` and `configArgs = ctx.configPath ? ['--config', ctx.configPath] : []`. This ensures credentials round-trip to the correct scope regardless of whether `--profile`, `--config`, both, or neither are active. **`--yes` mode**: check credentials only, return `failed` + `{ reason: 'credentials-missing' }` if absent | Yes |
 | 3 | `remove-plugin` | `codex plugin remove <id>` (best-effort, exit ≠ 0 is non-fatal) | Yes |
 | 4 | `register-plugin` | `codex plugin marketplace add` + `codex plugin add` (calls `runCodexPluginRegistration` + `resolvePluginId`) | No |
 | 5 | `doctor-verify` | Run all 7 Codex doctor checks, print summary | No |
@@ -223,6 +223,7 @@ Implementation: extracts the subset from CHECK_REGISTRY, runs them, formats with
 ```typescript
 interface RepairContext {
   profile: string;          // active profile (--profile or 'default')
+  configPath?: string;      // active --config override path, if any
   codexPluginId?: string;   // resolved from npm list, e.g. 'switchbot@switchbot-codex-plugin'
   nonInteractive: boolean;  // true when --yes is passed
 }
@@ -244,7 +245,10 @@ interface RepairOutcome {
 
 ```
 switchbot codex repair
-  --skip <names>   Comma-separated step names to skip (e.g. "re-auth,remove-plugin")
+  --skip <names>   Comma-separated step names to skip (e.g. "re-auth,remove-plugin").
+                   Only skippable steps may be named. Passing a non-skippable step name
+                   (verify-cli, register-plugin, doctor-verify) is a usage error → exit 2
+                   with message: "invalid --skip: '<name>' is not skippable"
   --yes            Non-interactive: skip re-auth (check only, report failed if missing)
   --json           Emit repair report as JSON
   (inherits global --dry-run)
@@ -339,6 +343,9 @@ Legacy (still works): switchbot-codex-install
 - `codex repair --dry-run`: assert step list printed, no mutations
 - `codex repair --json`: stub repair steps, assert outcome array shape
 - `codex repair --skip re-auth`: assert step 2 has status `skipped`
+- `codex repair --skip verify-cli`: assert exit 2 with message `"invalid --skip: 'verify-cli' is not skippable"`
+- `codex repair --config <path>` with credentials missing: assert re-auth spawn argv includes `['--config', path]`, not the default keychain path
+- `codex doctor` with npm package absent: assert warning message contains `npm install -g @cly-org/switchbot-codex-plugin`
 
 ### install --agent codex
 
@@ -350,7 +357,7 @@ Legacy (still works): switchbot-codex-install
 
 ## Constraints & Non-goals
 
-- CLI does **not** install the `@cly-org/switchbot-codex-plugin` npm package; it assumes the package is globally installed (preflight warns if not). The user installs the npm package once; CLI manages registration only.
+- CLI does **not** install the `@cly-org/switchbot-codex-plugin` npm package; it assumes the package is globally installed (preflight **fails** if not — `switchbot install --agent codex` is a register-only command). The user installs the npm package once; CLI manages registration only.
 - `switchbot codex` does not handle Cursor / Copilot / Claude Code — those remain under `--agent` flags.
 - No changes to `switchbot uninstall` in this phase; Codex-specific uninstall is out of scope.
 - **`switchbot doctor` default run is unaffected.** No Codex-specific checks are added to the global CHECK_REGISTRY. Codex health is only visible via `switchbot codex doctor`.
