@@ -49,7 +49,7 @@ Under the hood every surface shares the same catalog, cache, and HMAC client —
 - [Credentials](#credentials)
 - [Policy](#policy) · [Rules engine](#rules-engine)
 - [Global options](#global-options)
-- [Commands](#commands): [auth](#auth--login-and-credential-management) · [config](#config--credential-management) · [devices](#devices--list-status-control) · [scenes](#scenes--run-manual-scenes) · [webhook](#webhook--receive-device-events-over-http) · [events](#events--receive-device-events) · [status-sync](#status-sync--mqttopenclaw-bridge) · [daemon](#daemon--background-rules-engine-process) · [plan](#plan--declarative-batch-operations) · [mcp](#mcp--model-context-protocol-server) · [doctor](#doctor--self-check) · [health](#health--runtime-health-report) · [upgrade-check](#upgrade-check--version-check) · [quota](#quota--api-request-counter) · [history](#history--audit-log) · [catalog](#catalog--device-type-catalog) · [schema](#schema--export-catalog-as-json) · [capabilities](#capabilities--cli-manifest) · [cache](#cache--inspect-and-clear-local-cache) · [reset](#reset--clear-local-data) · [policy cmd](#policy--validate-scaffold-and-migrate-policyyaml) · [completion](#completion--shell-tab-completion)
+- [Commands](#commands): [auth](#auth--login-and-credential-management) · [config](#config--credential-management) · [devices](#devices--list-status-control) · [scenes](#scenes--run-manual-scenes) · [webhook](#webhook--receive-device-events-over-http) · [events](#events--receive-device-events) · [status-sync](#status-sync--mqttopenclaw-bridge) · [daemon](#daemon--background-rules-engine-process) · [plan](#plan--declarative-batch-operations) · [mcp](#mcp--model-context-protocol-server) · [doctor](#doctor--self-check) · [health](#health--runtime-health-report) · [upgrade-check](#upgrade-check--version-check) · [quota](#quota--api-request-counter) · [history](#history--audit-log) · [catalog](#catalog--device-type-catalog) · [schema](#schema--export-catalog-as-json) · [capabilities](#capabilities--cli-manifest) · [cache](#cache--inspect-and-clear-local-cache) · [reset](#reset--clear-local-data) · [policy cmd](#policy--validate-scaffold-and-migrate-policyyaml) · [completion](#completion--shell-tab-completion) · [codex](#codex--codex-cli-integration)
 - [Output modes](#output-modes) · [Cache](#cache) · [Exit codes](#exit-codes--error-codes) · [Environment variables](#environment-variables)
 - [Scripting examples](#scripting-examples) · [Development](#development) · [License](#license)
 
@@ -314,23 +314,7 @@ counts over per-device history), and `llm` (AI decision — see
 below). Every fire is recorded in `~/.switchbot/audit.log`. `rules run` is long-running; use
 `daemon start` / `daemon reload` for the managed background mode.
 
-**Actions** — each rule's `then` array accepts two action types:
-
-- `type: command` (default, no `type` field required) — sends a device command, e.g. `devices command <id> turnOn`
-- `type: notify` — delivers a payload to an external channel after the rule fires:
-  - `channel: webhook` — HTTP POST to a URL (only `http://` and `https://` schemes are accepted; `rules lint` rejects others)
-  - `channel: file` — appends a JSONL line to a local file. `to` must be an absolute path; relative or `~`-prefixed paths are rejected by `rules lint` (code `notify-relative-path`) and at runtime
-  - `channel: openclaw` — HTTP POST to an OpenClaw endpoint (same protocol restriction)
-  - Optional `template` field supports `{{ rule.name }}`, `{{ event.* }}`, `{{ device.id }}` placeholders. Nested fields use dot paths, e.g. `{{ event.context.deviceMac }}`; arrays index numerically, e.g. `{{ event.list.0 }}`
-
-```yaml
-then:
-  - command: devices command AC_001 turnOn
-  - type: notify
-    channel: webhook
-    to: https://your.host/hook
-    template: '{"rule":"{{ rule.name }}","fired":"{{ rule.fired_at }}"}'
-```
+**Triggers:** `mqtt` · `cron` · `webhook` — **Conditions:** `time_between` · `device_state` · `event_count` · `llm` — **Actions:** `command` · `notify` (webhook / file / openclaw, with `template` support)
 
 **LLM condition** — add an AI judgement step before actions fire:
 
@@ -342,42 +326,28 @@ conditions:
       cache_ttl: 5m
       budget:
         max_calls_per_hour: 20
-        max_tokens_per_hour: 100000   # optional rolling 1h token cap
-        max_cost_per_day_usd: 1.00    # optional rolling 24h USD cap
+        max_cost_per_day_usd: 1.00
       on_error: pass          # fail | pass | skip
 ```
 
-Set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` for the cloud providers.
-For `provider: local`, point `SWITCHBOT_LOCAL_LLM_URL` at any
-OpenAI-compatible `/v1/chat/completions` endpoint (Ollama, llama.cpp,
-vLLM, LM Studio); `SWITCHBOT_LOCAL_LLM_MODEL` picks the model and
-`SWITCHBOT_LOCAL_LLM_TOOL_USE=1` opts into native tool-use when the
-endpoint supports it (otherwise a structured-output fallback is used).
-`rules lint` flags misconfigured LLM conditions.
-
-**Decision trace** — set `automation.audit.evaluate_trace: sampled` (or `full`) in `policy.yaml` to record every evaluation decision.
+Set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` for cloud providers; `SWITCHBOT_LOCAL_LLM_URL` for any OpenAI-compatible endpoint.
 
 ```bash
-switchbot rules lint                        # static check: exit 0 valid, 1 error
-switchbot rules list --json | jq .          # structured rule summary
-switchbot rules explain "motion on"         # trigger, conditions, actions, last fired
-switchbot rules run --dry-run --max-firings 5  # run engine; --dry-run = audit only
-switchbot daemon reload                     # hot-reload policy without restart
-
-switchbot rules tail --follow               # stream rule-* audit lines
-switchbot rules replay --since 1h --json    # per-rule fires/dries/throttled/errors
-switchbot rules summary                     # aggregate fires/errors (24h)
-switchbot rules conflicts                   # opposing actions, destructive cmds, quiet-hours gaps
-switchbot rules doctor --json               # lint + conflicts; exit 0 when clean
-
-switchbot rules suggest --intent "turn off AC at 11pm"
-switchbot rules suggest --intent "..." --llm auto    # LLM-backed (OPENAI_API_KEY or ANTHROPIC_API_KEY)
-
-switchbot rules trace-explain --rule "motion on" --last   # why a rule fired/was blocked
-switchbot rules simulate "motion on" --since 7d --json    # replay without running the engine
+switchbot rules lint                            # static validation
+switchbot rules list --json                     # structured rule summary
+switchbot rules explain "motion on"             # trigger / conditions / actions / last fired
+switchbot rules run --dry-run --max-firings 5   # run engine (audit-only)
+switchbot rules tail --follow                   # stream rule-* audit lines
+switchbot rules replay --since 1h --json        # per-rule fires/throttled/errors
+switchbot rules summary                         # aggregate fires (24h)
+switchbot rules conflicts                       # opposing actions / quiet-hours gaps
+switchbot rules doctor --json                   # lint + conflicts combined
+switchbot rules suggest --intent "turn off AC at 11pm" --llm auto
+switchbot rules trace-explain --rule "motion on" --last
+switchbot rules simulate "motion on" --since 7d --json
 ```
 
-LLM-generated rules always have `dry_run: true` — flip it yourself after review. Notify URLs must be `http://` or `https://`.
+LLM-generated rules always have `dry_run: true` — flip it yourself after review.
 
 ## Global options
 
@@ -479,27 +449,11 @@ For per-device command and parameter details: `switchbot devices commands <type>
 
 #### `devices expand` — named flags for packed parameters
 
-Some commands require a packed string like `"26,2,2,on"`. `devices expand` builds it from readable flags:
-
 ```bash
-# Air Conditioner — setAll
 switchbot devices expand <acId> setAll --temp 26 --mode cool --fan low --power on
-# Resolve by name
 switchbot devices expand --name "Living Room AC" setAll --temp 26 --mode cool --fan low --power on
-
-# Curtain / Roller Shade — setPosition
 switchbot devices expand <curtainId> setPosition --position 50 --mode silent
-
-# Blind Tilt — setPosition
-switchbot devices expand <blindId> setPosition --direction up --angle 50
-
-# Relay Switch — setMode
-switchbot devices expand <relayId> setMode --channel 1 --mode edge
-
-# Color Bulb / Strip Light / Floor Lamp / Ceiling Light — setBrightness / setColor / setColorTemperature
-switchbot devices expand <bulbId> setBrightness --brightness 80
 switchbot devices expand <bulbId> setColor --color "#FF0000"
-switchbot devices expand <bulbId> setColorTemperature --color-temp 4000
 ```
 
 Run `switchbot devices expand <id> <command> --help` to see the available flags for any device command.
@@ -515,10 +469,8 @@ switchbot devices explain <deviceId> --no-live # catalog-only, no API call
 
 ```bash
 switchbot devices meta set <deviceId> --alias "Office Light"
-switchbot devices meta set <deviceId> --hide   # hide from `devices list`
 switchbot devices meta get <deviceId>
 switchbot devices meta list
-switchbot devices meta clear <deviceId>
 ```
 
 Stores local annotations in `~/.switchbot/device-meta.json`. `--show-hidden` on `devices list` reveals hidden devices.
@@ -526,15 +478,10 @@ Stores local annotations in `~/.switchbot/device-meta.json`. `--show-hidden` on 
 #### `devices batch` — bulk commands
 
 ```bash
-# Same command to every matching device
 switchbot devices batch turnOff --filter 'type=Bot'
 switchbot devices batch setBrightness 50 --filter 'type~Light,family=Living'
-switchbot devices batch turnOn --ids ID1,ID2,ID3
-switchbot devices list --format=id --filter 'type=Bot' | switchbot devices batch toggle -
 switchbot devices batch unlock --filter 'type=Smart Lock' --yes  # destructive: requires --yes
 ```
-
-Filter keys: `type`, `family`, `room`, `category`. Skipped-offline devices appear under `summary.skipped` when `--skip-offline` is passed.
 
 ### `scenes` — run manual scenes
 
@@ -649,48 +596,52 @@ switchbot completion powershell >> $PROFILE
 
 Supported shells: `bash`, `zsh`, `fish`, `powershell` (`pwsh` is accepted as an alias).
 
+### `codex` — Codex CLI integration
+
+```bash
+# Full bootstrap: verify codex CLI, install packages if needed, register plugin, auth, verify
+switchbot codex setup
+switchbot codex setup --yes         # non-interactive (skip auth login spawn)
+switchbot codex setup --dry-run     # preview steps without mutating
+switchbot codex setup --json        # machine-readable output
+
+# Health check: 7 checks (node, path, credentials, mcp, codex-cli, npm-plugin, registered)
+switchbot codex doctor
+switchbot codex doctor --quiet      # only show warn/fail
+switchbot codex doctor --json
+
+# Repair: re-auth + re-register plugin + re-verify
+switchbot codex repair
+switchbot codex repair --skip re-auth         # skip credential check
+switchbot codex repair --skip remove-plugin   # skip pre-clean step
+switchbot codex repair --yes --dry-run --json
+```
+
+All subcommands accept `--dry-run`, `--json`, `--yes`, and global `--profile` / `--config`.
+See [Codex integration](#codex-integration) for setup instructions.
+
 ### `plan` — declarative batch operations
 
 ```bash
-# Print the plan JSON Schema (give to your agent framework)
-switchbot plan schema
-
-# Draft a candidate plan from natural language intent
-switchbot plan suggest --intent "turn off all lights" --device <id1> --device <id2>
-
-# Validate a plan file without running it
+switchbot plan schema                            # print JSON Schema for plan files
+switchbot plan suggest --intent "turn off all lights" --device <id>
 switchbot plan validate plan.json
-
-# Preview — mutations skipped, GETs still execute
-switchbot --dry-run plan run plan.json
-
-# Save / review / approve / execute for destructive plans
-switchbot plan save plan.json
+switchbot plan run plan.json                     # preview (--dry-run) or execute
+switchbot plan run plan.json --require-approval  # TTY confirmation for destructive steps
+switchbot plan save plan.json                    # stage for review
 switchbot plan review <planId>
 switchbot plan approve <planId>
 switchbot plan execute <planId>
-switchbot plan run plan.json --continue-on-error
-
-# Run with per-step TTY confirmation for destructive steps (human-in-the-loop)
-switchbot plan run plan.json --require-approval
 ```
-
-A plan file is a JSON document with `version`, `description`, and a `steps` array of `command`, `scene`, or `wait` steps. Steps execute sequentially; a failed step stops the run unless `--continue-on-error` is set. `plan run` is the preview/direct path, but destructive steps are blocked by default and should go through `plan save` → `plan review` → `plan approve` → `plan execute`. See [`docs/agent-guide.md`](./docs/agent-guide.md) for the full schema and agent integration patterns.
 
 ### `devices watch` — poll status
 
 ```bash
-# Poll a device's status every 30 s until Ctrl-C
-switchbot devices watch <deviceId>
-
-# Custom interval; emit every tick even when nothing changed
-switchbot devices watch <deviceId> --interval 10s --include-unchanged --json
-
-# Time-bounded: stop after 5 minutes instead of a fixed tick count
-switchbot devices watch <deviceId> --for 5m
+switchbot devices watch <deviceId>                                    # poll every 30s
+switchbot devices watch <deviceId> --interval 10s --json             # custom interval
+switchbot devices watch <deviceId> --for 5m                          # time-bounded
+switchbot devices watch <deviceId> --include-unchanged --max 20      # emit every tick
 ```
-
-Output is a JSONL stream of status-change events (with `--json`) or a refreshed table. Use `--max <n>` to stop after N ticks, or `--for <duration>` to stop after an elapsed wall-clock window (e.g. `30s`, `1h`, `2d`). When both are set, whichever limit trips first wins.
 
 ### `mcp` — Model Context Protocol server
 
@@ -721,17 +672,14 @@ See [`docs/agent-guide.md`](./docs/agent-guide.md) for the full tool reference a
 ```bash
 switchbot doctor
 switchbot doctor --json
+switchbot doctor --fix --yes   # auto-apply safe fixes
 ```
 
-Runs local checks (Node version, credentials, profiles, catalog, catalog-schema, catalog-coverage, cache, quota, clock, MQTT, policy, MCP, keychain, path, inventory, audit, daemon, daemon-ipc, health, notify-connectivity, local-llm-reachable, release-notes) and exits 1 if any check fails. `warn` results exit 0. The MQTT check reports `ok` when REST credentials are configured (auto-provisioned on first use). The `notify-connectivity` check probes webhook URLs declared in `type: notify` actions. `daemon-ipc` round-trips the JSON-RPC socket when the daemon is running (silently skipped otherwise); `local-llm-reachable` only fires when policy uses `provider: local`. Use this to diagnose connectivity or config issues before running automation.
-
-`--json` output includes `maturityScore` (0–100) and `maturityLabel` (`production-ready` / `mostly-ready` / `needs-work` / `not-ready`) to give an at-a-glance readiness rating:
+Checks Node version, credentials, profiles, catalog, cache, quota, clock, MQTT, policy, MCP, keychain, path, inventory, audit, daemon, and more — exits 1 on any failure (`warn` exits 0).
 
 ```bash
 switchbot doctor --json | jq '{score: .data.maturityScore, label: .data.maturityLabel}'
 ```
-
-Pass `--fix --yes` to auto-apply safe fixes (e.g. clear stale cache entries) without a prompt.
 
 ### `health` — runtime health report
 
