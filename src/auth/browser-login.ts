@@ -1,3 +1,4 @@
+import { existsSync } from 'fs';
 import open from 'open';
 import { generateState } from './csrf.js';
 import { bindCallbackServer } from './oauth-callback.js';
@@ -38,11 +39,9 @@ export async function browserLogin(options: BrowserLoginOptions = {}): Promise<C
     log(`Open this URL in your browser to sign in:\n\n  ${loginUrl}\n`);
   } else {
     log('Opening SwitchBot login page in your browser…');
-    try {
-      await open(loginUrl);
-    } catch (err) {
-      close();
-      throw err;
+    const opened = await tryOpenBrowser(loginUrl);
+    if (!opened) {
+      log(`Could not open browser automatically. Open this URL in your browser to sign in:\n\n  ${loginUrl}\n`);
     }
   }
 
@@ -68,6 +67,26 @@ function buildLoginUrl(params: { redirectUri: string; state: string }): string {
   url.searchParams.set('redirect_uri', params.redirectUri);
   url.searchParams.set('state', params.state);
   return url.toString();
+}
+
+// open v10 spawns PowerShell (via wsl-utils) when running inside WSL, but attaches
+// an error handler only when wait:true. With the default wait:false, ENOENT fires
+// via process.nextTick — before the returned Promise resolves — so no try/catch
+// around `await open()` can intercept it and the process crashes. Pre-check the
+// executable path in WSL to avoid the unhandled 'error' event entirely.
+async function tryOpenBrowser(url: string): Promise<boolean> {
+  if (process.platform === 'linux') {
+    // Default WSL mount; if the user has a custom root= in /etc/wsl.conf and
+    // PowerShell lives there, open() will work fine and this check is skipped.
+    const wslPsPath = '/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe';
+    if (!existsSync(wslPsPath)) return false;
+  }
+  try {
+    await open(url);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function startCountdown(deadline: number): { stop(): void } {
