@@ -20,17 +20,128 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm test
-      - name: Verify tag matches package.json version
+      - run: npm run test:workspaces
+
+      - name: Verify tag matches root CLI package.json version
         run: |
           PKG_VERSION=$(node -p "require('./package.json').version")
           TAG_VERSION="${GITHUB_REF_NAME#v}"
           if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
-            echo "Tag $TAG_VERSION does not match package.json version $PKG_VERSION"
+            echo "Tag $TAG_VERSION does not match root package.json version $PKG_VERSION"
+            echo "Plugin versions are independent and read from packages/*/package.json directly."
             exit 1
           fi
-      - name: Smoke test packed npm artifact
+
+      - name: Show resolved versions
+        run: |
+          CLI_VERSION=$(node -p "require('./package.json').version")
+          CODEX_VERSION=$(node -p "require('./packages/codex-plugin/package.json').version")
+          OPENCLAW_VERSION=$(node -p "require('./packages/openclaw-skill/package.json').version")
+          echo "Root CLI:        @switchbot/openapi-cli@$CLI_VERSION"
+          echo "Codex plugin:    @switchbot/codex-plugin@$CODEX_VERSION"
+          echo "OpenClaw skill:  @switchbot/openclaw-skill@$OPENCLAW_VERSION"
+          {
+            echo "cli_version=$CLI_VERSION"
+            echo "codex_version=$CODEX_VERSION"
+            echo "openclaw_version=$OPENCLAW_VERSION"
+          } >> "$GITHUB_OUTPUT"
+        id: versions
+
+      - name: Detect which packages need publishing
+        id: detect
+        env:
+          CLI_VERSION: ${{ steps.versions.outputs.cli_version }}
+          CODEX_VERSION: ${{ steps.versions.outputs.codex_version }}
+          OPENCLAW_VERSION: ${{ steps.versions.outputs.openclaw_version }}
+        run: |
+          # For each package, query npm; if the exact version is already published, skip.
+          check_unpublished() {
+            local name="$1"
+            local version="$2"
+            local found
+            found=$(npm view "${name}@${version}" version 2>/dev/null || true)
+            if [ "$found" = "$version" ]; then
+              echo "false"
+            else
+              echo "true"
+            fi
+          }
+          CLI_PUBLISH=$(check_unpublished "@switchbot/openapi-cli" "$CLI_VERSION")
+          CODEX_PUBLISH=$(check_unpublished "@switchbot/codex-plugin" "$CODEX_VERSION")
+          OPENCLAW_PUBLISH=$(check_unpublished "@switchbot/openclaw-skill" "$OPENCLAW_VERSION")
+          echo "cli_publish=$CLI_PUBLISH"
+          echo "codex_publish=$CODEX_PUBLISH"
+          echo "openclaw_publish=$OPENCLAW_PUBLISH"
+          {
+            echo "cli_publish=$CLI_PUBLISH"
+            echo "codex_publish=$CODEX_PUBLISH"
+            echo "openclaw_publish=$OPENCLAW_PUBLISH"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Smoke test packed root CLI artifact
+        if: steps.detect.outputs.cli_publish == 'true'
         run: npm run smoke:pack-install
-      - name: Publish package to npm dist-tag next
+
+      - name: Verify codex-plugin tarball peerDep is a concrete range
+        if: steps.detect.outputs.codex_publish == 'true'
+        run: |
+          TARBALL=$(npm pack -w @switchbot/codex-plugin --pack-destination /tmp/ 2>&1 | tail -1)
+          PEER=$(tar -xOzf "/tmp/$TARBALL" package/package.json | node -e "
+            const p = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+            console.log(p.peerDependencies?.['@switchbot/openapi-cli'] || '');
+          ")
+          if [ -z "$PEER" ] || echo "$PEER" | grep -q "workspace:"; then
+            echo "FAIL: codex-plugin peerDep is missing or unrewritten workspace:* — got: '$PEER'"
+            exit 1
+          fi
+          echo "OK: codex-plugin peerDep = '$PEER'"
+          rm -f "/tmp/$TARBALL"
+
+      - name: Verify openclaw-skill tarball peerDep is a concrete range
+        if: steps.detect.outputs.openclaw_publish == 'true'
+        run: |
+          TARBALL=$(npm pack -w @switchbot/openclaw-skill --pack-destination /tmp/ 2>&1 | tail -1)
+          PEER=$(tar -xOzf "/tmp/$TARBALL" package/package.json | node -e "
+            const p = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+            console.log(p.peerDependencies?.['@switchbot/openapi-cli'] || '');
+          ")
+          if [ -z "$PEER" ] || echo "$PEER" | grep -q "workspace:"; then
+            echo "FAIL: openclaw-skill peerDep is missing or unrewritten workspace:* — got: '$PEER'"
+            exit 1
+          fi
+          echo "OK: openclaw-skill peerDep = '$PEER'"
+          rm -f "/tmp/$TARBALL"
+
+      - name: Publish root CLI to npm dist-tag next
+        if: steps.detect.outputs.cli_publish == 'true'
         run: npm publish --tag next --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish codex-plugin to npm dist-tag next
+        id: publish_codex
+        if: steps.detect.outputs.codex_publish == 'true'
+        continue-on-error: true
+        run: npm publish -w @switchbot/codex-plugin --tag next --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish openclaw-skill to npm dist-tag next
+        id: publish_openclaw
+        if: steps.detect.outputs.openclaw_publish == 'true'
+        continue-on-error: true
+        run: npm publish -w @switchbot/openclaw-skill --tag next --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Annotate plugin publish failures
+        if: >
+          (steps.detect.outputs.codex_publish == 'true' && steps.publish_codex.outcome == 'failure') ||
+          (steps.detect.outputs.openclaw_publish == 'true' && steps.publish_openclaw.outcome == 'failure')
+        run: |
+          if [ "${{ steps.publish_codex.outcome }}" = "failure" ]; then
+            echo "::warning::codex-plugin publish step failed; root CLI promotion is unaffected. Investigate before next release."
+          fi
+          if [ "${{ steps.publish_openclaw.outcome }}" = "failure" ]; then
+            echo "::warning::openclaw-skill publish step failed; root CLI promotion is unaffected. Investigate before next release."
+          fi

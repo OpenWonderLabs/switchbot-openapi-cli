@@ -7,6 +7,25 @@ All notable changes to `@switchbot/openapi-cli` are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Monorepo absorption** — `@switchbot/codex-plugin` (formerly `@cly-org/switchbot-codex-plugin`) and `@switchbot/openclaw-skill` (formerly `@cly-org/switchbot-openclaw-skill`) now ship from this repository under `packages/codex-plugin/` and `packages/openclaw-skill/`. A single GitHub Release publishes any package whose version was bumped since the previous release.
+- **Codex command group** — `switchbot codex setup`, `switchbot codex doctor`, `switchbot codex repair` orchestrate Codex plugin install, the 7-check health summary, and end-to-end repair. `switchbot install --agent codex` is the register-only sibling.
+
+### Changed
+
+- **Plugin package names** — `@cly-org/switchbot-codex-plugin` → `@switchbot/codex-plugin`; `@cly-org/switchbot-openclaw-skill` → `@switchbot/openclaw-skill`. The old names were verification-stage with no published users; no `npm deprecate` notice is necessary.
+- **Plugin versions reset to `0.1.0`** for first publish under the new scope.
+- **Publish workflow** — `.github/workflows/publish.yml` gains a `detect-versions` step and per-package guards so plugin failures (or unbumped versions) do not block CLI promotion. Plugin steps run `continue-on-error: true` and surface failures as workflow annotations.
+- **Smoke workflow** — `.github/workflows/npm-published-smoke.yml` is now a per-package matrix. CLI keeps offline + live smoke; plugins get tarball-shape checks (concrete peerDep, executable bin entries) without live smoke.
+- **CI** — `policy-schema-sync` cross-repo job removed; the skill consumer is now in this monorepo.
+
+### Removed
+
+- Sibling repository `openclaw-switchbot-skill` is archived; future development happens here.
+
 ## [3.7.1]
 
 ### Fixed
