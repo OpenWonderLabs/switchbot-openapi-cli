@@ -3,18 +3,31 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const spawnSyncMock = vi.hoisted(() => vi.fn());
 vi.mock('node:child_process', () => ({ spawnSync: spawnSyncMock }));
 
+const existsSyncMock = vi.hoisted(() => vi.fn());
+const readFileSyncMock = vi.hoisted(() => vi.fn());
+vi.mock('node:fs', () => ({
+  default: { existsSync: existsSyncMock, readFileSync: readFileSyncMock },
+  existsSync: existsSyncMock,
+  readFileSync: readFileSyncMock,
+}));
+
 import {
   checkCodexCli,
   checkCodexPluginNpm,
   checkCodexPluginRegistered,
   runCodexPluginRegistration,
+  resolvePluginId,
 } from '../../src/install/codex-checks.js';
 
 function makeSpawnResult(status: number, stdout: string, stderr = ''): ReturnType<typeof spawnSyncMock> {
   return { status, stdout, stderr, error: undefined } as ReturnType<typeof spawnSyncMock>;
 }
 
-beforeEach(() => { spawnSyncMock.mockReset(); });
+beforeEach(() => {
+  spawnSyncMock.mockReset();
+  existsSyncMock.mockReset();
+  readFileSyncMock.mockReset();
+});
 
 describe('checkCodexCli', () => {
   it('returns ok when codex is on PATH and version parses', () => {
@@ -120,5 +133,24 @@ describe('runCodexPluginRegistration', () => {
     const result = runCodexPluginRegistration('/some/path', 'switchbot@pkg');
     expect(result.ok).toBe(false);
     expect(result.stderr).toBe('plugin add error');
+  });
+});
+
+describe('resolvePluginId', () => {
+  it('returns default id when .codex-plugin/plugin.json does not exist', () => {
+    existsSyncMock.mockReturnValue(false);
+    expect(resolvePluginId('/some/path/switchbot-codex-plugin')).toBe('switchbot@switchbot-codex-plugin');
+  });
+
+  it('uses plugin.json name when available', () => {
+    existsSyncMock.mockReturnValue(true);
+    readFileSyncMock.mockReturnValue('{"name":"myplugin"}');
+    expect(resolvePluginId('/some/path/switchbot-codex-plugin')).toBe('myplugin@switchbot-codex-plugin');
+  });
+
+  it('falls back to default when plugin.json has no name', () => {
+    existsSyncMock.mockReturnValue(true);
+    readFileSyncMock.mockReturnValue('{}');
+    expect(resolvePluginId('/some/path/switchbot-codex-plugin')).toBe('switchbot@switchbot-codex-plugin');
   });
 });

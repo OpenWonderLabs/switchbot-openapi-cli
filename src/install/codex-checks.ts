@@ -1,4 +1,6 @@
 import { spawnSync } from 'node:child_process';
+import path from 'node:path';
+import fs from 'node:fs';
 
 export interface Check {
   name: string;
@@ -19,6 +21,18 @@ function spawnStr(cmd: string, args: string[]): { status: number; stdout: string
     timeout: 10000,
   });
   return { status: r.status ?? -1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
+}
+
+/** Single authoritative plugin ID resolver. Mirrors install.js:resolvePluginIdentifier. */
+export function resolvePluginId(packageRoot: string): string {
+  const manifestPath = path.join(packageRoot, '.codex-plugin', 'plugin.json');
+  if (fs.existsSync(manifestPath)) {
+    try {
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as { name?: string };
+      if (manifest.name) return `${manifest.name}@${path.basename(packageRoot)}`;
+    } catch { /* fall through */ }
+  }
+  return `switchbot@${path.basename(packageRoot)}`;
 }
 
 export function checkCodexCli(): Check {
@@ -63,7 +77,7 @@ export function checkCodexPluginNpm(): Check {
   let packageRoot: string | null = null;
   const rootResult = spawnStr('npm', ['root', '-g']);
   if (rootResult.status === 0) {
-    packageRoot = `${rootResult.stdout.trim()}/@cly-org/switchbot-codex-plugin`;
+    packageRoot = path.join(rootResult.stdout.trim(), '@cly-org', 'switchbot-codex-plugin');
   }
   return {
     name: 'codex-plugin-npm',
