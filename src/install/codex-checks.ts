@@ -222,6 +222,9 @@ export function runCodexPluginRegistration(packageRoot: string, pluginId: string
   if (mkt.status !== 0) {
     return { ok: false, exitCode: mkt.status, stderr: mkt.stderr, stage: 'marketplace-add' };
   }
+  // Remove any stale registration first so codex does a fresh install rather than
+  // an update-with-backup. The backup step hits ACCESS_DENIED on Windows junction paths.
+  spawnStr('codex', ['plugin', 'remove', pluginId]);
   const add = spawnStr('codex', ['plugin', 'add', pluginId]);
   return { ok: add.status === 0, exitCode: add.status, stderr: add.stderr, stage: 'plugin-add' };
 }
