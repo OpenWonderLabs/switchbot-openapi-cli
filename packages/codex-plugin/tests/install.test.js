@@ -174,6 +174,31 @@ describe('makeInstall', () => {
     assert.equal(callCount, 1);
     assert.equal(auth.calls.length, 0);
   });
+
+  it('returns 1 with a prefixed message when resolveMarketplaceSourceRoot throws', async () => {
+    const auth = makeRunAuth(0);
+    const { spawn } = makeSpawn(0);
+    const errChunks = [];
+    const origWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = (chunk, ...rest) => { errChunks.push(String(chunk)); return true; };
+
+    const install = makeInstall({
+      checkCli: makeOkCliCheck(),
+      runInherit: spawn,
+      packageRoot: TEST_ROOT,
+      runAuth: auth.runAuth,
+      resolveRoot: () => {
+        throw new Error('alias path /home/user/.switchbot/codex-plugin-marketplace exists and is not a symlink/junction; remove it manually and retry');
+      },
+    });
+    const code = await install();
+    process.stderr.write = origWrite;
+
+    assert.equal(code, 1);
+    const combined = errChunks.join('');
+    assert.ok(combined.includes('[switchbot-codex]'), `expected [switchbot-codex] prefix in: ${combined}`);
+    assert.ok(combined.includes('codex-plugin-marketplace'), `expected alias path in: ${combined}`);
+  });
 });
 
 describe('resolvePluginIdentifier', () => {

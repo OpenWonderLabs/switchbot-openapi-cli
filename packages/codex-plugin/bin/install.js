@@ -103,7 +103,7 @@ function formatCodexFailure(step) {
   ].join('\n');
 }
 
-export function makeInstall({ checkCli, runInherit, packageRoot, runAuth }) {
+export function makeInstall({ checkCli, runInherit, packageRoot, runAuth, resolveRoot = resolveMarketplaceSourceRoot }) {
   return async function install() {
     process.stderr.write(
       '[switchbot-codex] WARNING: switchbot-codex-install is deprecated.\n' +
@@ -122,7 +122,13 @@ export function makeInstall({ checkCli, runInherit, packageRoot, runAuth }) {
       process.stderr.write(`[switchbot-codex] CLI ${cliCheck.version} detected.\n`);
     }
 
-    const marketplaceRoot = resolveMarketplaceSourceRoot(packageRoot);
+    let marketplaceRoot;
+    try {
+      marketplaceRoot = resolveRoot(packageRoot);
+    } catch (err) {
+      process.stderr.write(`[switchbot-codex] Cannot prepare marketplace path: ${err.message}\n`);
+      return 1;
+    }
     process.stderr.write(`[switchbot-codex] Registering plugin at ${marketplaceRoot}...\n`);
     const marketplaceCode = await runInherit('codex', ['plugin', 'marketplace', 'add', marketplaceRoot]);
     if (marketplaceCode !== 0) {
