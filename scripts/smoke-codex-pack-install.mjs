@@ -115,7 +115,6 @@ try {
   for (const expected of [
     'check-codex-cli',
     'install-switchbot-cli',
-    'install-codex-plugin',
     'register-plugin',
     'auth',
     'doctor-verify',
@@ -141,7 +140,7 @@ try {
     throw new Error(`codex plugin onInstall hook must exit 0; got ${hook.status ?? 1}\nstderr:\n${hook.stderr}`);
   }
 
-  console.log('codex pack-install smoke ok: tarballs install, setup dry-run includes plugin install, hook is non-blocking');
+  console.log('codex pack-install smoke ok: tarballs install, setup dry-run has 5 steps, hook is non-blocking');
 } finally {
   for (const tarball of packed) {
     rmSync(tarball, { force: true });

@@ -154,7 +154,8 @@ describe('runCodexPluginRegistration', () => {
   it('returns ok when both marketplace add and plugin add succeed', () => {
     spawnSyncMock
       .mockReturnValueOnce(makeSpawnResult(0, ''))  // marketplace add
-      .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (pre-clean)
+      .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (current id)
+      .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (legacy id)
       .mockReturnValueOnce(makeSpawnResult(0, '')); // plugin add
     const result = runCodexPluginRegistration('/some/path', 'switchbot@pkg');
     expect(result.ok).toBe(true);
@@ -172,7 +173,8 @@ describe('runCodexPluginRegistration', () => {
   it('returns failure when plugin add exits non-zero', () => {
     spawnSyncMock
       .mockReturnValueOnce(makeSpawnResult(0, ''))
-      .mockReturnValueOnce(makeSpawnResult(0, ''))                // plugin remove (pre-clean)
+      .mockReturnValueOnce(makeSpawnResult(0, ''))                // plugin remove (current id)
+      .mockReturnValueOnce(makeSpawnResult(0, ''))                // plugin remove (legacy id)
       .mockReturnValueOnce(makeSpawnResult(1, '', 'plugin add error'));
     const result = runCodexPluginRegistration('/some/path', 'switchbot@pkg');
     expect(result.ok).toBe(false);
@@ -187,7 +189,8 @@ describe('registerCodexPlugin (shared helper)', () => {
     spawnSyncMock
       .mockReturnValueOnce(makeSpawnResult(0, '/usr/local/lib/node_modules\n')) // npm root -g
       .mockReturnValueOnce(makeSpawnResult(0, ''))                                // marketplace add
-      .mockReturnValueOnce(makeSpawnResult(0, ''))                                // plugin remove (pre-clean)
+      .mockReturnValueOnce(makeSpawnResult(0, ''))                                // plugin remove (current id)
+      .mockReturnValueOnce(makeSpawnResult(0, ''))                                // plugin remove (legacy id)
       .mockReturnValueOnce(makeSpawnResult(0, ''));                               // plugin add
     const r = registerCodexPlugin();
     expect(r.ok).toBe(true);
@@ -467,7 +470,8 @@ describe('registerCodexPluginAuto', () => {
       .mockReturnValueOnce(makeSpawnResult(1, '', 'git clone failed')) // marketplace add (git) — fails
       .mockReturnValueOnce(makeSpawnResult(0, '/usr/local/lib/node_modules\n', '')) // npm root -g
       .mockReturnValueOnce(makeSpawnResult(0, ''))  // marketplace add (local)
-      .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove
+      .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (current id)
+      .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (legacy id)
       .mockReturnValueOnce(makeSpawnResult(0, '')); // plugin add
     const r = registerCodexPluginAuto();
     expect(r.ok).toBe(true);
@@ -483,7 +487,8 @@ describe('registerCodexPluginAuto', () => {
       .mockReturnValueOnce(makeSpawnResult(0, '', ''))                               // npm install -g: succeeds
       .mockReturnValueOnce(makeSpawnResult(0, '/usr/local/lib/node_modules\n', ''))  // npm root -g (retry)
       .mockReturnValueOnce(makeSpawnResult(0, ''))                                   // marketplace add (local)
-      .mockReturnValueOnce(makeSpawnResult(0, ''))                                   // plugin remove
+      .mockReturnValueOnce(makeSpawnResult(0, ''))                                   // plugin remove (current id)
+      .mockReturnValueOnce(makeSpawnResult(0, ''))                                   // plugin remove (legacy id)
       .mockReturnValueOnce(makeSpawnResult(0, ''));                                  // plugin add
     const r = registerCodexPluginAuto();
     expect(r.ok).toBe(true);
@@ -527,7 +532,8 @@ describe('registerCodexPluginAuto', () => {
       .mockReturnValueOnce(makeSpawnResult(0, npmListWithWarnings, ''))          // npm list → found
       .mockReturnValueOnce(makeSpawnResult(0, '/usr/local/lib/node_modules\n'))  // npm root -g retry
       .mockReturnValueOnce(makeSpawnResult(0, ''))                               // marketplace add (local)
-      .mockReturnValueOnce(makeSpawnResult(0, ''))                               // plugin remove
+      .mockReturnValueOnce(makeSpawnResult(0, ''))                               // plugin remove (current id)
+      .mockReturnValueOnce(makeSpawnResult(0, ''))                               // plugin remove (legacy id)
       .mockReturnValueOnce(makeSpawnResult(0, ''));                              // plugin add
     const r = registerCodexPluginAuto();
     // npm install -g must NOT have been called

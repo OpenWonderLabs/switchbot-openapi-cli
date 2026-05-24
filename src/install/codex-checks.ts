@@ -232,9 +232,10 @@ export function runCodexPluginRegistration(packageRoot: string, pluginId: string
   if (mkt.status !== 0) {
     return { ok: false, exitCode: mkt.status, stderr: mkt.stderr, stage: 'marketplace-add' };
   }
-  // Remove any stale registration first so codex does a fresh install rather than
-  // an update-with-backup. The backup step hits ACCESS_DENIED on Windows junction paths.
-  spawnStr('codex', ['plugin', 'remove', pluginId]);
+  // Remove current and legacy IDs; ignore exit codes (best-effort pre-clean).
+  for (const id of [pluginId, ...CODEX_PLUGIN_LEGACY_IDS]) {
+    spawnStr('codex', ['plugin', 'remove', id]);
+  }
   const add = spawnStr('codex', ['plugin', 'add', pluginId]);
   return { ok: add.status === 0, exitCode: add.status, stderr: add.stderr, stage: 'plugin-add' };
 }
@@ -279,7 +280,7 @@ export const CODEX_GIT_MARKETPLACE_REPO   = 'OpenWonderLabs/switchbot-openapi-cl
 export const CODEX_GIT_MARKETPLACE_SPARSE = 'packages/codex-plugin';
 export const CODEX_GIT_MARKETPLACE_REF    = 'main';
 export const CODEX_PLUGIN_DEFAULT_ID      = 'switchbot@codex-plugin';
-// Known IDs from pre-release installs; cleaned up during Route B pre-clean step.
+// Known IDs from pre-release installs; cleaned up by both Route A and Route B.
 const CODEX_PLUGIN_LEGACY_IDS = ['switchbot@switchbot-skill'];
 
 export function runCodexPluginRegistrationGit(pluginId: string): RegistrationResult {
