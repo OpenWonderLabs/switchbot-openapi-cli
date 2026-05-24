@@ -334,8 +334,10 @@ function installCodexPluginGlobally(): { ok: boolean; error?: string } {
   if ((list.status ?? 1) === 0) {
     try {
       const raw = list.stdout ?? '';
-      const jsonLine = raw.split('\n').find((l) => l.trimStart().startsWith('{')) ?? raw;
-      const parsed = JSON.parse(jsonLine) as Record<string, unknown>;
+      const lines = raw.split('\n');
+      const jsonStartIdx = lines.findIndex((l) => l.trimStart().startsWith('{'));
+      const jsonStr = jsonStartIdx >= 0 ? lines.slice(jsonStartIdx).join('\n') : raw;
+      const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
       const deps = (parsed.dependencies ?? {}) as Record<string, unknown>;
       if (deps['@switchbot/codex-plugin']) return { ok: true };
     } catch { /* fall through to install */ }
