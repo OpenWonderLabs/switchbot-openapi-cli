@@ -288,7 +288,7 @@ export function runCodexPluginRegistrationGit(pluginId: string): RegistrationRes
   const _envTimeout = process.env['CODEX_MARKETPLACE_ADD_TIMEOUT'];
   const _parsedTimeout = Number(_envTimeout ?? '');
   const _timeoutValid = Number.isFinite(_parsedTimeout) && _parsedTimeout > 0;
-  if (_envTimeout !== undefined && _envTimeout !== '' && !_timeoutValid) {
+  if (_envTimeout !== undefined && !_timeoutValid) {
     process.stderr.write(
       `[switchbot] CODEX_MARKETPLACE_ADD_TIMEOUT="${_envTimeout}" is not a valid positive number; using default 60000 ms\n`,
     );
@@ -332,17 +332,18 @@ function installCodexPluginGlobally(): { ok: boolean; error?: string } {
     'npm', ['list', '-g', '--json', '--depth=0', '@switchbot/codex-plugin'],
     { encoding: 'utf-8', shell: process.platform === 'win32', timeout: 10000 },
   );
-  if ((list.status ?? 1) === 0) {
-    try {
-      const raw = list.stdout ?? '';
-      const lines = raw.split('\n');
-      const jsonStartIdx = lines.findIndex((l) => l.trimStart().startsWith('{'));
-      const jsonStr = jsonStartIdx >= 0 ? lines.slice(jsonStartIdx).join('\n') : raw;
-      const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
-      const deps = (parsed.dependencies ?? {}) as Record<string, unknown>;
-      if (deps['@switchbot/codex-plugin']) return { ok: true };
-    } catch { /* fall through to install */ }
-  }
+  // Parse JSON regardless of exit code: npm exits 1 on peer-dep warnings even
+  // when the package is present. Skip the install if the package shows up in the
+  // dependency tree either way.
+  try {
+    const raw = list.stdout ?? '';
+    const lines = raw.split('\n');
+    const jsonStartIdx = lines.findIndex((l) => l.trimStart().startsWith('{'));
+    const jsonStr = jsonStartIdx >= 0 ? lines.slice(jsonStartIdx).join('\n') : raw;
+    const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
+    const deps = (parsed.dependencies ?? {}) as Record<string, unknown>;
+    if (deps['@switchbot/codex-plugin']) return { ok: true };
+  } catch { /* fall through to install */ }
   const install = spawnSync(
     'npm', ['install', '-g', '@switchbot/codex-plugin@latest'],
     { encoding: 'utf-8', shell: process.platform === 'win32', timeout: 120000 },
@@ -350,6 +351,26 @@ function installCodexPluginGlobally(): { ok: boolean; error?: string } {
   if ((install.status ?? 1) !== 0) {
     return { ok: false, error: `npm install -g failed (exit ${install.status ?? 1}): ${install.stderr ?? ''}` };
   }
+  // Verify the package now appears in npm list; a mismatch means npm installed
+  // to a different prefix than the active one (e.g. nvm switching, sudo vs user).
+  const verify = spawnSync(
+    'npm', ['list', '-g', '--json', '--depth=0', '@switchbot/codex-plugin'],
+    { encoding: 'utf-8', shell: process.platform === 'win32', timeout: 10000 },
+  );
+  try {
+    const vRaw = verify.stdout ?? '';
+    const vLines = vRaw.split('\n');
+    const vJsonIdx = vLines.findIndex((l) => l.trimStart().startsWith('{'));
+    const vJsonStr = vJsonIdx >= 0 ? vLines.slice(vJsonIdx).join('\n') : vRaw;
+    const vParsed = JSON.parse(vJsonStr) as Record<string, unknown>;
+    const vDeps = (vParsed.dependencies ?? {}) as Record<string, unknown>;
+    if (!vDeps['@switchbot/codex-plugin']) {
+      return {
+        ok: false,
+        error: 'npm install -g succeeded but @switchbot/codex-plugin not found in npm list (npm prefix mismatch? Run: npm root -g to verify prefix)',
+      };
+    }
+  } catch { /* verification inconclusive — proceed and let registration catch the error */ }
   return { ok: true };
 }
 

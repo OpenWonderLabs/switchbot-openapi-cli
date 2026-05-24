@@ -39,11 +39,12 @@ describe('makeInstall', () => {
     });
     const code = await install();
     assert.equal(code, 0);
-    assert.equal(calls.length, 4);
+    assert.equal(calls.length, 5);
     assert.deepEqual(calls[0], { cmd: 'codex', args: ['plugin', 'marketplace', 'add', TEST_ROOT] });
     assert.deepEqual(calls[1], { cmd: 'codex', args: ['plugin', 'remove', 'switchbot@codex-plugin'] });
-    assert.deepEqual(calls[2], { cmd: 'codex', args: ['plugin', 'add', 'switchbot@codex-plugin'] });
-    assert.deepEqual(calls[3], { cmd: 'switchbot', args: ['doctor'] });
+    assert.deepEqual(calls[2], { cmd: 'codex', args: ['plugin', 'remove', 'switchbot@switchbot-skill'] });
+    assert.deepEqual(calls[3], { cmd: 'codex', args: ['plugin', 'add', 'switchbot@codex-plugin'] });
+    assert.deepEqual(calls[4], { cmd: 'switchbot', args: ['doctor'] });
     assert.equal(auth.calls.length, 1);
   });
 
@@ -58,12 +59,13 @@ describe('makeInstall', () => {
     });
     const code = await install();
     assert.equal(code, 0);
-    assert.equal(calls.length, 5);
+    assert.equal(calls.length, 6);
     assert.deepEqual(calls[0], { cmd: 'npm', args: ['install', '-g', '@switchbot/openapi-cli@latest'] });
     assert.deepEqual(calls[1], { cmd: 'codex', args: ['plugin', 'marketplace', 'add', TEST_ROOT] });
     assert.deepEqual(calls[2], { cmd: 'codex', args: ['plugin', 'remove', 'switchbot@codex-plugin'] });
-    assert.deepEqual(calls[3], { cmd: 'codex', args: ['plugin', 'add', 'switchbot@codex-plugin'] });
-    assert.deepEqual(calls[4], { cmd: 'switchbot', args: ['doctor'] });
+    assert.deepEqual(calls[3], { cmd: 'codex', args: ['plugin', 'remove', 'switchbot@switchbot-skill'] });
+    assert.deepEqual(calls[4], { cmd: 'codex', args: ['plugin', 'add', 'switchbot@codex-plugin'] });
+    assert.deepEqual(calls[5], { cmd: 'switchbot', args: ['doctor'] });
     assert.equal(auth.calls.length, 1);
   });
 
@@ -107,7 +109,8 @@ describe('makeInstall', () => {
     const auth = makeRunAuth(0);
     const spawn = (cmd, args) => {
       callCount++;
-      return Promise.resolve(callCount === 3 ? 3 : 0);
+      // calls: 1=marketplace add, 2=remove current, 3=remove legacy, 4=plugin add
+      return Promise.resolve(callCount === 4 ? 3 : 0);
     };
     const install = makeInstall({
       checkCli: makeOkCliCheck(),
@@ -117,7 +120,7 @@ describe('makeInstall', () => {
     });
     const code = await install();
     assert.equal(code, 3);
-    assert.equal(callCount, 3);
+    assert.equal(callCount, 4);
     assert.equal(auth.calls.length, 0);
   });
 
@@ -132,7 +135,7 @@ describe('makeInstall', () => {
     });
     const code = await install();
     assert.equal(code, 4);
-    assert.equal(calls.length, 3);
+    assert.equal(calls.length, 4);
     assert.equal(auth.calls.length, 1);
   });
 
@@ -151,8 +154,8 @@ describe('makeInstall', () => {
     });
     const code = await install();
     assert.equal(code, 5);
-    assert.equal(calls.length, 4);
-    assert.deepEqual(calls[3], { cmd: 'switchbot', args: ['doctor'] });
+    assert.equal(calls.length, 5);
+    assert.deepEqual(calls[4], { cmd: 'switchbot', args: ['doctor'] });
     assert.equal(auth.calls.length, 1);
   });
 
@@ -182,17 +185,21 @@ describe('makeInstall', () => {
     const origWrite = process.stderr.write.bind(process.stderr);
     process.stderr.write = (chunk, ...rest) => { errChunks.push(String(chunk)); return true; };
 
-    const install = makeInstall({
-      checkCli: makeOkCliCheck(),
-      runInherit: spawn,
-      packageRoot: TEST_ROOT,
-      runAuth: auth.runAuth,
-      resolveRoot: () => {
-        throw new Error('alias path /home/user/.switchbot/codex-plugin-marketplace exists and is not a symlink/junction; remove it manually and retry');
-      },
-    });
-    const code = await install();
-    process.stderr.write = origWrite;
+    let code;
+    try {
+      const install = makeInstall({
+        checkCli: makeOkCliCheck(),
+        runInherit: spawn,
+        packageRoot: TEST_ROOT,
+        runAuth: auth.runAuth,
+        resolveRoot: () => {
+          throw new Error('alias path /home/user/.switchbot/codex-plugin-marketplace exists and is not a symlink/junction; remove it manually and retry');
+        },
+      });
+      code = await install();
+    } finally {
+      process.stderr.write = origWrite;
+    }
 
     assert.equal(code, 1);
     const combined = errChunks.join('');
@@ -204,10 +211,7 @@ describe('makeInstall', () => {
     let callCount = 0;
     const spawn = (cmd, args) => {
       callCount++;
-      // call 1: marketplace add → 0
-      // call 2: plugin remove → 1 (failure, best-effort)
-      // call 3: plugin add → 0
-      // call 4: doctor → 0
+      // calls: 1=marketplace add, 2=remove current → failure, 3=remove legacy, 4=plugin add, 5=doctor
       return Promise.resolve(callCount === 2 ? 1 : 0);
     };
     const auth = makeRunAuth(0);
@@ -215,17 +219,21 @@ describe('makeInstall', () => {
     const origWrite = process.stderr.write.bind(process.stderr);
     process.stderr.write = (chunk, ...rest) => { errChunks.push(String(chunk)); return true; };
 
-    const install = makeInstall({
-      checkCli: makeOkCliCheck(),
-      runInherit: spawn,
-      packageRoot: TEST_ROOT,
-      runAuth: auth.runAuth,
-    });
-    const code = await install();
-    process.stderr.write = origWrite;
+    let code;
+    try {
+      const install = makeInstall({
+        checkCli: makeOkCliCheck(),
+        runInherit: spawn,
+        packageRoot: TEST_ROOT,
+        runAuth: auth.runAuth,
+      });
+      code = await install();
+    } finally {
+      process.stderr.write = origWrite;
+    }
 
     assert.equal(code, 0, 'install should still succeed');
-    assert.equal(callCount, 4, 'all four spawn calls should be made');
+    assert.equal(callCount, 5, 'all five spawn calls should be made');
     const combined = errChunks.join('');
     assert.ok(
       combined.includes('Warning') && combined.includes('remove') && combined.includes('exited'),

@@ -103,6 +103,8 @@ function formatCodexFailure(step) {
   ].join('\n');
 }
 
+const CODEX_PLUGIN_LEGACY_IDS = ['switchbot@switchbot-skill'];
+
 export function makeInstall({ checkCli, runInherit, packageRoot, runAuth, resolveRoot = resolveMarketplaceSourceRoot }) {
   return async function install() {
     process.stderr.write(
@@ -141,10 +143,12 @@ export function makeInstall({ checkCli, runInherit, packageRoot, runAuth, resolv
     }
 
     const pluginName = resolvePluginIdentifier(packageRoot);
-    process.stderr.write(`[switchbot-codex] Removing stale plugin ${pluginName} if present...\n`);
-    const removeCode = await runInherit('codex', ['plugin', 'remove', pluginName]);
-    if (removeCode !== 0) {
-      process.stderr.write(`[switchbot-codex] Warning: plugin remove exited ${removeCode}; continuing.\n`);
+    for (const id of [pluginName, ...CODEX_PLUGIN_LEGACY_IDS]) {
+      process.stderr.write(`[switchbot-codex] Removing stale plugin ${id} if present...\n`);
+      const removeCode = await runInherit('codex', ['plugin', 'remove', id]);
+      if (removeCode !== 0) {
+        process.stderr.write(`[switchbot-codex] Warning: plugin remove exited ${removeCode}; continuing.\n`);
+      }
     }
     process.stderr.write(`[switchbot-codex] Adding plugin ${pluginName}...\n`);
     const pluginCode = await runInherit('codex', ['plugin', 'add', pluginName]);
