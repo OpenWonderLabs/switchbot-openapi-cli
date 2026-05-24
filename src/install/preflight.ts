@@ -255,7 +255,7 @@ function checkCodexCliForPreflight(opts: PreflightOptions): PreflightCheck | nul
       name: 'codex-cli',
       status: 'fail',
       message: 'codex CLI not found on PATH',
-      hint: 'Install Codex (https://github.com/openai/codex), then re-run switchbot install --agent codex',
+      hint: 'Install Codex (https://github.com/openai/codex), then run: npx @switchbot/openapi-cli codex setup',
     };
   }
   return { name: 'codex-cli', status: 'ok', message: 'codex CLI found on PATH' };
@@ -274,11 +274,14 @@ function checkCodexPluginForPreflight(opts: PreflightOptions): PreflightCheck | 
     installed = Boolean(parsed.dependencies?.['@switchbot/codex-plugin']);
   } catch { /* treat as not installed */ }
   if (!installed) {
+    // Route B (git marketplace) can register without the npm package, so this
+    // is not a hard failure — stepRegisterCodexPlugin → registerCodexPluginAuto
+    // will try git first and fall back to on-demand npm install if needed.
     return {
       name: 'codex-plugin-npm',
-      status: 'fail',
-      message: '@switchbot/codex-plugin not installed globally',
-      hint: 'Run: npm install -g @switchbot/codex-plugin (this command only registers an already-installed package)',
+      status: 'warn',
+      message: '@switchbot/codex-plugin not installed globally (will be fetched via git marketplace)',
+      hint: 'Run the full bootstrap instead: npx @switchbot/openapi-cli codex setup',
     };
   }
   return { name: 'codex-plugin-npm', status: 'ok', message: '@switchbot/codex-plugin installed' };

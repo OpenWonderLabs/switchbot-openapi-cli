@@ -8,7 +8,7 @@ Codex plugin for SwitchBot smart-home control through the authoritative
 - A Codex skill at `skills/switchbot/SKILL.md`
 - An MCP server definition that runs `switchbot mcp serve --tools all`
 - A best-effort `onInstall` hook that runs non-interactive setup when the CLI is present
-- A bootstrap binary: `switchbot-codex-install`
+- Legacy helper binaries: `switchbot-codex-auth` and `switchbot-codex-install`
 
 ## Requirements
 
@@ -115,16 +115,14 @@ Expected result:
 
 ## Uninstall
 
-Remove the plugin entry you installed. Common Codex plugin IDs are:
+Remove the plugin entry:
 
 ```bash
-codex plugin remove switchbot@switchbot-skill
 codex plugin remove switchbot@codex-plugin
 ```
 
-Repo-marketplace installs usually use `switchbot@switchbot-skill`. Package-local
-marketplace installs use `switchbot@codex-plugin` (matches the package directory
-name).
+Older prerelease installs may have used `switchbot@switchbot-skill`; removing
+that id is harmless if Codex reports it is not installed.
 
 If you installed the npm package globally and also want to remove the helper
 commands:
@@ -138,7 +136,6 @@ npm uninstall -g @switchbot/codex-plugin
 To remove the plugin, local policy files, and stored login state:
 
 ```bash
-codex plugin remove switchbot@switchbot-skill
 codex plugin remove switchbot@codex-plugin
 switchbot auth logout
 ```

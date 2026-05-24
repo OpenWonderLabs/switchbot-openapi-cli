@@ -6,9 +6,10 @@ import {
   checkCodexCli,
   checkCodexPluginNpm,
   checkCodexPluginRegistered,
-  registerCodexPlugin,
+  registerCodexPluginAuto,
   resolvePluginId,
   resolveCodexPackageRoot,
+  CODEX_PLUGIN_LEGACY_IDS,
   type Check,
 } from '../install/codex-checks.js';
 import { isJsonMode, printJson } from '../utils/output.js';
@@ -17,7 +18,6 @@ import { getConfigPath } from '../utils/flags.js';
 
 const CODEX_BASE_SECTIONS = ['node', 'path', 'credentials', 'mcp'] as const;
 const SWITCHBOT_CLI_PACKAGE = '@switchbot/openapi-cli';
-const CODEX_PLUGIN_PACKAGE = '@switchbot/codex-plugin';
 
 async function runAllCodexDoctorChecks(): Promise<Check[]> {
   const base = await runDoctorChecks(CODEX_BASE_SECTIONS);
@@ -145,18 +145,20 @@ function repairStepRemovePlugin(ctx: RepairContext): RepairOutcome {
     pluginId = root.ok ? resolvePluginId(root.packageRoot) : 'switchbot@codex-plugin';
     ctx.codexPluginId = pluginId;
   }
-  const r = spawnSync(
-    'codex', ['plugin', 'remove', pluginId],
-    { encoding: 'utf-8', shell: process.platform === 'win32', timeout: 15000 },
-  );
-  if ((r.status ?? 1) !== 0) {
-    return { step: 'remove-plugin', status: 'failed', message: `exit ${r.status ?? 1} (non-fatal)` };
+  for (const id of [pluginId, ...CODEX_PLUGIN_LEGACY_IDS]) {
+    const r = spawnSync(
+      'codex', ['plugin', 'remove', id],
+      { encoding: 'utf-8', shell: process.platform === 'win32', timeout: 15000 },
+    );
+    if ((r.status ?? 1) !== 0) {
+      process.stderr.write(`[switchbot] Warning: codex plugin remove "${id}" exited ${r.status ?? 1} (non-fatal)\n`);
+    }
   }
   return { step: 'remove-plugin', status: 'ok' };
 }
 
 function stepRegisterPluginShared(stepName: string, ctx: { codexPluginId?: string; packageRoot?: string | null }): StepOutcome {
-  const r = registerCodexPlugin();
+  const r = registerCodexPluginAuto();
   if (!r.ok) {
     return { step: stepName, status: 'failed', message: r.error };
   }
@@ -197,9 +199,17 @@ const REPAIR_STEPS: readonly StepDef[] = [
   { name: 'doctor-verify',   description: 'Run Codex doctor checks and report health',    skippable: false },
 ];
 
+// Step names removed from SETUP_STEPS/REPAIR_STEPS in past releases; silently
+// accepted by --skip for backward compatibility instead of exit 2.
+const DEPRECATED_SKIP_NAMES = new Set(['install-codex-plugin']);
+
 function validateSkip(stepDefs: readonly StepDef[], skip: Set<string>): { ok: true } | { ok: false; offending: string } {
   const skippableNames = new Set(stepDefs.filter((s) => s.skippable).map((s) => s.name));
   for (const name of skip) {
+    if (DEPRECATED_SKIP_NAMES.has(name)) {
+      console.error(`[switchbot] --skip "${name}" is no longer a valid step name and has no effect`);
+      continue;
+    }
     if (!skippableNames.has(name)) {
       return { ok: false, offending: name };
     }
@@ -331,12 +341,11 @@ interface SetupContext {
 type SetupOutcome = StepOutcome;
 
 const SETUP_STEPS: readonly StepDef[] = [
-  { name: 'check-codex-cli',       description: 'Verify codex CLI on PATH',                              skippable: false },
-  { name: 'install-switchbot-cli', description: 'Install @switchbot/openapi-cli if missing',             skippable: true  },
-  { name: 'install-codex-plugin',  description: 'Install @switchbot/codex-plugin if missing',            skippable: true  },
-  { name: 'register-plugin',       description: 'Register plugin via shared registerCodexPlugin()',      skippable: false },
-  { name: 'auth',                  description: 'Verify credentials; spawn auth login if missing',      skippable: true  },
-  { name: 'doctor-verify',         description: 'Run 4 base + 3 Codex checks and report health',        skippable: false },
+  { name: 'check-codex-cli',       description: 'Verify codex CLI on PATH',                                        skippable: false },
+  { name: 'install-switchbot-cli', description: 'Install @switchbot/openapi-cli if missing',                       skippable: true  },
+  { name: 'register-plugin',       description: 'Register plugin (Route B git; npm install + Route A on fallback)', skippable: false },
+  { name: 'auth',                  description: 'Verify credentials; spawn auth login if missing',                 skippable: true  },
+  { name: 'doctor-verify',         description: 'Run 4 base + 3 Codex checks and report health',                   skippable: false },
 ];
 
 function setupStepCheckCodexCli(): SetupOutcome {
@@ -358,13 +367,6 @@ function setupStepInstallSwitchbotCli(): SetupOutcome {
   return setupStepInstallGlobalPackage(
     'install-switchbot-cli',
     SWITCHBOT_CLI_PACKAGE,
-  );
-}
-
-function setupStepInstallCodexPlugin(): SetupOutcome {
-  return setupStepInstallGlobalPackage(
-    'install-codex-plugin',
-    CODEX_PLUGIN_PACKAGE,
   );
 }
 
@@ -396,7 +398,14 @@ function setupStepInstallGlobalPackage(step: string, packageName: string): Setup
 }
 
 function setupStepRegisterPlugin(ctx: SetupContext): SetupOutcome {
-  return stepRegisterPluginShared('register-plugin', ctx);
+  const r = registerCodexPluginAuto();
+  if (!r.ok) {
+    return { step: 'register-plugin', status: 'failed', message: r.error };
+  }
+  ctx.codexPluginId = r.pluginId;
+  ctx.packageRoot = r.packageRoot;
+  const via = r.packageRoot ? 'local npm (Route A fallback)' : 'git marketplace (Route B)';
+  return { step: 'register-plugin', status: 'ok', message: `registered via ${via}` };
 }
 
 async function setupStepAuth(ctx: SetupContext): Promise<SetupOutcome> {
@@ -447,7 +456,6 @@ async function runSetup(
     let outcome: SetupOutcome;
     if (step.name === 'check-codex-cli')             outcome = setupStepCheckCodexCli();
     else if (step.name === 'install-switchbot-cli')  outcome = setupStepInstallSwitchbotCli();
-    else if (step.name === 'install-codex-plugin')   outcome = setupStepInstallCodexPlugin();
     else if (step.name === 'register-plugin')        outcome = setupStepRegisterPlugin(ctx);
     else if (step.name === 'auth')                   outcome = await setupStepAuth(ctx);
     else                                             outcome = await setupStepDoctorVerify();
@@ -465,8 +473,13 @@ function registerCodexSetupSubcommand(codex: Command): void {
   codex
     .command('setup')
     .description('Bootstrap the Codex integration end-to-end: install packages if missing, register plugin, auth, verify')
-    .option('--skip <names>', 'Comma-separated step names to skip (only "install-switchbot-cli", "install-codex-plugin", or "auth" allowed)')
+    .option('--skip <names>', 'Comma-separated step names to skip (skippable: "install-switchbot-cli", "auth"; deprecated no-ops: "install-codex-plugin")')
     .option('--yes', 'Non-interactive mode: do not spawn auth login, fail fast if credentials missing')
+    .addHelpText('after', `
+Environment variables:
+  CODEX_GIT_MARKETPLACE_REF        Git ref used when registering via git marketplace (default: main)
+  CODEX_MARKETPLACE_ADD_TIMEOUT    Timeout in ms for "codex plugin marketplace add" (default: 60000)
+`)
     .action(async (opts: { skip?: string; yes?: boolean }, command: Command) => {
       const skip = new Set(
         (opts.skip ?? '').split(',').map((s) => s.trim()).filter(Boolean),
