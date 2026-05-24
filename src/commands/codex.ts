@@ -6,8 +6,6 @@ import {
   checkCodexCli,
   checkCodexPluginNpm,
   checkCodexPluginRegistered,
-  registerCodexPlugin,
-  registerCodexPluginGit,
   registerCodexPluginAuto,
   resolvePluginId,
   resolveCodexPackageRoot,
@@ -19,7 +17,6 @@ import { getConfigPath } from '../utils/flags.js';
 
 const CODEX_BASE_SECTIONS = ['node', 'path', 'credentials', 'mcp'] as const;
 const SWITCHBOT_CLI_PACKAGE = '@switchbot/openapi-cli';
-const CODEX_PLUGIN_PACKAGE = '@switchbot/codex-plugin';
 
 async function runAllCodexDoctorChecks(): Promise<Check[]> {
   const base = await runDoctorChecks(CODEX_BASE_SECTIONS);
@@ -390,35 +387,14 @@ function setupStepInstallGlobalPackage(step: string, packageName: string): Setup
 }
 
 function setupStepRegisterPlugin(ctx: SetupContext): SetupOutcome {
-  // Try Route B (git marketplace) — no npm package required
-  const gitResult = registerCodexPluginGit();
-  if (gitResult.ok) {
-    ctx.codexPluginId = gitResult.pluginId;
-    ctx.packageRoot = gitResult.packageRoot;
-    return { step: 'register-plugin', status: 'ok', message: 'registered via git marketplace (Route B)' };
+  const r = registerCodexPluginAuto();
+  if (!r.ok) {
+    return { step: 'register-plugin', status: 'failed', message: r.error };
   }
-
-  // Route B failed — install @switchbot/codex-plugin on demand, then try Route A
-  const installOutcome = setupStepInstallGlobalPackage('register-plugin', CODEX_PLUGIN_PACKAGE);
-  if (installOutcome.status === 'failed') {
-    return {
-      step: 'register-plugin',
-      status: 'failed',
-      message: `Route B failed (${gitResult.error}); npm install also failed: ${installOutcome.message ?? ''}`,
-    };
-  }
-
-  const npmResult = registerCodexPlugin();
-  if (!npmResult.ok) {
-    return {
-      step: 'register-plugin',
-      status: 'failed',
-      message: `Route B failed (${gitResult.error}); Route A also failed: ${npmResult.error ?? ''}`,
-    };
-  }
-  ctx.codexPluginId = npmResult.pluginId;
-  ctx.packageRoot = npmResult.packageRoot;
-  return { step: 'register-plugin', status: 'ok', message: 'registered via local npm (Route A fallback)' };
+  ctx.codexPluginId = r.pluginId;
+  ctx.packageRoot = r.packageRoot;
+  const via = r.packageRoot ? 'local npm (Route A fallback)' : 'git marketplace (Route B)';
+  return { step: 'register-plugin', status: 'ok', message: `registered via ${via}` };
 }
 
 async function setupStepAuth(ctx: SetupContext): Promise<SetupOutcome> {

@@ -242,6 +242,7 @@ switchbot completion bash/zsh/fish/powershell
 | `SWITCHBOT_TOKEN` | API token (overrides config file) |
 | `SWITCHBOT_SECRET` | API secret (overrides config file) |
 | `NO_COLOR` | Disable ANSI colors |
+| `CODEX_GIT_MARKETPLACE_REF` | Git ref used when registering the Codex plugin via the git marketplace (default: `main`) |
 
 ---
 

@@ -547,17 +547,8 @@ describe('switchbot codex setup', () => {
       stdout: JSON.stringify({ dependencies: { '@switchbot/openapi-cli': { version: '1.0.0' } } }),
       stderr: '',
     });
-    // register-plugin step:
-    //   1. registerCodexPluginGit (= registerCodexPluginMock #1) → Route B fails
-    registerCodexPluginMock.mockReturnValueOnce({
-      ok: false, pluginId: 'switchbot@codex-plugin', packageRoot: null,
-      error: 'marketplace-add exit 1: git clone failed',
-    });
-    //   2. npm list -g: codex-plugin not installed
-    spawnSyncRepairMock.mockReturnValueOnce({ status: 1, stdout: '{}', stderr: '' });
-    //   3. npm install -g: succeeds
-    spawnSyncRepairMock.mockReturnValueOnce({ status: 0, stdout: '', stderr: '' });
-    //   4. registerCodexPlugin (= registerCodexPluginMock #2) → Route A ok
+    // register-plugin: registerCodexPluginAuto handles Route B failure + on-demand install internally.
+    // Non-null packageRoot signals Route A was used (tested thoroughly in codex-checks.test.ts).
     registerCodexPluginMock.mockReturnValueOnce({
       ok: true, pluginId: 'switchbot@codex-plugin', packageRoot: '/some/path',
     });
@@ -575,21 +566,12 @@ describe('switchbot codex setup', () => {
     const parsed = JSON.parse(stdout.join('')) as {
       data?: { outcomes: Array<{ step: string; status: string; message?: string }> };
     };
-    // No standalone install-codex-plugin step — it happened inside register-plugin
+    // No standalone install-codex-plugin step — on-demand install is inside registerCodexPluginAuto
     expect(parsed.data!.outcomes.find((o) => o.step === 'install-codex-plugin')).toBeUndefined();
     const registerStep = parsed.data!.outcomes.find((o) => o.step === 'register-plugin');
     expect(registerStep?.status).toBe('ok');
     expect(registerStep?.message).toContain('Route A fallback');
-    // Verify the on-demand npm calls were made inside register-plugin
-    const npmListCall = spawnSyncRepairMock.mock.calls.find(
-      (c) => Array.isArray(c[1]) && c[1].includes('@switchbot/codex-plugin'),
-    );
-    expect(npmListCall).toBeDefined();
-    const npmInstallCall = spawnSyncRepairMock.mock.calls.find(
-      (c) => Array.isArray(c[1]) && (c[1] as string[]).includes('@switchbot/codex-plugin@latest'),
-    );
-    expect(npmInstallCall).toBeDefined();
-    // registerCodexPluginGit + registerCodexPlugin = 2 calls to the shared mock
-    expect(registerCodexPluginMock).toHaveBeenCalledTimes(2);
+    // registerCodexPluginAuto called once; internal npm calls tested in codex-checks.test.ts
+    expect(registerCodexPluginMock).toHaveBeenCalledOnce();
   });
 });

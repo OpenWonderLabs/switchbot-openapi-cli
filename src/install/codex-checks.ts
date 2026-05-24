@@ -251,8 +251,8 @@ export function resolveCodexPackageRoot(): { ok: true; packageRoot: string } | {
 }
 
 /**
- * 共享注册 helper：封装 resolveCodexPackageRoot → resolvePluginId → runCodexPluginRegistration。
- * 保留作为 npm-local 路径注册的后备；新路径请用 registerCodexPluginGit()。
+ * Route A fallback: resolve the locally-installed npm package root and register it.
+ * For new installs, prefer registerCodexPluginGit() (Route B).
  */
 export function registerCodexPlugin(): RegisterCodexPluginResult {
   const root = resolveCodexPackageRoot();
@@ -275,7 +275,6 @@ export function registerCodexPlugin(): RegisterCodexPluginResult {
 }
 
 // ─── Git-based marketplace registration (Route B) ────────────────────────────
-
 export const CODEX_GIT_MARKETPLACE_REPO   = 'OpenWonderLabs/switchbot-openapi-cli';
 export const CODEX_GIT_MARKETPLACE_SPARSE = 'packages/codex-plugin';
 export const CODEX_GIT_MARKETPLACE_REF    = 'main';
@@ -291,7 +290,7 @@ export function runCodexPluginRegistrationGit(pluginId: string): RegistrationRes
   if (mkt.status !== 0) {
     return { ok: false, exitCode: mkt.status, stderr: mkt.stderr, stage: 'marketplace-add' };
   }
-  spawnStr('codex', ['plugin', 'remove', pluginId]);
+  spawnStr('codex', ['plugin', 'remove', pluginId]); // pre-clean; ignore exit code — plugin may not be registered yet
   const add = spawnStr('codex', ['plugin', 'add', pluginId]);
   return { ok: add.status === 0, exitCode: add.status, stderr: add.stderr, stage: 'plugin-add' };
 }
@@ -309,18 +308,60 @@ export function registerCodexPluginGit(): RegisterCodexPluginResult {
   return { ok: true, pluginId, packageRoot: null };
 }
 
+// Install @switchbot/codex-plugin globally if not already present.
+// Used by registerCodexPluginAuto as a last resort before retrying Route A.
+function installCodexPluginGlobally(): { ok: boolean; error?: string } {
+  const list = spawnSync(
+    'npm', ['list', '-g', '--json', '--depth=0', '@switchbot/codex-plugin'],
+    { encoding: 'utf-8', shell: process.platform === 'win32', timeout: 10000 },
+  );
+  if ((list.status ?? 1) === 0) {
+    try {
+      const parsed = JSON.parse(list.stdout ?? '') as Record<string, unknown>;
+      const deps = (parsed.dependencies ?? {}) as Record<string, unknown>;
+      if (deps['@switchbot/codex-plugin']) return { ok: true };
+    } catch { /* fall through to install */ }
+  }
+  const install = spawnSync(
+    'npm', ['install', '-g', '@switchbot/codex-plugin@latest'],
+    { encoding: 'utf-8', shell: process.platform === 'win32', timeout: 120000 },
+  );
+  if ((install.status ?? 1) !== 0) {
+    return { ok: false, error: `npm install -g failed (exit ${install.status ?? 1}): ${install.stderr ?? ''}` };
+  }
+  return { ok: true };
+}
+
 /**
  * Try Route B (git marketplace) first; fall back to local npm path if GitHub
  * is unreachable or the clone fails. This preserves air-gapped / corporate
  * environments where @switchbot/codex-plugin is already installed locally.
  */
 export function registerCodexPluginAuto(): RegisterCodexPluginResult {
+  // Route B: git marketplace — no local npm package required
   const git = registerCodexPluginGit();
   if (git.ok) return git;
+
+  // Route A: local npm path (fast path if already installed)
   const npm = registerCodexPlugin();
   if (npm.ok) return npm;
-  return {
-    ...npm,
-    error: `Route B failed (${git.error}); local npm fallback also failed (${npm.error})`,
-  };
+
+  // On-demand install: @switchbot/codex-plugin may not be globally installed yet.
+  // Covers fresh repair/install scenarios where the npm package is absent.
+  const install = installCodexPluginGlobally();
+  if (!install.ok) {
+    return {
+      ...npm,
+      error: `Route B failed (${git.error}); Route A failed (${npm.error}); on-demand install failed: ${install.error}`,
+    };
+  }
+
+  // Retry Route A after successful install
+  const retry = registerCodexPlugin();
+  return retry.ok
+    ? retry
+    : {
+        ...retry,
+        error: `Route B failed (${git.error}); installed @switchbot/codex-plugin but Route A still failed: ${retry.error}`,
+      };
 }

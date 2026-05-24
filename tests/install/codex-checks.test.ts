@@ -435,14 +435,46 @@ describe('registerCodexPluginAuto', () => {
     expect(r.packageRoot).toMatch(/codex-plugin/);
   });
 
-  it('returns failure when both Route B and local path fail', () => {
+  it('installs on demand and retries Route A when Route B and initial Route A both fail', () => {
+    existsSyncMock.mockReturnValue(true);
+    spawnSyncMock
+      .mockReturnValueOnce(makeSpawnResult(1, '', 'git clone failed'))               // marketplace add (git) — fails
+      .mockReturnValueOnce(makeSpawnResult(1, '', 'npm root error'))                 // npm root -g fails (Route A)
+      .mockReturnValueOnce(makeSpawnResult(1, '{}', ''))                             // npm list -g: not installed
+      .mockReturnValueOnce(makeSpawnResult(0, '', ''))                               // npm install -g: succeeds
+      .mockReturnValueOnce(makeSpawnResult(0, '/usr/local/lib/node_modules\n', ''))  // npm root -g (retry)
+      .mockReturnValueOnce(makeSpawnResult(0, ''))                                   // marketplace add (local)
+      .mockReturnValueOnce(makeSpawnResult(0, ''))                                   // plugin remove
+      .mockReturnValueOnce(makeSpawnResult(0, ''));                                  // plugin add
+    const r = registerCodexPluginAuto();
+    expect(r.ok).toBe(true);
+    expect(r.packageRoot).toMatch(/codex-plugin/);
+  });
+
+  it('returns failure when Route B fails, Route A fails, and on-demand install also fails', () => {
     spawnSyncMock
       .mockReturnValueOnce(makeSpawnResult(1, '', 'git clone failed')) // marketplace add (git) — fails
-      .mockReturnValueOnce(makeSpawnResult(1, '', 'npm error'));        // npm root -g — fails
+      .mockReturnValueOnce(makeSpawnResult(1, '', 'npm root error'))   // npm root -g fails (Route A)
+      .mockReturnValueOnce(makeSpawnResult(1, '{}', ''))               // npm list -g: not installed
+      .mockReturnValueOnce(makeSpawnResult(1, '', 'EACCES'));          // npm install -g: fails
     const r = registerCodexPluginAuto();
     expect(r.ok).toBe(false);
     expect(r.error).toMatch(/git clone failed/);
-    expect(r.error).toMatch(/npm error/);
+    expect(r.error).toMatch(/npm root error/);
+    expect(r.error).toMatch(/EACCES/);
+  });
+
+  it('returns failure when on-demand install succeeds but Route A retry still fails', () => {
+    spawnSyncMock
+      .mockReturnValueOnce(makeSpawnResult(1, '', 'git clone failed')) // marketplace add (git) — fails
+      .mockReturnValueOnce(makeSpawnResult(1, '', 'npm root error'))   // npm root -g fails (Route A)
+      .mockReturnValueOnce(makeSpawnResult(1, '{}', ''))               // npm list -g: not installed
+      .mockReturnValueOnce(makeSpawnResult(0, '', ''))                 // npm install -g: succeeds
+      .mockReturnValueOnce(makeSpawnResult(1, '', 'npm root error 2')); // npm root -g fails (retry)
+    const r = registerCodexPluginAuto();
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/git clone failed/);
+    expect(r.error).toMatch(/npm root error 2/);
   });
 });
 
@@ -471,7 +503,10 @@ describe('stepRegisterCodexPlugin', () => {
 
   it('throws when runCodexPluginRegistration fails', async () => {
     spawnSyncMock
-      .mockReturnValueOnce({ status: 1, stdout: '', stderr: 'marketplace error' }); // marketplace add
+      .mockReturnValueOnce({ status: 1, stdout: '', stderr: 'marketplace error' }) // marketplace add (git) — Route B fails
+      .mockReturnValueOnce({ status: 1, stdout: '', stderr: 'npm root error' })    // npm root -g — Route A fails
+      .mockReturnValueOnce({ status: 1, stdout: '{}', stderr: '' })                // npm list -g: not installed
+      .mockReturnValueOnce({ status: 1, stdout: '', stderr: 'EACCES' });           // npm install -g: fails (on-demand)
     const step = stepRegisterCodexPlugin();
     const ctx = makeCtx();
     await expect(step.execute(ctx)).rejects.toThrow('Codex plugin registration failed');

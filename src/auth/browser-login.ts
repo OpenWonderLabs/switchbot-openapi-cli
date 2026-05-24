@@ -41,7 +41,9 @@ export async function browserLogin(options: BrowserLoginOptions = {}): Promise<C
     log('Opening SwitchBot login page in your browser…');
     const opened = await tryOpenBrowser(loginUrl);
     if (!opened) {
-      log(`Could not open browser automatically. Open this URL in your browser to sign in:\n\n  ${loginUrl}\n`);
+      const isWsl = process.platform === 'linux' && process.env['WSL_DISTRO_NAME'] !== undefined;
+      const hint = isWsl ? ' (WSL detected — open the URL in your Windows browser)' : '';
+      log(`Could not open browser automatically${hint}. Open this URL in your browser to sign in:\n\n  ${loginUrl}\n`);
     }
   }
 
