@@ -9,6 +9,26 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [3.7.3]
+
+### Added
+
+- **Route B (git marketplace)** — `codex setup` and `codex repair` now try `codex plugin marketplace add OpenWonderLabs/switchbot-openapi-cli --sparse packages/codex-plugin --ref main` before falling back to the local npm path. Route B requires no locally-installed `@switchbot/codex-plugin`, making fresh installs and CI environments work out of the box. Configurable via `CODEX_GIT_MARKETPLACE_REF` (default `main`) and `CODEX_MARKETPLACE_ADD_TIMEOUT` (default 60 000 ms).
+- **On-demand npm install** — when both Route B and Route A fail, `registerCodexPluginAuto` installs `@switchbot/codex-plugin@latest` and retries Route A automatically. Covers fresh-machine setups where the npm package was never installed.
+
+### Changed
+
+- **`codex setup` removes the `install-codex-plugin` step** — on-demand install is now embedded inside `register-plugin` via `registerCodexPluginAuto`, so the explicit step is no longer needed. `--skip install-codex-plugin` is still accepted (silently ignored) for backward compatibility.
+- **Legacy plugin ID cleanup** — `codex repair`'s `remove-plugin` step now removes both the current ID and the legacy ID `switchbot@switchbot-skill` before re-registering, matching the pre-clean behaviour already present in the registration helpers.
+
+### Fixed
+
+- **Dangling symlink crash** — `resolveMarketplaceSourceRoot` called `realpathSync` without a guard; if the junction/symlink target was deleted (e.g. after `nvm use` or `npm uninstall`), it threw ENOENT and aborted registration. It now catches the error, removes the stale link, and recreates it pointing at the current package root.
+- **Empty `CODEX_GIT_MARKETPLACE_REF` env var** — `??` was used instead of `||`, so setting the variable to an empty string passed `--ref ""` to the CLI instead of falling back to `"main"`.
+- **Misleading "installed" in error message** — when `@switchbot/codex-plugin` was already present and Route A retry still failed, the error reported "installed @switchbot/codex-plugin but Route A still failed". The message now says "already present" when no install actually ran.
+- **Platform-split error message** — the alias-path error now reads "not a junction" on Windows and "not a symlink" on Linux/macOS instead of the ambiguous "not a symlink/junction".
+- **`switchbot-codex-install` binary frozen** — `resolveMarketplaceSourceRoot` in `packages/codex-plugin/bin/install.js` is now marked frozen (not kept in sync with `codex-checks.ts`). The binary is deprecated; use `switchbot codex setup` instead.
+
 ## [3.7.2]
 
 ### Added
