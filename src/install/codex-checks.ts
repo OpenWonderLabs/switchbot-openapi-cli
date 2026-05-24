@@ -284,8 +284,15 @@ const CODEX_PLUGIN_LEGACY_IDS = ['switchbot@switchbot-skill'];
 
 export function runCodexPluginRegistrationGit(pluginId: string): RegistrationResult {
   const ref     = process.env['CODEX_GIT_MARKETPLACE_REF'] ?? CODEX_GIT_MARKETPLACE_REF;
-  const _parsedTimeout = Number(process.env['CODEX_MARKETPLACE_ADD_TIMEOUT'] ?? '');
-  const timeout = Number.isFinite(_parsedTimeout) && _parsedTimeout > 0 ? _parsedTimeout : 60000;
+  const _envTimeout = process.env['CODEX_MARKETPLACE_ADD_TIMEOUT'];
+  const _parsedTimeout = Number(_envTimeout ?? '');
+  const _timeoutValid = Number.isFinite(_parsedTimeout) && _parsedTimeout > 0;
+  if (_envTimeout !== undefined && _envTimeout !== '' && !_timeoutValid) {
+    process.stderr.write(
+      `[switchbot] CODEX_MARKETPLACE_ADD_TIMEOUT="${_envTimeout}" is not a valid positive integer; using default 60000 ms\n`,
+    );
+  }
+  const timeout = _timeoutValid ? _parsedTimeout : 60000;
   // git clone via marketplace add can take >10 s on slow networks; use 60 s
   const mkt = spawnStr('codex', [
     'plugin', 'marketplace', 'add',

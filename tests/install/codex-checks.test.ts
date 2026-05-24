@@ -424,6 +424,29 @@ describe('runCodexPluginRegistrationGit', () => {
     expect(r.stderr).toBe('plugin add error');
     expect(r.stage).toBe('plugin-add');
   });
+
+  it('warns to stderr and falls back to 60000 ms when CODEX_MARKETPLACE_ADD_TIMEOUT is "0"', () => {
+    const origEnv = process.env['CODEX_MARKETPLACE_ADD_TIMEOUT'];
+    process.env['CODEX_MARKETPLACE_ADD_TIMEOUT'] = '0';
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    spawnSyncMock.mockReturnValueOnce(makeSpawnResult(1, '', 'fail'));
+    runCodexPluginRegistrationGit('switchbot@codex-plugin');
+    expect(spy).toHaveBeenCalledWith(expect.stringContaining('CODEX_MARKETPLACE_ADD_TIMEOUT'));
+    spy.mockRestore();
+    if (origEnv === undefined) delete process.env['CODEX_MARKETPLACE_ADD_TIMEOUT'];
+    else process.env['CODEX_MARKETPLACE_ADD_TIMEOUT'] = origEnv;
+  });
+
+  it('does not warn when CODEX_MARKETPLACE_ADD_TIMEOUT is unset', () => {
+    const origEnv = process.env['CODEX_MARKETPLACE_ADD_TIMEOUT'];
+    delete process.env['CODEX_MARKETPLACE_ADD_TIMEOUT'];
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    spawnSyncMock.mockReturnValueOnce(makeSpawnResult(1, '', 'fail'));
+    runCodexPluginRegistrationGit('switchbot@codex-plugin');
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+    if (origEnv !== undefined) process.env['CODEX_MARKETPLACE_ADD_TIMEOUT'] = origEnv;
+  });
 });
 
 describe('registerCodexPluginAuto', () => {
