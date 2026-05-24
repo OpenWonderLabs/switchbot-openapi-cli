@@ -467,7 +467,7 @@ function registerCodexSetupSubcommand(codex: Command): void {
   codex
     .command('setup')
     .description('Bootstrap the Codex integration end-to-end: install packages if missing, register plugin, auth, verify')
-    .option('--skip <names>', 'Comma-separated step names to skip (only "install-switchbot-cli" or "auth" allowed)')
+    .option('--skip <names>', 'Comma-separated step names to skip (skippable: "install-switchbot-cli", "auth"; deprecated no-ops: "install-codex-plugin")')
     .option('--yes', 'Non-interactive mode: do not spawn auth login, fail fast if credentials missing')
     .addHelpText('after', `
 Environment variables:
