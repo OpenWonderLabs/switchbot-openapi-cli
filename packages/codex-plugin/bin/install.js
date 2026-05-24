@@ -55,11 +55,9 @@ function computeAliasPath() {
 }
 
 export function resolveMarketplaceSourceRoot(packageRoot, deps = defaultFsDeps) {
-  // NOTE: This function is intentionally kept in sync with
-  // src/install/codex-checks.ts:resolveMarketplaceSourceRoot. Both copies exist
-  // because this package is self-contained (no TypeScript build step) and must
-  // work when loaded directly by the Codex plugin machinery before the CLI is
-  // installed. When updating the logic, mirror the change in both files.
+  // NOTE: This function is FROZEN. The canonical implementation lives in
+  // src/install/codex-checks.ts. Do NOT sync new changes here.
+  // The switchbot-codex-install binary is deprecated; use: switchbot codex setup
   const needsAlias = process.platform === 'win32'
     ? /^[A-Za-z]:[\\/].*[\\/]@[^\\/]+[\\/]/.test(packageRoot)
     : /\/@[^/]+\//.test(packageRoot);
