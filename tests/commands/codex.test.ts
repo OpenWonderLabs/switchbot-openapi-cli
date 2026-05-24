@@ -302,6 +302,32 @@ describe('switchbot codex repair', () => {
     // default profile → also no --profile in argv
     expect(argv).not.toContain('--profile');
   });
+
+  it('emits a warning when a deprecated step name is passed to --skip', async () => {
+    // verify-cli: node+path ok
+    runDoctorChecksMock.mockResolvedValueOnce([
+      { name: 'node', status: 'ok', detail: 'ok' },
+      { name: 'path', status: 'ok', detail: 'ok' },
+    ]);
+    // re-auth step runs (not skipped)
+    spawnSyncRepairMock.mockReturnValueOnce({ status: 0, stdout: '', stderr: '' });
+    registerCodexPluginMock.mockReturnValueOnce({
+      ok: true, pluginId: 'switchbot@codex-plugin', packageRoot: '/some/path',
+    });
+    runDoctorChecksMock.mockResolvedValueOnce(makeBaseChecks());
+    checkCodexCliMock.mockReturnValue({ name: 'codex-cli', status: 'ok', detail: 'ok' });
+    checkCodexPluginNpmMock.mockReturnValue({ name: 'codex-plugin-npm', status: 'ok', detail: 'ok' });
+    checkCodexPluginRegisteredMock.mockReturnValue({ name: 'codex-plugin-registered', status: 'ok', detail: 'ok' });
+
+    const { exitCode, stderr } = await runCli(
+      registerCodexCommand,
+      ['codex', 'repair', '--skip', 'install-codex-plugin,remove-plugin'],
+    );
+    expect(exitCode).toBe(0);
+    const errOut = stderr.join('\n');
+    expect(errOut).toContain('install-codex-plugin');
+    expect(errOut).toMatch(/no.*effect|deprecated|no longer/i);
+  });
 });
 
 // ─── codex setup (C5) ────────────────────────────────────────────────────────

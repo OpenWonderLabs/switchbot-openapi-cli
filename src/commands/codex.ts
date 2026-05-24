@@ -203,7 +203,10 @@ const DEPRECATED_SKIP_NAMES = new Set(['install-codex-plugin']);
 function validateSkip(stepDefs: readonly StepDef[], skip: Set<string>): { ok: true } | { ok: false; offending: string } {
   const skippableNames = new Set(stepDefs.filter((s) => s.skippable).map((s) => s.name));
   for (const name of skip) {
-    if (DEPRECATED_SKIP_NAMES.has(name)) continue;
+    if (DEPRECATED_SKIP_NAMES.has(name)) {
+      console.error(`[switchbot] --skip "${name}" is no longer a valid step name and has no effect`);
+      continue;
+    }
     if (!skippableNames.has(name)) {
       return { ok: false, offending: name };
     }
