@@ -199,6 +199,39 @@ describe('makeInstall', () => {
     assert.ok(combined.includes('[switchbot-codex]'), `expected [switchbot-codex] prefix in: ${combined}`);
     assert.ok(combined.includes('codex-plugin-marketplace'), `expected alias path in: ${combined}`);
   });
+
+  it('logs a warning and continues when plugin remove exits non-zero', async () => {
+    let callCount = 0;
+    const spawn = (cmd, args) => {
+      callCount++;
+      // call 1: marketplace add → 0
+      // call 2: plugin remove → 1 (failure, best-effort)
+      // call 3: plugin add → 0
+      // call 4: doctor → 0
+      return Promise.resolve(callCount === 2 ? 1 : 0);
+    };
+    const auth = makeRunAuth(0);
+    const errChunks = [];
+    const origWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = (chunk, ...rest) => { errChunks.push(String(chunk)); return true; };
+
+    const install = makeInstall({
+      checkCli: makeOkCliCheck(),
+      runInherit: spawn,
+      packageRoot: TEST_ROOT,
+      runAuth: auth.runAuth,
+    });
+    const code = await install();
+    process.stderr.write = origWrite;
+
+    assert.equal(code, 0, 'install should still succeed');
+    assert.equal(callCount, 4, 'all four spawn calls should be made');
+    const combined = errChunks.join('');
+    assert.ok(
+      combined.includes('Warning') && combined.includes('remove') && combined.includes('exited'),
+      `expected warning about remove exit code in: ${combined}`,
+    );
+  });
 });
 
 describe('resolvePluginIdentifier', () => {
