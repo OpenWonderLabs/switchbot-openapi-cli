@@ -289,7 +289,7 @@ export function runCodexPluginRegistrationGit(pluginId: string): RegistrationRes
   const _timeoutValid = Number.isFinite(_parsedTimeout) && _parsedTimeout > 0;
   if (_envTimeout !== undefined && _envTimeout !== '' && !_timeoutValid) {
     process.stderr.write(
-      `[switchbot] CODEX_MARKETPLACE_ADD_TIMEOUT="${_envTimeout}" is not a valid positive integer; using default 60000 ms\n`,
+      `[switchbot] CODEX_MARKETPLACE_ADD_TIMEOUT="${_envTimeout}" is not a valid positive number; using default 60000 ms\n`,
     );
   }
   const timeout = _timeoutValid ? _parsedTimeout : 60000;
@@ -334,8 +334,8 @@ function installCodexPluginGlobally(): { ok: boolean; error?: string } {
   if ((list.status ?? 1) === 0) {
     try {
       const raw = list.stdout ?? '';
-      const jsonStart = raw.indexOf('{');
-      const parsed = JSON.parse(jsonStart >= 0 ? raw.slice(jsonStart) : raw) as Record<string, unknown>;
+      const jsonLine = raw.split('\n').find((l) => l.trimStart().startsWith('{')) ?? raw;
+      const parsed = JSON.parse(jsonLine) as Record<string, unknown>;
       const deps = (parsed.dependencies ?? {}) as Record<string, unknown>;
       if (deps['@switchbot/codex-plugin']) return { ok: true };
     } catch { /* fall through to install */ }
