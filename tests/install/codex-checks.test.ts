@@ -515,6 +515,27 @@ describe('registerCodexPluginAuto', () => {
     expect(r.error).toMatch(/git clone failed/);
     expect(r.error).toMatch(/npm root error 2/);
   });
+
+  it('skips npm install when npm list output has non-JSON warning prefix (Windows behavior)', () => {
+    const npmListWithWarnings =
+      'npm warn config optional\nnpm warn config another\n' +
+      '{"dependencies":{"@switchbot/codex-plugin":{"version":"1.0.0"}}}';
+    existsSyncMock.mockReturnValue(true);
+    spawnSyncMock
+      .mockReturnValueOnce(makeSpawnResult(1, '', 'git clone failed'))          // Route B fails
+      .mockReturnValueOnce(makeSpawnResult(1, '', 'npm root error'))             // Route A fails
+      .mockReturnValueOnce(makeSpawnResult(0, npmListWithWarnings, ''))          // npm list → found
+      .mockReturnValueOnce(makeSpawnResult(0, '/usr/local/lib/node_modules\n'))  // npm root -g retry
+      .mockReturnValueOnce(makeSpawnResult(0, ''))                               // marketplace add (local)
+      .mockReturnValueOnce(makeSpawnResult(0, ''))                               // plugin remove
+      .mockReturnValueOnce(makeSpawnResult(0, ''));                              // plugin add
+    const r = registerCodexPluginAuto();
+    // npm install -g must NOT have been called
+    const calls = spawnSyncMock.mock.calls as [string, string[]][];
+    const installCall = calls.find(([cmd, args]) => cmd === 'npm' && args.includes('install'));
+    expect(installCall).toBeUndefined();
+    expect(r.ok).toBe(true);
+  });
 });
 
 describe('stepRegisterCodexPlugin', () => {
