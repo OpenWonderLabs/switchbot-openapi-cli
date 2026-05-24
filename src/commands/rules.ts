@@ -1085,7 +1085,7 @@ function registerSimulate(rules: Command): void {
 export function registerRulesCommand(program: Command): void {
   const rules = program
     .command('rules')
-    .description('Run, list, and lint automation rules declared in policy.yaml (v0.2, preview).')
+    .description('Manage automation rules in policy.yaml: author, lint, run (MQTT/cron/webhook), debug, and simulate.')
     .addHelpText(
       'after',
       `
@@ -1106,6 +1106,8 @@ Subcommands:
   doctor [path]             Combined health check: lint + conflict analysis + summary.
   summary                   Aggregate rule-fire counts per rule over a time window.
   last-fired                Show the N most recently fired rule-fire audit entries.
+  trace-explain [fireId]    Show per-condition trace for a rule evaluation (why it fired or was blocked).
+  simulate <rule-or-policy> Replay historical events against a rule; reports would-fire / blocked outcomes.
   webhook-rotate-token      Rotate the bearer token used for webhook triggers.
   webhook-show-token        Print the current bearer token (creating one if absent).
 

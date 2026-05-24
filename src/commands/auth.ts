@@ -138,7 +138,7 @@ function cleanupMigratedSourceFile(sourceFile: string, parsed: Record<string, un
 export function registerAuthCommand(program: Command): void {
   const auth = program
     .command('auth')
-    .description('Manage SwitchBot credentials in the OS keychain (preview)');
+    .description('Manage SwitchBot credentials in the OS keychain');
 
   const keychain = auth
     .command('keychain')
