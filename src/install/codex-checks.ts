@@ -357,6 +357,12 @@ function installCodexPluginGlobally(): { ok: boolean; error?: string } {
     'npm', ['list', '-g', '--json', '--depth=0', '@switchbot/codex-plugin'],
     { encoding: 'utf-8', shell: process.platform === 'win32', timeout: 10000 },
   );
+  if (verify.status === null) {
+    return {
+      ok: false,
+      error: 'post-install npm list timed out; cannot verify @switchbot/codex-plugin was installed correctly',
+    };
+  }
   try {
     const vRaw = verify.stdout ?? '';
     const vLines = vRaw.split('\n');

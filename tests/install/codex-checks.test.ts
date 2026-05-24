@@ -588,6 +588,18 @@ describe('registerCodexPluginAuto', () => {
     expect(r.ok).toBe(false);
     expect(r.error).toMatch(/npm prefix mismatch/i);
   });
+
+  it('returns error when post-install verify spawnSync times out (status null)', () => {
+    spawnSyncMock
+      .mockReturnValueOnce(makeSpawnResult(1, '', 'git clone failed'))          // Route B fails
+      .mockReturnValueOnce(makeSpawnResult(1, '', 'npm root error'))             // Route A: npm root -g fails
+      .mockReturnValueOnce(makeSpawnResult(1, '{}', ''))                        // npm list: not installed
+      .mockReturnValueOnce(makeSpawnResult(0, '', ''))                          // npm install -g: succeeds
+      .mockReturnValueOnce({ status: null, stdout: null, stderr: '', signal: 'SIGTERM' }); // verify times out
+    const r = registerCodexPluginAuto();
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/timed out/i);
+  });
 });
 
 describe('stepRegisterCodexPlugin', () => {
