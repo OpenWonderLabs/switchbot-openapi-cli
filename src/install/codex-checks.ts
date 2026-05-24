@@ -283,14 +283,15 @@ export const CODEX_PLUGIN_DEFAULT_ID      = 'switchbot@codex-plugin';
 const CODEX_PLUGIN_LEGACY_IDS = ['switchbot@switchbot-skill'];
 
 export function runCodexPluginRegistrationGit(pluginId: string): RegistrationResult {
-  const ref = process.env['CODEX_GIT_MARKETPLACE_REF'] ?? CODEX_GIT_MARKETPLACE_REF;
+  const ref     = process.env['CODEX_GIT_MARKETPLACE_REF'] ?? CODEX_GIT_MARKETPLACE_REF;
+  const timeout = Number(process.env['CODEX_MARKETPLACE_ADD_TIMEOUT']) || 60000;
   // git clone via marketplace add can take >10 s on slow networks; use 60 s
   const mkt = spawnStr('codex', [
     'plugin', 'marketplace', 'add',
     CODEX_GIT_MARKETPLACE_REPO,
     '--sparse', CODEX_GIT_MARKETPLACE_SPARSE,
     '--ref',    ref,
-  ], 60000);
+  ], timeout);
   if (mkt.status !== 0) {
     return { ok: false, exitCode: mkt.status, stderr: mkt.stderr, stage: 'marketplace-add' };
   }
@@ -359,7 +360,7 @@ export function registerCodexPluginAuto(): RegisterCodexPluginResult {
   if (!install.ok) {
     return {
       ok: false,
-      pluginId: npm.pluginId || CODEX_PLUGIN_DEFAULT_ID,
+      pluginId: CODEX_PLUGIN_DEFAULT_ID,
       packageRoot: null,
       error: `Route B failed (${git.error}); Route A failed (${npm.error}); on-demand install failed: ${install.error}. Run: switchbot codex repair`,
     };
@@ -371,7 +372,7 @@ export function registerCodexPluginAuto(): RegisterCodexPluginResult {
     ? retry
     : {
         ...retry,
-        pluginId: retry.pluginId || CODEX_PLUGIN_DEFAULT_ID,
+        pluginId: CODEX_PLUGIN_DEFAULT_ID,
         error: `Route B failed (${git.error}); installed @switchbot/codex-plugin but Route A still failed: ${retry.error}. Run: switchbot codex repair`,
       };
 }

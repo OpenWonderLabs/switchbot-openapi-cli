@@ -196,13 +196,15 @@ const REPAIR_STEPS: readonly StepDef[] = [
   { name: 'doctor-verify',   description: 'Run Codex doctor checks and report health',    skippable: false },
 ];
 
+// Step names removed from SETUP_STEPS/REPAIR_STEPS in past releases; silently
+// accepted by --skip for backward compatibility instead of exit 2.
+const DEPRECATED_SKIP_NAMES = new Set(['install-codex-plugin']);
+
 function validateSkip(stepDefs: readonly StepDef[], skip: Set<string>): { ok: true } | { ok: false; offending: string } {
   const skippableNames = new Set(stepDefs.filter((s) => s.skippable).map((s) => s.name));
-  const allNames       = new Set(stepDefs.map((s) => s.name));
   for (const name of skip) {
-    // Only reject a name that exists as a step but is not skippable.
-    // Unknown names (e.g. removed steps like 'install-codex-plugin') are silently no-ops.
-    if (allNames.has(name) && !skippableNames.has(name)) {
+    if (DEPRECATED_SKIP_NAMES.has(name)) continue;
+    if (!skippableNames.has(name)) {
       return { ok: false, offending: name };
     }
   }
@@ -469,7 +471,8 @@ function registerCodexSetupSubcommand(codex: Command): void {
     .option('--yes', 'Non-interactive mode: do not spawn auth login, fail fast if credentials missing')
     .addHelpText('after', `
 Environment variables:
-  CODEX_GIT_MARKETPLACE_REF   Git ref used when registering via git marketplace (default: main)
+  CODEX_GIT_MARKETPLACE_REF        Git ref used when registering via git marketplace (default: main)
+  CODEX_MARKETPLACE_ADD_TIMEOUT    Timeout in ms for "codex plugin marketplace add" (default: 60000)
 `)
     .action(async (opts: { skip?: string; yes?: boolean }, command: Command) => {
       const skip = new Set(
