@@ -274,10 +274,13 @@ function checkCodexPluginForPreflight(opts: PreflightOptions): PreflightCheck | 
     installed = Boolean(parsed.dependencies?.['@switchbot/codex-plugin']);
   } catch { /* treat as not installed */ }
   if (!installed) {
+    // Route B (git marketplace) can register without the npm package, so this
+    // is not a hard failure — stepRegisterCodexPlugin → registerCodexPluginAuto
+    // will try git first and fall back to on-demand npm install if needed.
     return {
       name: 'codex-plugin-npm',
-      status: 'fail',
-      message: '@switchbot/codex-plugin not installed globally',
+      status: 'warn',
+      message: '@switchbot/codex-plugin not installed globally (will be fetched via git marketplace)',
       hint: 'Run the full bootstrap instead: npx @switchbot/openapi-cli codex setup',
     };
   }

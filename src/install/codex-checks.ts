@@ -352,7 +352,7 @@ export function registerCodexPluginAuto(): RegisterCodexPluginResult {
   if (!install.ok) {
     return {
       ...npm,
-      error: `Route B failed (${git.error}); Route A failed (${npm.error}); on-demand install failed: ${install.error}`,
+      error: `Route B failed (${git.error}); Route A failed (${npm.error}); on-demand install failed: ${install.error}. Run: switchbot codex repair`,
     };
   }
 
@@ -362,6 +362,6 @@ export function registerCodexPluginAuto(): RegisterCodexPluginResult {
     ? retry
     : {
         ...retry,
-        error: `Route B failed (${git.error}); installed @switchbot/codex-plugin but Route A still failed: ${retry.error}`,
+        error: `Route B failed (${git.error}); installed @switchbot/codex-plugin but Route A still failed: ${retry.error}. Run: switchbot codex repair`,
       };
 }

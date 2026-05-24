@@ -170,4 +170,23 @@ describe('runPreflight', () => {
       existsSpy.mockRestore();
     }
   });
+
+  it('codex agent: missing global npm package is warn (not fail) — Route B does not need it', async () => {
+    // npm list -g will return non-zero / empty in the test environment; that used
+    // to be a hard 'fail' blocking the entire install. With Route B it should
+    // only be a warning so registerCodexPluginAuto() gets a chance to run.
+    const res = await runPreflight({ agent: 'codex' });
+    const npmCheck = res.checks.find((c) => c.name === 'codex-plugin-npm');
+    if (npmCheck) {
+      // When the npm package is absent the check must be at most 'warn'.
+      expect(npmCheck.status).not.toBe('fail');
+    }
+    // Overall preflight must not be blocked by this check alone.
+    const nonNpmFails = res.checks.filter(
+      (c) => c.status === 'fail' && c.name !== 'codex-plugin-npm',
+    );
+    if (nonNpmFails.length === 0) {
+      expect(res.ok).toBe(true);
+    }
+  });
 });

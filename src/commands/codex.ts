@@ -464,6 +464,10 @@ function registerCodexSetupSubcommand(codex: Command): void {
     .description('Bootstrap the Codex integration end-to-end: install packages if missing, register plugin, auth, verify')
     .option('--skip <names>', 'Comma-separated step names to skip (only "install-switchbot-cli" or "auth" allowed)')
     .option('--yes', 'Non-interactive mode: do not spawn auth login, fail fast if credentials missing')
+    .addHelpText('after', `
+Environment variables:
+  CODEX_GIT_MARKETPLACE_REF   Git ref used when registering via git marketplace (default: main)
+`)
     .action(async (opts: { skip?: string; yes?: boolean }, command: Command) => {
       const skip = new Set(
         (opts.skip ?? '').split(',').map((s) => s.trim()).filter(Boolean),
