@@ -62,7 +62,7 @@ export function resolveMarketplaceSourceRoot(packageRoot, deps = defaultFsDeps) 
   // installed. When updating the logic, mirror the change in both files.
   const needsAlias = process.platform === 'win32'
     ? /^[A-Za-z]:[\\/].*[\\/]@[^\\/]+[\\/]/.test(packageRoot)
-    : /\/node_modules\/@[^/]+\//.test(packageRoot);
+    : /\/@[^/]+\//.test(packageRoot);
 
   if (!needsAlias) {
     return packageRoot;

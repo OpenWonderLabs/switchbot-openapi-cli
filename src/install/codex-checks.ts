@@ -25,11 +25,11 @@ export interface RegisterCodexPluginResult {
   stderr?: string;
 }
 
-function spawnStr(cmd: string, args: string[]): { status: number; stdout: string; stderr: string } {
+function spawnStr(cmd: string, args: string[], timeout = 10000): { status: number; stdout: string; stderr: string } {
   const r = spawnSync(cmd, args, {
     encoding: 'utf-8',
     shell: process.platform === 'win32',
-    timeout: 10000,
+    timeout,
   });
   return { status: r.status ?? -1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
 }
@@ -86,7 +86,7 @@ export function resolveMarketplaceSourceRoot(packageRoot: string): string {
   // a symlink/junction at a stable `@`-free location.
   const needsAlias = process.platform === 'win32'
     ? /^[A-Za-z]:[\\/].*[\\/]@[^\\/]+[\\/]/.test(packageRoot)
-    : /\/node_modules\/@[^/]+\//.test(packageRoot);
+    : /\/@[^/]+\//.test(packageRoot);
 
   if (!needsAlias) return packageRoot;
 
@@ -278,25 +278,32 @@ export function registerCodexPlugin(): RegisterCodexPluginResult {
 export const CODEX_GIT_MARKETPLACE_REPO   = 'OpenWonderLabs/switchbot-openapi-cli';
 export const CODEX_GIT_MARKETPLACE_SPARSE = 'packages/codex-plugin';
 export const CODEX_GIT_MARKETPLACE_REF    = 'main';
+export const CODEX_PLUGIN_DEFAULT_ID      = 'switchbot@codex-plugin';
+// Known IDs from pre-release installs; cleaned up during Route B pre-clean step.
+const CODEX_PLUGIN_LEGACY_IDS = ['switchbot@switchbot-skill'];
 
 export function runCodexPluginRegistrationGit(pluginId: string): RegistrationResult {
   const ref = process.env['CODEX_GIT_MARKETPLACE_REF'] ?? CODEX_GIT_MARKETPLACE_REF;
+  // git clone via marketplace add can take >10 s on slow networks; use 60 s
   const mkt = spawnStr('codex', [
     'plugin', 'marketplace', 'add',
     CODEX_GIT_MARKETPLACE_REPO,
     '--sparse', CODEX_GIT_MARKETPLACE_SPARSE,
     '--ref',    ref,
-  ]);
+  ], 60000);
   if (mkt.status !== 0) {
     return { ok: false, exitCode: mkt.status, stderr: mkt.stderr, stage: 'marketplace-add' };
   }
-  spawnStr('codex', ['plugin', 'remove', pluginId]); // pre-clean; ignore exit code — plugin may not be registered yet
+  // Pre-clean: remove current ID and any known legacy IDs; ignore exit codes
+  for (const id of [pluginId, ...CODEX_PLUGIN_LEGACY_IDS]) {
+    spawnStr('codex', ['plugin', 'remove', id]);
+  }
   const add = spawnStr('codex', ['plugin', 'add', pluginId]);
   return { ok: add.status === 0, exitCode: add.status, stderr: add.stderr, stage: 'plugin-add' };
 }
 
 export function registerCodexPluginGit(): RegisterCodexPluginResult {
-  const pluginId = 'switchbot@codex-plugin';
+  const pluginId = CODEX_PLUGIN_DEFAULT_ID;
   const r = runCodexPluginRegistrationGit(pluginId);
   if (!r.ok) {
     return {
@@ -351,7 +358,9 @@ export function registerCodexPluginAuto(): RegisterCodexPluginResult {
   const install = installCodexPluginGlobally();
   if (!install.ok) {
     return {
-      ...npm,
+      ok: false,
+      pluginId: npm.pluginId || CODEX_PLUGIN_DEFAULT_ID,
+      packageRoot: null,
       error: `Route B failed (${git.error}); Route A failed (${npm.error}); on-demand install failed: ${install.error}. Run: switchbot codex repair`,
     };
   }
@@ -362,6 +371,7 @@ export function registerCodexPluginAuto(): RegisterCodexPluginResult {
     ? retry
     : {
         ...retry,
+        pluginId: retry.pluginId || CODEX_PLUGIN_DEFAULT_ID,
         error: `Route B failed (${git.error}); installed @switchbot/codex-plugin but Route A still failed: ${retry.error}. Run: switchbot codex repair`,
       };
 }

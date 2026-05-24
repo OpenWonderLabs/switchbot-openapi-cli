@@ -378,13 +378,27 @@ describe('resolveMarketplaceSourceRoot — Linux @-scoped path handling', () => 
     expect(unlinkSyncMock).not.toHaveBeenCalled();
     expect(symlinkSyncMock).not.toHaveBeenCalled();
   });
+
+  it('aliases a custom-prefix path that has no node_modules segment', () => {
+    lstatSyncMock.mockReturnValue(null);
+    const customPrefixRoot = '/home/user/.local/lib/@switchbot/codex-plugin';
+    const result = resolveMarketplaceSourceRoot(customPrefixRoot);
+    expect(symlinkSyncMock).toHaveBeenCalledWith(
+      customPrefixRoot,
+      expect.stringMatching(/codex-plugin-marketplace$/),
+      'dir',
+    );
+    expect(result).toMatch(/codex-plugin-marketplace$/);
+    expect(result).not.toContain('@');
+  });
 });
 
 describe('runCodexPluginRegistrationGit', () => {
   it('returns ok when marketplace add and plugin add both succeed', () => {
     spawnSyncMock
       .mockReturnValueOnce(makeSpawnResult(0, ''))  // marketplace add (git)
-      .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (pre-clean)
+      .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (current id)
+      .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (legacy id)
       .mockReturnValueOnce(makeSpawnResult(0, '')); // plugin add
     const r = runCodexPluginRegistrationGit('switchbot@codex-plugin');
     expect(r.ok).toBe(true);
@@ -402,7 +416,8 @@ describe('runCodexPluginRegistrationGit', () => {
   it('returns failure when plugin add exits non-zero', () => {
     spawnSyncMock
       .mockReturnValueOnce(makeSpawnResult(0, ''))  // marketplace add
-      .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove
+      .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (current id)
+      .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (legacy id)
       .mockReturnValueOnce(makeSpawnResult(1, '', 'plugin add error'));
     const r = runCodexPluginRegistrationGit('switchbot@codex-plugin');
     expect(r.ok).toBe(false);
@@ -415,7 +430,8 @@ describe('registerCodexPluginAuto', () => {
   it('returns git result when Route B succeeds', () => {
     spawnSyncMock
       .mockReturnValueOnce(makeSpawnResult(0, ''))  // marketplace add (git)
-      .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove
+      .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (current id)
+      .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (legacy id)
       .mockReturnValueOnce(makeSpawnResult(0, '')); // plugin add
     const r = registerCodexPluginAuto();
     expect(r.ok).toBe(true);
@@ -492,7 +508,8 @@ describe('stepRegisterCodexPlugin', () => {
   it('sets codexPluginRegistered and codexPluginIdentifier on success', async () => {
     spawnSyncMock
       .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' })  // marketplace add (git)
-      .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' })  // plugin remove (pre-clean)
+      .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' })  // plugin remove (current id)
+      .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' })  // plugin remove (legacy id)
       .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' }); // plugin add
     const step = stepRegisterCodexPlugin();
     const ctx = makeCtx();

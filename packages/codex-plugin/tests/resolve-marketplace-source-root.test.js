@@ -101,4 +101,24 @@ describe('resolveMarketplaceSourceRoot', () => {
       Object.defineProperty(process, 'platform', { value: savedPlatform, configurable: true });
     }
   });
+
+  it('aliases Linux custom-prefix path with no node_modules segment', () => {
+    const savedPlatform = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+    try {
+      const target = '/home/me/.local/lib/@switchbot/codex-plugin';
+      const created = [];
+      const deps = makeDeps({
+        lstatSync: () => null,
+        mkdirSync: (p) => created.push(['mkdir', p]),
+        symlinkSync: (from, to, type) => created.push(['symlink', from, to, type]),
+      });
+      const resolved = resolveMarketplaceSourceRoot(target, deps);
+      assert.match(resolved, /codex-plugin-marketplace$/);
+      assert.equal(created[1][1], target);
+      assert.equal(created[1][3], 'dir');
+    } finally {
+      Object.defineProperty(process, 'platform', { value: savedPlatform, configurable: true });
+    }
+  });
 });

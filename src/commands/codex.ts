@@ -198,8 +198,11 @@ const REPAIR_STEPS: readonly StepDef[] = [
 
 function validateSkip(stepDefs: readonly StepDef[], skip: Set<string>): { ok: true } | { ok: false; offending: string } {
   const skippableNames = new Set(stepDefs.filter((s) => s.skippable).map((s) => s.name));
+  const allNames       = new Set(stepDefs.map((s) => s.name));
   for (const name of skip) {
-    if (!skippableNames.has(name)) {
+    // Only reject a name that exists as a step but is not skippable.
+    // Unknown names (e.g. removed steps like 'install-codex-plugin') are silently no-ops.
+    if (allNames.has(name) && !skippableNames.has(name)) {
       return { ok: false, offending: name };
     }
   }
