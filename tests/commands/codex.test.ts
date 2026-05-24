@@ -359,6 +359,35 @@ describe('switchbot codex repair', () => {
     expect(removedIds).toContain('switchbot@codex-plugin');
     expect(removedIds).toContain('switchbot@switchbot-skill');
   });
+
+  it('remove-plugin falls back to default ID "switchbot@codex-plugin" when npm root -g fails', async () => {
+    // verify-cli passes
+    runDoctorChecksMock.mockResolvedValueOnce([
+      { name: 'node', status: 'ok', detail: 'ok' },
+      { name: 'path', status: 'ok', detail: 'ok' },
+    ]);
+    // remove-plugin: npm root -g fails → fallback to 'switchbot@codex-plugin'
+    spawnSyncRepairMock
+      .mockReturnValueOnce({ status: 1, stdout: '', stderr: 'npm error' }) // npm root -g fails
+      .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' })          // remove switchbot@codex-plugin
+      .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' });         // remove legacy id
+    // register-plugin: ok
+    registerCodexPluginMock.mockReturnValueOnce({ ok: true, pluginId: 'switchbot@codex-plugin', packageRoot: null });
+    // doctor-verify
+    runDoctorChecksMock.mockResolvedValueOnce(makeBaseChecks());
+    checkCodexCliMock.mockReturnValue({ name: 'codex-cli', status: 'ok', detail: 'ok' });
+    checkCodexPluginNpmMock.mockReturnValue({ name: 'codex-plugin-npm', status: 'ok', detail: 'ok' });
+    checkCodexPluginRegisteredMock.mockReturnValue({ name: 'codex-plugin-registered', status: 'ok', detail: 'ok' });
+
+    const { exitCode } = await runCli(registerCodexCommand, ['codex', 'repair', '--skip', 're-auth']);
+    expect(exitCode).toBe(0);
+    const removeCalls = spawnSyncRepairMock.mock.calls.filter(
+      (call) => (call[1] as string[]).includes('remove'),
+    );
+    const removedIds = removeCalls.map((call) => (call[1] as string[])[2]);
+    expect(removedIds).toContain('switchbot@codex-plugin');
+    expect(removedIds).toContain('switchbot@switchbot-skill');
+  });
 });
 
 // ─── codex setup (C5) ────────────────────────────────────────────────────────
@@ -630,5 +659,37 @@ describe('switchbot codex setup', () => {
     expect(registerStep?.message).toContain('Route A fallback');
     // registerCodexPluginAuto called once; internal npm calls tested in codex-checks.test.ts
     expect(registerCodexPluginMock).toHaveBeenCalledOnce();
+  });
+
+  it('auth step returns failed when auth login exits non-zero', async () => {
+    checkCodexCliMock.mockReturnValueOnce({
+      name: 'codex-cli', status: 'ok', detail: { path: '/usr/local/bin/codex' },
+    });
+    // install-switchbot-cli: already installed
+    spawnSyncRepairMock.mockReturnValueOnce({
+      status: 0,
+      stdout: JSON.stringify({ dependencies: { '@switchbot/openapi-cli': { version: '1.0.0' } } }),
+      stderr: '',
+    });
+    // register-plugin: ok
+    registerCodexPluginMock.mockReturnValueOnce({ ok: true, pluginId: 'switchbot@codex-plugin', packageRoot: null });
+    // credentials missing → spawn auth login
+    tryLoadConfigMock.mockReturnValue(null);
+    // auth login exits non-zero
+    spawnSyncRepairMock.mockReturnValueOnce({ status: 1, stdout: '', stderr: 'auth failed' });
+    // doctor-verify still runs
+    runDoctorChecksMock.mockResolvedValueOnce(makeBaseChecks());
+    checkCodexCliMock.mockReturnValue({ name: 'codex-cli', status: 'ok', detail: 'ok' });
+    checkCodexPluginNpmMock.mockReturnValue({ name: 'codex-plugin-npm', status: 'ok', detail: 'ok' });
+    checkCodexPluginRegisteredMock.mockReturnValue({ name: 'codex-plugin-registered', status: 'ok', detail: 'ok' });
+
+    const { exitCode, stdout } = await runCli(registerCodexCommand, ['codex', 'setup', '--json']);
+    expect(exitCode).toBe(1); // anyFailed but not preflight
+    const parsed = JSON.parse(stdout.join('')) as {
+      data?: { outcomes: Array<{ step: string; status: string; message?: string }> };
+    };
+    const authStep = parsed.data!.outcomes.find((o) => o.step === 'auth');
+    expect(authStep?.status).toBe('failed');
+    expect(authStep?.message).toContain('auth login exited 1');
   });
 });

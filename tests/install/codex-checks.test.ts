@@ -103,6 +103,17 @@ describe('checkCodexPluginNpm', () => {
     const result = checkCodexPluginNpm();
     expect(result.status).toBe('warn');
   });
+
+  it('returns ok with packageRoot null when npm root -g exits non-zero', () => {
+    spawnSyncMock
+      .mockReturnValueOnce(makeSpawnResult(0, JSON.stringify({
+        dependencies: { '@switchbot/codex-plugin': { version: '1.2.3' } },
+      })))
+      .mockReturnValueOnce(makeSpawnResult(1, '', 'npm error')); // npm root -g fails
+    const result = checkCodexPluginNpm();
+    expect(result.status).toBe('ok');
+    expect((result.detail as Record<string, unknown>).packageRoot).toBeNull();
+  });
 });
 
 describe('checkCodexPluginRegistered', () => {
@@ -504,6 +515,24 @@ describe('runCodexPluginRegistrationGit', () => {
     if (origEnv === undefined) delete process.env['CODEX_GIT_MARKETPLACE_REF'];
     else process.env['CODEX_GIT_MARKETPLACE_REF'] = origEnv;
   });
+
+  it('passes custom CODEX_GIT_MARKETPLACE_REF value as --ref arg', () => {
+    const origEnv = process.env['CODEX_GIT_MARKETPLACE_REF'];
+    process.env['CODEX_GIT_MARKETPLACE_REF'] = 'feat/my-branch';
+    spawnSyncMock
+      .mockReturnValueOnce(makeSpawnResult(0, ''))  // marketplace add
+      .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (current id)
+      .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (legacy id)
+      .mockReturnValueOnce(makeSpawnResult(0, '')); // plugin add
+    runCodexPluginRegistrationGit('switchbot@codex-plugin');
+    const calls = spawnSyncMock.mock.calls as [string, string[]][];
+    const mktCall = calls.find(([cmd, args]) => cmd === 'codex' && args.includes('marketplace'));
+    const refIdx = mktCall?.[1].indexOf('--ref') ?? -1;
+    expect(refIdx).toBeGreaterThan(-1);
+    expect(mktCall?.[1][refIdx + 1]).toBe('feat/my-branch');
+    if (origEnv === undefined) delete process.env['CODEX_GIT_MARKETPLACE_REF'];
+    else process.env['CODEX_GIT_MARKETPLACE_REF'] = origEnv;
+  });
 });
 
 describe('registerCodexPluginAuto', () => {
@@ -654,6 +683,44 @@ describe('registerCodexPluginAuto', () => {
     const r = registerCodexPluginAuto();
     expect(r.ok).toBe(false);
     expect(r.error).toMatch(/timed out/i);
+  });
+
+  it('falls through to npm install when initial npm list stdout is invalid JSON', () => {
+    const installedJson = JSON.stringify({ dependencies: { '@switchbot/codex-plugin': { version: '1.0.0' } } });
+    existsSyncMock.mockReturnValue(true);
+    spawnSyncMock
+      .mockReturnValueOnce(makeSpawnResult(1, '', 'git clone failed'))              // Route B fails
+      .mockReturnValueOnce(makeSpawnResult(1, '', 'npm root error'))                // Route A: npm root -g fails
+      .mockReturnValueOnce(makeSpawnResult(0, 'npm warn something\nnot-json', '')) // npm list: invalid JSON → fall through
+      .mockReturnValueOnce(makeSpawnResult(0, '', ''))                              // npm install -g succeeds
+      .mockReturnValueOnce(makeSpawnResult(0, installedJson, ''))                   // post-install npm list: ok
+      .mockReturnValueOnce(makeSpawnResult(0, '/usr/local/lib/node_modules\n', '')) // npm root -g retry
+      .mockReturnValueOnce(makeSpawnResult(0, ''))                                  // marketplace add (local)
+      .mockReturnValueOnce(makeSpawnResult(0, ''))                                  // plugin remove (current id)
+      .mockReturnValueOnce(makeSpawnResult(0, ''))                                  // plugin remove (legacy id)
+      .mockReturnValueOnce(makeSpawnResult(0, ''));                                 // plugin add
+    const r = registerCodexPluginAuto();
+    const calls = spawnSyncMock.mock.calls as [string, string[]][];
+    const installCall = calls.find(([cmd, args]) => cmd === 'npm' && args.includes('install'));
+    expect(installCall).toBeDefined();
+    expect(r.ok).toBe(true);
+  });
+
+  it('proceeds to Route A retry when post-install verify stdout is unparseable (inconclusive)', () => {
+    existsSyncMock.mockReturnValue(true);
+    spawnSyncMock
+      .mockReturnValueOnce(makeSpawnResult(1, '', 'git clone failed'))              // Route B fails
+      .mockReturnValueOnce(makeSpawnResult(1, '', 'npm root error'))                // Route A: npm root -g fails
+      .mockReturnValueOnce(makeSpawnResult(1, '{}', ''))                            // npm list: not installed
+      .mockReturnValueOnce(makeSpawnResult(0, '', ''))                              // npm install -g succeeds
+      .mockReturnValueOnce(makeSpawnResult(0, 'garbage\n', ''))                    // post-install verify: invalid JSON
+      .mockReturnValueOnce(makeSpawnResult(0, '/usr/local/lib/node_modules\n', '')) // npm root -g retry
+      .mockReturnValueOnce(makeSpawnResult(0, ''))                                  // marketplace add (local)
+      .mockReturnValueOnce(makeSpawnResult(0, ''))                                  // plugin remove (current id)
+      .mockReturnValueOnce(makeSpawnResult(0, ''))                                  // plugin remove (legacy id)
+      .mockReturnValueOnce(makeSpawnResult(0, ''));                                 // plugin add
+    const r = registerCodexPluginAuto();
+    expect(r.ok).toBe(true);
   });
 });
 
