@@ -102,8 +102,18 @@ export function resolveMarketplaceSourceRoot(packageRoot: string): string {
   }
 
   if (stat.isSymbolicLink()) {
-    const aliasReal = fs.realpathSync(aliasRoot);
-    const packageReal = fs.realpathSync(packageRoot);
+    let aliasReal: string;
+    let packageReal: string;
+    try {
+      aliasReal = fs.realpathSync(aliasRoot);
+      packageReal = fs.realpathSync(packageRoot);
+    } catch {
+      // Dangling symlink: target was deleted (e.g. nvm switch, npm uninstall).
+      // Recreate it pointing at the current packageRoot.
+      fs.unlinkSync(aliasRoot);
+      fs.symlinkSync(packageRoot, aliasRoot, linkType);
+      return aliasRoot;
+    }
     const pathsMatch = process.platform === 'win32'
       ? aliasReal.toLowerCase() === packageReal.toLowerCase()
       : aliasReal === packageReal;
@@ -113,7 +123,8 @@ export function resolveMarketplaceSourceRoot(packageRoot: string): string {
     return aliasRoot;
   }
 
-  throw new Error(`alias path ${aliasRoot} exists and is not a symlink/junction; remove it manually and retry`);
+  const expected = process.platform === 'win32' ? 'junction' : 'symlink';
+  throw new Error(`alias path ${aliasRoot} exists and is not a ${expected}; remove it manually and retry`);
 }
 
 /** Single authoritative plugin ID resolver. Mirrors install.js:resolvePluginIdentifier. */
@@ -281,10 +292,10 @@ export const CODEX_GIT_MARKETPLACE_SPARSE = 'packages/codex-plugin';
 export const CODEX_GIT_MARKETPLACE_REF    = 'main';
 export const CODEX_PLUGIN_DEFAULT_ID      = 'switchbot@codex-plugin';
 // Known IDs from pre-release installs; cleaned up by both Route A and Route B.
-const CODEX_PLUGIN_LEGACY_IDS = ['switchbot@switchbot-skill'];
+export const CODEX_PLUGIN_LEGACY_IDS = ['switchbot@switchbot-skill'];
 
 export function runCodexPluginRegistrationGit(pluginId: string): RegistrationResult {
-  const ref     = process.env['CODEX_GIT_MARKETPLACE_REF'] ?? CODEX_GIT_MARKETPLACE_REF;
+  const ref = process.env['CODEX_GIT_MARKETPLACE_REF'] || CODEX_GIT_MARKETPLACE_REF;
   const _envTimeout = process.env['CODEX_MARKETPLACE_ADD_TIMEOUT'];
   const _parsedTimeout = Number(_envTimeout ?? '');
   const _timeoutValid = Number.isFinite(_parsedTimeout) && _parsedTimeout > 0;
@@ -327,7 +338,7 @@ export function registerCodexPluginGit(): RegisterCodexPluginResult {
 
 // Install @switchbot/codex-plugin globally if not already present.
 // Used by registerCodexPluginAuto as a last resort before retrying Route A.
-function installCodexPluginGlobally(): { ok: boolean; error?: string } {
+function installCodexPluginGlobally(): { ok: boolean; installed?: boolean; error?: string } {
   const list = spawnSync(
     'npm', ['list', '-g', '--json', '--depth=0', '@switchbot/codex-plugin'],
     { encoding: 'utf-8', shell: process.platform === 'win32', timeout: 10000 },
@@ -342,7 +353,7 @@ function installCodexPluginGlobally(): { ok: boolean; error?: string } {
     const jsonStr = jsonStartIdx >= 0 ? lines.slice(jsonStartIdx).join('\n') : raw;
     const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
     const deps = (parsed.dependencies ?? {}) as Record<string, unknown>;
-    if (deps['@switchbot/codex-plugin']) return { ok: true };
+    if (deps['@switchbot/codex-plugin']) return { ok: true, installed: false };
   } catch { /* fall through to install */ }
   const install = spawnSync(
     'npm', ['install', '-g', '@switchbot/codex-plugin@latest'],
@@ -377,7 +388,7 @@ function installCodexPluginGlobally(): { ok: boolean; error?: string } {
       };
     }
   } catch { /* verification inconclusive — proceed and let registration catch the error */ }
-  return { ok: true };
+  return { ok: true, installed: true };
 }
 
 /**
@@ -408,11 +419,14 @@ export function registerCodexPluginAuto(): RegisterCodexPluginResult {
 
   // Retry Route A after successful install
   const retry = registerCodexPlugin();
+  const installPhrase = install.installed
+    ? 'installed @switchbot/codex-plugin'
+    : '@switchbot/codex-plugin already present';
   return retry.ok
     ? retry
     : {
         ...retry,
         pluginId: CODEX_PLUGIN_DEFAULT_ID,
-        error: `Route B failed (${git.error}); installed @switchbot/codex-plugin but Route A still failed: ${retry.error}. Run: switchbot codex repair`,
+        error: `Route B failed (${git.error}); ${installPhrase} but Route A still failed: ${retry.error}. Run: switchbot codex repair`,
       };
 }

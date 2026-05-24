@@ -328,6 +328,37 @@ describe('switchbot codex repair', () => {
     expect(errOut).toContain('install-codex-plugin');
     expect(errOut).toMatch(/no.*effect|deprecated|no longer/i);
   });
+
+  it('remove-plugin step also removes legacy ID switchbot@switchbot-skill (Fix 4)', async () => {
+    // verify-cli passes
+    runDoctorChecksMock.mockResolvedValueOnce([
+      { name: 'node', status: 'ok', detail: 'ok' },
+      { name: 'path', status: 'ok', detail: 'ok' },
+    ]);
+    // re-auth: credentials present → no spawn
+    tryLoadConfigMock.mockReturnValue({ token: 't', secret: 's' });
+    // remove-plugin: resolveCodexPackageRoot npm root -g, then remove current id + legacy id
+    spawnSyncRepairMock
+      .mockReturnValueOnce({ status: 0, stdout: '/usr/local/lib/node_modules\n', stderr: '' }) // npm root -g
+      .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' })  // remove current id
+      .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' }); // remove legacy id
+    // register-plugin: ok
+    registerCodexPluginMock.mockReturnValueOnce({ ok: true, pluginId: 'switchbot@codex-plugin', packageRoot: null });
+    // doctor-verify
+    runDoctorChecksMock.mockResolvedValueOnce(makeBaseChecks());
+    checkCodexCliMock.mockReturnValue({ name: 'codex-cli', status: 'ok', detail: 'ok' });
+    checkCodexPluginNpmMock.mockReturnValue({ name: 'codex-plugin-npm', status: 'ok', detail: 'ok' });
+    checkCodexPluginRegisteredMock.mockReturnValue({ name: 'codex-plugin-registered', status: 'ok', detail: 'ok' });
+
+    const { exitCode } = await runCli(registerCodexCommand, ['codex', 'repair', '--skip', 're-auth']);
+    expect(exitCode).toBe(0);
+    const removeCalls = spawnSyncRepairMock.mock.calls.filter(
+      (call) => (call[1] as string[]).includes('remove'),
+    );
+    const removedIds = removeCalls.map((call) => (call[1] as string[])[2]);
+    expect(removedIds).toContain('switchbot@codex-plugin');
+    expect(removedIds).toContain('switchbot@switchbot-skill');
+  });
 });
 
 // ─── codex setup (C5) ────────────────────────────────────────────────────────

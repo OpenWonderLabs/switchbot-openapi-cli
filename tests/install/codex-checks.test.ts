@@ -375,6 +375,30 @@ describe('resolveMarketplaceSourceRoot — Linux @-scoped path handling', () => 
     expect(result).toMatch(/codex-plugin-marketplace$/);
   });
 
+  it('recreates a dangling symlink when realpathSync throws ENOENT (Fix 1)', () => {
+    lstatSyncMock.mockReturnValue(makeStat(true));
+    realpathSyncMock.mockImplementation(() => {
+      throw Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' });
+    });
+    const result = resolveMarketplaceSourceRoot(LINUX_SCOPED_ROOT);
+    expect(unlinkSyncMock).toHaveBeenCalledWith(expect.stringMatching(/codex-plugin-marketplace$/));
+    expect(symlinkSyncMock).toHaveBeenCalledWith(
+      LINUX_SCOPED_ROOT,
+      expect.stringMatching(/codex-plugin-marketplace$/),
+      'dir',
+    );
+    expect(result).toMatch(/codex-plugin-marketplace$/);
+  });
+
+  it('throws "not a symlink" without "/junction" suffix on Linux (Fix 5)', () => {
+    lstatSyncMock.mockReturnValue(makeStat(false));
+    let caught: Error | null = null;
+    try { resolveMarketplaceSourceRoot(LINUX_SCOPED_ROOT); } catch (e) { caught = e as Error; }
+    expect(caught).not.toBeNull();
+    expect(caught!.message).toContain('not a symlink');
+    expect(caught!.message).not.toContain('symlink/junction');
+  });
+
   it('throws when alias path is a real directory (not a symlink)', () => {
     lstatSyncMock.mockReturnValue(makeStat(false));
     expect(() => resolveMarketplaceSourceRoot(LINUX_SCOPED_ROOT)).toThrow(/not a.*symlink/i);
@@ -461,6 +485,24 @@ describe('runCodexPluginRegistrationGit', () => {
     spy.mockRestore();
     if (origEnv === undefined) delete process.env['CODEX_MARKETPLACE_ADD_TIMEOUT'];
     else process.env['CODEX_MARKETPLACE_ADD_TIMEOUT'] = origEnv;
+  });
+
+  it('uses default ref "main" when CODEX_GIT_MARKETPLACE_REF is empty string (Fix 2)', () => {
+    const origEnv = process.env['CODEX_GIT_MARKETPLACE_REF'];
+    process.env['CODEX_GIT_MARKETPLACE_REF'] = '';
+    spawnSyncMock
+      .mockReturnValueOnce(makeSpawnResult(0, ''))  // marketplace add
+      .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (current id)
+      .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (legacy id)
+      .mockReturnValueOnce(makeSpawnResult(0, '')); // plugin add
+    runCodexPluginRegistrationGit('switchbot@codex-plugin');
+    const calls = spawnSyncMock.mock.calls as [string, string[]][];
+    const mktCall = calls.find(([cmd, args]) => cmd === 'codex' && args.includes('marketplace'));
+    const refIdx = mktCall?.[1].indexOf('--ref') ?? -1;
+    expect(refIdx).toBeGreaterThan(-1);
+    expect(mktCall?.[1][refIdx + 1]).toBe('main');
+    if (origEnv === undefined) delete process.env['CODEX_GIT_MARKETPLACE_REF'];
+    else process.env['CODEX_GIT_MARKETPLACE_REF'] = origEnv;
   });
 });
 
@@ -587,6 +629,19 @@ describe('registerCodexPluginAuto', () => {
     const r = registerCodexPluginAuto();
     expect(r.ok).toBe(false);
     expect(r.error).toMatch(/npm prefix mismatch/i);
+  });
+
+  it('error says "already present" (not "installed") when package existed before and Route A retry fails (Fix 3)', () => {
+    const installedJson = JSON.stringify({ dependencies: { '@switchbot/codex-plugin': { version: '1.0.0' } } });
+    spawnSyncMock
+      .mockReturnValueOnce(makeSpawnResult(1, '', 'git clone failed'))          // Route B fails
+      .mockReturnValueOnce(makeSpawnResult(1, '', 'npm root error'))             // Route A: npm root -g fails
+      .mockReturnValueOnce(makeSpawnResult(0, installedJson, ''))               // npm list: ALREADY installed (no install ran)
+      .mockReturnValueOnce(makeSpawnResult(1, '', 'npm root error 2'));          // npm root -g fails (retry)
+    const r = registerCodexPluginAuto();
+    expect(r.ok).toBe(false);
+    expect(r.error).not.toMatch(/installed @switchbot/i);
+    expect(r.error).toMatch(/already present|was present/i);
   });
 
   it('returns error when post-install verify spawnSync times out (status null)', () => {

@@ -9,6 +9,7 @@ import {
   registerCodexPluginAuto,
   resolvePluginId,
   resolveCodexPackageRoot,
+  CODEX_PLUGIN_LEGACY_IDS,
   type Check,
 } from '../install/codex-checks.js';
 import { isJsonMode, printJson } from '../utils/output.js';
@@ -144,12 +145,14 @@ function repairStepRemovePlugin(ctx: RepairContext): RepairOutcome {
     pluginId = root.ok ? resolvePluginId(root.packageRoot) : 'switchbot@codex-plugin';
     ctx.codexPluginId = pluginId;
   }
-  const r = spawnSync(
-    'codex', ['plugin', 'remove', pluginId],
-    { encoding: 'utf-8', shell: process.platform === 'win32', timeout: 15000 },
-  );
-  if ((r.status ?? 1) !== 0) {
-    return { step: 'remove-plugin', status: 'failed', message: `exit ${r.status ?? 1} (non-fatal)` };
+  for (const id of [pluginId, ...CODEX_PLUGIN_LEGACY_IDS]) {
+    const r = spawnSync(
+      'codex', ['plugin', 'remove', id],
+      { encoding: 'utf-8', shell: process.platform === 'win32', timeout: 15000 },
+    );
+    if ((r.status ?? 1) !== 0) {
+      process.stderr.write(`[switchbot] Warning: codex plugin remove "${id}" exited ${r.status ?? 1} (non-fatal)\n`);
+    }
   }
   return { step: 'remove-plugin', status: 'ok' };
 }

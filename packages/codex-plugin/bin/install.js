@@ -79,8 +79,17 @@ export function resolveMarketplaceSourceRoot(packageRoot, deps = defaultFsDeps) 
   }
 
   if (stat.isSymbolicLink()) {
-    const aliasReal = deps.realpathSync(aliasRoot);
-    const packageReal = deps.realpathSync(packageRoot);
+    let aliasReal;
+    let packageReal;
+    try {
+      aliasReal = deps.realpathSync(aliasRoot);
+      packageReal = deps.realpathSync(packageRoot);
+    } catch {
+      // Dangling symlink: target was deleted (e.g. nvm switch, npm uninstall).
+      deps.unlinkSync(aliasRoot);
+      deps.symlinkSync(packageRoot, aliasRoot, linkType);
+      return aliasRoot;
+    }
     const pathsMatch = process.platform === 'win32'
       ? aliasReal.toLowerCase() === packageReal.toLowerCase()
       : aliasReal === packageReal;
