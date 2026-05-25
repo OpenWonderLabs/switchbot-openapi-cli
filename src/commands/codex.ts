@@ -15,17 +15,47 @@ import {
 import { isJsonMode, printJson } from '../utils/output.js';
 import { getActiveProfile } from '../lib/request-context.js';
 import { getConfigPath } from '../utils/flags.js';
+import { VERSION } from '../version.js';
+
+export function compareVersions(a: string, b: string): -1 | 0 | 1 {
+  // Strip pre-release/build metadata (e.g. '3.8.0-rc.1+build' → '3.8.0')
+  const core = (v: string) => (v.split(/[-+]/)[0] ?? v).split('.').map(Number);
+  const pa = core(a);
+  const pb = core(b);
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i++) {
+    const na = pa[i] ?? 0;
+    const nb = pb[i] ?? 0;
+    if (na < nb) return -1;
+    if (na > nb) return 1;
+  }
+  return 0;
+}
+
+function fetchLatestPublishedVersion(packageName: string): { version: string; fromRegistry: boolean } {
+  const r = spawnSync(
+    'npm', ['view', packageName, 'version'],
+    { encoding: 'utf-8', shell: process.platform === 'win32', timeout: 8000 },
+  );
+  if ((r.status ?? 1) === 0) {
+    const v = (r.stdout ?? '').trim();
+    if (/^\d+\.\d+\.\d+/.test(v)) return { version: v, fromRegistry: true };
+  }
+  // Offline or registry error: fall back to the running binary's own version.
+  // When invoked via npx, VERSION == latest, so the comparison still works.
+  return { version: VERSION, fromRegistry: false };
+}
 
 const CODEX_BASE_SECTIONS = ['node', 'path', 'credentials', 'mcp'] as const;
 const SWITCHBOT_CLI_PACKAGE = '@switchbot/openapi-cli';
 
 async function runAllCodexDoctorChecks(): Promise<Check[]> {
-  const base = await runDoctorChecks(CODEX_BASE_SECTIONS);
+  const base = (await runDoctorChecks(CODEX_BASE_SECTIONS)) ?? [];
   const codexChecks: Check[] = [
     checkCodexCli(),
     checkCodexPluginNpm(),
     checkCodexPluginRegistered(),
-  ];
+  ].filter(Boolean) as Check[];
   return [...base, ...codexChecks];
 }
 
@@ -81,7 +111,7 @@ function buildAuthLoginArgv(profile: string, configPath?: string): string[] {
 
 interface StepOutcome {
   step: string;
-  status: 'ok' | 'skipped' | 'failed';
+  status: 'ok' | 'skipped' | 'failed' | 'warn';
   message?: string;
 }
 
@@ -304,12 +334,14 @@ function registerCodexRepairSubcommand(codex: Command): void {
       const { outcomes, anyFailed, preflightFailed } = await runRepair(skip, ctx);
 
       if (isJsonMode()) {
-        printJson({ ok: !anyFailed, preflightFailed, outcomes });
+        const anyWarn = outcomes.some((o) => o.status === 'warn');
+        printJson({ ok: !anyFailed, hasWarnings: anyWarn, preflightFailed, outcomes });
       } else {
         for (const o of outcomes) {
           const icon =
             o.status === 'ok'      ? chalk.green('✓') :
             o.status === 'skipped' ? chalk.dim('·') :
+            o.status === 'warn'    ? chalk.yellow('⚠') :
                                      chalk.red('✗');
           console.log(`${icon} ${o.step.padEnd(18)} ${o.message ?? ''}`);
         }
@@ -342,11 +374,33 @@ type SetupOutcome = StepOutcome;
 
 const SETUP_STEPS: readonly StepDef[] = [
   { name: 'check-codex-cli',       description: 'Verify codex CLI on PATH',                                        skippable: false },
-  { name: 'install-switchbot-cli', description: 'Install @switchbot/openapi-cli if missing',                       skippable: true  },
+  { name: 'check-network',         description: 'Probe npm registry; print Codex config hint if offline',          skippable: true  },
+  { name: 'install-switchbot-cli', description: 'Install @switchbot/openapi-cli if missing or outdated',           skippable: true  },
   { name: 'register-plugin',       description: 'Register plugin (Route B git; npm install + Route A on fallback)', skippable: false },
   { name: 'auth',                  description: 'Verify credentials; spawn auth login if missing',                 skippable: true  },
   { name: 'doctor-verify',         description: 'Run 4 base + 3 Codex checks and report health',                   skippable: false },
 ];
+
+function setupStepCheckNetwork(): SetupOutcome {
+  const r = spawnSync(
+    'npm', ['ping'],
+    { encoding: 'utf-8', shell: process.platform === 'win32', timeout: 5000 },
+  );
+  if ((r.status ?? 1) === 0) {
+    return { step: 'check-network', status: 'ok', message: 'npm registry reachable' };
+  }
+  return {
+    step: 'check-network',
+    status: 'warn',
+    message: [
+      'npm registry unreachable — install and plugin registration require network access.',
+      'To enable network in Codex, add to ~/.codex/config.toml:',
+      '  [sandbox_workspace_write]',
+      '  network_access = true',
+      'Then restart Codex and re-run: switchbot codex setup',
+    ].join('\n'),
+  };
+}
 
 function setupStepCheckCodexCli(): SetupOutcome {
   const c = checkCodexCli();
@@ -370,19 +424,56 @@ function setupStepInstallSwitchbotCli(): SetupOutcome {
   );
 }
 
+function resolveInstalledVersion(packageName: string): string | null {
+  const r = spawnSync(
+    'npm', ['list', '-g', '--json', '--depth=0', packageName],
+    { encoding: 'utf-8', shell: process.platform === 'win32', timeout: 15000 },
+  );
+  try {
+    const parsed = JSON.parse(r.stdout ?? '{}') as {
+      dependencies?: Record<string, { version?: string }>;
+    };
+    return parsed?.dependencies?.[packageName]?.version ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function setupStepInstallGlobalPackage(step: string, packageName: string): SetupOutcome {
+  const { version: latestVersion, fromRegistry } = fetchLatestPublishedVersion(packageName);
+  const registryNote = fromRegistry ? '' : ' (registry unreachable, used running version as reference)';
+
   const list = spawnSync(
     'npm', ['list', '-g', '--json', '--depth=0', packageName],
     { encoding: 'utf-8', shell: process.platform === 'win32', timeout: 15000 },
   );
-  let installed = false;
+  let installedVersion: string | null = null;
   try {
-    const parsed = JSON.parse(list.stdout ?? '{}') as { dependencies?: Record<string, unknown> };
-    installed = Boolean(parsed?.dependencies?.[packageName]);
+    const parsed = JSON.parse(list.stdout ?? '{}') as {
+      dependencies?: Record<string, { version?: string }>;
+    };
+    installedVersion = parsed?.dependencies?.[packageName]?.version ?? null;
   } catch { /* treat as not installed */ }
-  if (installed) {
-    return { step, status: 'ok', message: 'already installed' };
+
+  if (installedVersion !== null) {
+    if (compareVersions(installedVersion, latestVersion) >= 0) {
+      return { step, status: 'ok', message: `already installed (${installedVersion})${registryNote}` };
+    }
+    const upg = spawnSync(
+      'npm', ['install', '-g', `${packageName}@latest`],
+      { encoding: 'utf-8', shell: process.platform === 'win32', timeout: 120000 },
+    );
+    if ((upg.status ?? 1) !== 0) {
+      return {
+        step,
+        status: 'failed',
+        message: `npm install -g failed upgrading from ${installedVersion} (exit ${upg.status ?? 1}): ${upg.stderr ?? ''}`,
+      };
+    }
+    const newVersion = resolveInstalledVersion(packageName) ?? latestVersion;
+    return { step, status: 'ok', message: `upgraded ${installedVersion} → ${newVersion}` };
   }
+
   const inst = spawnSync(
     'npm', ['install', '-g', `${packageName}@latest`],
     { encoding: 'utf-8', shell: process.platform === 'win32', timeout: 120000 },
@@ -394,7 +485,8 @@ function setupStepInstallGlobalPackage(step: string, packageName: string): Setup
       message: `npm install -g failed (exit ${inst.status ?? 1}): ${inst.stderr ?? ''}`,
     };
   }
-  return { step, status: 'ok', message: `installed ${packageName}@latest` };
+  const installedNow = resolveInstalledVersion(packageName) ?? latestVersion;
+  return { step, status: 'ok', message: `installed ${packageName}@${installedNow}` };
 }
 
 function setupStepRegisterPlugin(ctx: SetupContext): SetupOutcome {
@@ -447,14 +539,26 @@ async function runSetup(
 ): Promise<{ outcomes: SetupOutcome[]; anyFailed: boolean; preflightFailed: boolean }> {
   const outcomes: SetupOutcome[] = [];
   let preflightFailed = false;
+  let networkOffline = false;
 
   for (const step of SETUP_STEPS) {
+    // Auto-skip network-dependent steps when check-network warned
+    if (step.name === 'install-switchbot-cli' && networkOffline && !skip.has(step.name)) {
+      outcomes.push({
+        step: step.name,
+        status: 'skipped',
+        message: 'skipped: npm registry unreachable (see check-network warning above)',
+      });
+      continue;
+    }
+
     if (skip.has(step.name)) {
       outcomes.push({ step: step.name, status: 'skipped' });
       continue;
     }
     let outcome: SetupOutcome;
     if (step.name === 'check-codex-cli')             outcome = setupStepCheckCodexCli();
+    else if (step.name === 'check-network')          outcome = setupStepCheckNetwork();
     else if (step.name === 'install-switchbot-cli')  outcome = setupStepInstallSwitchbotCli();
     else if (step.name === 'register-plugin')        outcome = setupStepRegisterPlugin(ctx);
     else if (step.name === 'auth')                   outcome = await setupStepAuth(ctx);
@@ -463,6 +567,9 @@ async function runSetup(
     if (step.name === 'check-codex-cli' && outcome.status === 'failed') {
       preflightFailed = true;
       break;
+    }
+    if (step.name === 'check-network' && outcome.status === 'warn') {
+      networkOffline = true;
     }
   }
   const anyFailed = outcomes.some((o) => o.status === 'failed');
@@ -533,12 +640,14 @@ Environment variables:
       const { outcomes, anyFailed, preflightFailed } = await runSetup(skip, ctx);
 
       if (isJsonMode()) {
-        printJson({ ok: !anyFailed, preflightFailed, outcomes });
+        const anyWarn = outcomes.some((o) => o.status === 'warn');
+        printJson({ ok: !anyFailed, hasWarnings: anyWarn, preflightFailed, outcomes });
       } else {
         for (const o of outcomes) {
           const icon =
             o.status === 'ok'      ? chalk.green('✓') :
             o.status === 'skipped' ? chalk.dim('·') :
+            o.status === 'warn'    ? chalk.yellow('⚠') :
                                      chalk.red('✗');
           console.log(`${icon} ${o.step.padEnd(22)} ${o.message ?? ''}`);
         }

@@ -50,6 +50,14 @@ CLI doesn't know about it, refuse and explain — don't paper over it.
 
 ---
 
+## Network requirements
+
+`codex setup` requires outbound internet access (npm registry + GitHub). Codex workspaces are offline by default. If setup reports a network error or the `check-network` step warns:
+
+→ Read `references/codex-network.md` for the exact `~/.codex/config.toml` fix.
+
+---
+
 ## Required bootstrap (run this first, every session)
 
 Before you take any action, establish context:
