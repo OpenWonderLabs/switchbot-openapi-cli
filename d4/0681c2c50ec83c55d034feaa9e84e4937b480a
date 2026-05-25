@@ -1,0 +1,21 @@
+packages/codex-plugin/skills/switchbot/references/codex-network.md
+  s_ffdcf8765e4b95::t_af6bbee9e7f962 1-34
+packages/codex-plugin/skills/switchbot/SKILL.md
+  s_ffdcf8765e4b95::t_22a7b016d3f7bc 53-60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "d40681c2c50ec83c55d034feaa9e84e4937b480a",
+  "prompts": {},
+  "sessions": {
+    "s_ffdcf8765e4b95": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9bba38b1-2790-40b0-86d8-af1157ed343b",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
