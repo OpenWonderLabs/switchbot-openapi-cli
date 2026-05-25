@@ -525,6 +525,13 @@ describe('switchbot codex setup', () => {
     });
     // npm install -g fails
     spawnSyncRepairMock.mockReturnValueOnce({ status: 1, stdout: '', stderr: 'EACCES permission denied' });
+    // pipeline continues past the failed install step
+    registerCodexPluginMock.mockReturnValueOnce({ ok: true, pluginId: 'switchbot@codex-plugin', packageRoot: null });
+    tryLoadConfigMock.mockReturnValue({ token: 't', secret: 's' });
+    runDoctorChecksMock.mockResolvedValueOnce(makeBaseChecks());
+    checkCodexCliMock.mockReturnValue({ name: 'codex-cli', status: 'ok', detail: 'ok' });
+    checkCodexPluginNpmMock.mockReturnValue({ name: 'codex-plugin-npm', status: 'ok', detail: 'ok' });
+    checkCodexPluginRegisteredMock.mockReturnValue({ name: 'codex-plugin-registered', status: 'ok', detail: 'ok' });
 
     const { exitCode, stdout } = await runCli(registerCodexCommand, ['codex', 'setup', '--yes', '--json']);
     expect(exitCode).toBe(1);
@@ -923,11 +930,13 @@ describe('switchbot codex setup', () => {
     const { exitCode, stdout } = await runCli(registerCodexCommand, ['codex', 'setup', '--json']);
     expect(exitCode).toBe(0);
     const parsed = JSON.parse(stdout.join('')) as {
-      data?: { outcomes: Array<{ step: string; status: string; message?: string }> };
+      data?: { hasWarnings?: boolean; outcomes: Array<{ step: string; status: string; message?: string }> };
     };
     const step = parsed.data!.outcomes.find((o) => o.step === 'check-network')!;
     expect(step.status).toBe('ok');
     expect(step.message).toContain('reachable');
+    // Fix 3: no warnings → hasWarnings must be falsy
+    expect(parsed.data?.hasWarnings).toBeFalsy();
   });
 
   it('check-network warn when npm ping fails, includes config.toml hint', async () => {
@@ -936,14 +945,7 @@ describe('switchbot codex setup', () => {
     });
     // npm ping fails (offline / sandboxed)
     spawnSyncRepairMock.mockReturnValueOnce({ status: 1, stdout: '', stderr: 'ENOTFOUND' });
-    // install-switchbot-cli: npm view offline fallback
-    spawnSyncRepairMock.mockReturnValueOnce({ status: 1, stdout: '', stderr: 'ENOTFOUND' });
-    // npm list -g: installed at VERSION
-    spawnSyncRepairMock.mockReturnValueOnce({
-      status: 0,
-      stdout: JSON.stringify({ dependencies: { '@switchbot/openapi-cli': { version: VERSION } } }),
-      stderr: '',
-    });
+    // install-switchbot-cli is auto-skipped when check-network warns — no npm view or npm list -g mocks needed
     registerCodexPluginMock.mockReturnValueOnce({ ok: true, pluginId: 'switchbot@codex-plugin', packageRoot: null });
     tryLoadConfigMock.mockReturnValue({ token: 't', secret: 's' });
     runDoctorChecksMock.mockResolvedValueOnce(makeBaseChecks());
@@ -955,12 +957,18 @@ describe('switchbot codex setup', () => {
     // warn is non-blocking — overall should still be 0 if other steps succeed
     expect(exitCode).toBe(0);
     const parsed = JSON.parse(stdout.join('')) as {
-      data?: { outcomes: Array<{ step: string; status: string; message?: string }> };
+      data?: { hasWarnings?: boolean; outcomes: Array<{ step: string; status: string; message?: string }> };
     };
     const step = parsed.data!.outcomes.find((o) => o.step === 'check-network')!;
     expect(step.status).toBe('warn');
     expect(step.message).toContain('sandbox_workspace_write');
     expect(step.message).toContain('network_access = true');
     expect(step.message).toContain('~/.codex/config.toml');
+    // Fix 1: install-switchbot-cli auto-skipped when network is offline
+    const installStep = parsed.data!.outcomes.find((o) => o.step === 'install-switchbot-cli')!;
+    expect(installStep.status).toBe('skipped');
+    expect(installStep.message).toMatch(/skipped|unreachable/);
+    // Fix 3: hasWarnings must be true when any step returned warn
+    expect(parsed.data?.hasWarnings).toBe(true);
   });
 });

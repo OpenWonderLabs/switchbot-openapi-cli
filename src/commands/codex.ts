@@ -188,12 +188,12 @@ function repairStepRemovePlugin(ctx: RepairContext): RepairOutcome {
 }
 
 function stepRegisterPluginShared(stepName: string, ctx: { codexPluginId?: string; packageRoot?: string | null }): StepOutcome {
-  const r = registerCodexPluginAuto() as { ok: boolean; pluginId?: string; packageRoot?: string | null; error?: string } | null | undefined;
-  if (!r || !r.ok) {
-    return { step: stepName, status: 'failed', message: r?.error ?? 'registerCodexPluginAuto returned no result' };
+  const r = registerCodexPluginAuto();
+  if (!r.ok) {
+    return { step: stepName, status: 'failed', message: r.error };
   }
   ctx.codexPluginId = r.pluginId;
-  ctx.packageRoot = r.packageRoot ?? null;
+  ctx.packageRoot = r.packageRoot;
   return { step: stepName, status: 'ok', message: 'marketplace add + plugin add succeeded' };
 }
 
@@ -334,12 +334,14 @@ function registerCodexRepairSubcommand(codex: Command): void {
       const { outcomes, anyFailed, preflightFailed } = await runRepair(skip, ctx);
 
       if (isJsonMode()) {
-        printJson({ ok: !anyFailed, preflightFailed, outcomes });
+        const anyWarn = outcomes.some((o) => o.status === 'warn');
+        printJson({ ok: !anyFailed, hasWarnings: anyWarn, preflightFailed, outcomes });
       } else {
         for (const o of outcomes) {
           const icon =
             o.status === 'ok'      ? chalk.green('✓') :
             o.status === 'skipped' ? chalk.dim('·') :
+            o.status === 'warn'    ? chalk.yellow('⚠') :
                                      chalk.red('✗');
           console.log(`${icon} ${o.step.padEnd(18)} ${o.message ?? ''}`);
         }
@@ -471,12 +473,12 @@ function setupStepInstallGlobalPackage(step: string, packageName: string): Setup
 }
 
 function setupStepRegisterPlugin(ctx: SetupContext): SetupOutcome {
-  const r = registerCodexPluginAuto() as { ok: boolean; pluginId?: string; packageRoot?: string | null; error?: string } | null | undefined;
-  if (!r || !r.ok) {
-    return { step: 'register-plugin', status: 'failed', message: r?.error ?? 'registerCodexPluginAuto returned no result' };
+  const r = registerCodexPluginAuto();
+  if (!r.ok) {
+    return { step: 'register-plugin', status: 'failed', message: r.error };
   }
   ctx.codexPluginId = r.pluginId;
-  ctx.packageRoot = r.packageRoot ?? null;
+  ctx.packageRoot = r.packageRoot;
   const via = r.packageRoot ? 'local npm (Route A fallback)' : 'git marketplace (Route B)';
   return { step: 'register-plugin', status: 'ok', message: `registered via ${via}` };
 }
@@ -520,8 +522,19 @@ async function runSetup(
 ): Promise<{ outcomes: SetupOutcome[]; anyFailed: boolean; preflightFailed: boolean }> {
   const outcomes: SetupOutcome[] = [];
   let preflightFailed = false;
+  let networkOffline = false;
 
   for (const step of SETUP_STEPS) {
+    // Auto-skip network-dependent steps when check-network warned
+    if (step.name === 'install-switchbot-cli' && networkOffline && !skip.has(step.name)) {
+      outcomes.push({
+        step: step.name,
+        status: 'skipped',
+        message: 'skipped: npm registry unreachable (see check-network warning above)',
+      });
+      continue;
+    }
+
     if (skip.has(step.name)) {
       outcomes.push({ step: step.name, status: 'skipped' });
       continue;
@@ -537,6 +550,9 @@ async function runSetup(
     if (step.name === 'check-codex-cli' && outcome.status === 'failed') {
       preflightFailed = true;
       break;
+    }
+    if (step.name === 'check-network' && outcome.status === 'warn') {
+      networkOffline = true;
     }
   }
   const anyFailed = outcomes.some((o) => o.status === 'failed');
@@ -607,7 +623,8 @@ Environment variables:
       const { outcomes, anyFailed, preflightFailed } = await runSetup(skip, ctx);
 
       if (isJsonMode()) {
-        printJson({ ok: !anyFailed, preflightFailed, outcomes });
+        const anyWarn = outcomes.some((o) => o.status === 'warn');
+        printJson({ ok: !anyFailed, hasWarnings: anyWarn, preflightFailed, outcomes });
       } else {
         for (const o of outcomes) {
           const icon =
