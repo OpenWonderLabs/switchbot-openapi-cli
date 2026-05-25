@@ -9,10 +9,20 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [3.7.5]
+
+### Fixed
+
+- **EPERM guard in `resolveMarketplaceSourceRoot`** — on Windows, junction creation at `@`-scoped npm paths fails with `EPERM` when the runner is not elevated. Both `src/install/codex-checks.ts` and `packages/codex-plugin/bin/install.js` now wrap every `symlinkSync` call in `createAlias`, which catches `EPERM` and throws an actionable error directing users to run the installer from an elevated terminal or choose a non-`@`-scoped install path.
+- **`CODEX_PLUGIN_DEFAULT_ID` constant in `repairStepRemovePlugin`** — the fallback plugin-remove call now uses the shared constant instead of a hardcoded string, eliminating the risk of divergence if the default ID changes.
+- **Codex plugin manifest location** — `packages/codex-plugin/.claude-plugin/marketplace.json` is now at the correct path and format; `plugins/switchbot/` structure added so `codex plugin add switchbot@switchbot` resolves the manifest reliably.
+- **Codex marketplace registration** — op order corrected, stale plugin DB cleared before re-registration, plugin path fixed; OS error 32 (file-in-use) retry improved for Windows.
+
 ### Changed
 
 - **OpenClaw plugin publish path** — `@switchbot/openclaw-skill` is back in the monorepo npm publish matrix. `publish.yml` now version-checks and publishes it alongside the CLI and Codex plugin, while `npm-published-smoke.yml` verifies the published tarball through the shared plugin smoke path.
 - **OpenClaw package metadata** — `packages/openclaw-skill/README.md`, `.mcp.json`, and package metadata now describe the actual runtime contract: OpenClaw bootstraps via `bin/start.js`, then delegates to `switchbot mcp serve` for the CLI-owned MCP tool surface.
+- **Codex smoke tests** — `smoke-codex-temp-prefix-route-a.mjs` now uses `lib/node_modules/` on Linux/macOS and `node_modules/` on Windows for prefix installs; test scripts in both plugin packages changed to `node --test` for cross-platform glob-free discovery; plugin registration smokes added to release gate.
 
 ## [3.7.3]
 
