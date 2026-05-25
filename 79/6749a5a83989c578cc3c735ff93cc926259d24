@@ -1,0 +1,19 @@
+.gitattributes
+  s_0857ba53256199::t_7da314a3806379 1-19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.1",
+  "base_commit_sha": "796749a5a83989c578cc3c735ff93cc926259d24",
+  "prompts": {},
+  "sessions": {
+    "s_0857ba53256199": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7ee9e770-9683-4ad6-a210-7292b9d12706",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
