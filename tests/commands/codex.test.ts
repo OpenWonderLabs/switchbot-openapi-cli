@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { runCli } from '../helpers/cli.js';
-import { registerCodexCommand } from '../../src/commands/codex.js';
+import { registerCodexCommand, compareVersions } from '../../src/commands/codex.js';
 import { VERSION } from '../../src/version.js';
 
 const spawnSyncRepairMock = vi.hoisted(() => vi.fn());
@@ -68,6 +68,27 @@ beforeEach(() => {
   checkCodexPluginRegisteredMock.mockReset();
   registerCodexPluginMock.mockReset();
   tryLoadConfigMock.mockReset();
+});
+
+describe('compareVersions (unit)', () => {
+  it('equal versions return 0', () => {
+    expect(compareVersions('3.7.3', '3.7.3')).toBe(0);
+  });
+  it('older < newer returns -1', () => {
+    expect(compareVersions('3.7.0', '3.8.0')).toBe(-1);
+  });
+  it('newer > older returns 1', () => {
+    expect(compareVersions('3.8.0', '3.7.0')).toBe(1);
+  });
+  it('pre-release stripped: 3.7.3 vs 3.8.0-rc.1 returns -1', () => {
+    expect(compareVersions('3.7.3', '3.8.0-rc.1')).toBe(-1);
+  });
+  it('pre-release stripped: 3.8.0-rc.1 vs 3.7.3 returns 1', () => {
+    expect(compareVersions('3.8.0-rc.1', '3.7.3')).toBe(1);
+  });
+  it('same core version with pre-release returns 0', () => {
+    expect(compareVersions('3.8.0', '3.8.0-rc.1')).toBe(0);
+  });
 });
 
 describe('switchbot codex doctor', () => {

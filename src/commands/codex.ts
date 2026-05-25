@@ -17,9 +17,11 @@ import { getActiveProfile } from '../lib/request-context.js';
 import { getConfigPath } from '../utils/flags.js';
 import { VERSION } from '../version.js';
 
-function compareVersions(a: string, b: string): -1 | 0 | 1 {
-  const pa = a.split('.').map(Number);
-  const pb = b.split('.').map(Number);
+export function compareVersions(a: string, b: string): -1 | 0 | 1 {
+  // Strip pre-release/build metadata (e.g. '3.8.0-rc.1+build' → '3.8.0')
+  const core = (v: string) => (v.split(/[-+]/)[0] ?? v).split('.').map(Number);
+  const pa = core(a);
+  const pb = core(b);
   const len = Math.max(pa.length, pb.length);
   for (let i = 0; i < len; i++) {
     const na = pa[i] ?? 0;
@@ -37,7 +39,7 @@ function fetchLatestPublishedVersion(packageName: string): { version: string; fr
   );
   if ((r.status ?? 1) === 0) {
     const v = (r.stdout ?? '').trim();
-    if (/^\d+\.\d+\.\d+$/.test(v)) return { version: v, fromRegistry: true };
+    if (/^\d+\.\d+\.\d+/.test(v)) return { version: v, fromRegistry: true };
   }
   // Offline or registry error: fall back to the running binary's own version.
   // When invoked via npx, VERSION == latest, so the comparison still works.
