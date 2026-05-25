@@ -1,0 +1,19 @@
+package.json
+  s_0857ba53256199::t_485c25028036eb 61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.1",
+  "base_commit_sha": "9ec207b4a562cfff003a957875c1d91faa087ed0",
+  "prompts": {},
+  "sessions": {
+    "s_0857ba53256199": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7ee9e770-9683-4ad6-a210-7292b9d12706",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
