@@ -410,6 +410,8 @@ describe('switchbot codex setup', () => {
     checkCodexCliMock.mockReturnValueOnce({
       name: 'codex-cli', status: 'ok', detail: { path: '/usr/local/bin/codex' },
     });
+    // npm ping succeeds (check-network step)
+    spawnSyncRepairMock.mockReturnValueOnce({ status: 0, stdout: 'Ping success: ...', stderr: '' });
     // npm view returns VERSION as latest → installed version matches → no upgrade
     spawnSyncRepairMock.mockReturnValueOnce({
       status: 0, stdout: VERSION + '\n', stderr: '',
@@ -447,6 +449,8 @@ describe('switchbot codex setup', () => {
     checkCodexCliMock.mockReturnValueOnce({
       name: 'codex-cli', status: 'ok', detail: { path: '/usr/local/bin/codex' },
     });
+    // npm ping succeeds (check-network step)
+    spawnSyncRepairMock.mockReturnValueOnce({ status: 0, stdout: 'Ping success: ...', stderr: '' });
     // npm view: latest is 99.0.0 (simulates a future release)
     spawnSyncRepairMock.mockReturnValueOnce({
       status: 0, stdout: '99.0.0\n', stderr: '',
@@ -488,6 +492,8 @@ describe('switchbot codex setup', () => {
     checkCodexCliMock.mockReturnValueOnce({
       name: 'codex-cli', status: 'ok', detail: { path: '/usr/local/bin/codex' },
     });
+    // npm ping succeeds (check-network step)
+    spawnSyncRepairMock.mockReturnValueOnce({ status: 0, stdout: 'Ping success: ...', stderr: '' });
     // npm view: latest is 99.0.0
     spawnSyncRepairMock.mockReturnValueOnce({ status: 0, stdout: '99.0.0\n', stderr: '' });
     // npm list -g: installed at 1.0.0
@@ -513,6 +519,8 @@ describe('switchbot codex setup', () => {
     checkCodexCliMock.mockReturnValueOnce({
       name: 'codex-cli', status: 'ok', detail: { path: '/usr/local/bin/codex' },
     });
+    // npm ping succeeds (check-network step)
+    spawnSyncRepairMock.mockReturnValueOnce({ status: 0, stdout: 'Ping success: ...', stderr: '' });
     // npm view fails (offline)
     spawnSyncRepairMock.mockReturnValueOnce({ status: 1, stdout: '', stderr: 'ENOTFOUND' });
     // npm list -g: installed at 1.0.0 (older than VERSION)
@@ -543,7 +551,7 @@ describe('switchbot codex setup', () => {
     expect(step.message).toContain(VERSION);
   });
 
-  it('--dry-run prints the 5-step list without mutating', async () => {
+  it('--dry-run prints the 6-step list without mutating', async () => {
     const { exitCode, stderr } = await runCli(
       registerCodexCommand,
       ['codex', 'setup', '--dry-run'],
@@ -551,6 +559,7 @@ describe('switchbot codex setup', () => {
     expect(exitCode).toBe(0);
     const out = stderr.join('\n');
     expect(out).toContain('check-codex-cli');
+    expect(out).toContain('check-network');
     expect(out).toContain('install-switchbot-cli');
     expect(out).not.toContain('install-codex-plugin');
     expect(out).toContain('register-plugin');
@@ -561,7 +570,7 @@ describe('switchbot codex setup', () => {
     expect(registerCodexPluginMock).not.toHaveBeenCalled();
   });
 
-  it('--dry-run --json emits 5 ordered steps with skippable flags', async () => {
+  it('--dry-run --json emits 6 ordered steps with skippable flags', async () => {
     const { exitCode, stdout } = await runCli(
       registerCodexCommand,
       ['codex', 'setup', '--dry-run', '--json'],
@@ -574,11 +583,12 @@ describe('switchbot codex setup', () => {
     };
     const data = parsed.data ?? parsed;
     expect(data.dryRun).toBe(true);
-    expect(data.steps).toHaveLength(5);
+    expect(data.steps).toHaveLength(6);
     expect(data.steps?.map((s) => s.name)).toEqual([
-      'check-codex-cli', 'install-switchbot-cli', 'register-plugin', 'auth', 'doctor-verify',
+      'check-codex-cli', 'check-network', 'install-switchbot-cli', 'register-plugin', 'auth', 'doctor-verify',
     ]);
     const skippable = Object.fromEntries(data.steps!.map((s) => [s.name, s.skippable]));
+    expect(skippable['check-network']).toBe(true);
     expect(skippable['install-switchbot-cli']).toBe(true);
     expect(skippable['auth']).toBe(true);
     expect(skippable['check-codex-cli']).toBe(false);
@@ -621,6 +631,8 @@ describe('switchbot codex setup', () => {
     checkCodexCliMock.mockReturnValueOnce({
       name: 'codex-cli', status: 'ok', detail: { path: '/usr/local/bin/codex', version: 'codex 1.2.3' },
     });
+    // npm ping succeeds (check-network step)
+    spawnSyncRepairMock.mockReturnValueOnce({ status: 0, stdout: 'Ping success: ...', stderr: '' });
     // npm view: returns current VERSION (no upgrade needed)
     spawnSyncRepairMock.mockReturnValueOnce({
       status: 0, stdout: VERSION + '\n', stderr: '',
@@ -665,6 +677,8 @@ describe('switchbot codex setup', () => {
     checkCodexCliMock.mockReturnValueOnce({
       name: 'codex-cli', status: 'ok', detail: { path: '/usr/local/bin/codex' },
     });
+    // npm ping succeeds (check-network step)
+    spawnSyncRepairMock.mockReturnValueOnce({ status: 0, stdout: 'Ping success: ...', stderr: '' });
     // npm view: returns current VERSION (no upgrade needed)
     spawnSyncRepairMock.mockReturnValueOnce({
       status: 0, stdout: VERSION + '\n', stderr: '',
@@ -711,6 +725,8 @@ describe('switchbot codex setup', () => {
     checkCodexCliMock.mockReturnValueOnce({
       name: 'codex-cli', status: 'ok', detail: { path: '/usr/local/bin/codex' },
     });
+    // npm ping succeeds (check-network step runs even when install-switchbot-cli is skipped)
+    spawnSyncRepairMock.mockReturnValueOnce({ status: 0, stdout: 'Ping success: ...', stderr: '' });
     // register-plugin: Route B succeeds — no npm install needed
     registerCodexPluginMock.mockReturnValueOnce({
       ok: true, pluginId: 'switchbot@codex-plugin', packageRoot: null,
@@ -732,14 +748,19 @@ describe('switchbot codex setup', () => {
     };
     const step = parsed.data!.outcomes.find((o) => o.step === 'install-switchbot-cli');
     expect(step?.status).toBe('skipped');
-    // Route B succeeded — no npm calls at all
-    expect(spawnSyncRepairMock).not.toHaveBeenCalled();
+    // check-network calls npm ping; no npm install calls
+    const installCalls = spawnSyncRepairMock.mock.calls.filter(
+      (c) => (c[1] as string[]).includes('install'),
+    );
+    expect(installCalls).toHaveLength(0);
   });
 
   it('install-switchbot-cli failure exits 1 (not 2 — only check-codex-cli is preflight)', async () => {
     checkCodexCliMock.mockReturnValueOnce({
       name: 'codex-cli', status: 'ok', detail: { path: '/usr/local/bin/codex' },
     });
+    // npm ping succeeds (check-network step)
+    spawnSyncRepairMock.mockReturnValueOnce({ status: 0, stdout: 'Ping success: ...', stderr: '' });
     // npm view: returns current VERSION (no upgrade needed)
     spawnSyncRepairMock.mockReturnValueOnce({
       status: 0, stdout: VERSION + '\n', stderr: '',
@@ -769,7 +790,7 @@ describe('switchbot codex setup', () => {
       data?: { preflightFailed: boolean; outcomes: Array<{ step: string; status: string }> };
     };
     expect(parsed.data!.preflightFailed).toBe(false);
-    expect(parsed.data!.outcomes).toHaveLength(5); // all 5 steps ran (no preflight halt)
+    expect(parsed.data!.outcomes).toHaveLength(6); // all 6 steps ran (no preflight halt)
     expect(parsed.data!.outcomes.find((o) => o.step === 'install-switchbot-cli')?.status).toBe('failed');
     // register-plugin still got called despite the earlier failure
     expect(registerCodexPluginMock).toHaveBeenCalledOnce();
@@ -779,6 +800,8 @@ describe('switchbot codex setup', () => {
     checkCodexCliMock.mockReturnValueOnce({
       name: 'codex-cli', status: 'ok', detail: { path: '/usr/local/bin/codex' },
     });
+    // npm ping succeeds (check-network step)
+    spawnSyncRepairMock.mockReturnValueOnce({ status: 0, stdout: 'Ping success: ...', stderr: '' });
     // npm view: returns current VERSION (no upgrade needed)
     spawnSyncRepairMock.mockReturnValueOnce({
       status: 0, stdout: VERSION + '\n', stderr: '',
@@ -821,6 +844,8 @@ describe('switchbot codex setup', () => {
     checkCodexCliMock.mockReturnValueOnce({
       name: 'codex-cli', status: 'ok', detail: { path: '/usr/local/bin/codex' },
     });
+    // npm ping succeeds (check-network step)
+    spawnSyncRepairMock.mockReturnValueOnce({ status: 0, stdout: 'Ping success: ...', stderr: '' });
     // npm view: returns current VERSION (no upgrade needed)
     spawnSyncRepairMock.mockReturnValueOnce({
       status: 0, stdout: VERSION + '\n', stderr: '',
@@ -851,5 +876,70 @@ describe('switchbot codex setup', () => {
     const authStep = parsed.data!.outcomes.find((o) => o.step === 'auth');
     expect(authStep?.status).toBe('failed');
     expect(authStep?.message).toContain('auth login exited 1');
+  });
+
+  it('check-network ok when npm ping succeeds', async () => {
+    checkCodexCliMock.mockReturnValueOnce({
+      name: 'codex-cli', status: 'ok', detail: { path: '/usr/local/bin/codex' },
+    });
+    // npm ping succeeds
+    spawnSyncRepairMock.mockReturnValueOnce({ status: 0, stdout: 'Ping success: ...', stderr: '' });
+    // npm view: current version (install-switchbot-cli step)
+    spawnSyncRepairMock.mockReturnValueOnce({ status: 0, stdout: VERSION + '\n', stderr: '' });
+    // npm list -g: already installed at VERSION
+    spawnSyncRepairMock.mockReturnValueOnce({
+      status: 0,
+      stdout: JSON.stringify({ dependencies: { '@switchbot/openapi-cli': { version: VERSION } } }),
+      stderr: '',
+    });
+    registerCodexPluginMock.mockReturnValueOnce({ ok: true, pluginId: 'switchbot@codex-plugin', packageRoot: null });
+    tryLoadConfigMock.mockReturnValue({ token: 't', secret: 's' });
+    runDoctorChecksMock.mockResolvedValueOnce(makeBaseChecks());
+    checkCodexCliMock.mockReturnValue({ name: 'codex-cli', status: 'ok', detail: 'ok' });
+    checkCodexPluginNpmMock.mockReturnValue({ name: 'codex-plugin-npm', status: 'ok', detail: 'ok' });
+    checkCodexPluginRegisteredMock.mockReturnValue({ name: 'codex-plugin-registered', status: 'ok', detail: 'ok' });
+
+    const { exitCode, stdout } = await runCli(registerCodexCommand, ['codex', 'setup', '--json']);
+    expect(exitCode).toBe(0);
+    const parsed = JSON.parse(stdout.join('')) as {
+      data?: { outcomes: Array<{ step: string; status: string; message?: string }> };
+    };
+    const step = parsed.data!.outcomes.find((o) => o.step === 'check-network')!;
+    expect(step.status).toBe('ok');
+    expect(step.message).toContain('reachable');
+  });
+
+  it('check-network warn when npm ping fails, includes config.toml hint', async () => {
+    checkCodexCliMock.mockReturnValueOnce({
+      name: 'codex-cli', status: 'ok', detail: { path: '/usr/local/bin/codex' },
+    });
+    // npm ping fails (offline / sandboxed)
+    spawnSyncRepairMock.mockReturnValueOnce({ status: 1, stdout: '', stderr: 'ENOTFOUND' });
+    // install-switchbot-cli: npm view offline fallback
+    spawnSyncRepairMock.mockReturnValueOnce({ status: 1, stdout: '', stderr: 'ENOTFOUND' });
+    // npm list -g: installed at VERSION
+    spawnSyncRepairMock.mockReturnValueOnce({
+      status: 0,
+      stdout: JSON.stringify({ dependencies: { '@switchbot/openapi-cli': { version: VERSION } } }),
+      stderr: '',
+    });
+    registerCodexPluginMock.mockReturnValueOnce({ ok: true, pluginId: 'switchbot@codex-plugin', packageRoot: null });
+    tryLoadConfigMock.mockReturnValue({ token: 't', secret: 's' });
+    runDoctorChecksMock.mockResolvedValueOnce(makeBaseChecks());
+    checkCodexCliMock.mockReturnValue({ name: 'codex-cli', status: 'ok', detail: 'ok' });
+    checkCodexPluginNpmMock.mockReturnValue({ name: 'codex-plugin-npm', status: 'ok', detail: 'ok' });
+    checkCodexPluginRegisteredMock.mockReturnValue({ name: 'codex-plugin-registered', status: 'ok', detail: 'ok' });
+
+    const { exitCode, stdout } = await runCli(registerCodexCommand, ['codex', 'setup', '--json']);
+    // warn is non-blocking — overall should still be 0 if other steps succeed
+    expect(exitCode).toBe(0);
+    const parsed = JSON.parse(stdout.join('')) as {
+      data?: { outcomes: Array<{ step: string; status: string; message?: string }> };
+    };
+    const step = parsed.data!.outcomes.find((o) => o.step === 'check-network')!;
+    expect(step.status).toBe('warn');
+    expect(step.message).toContain('sandbox_workspace_write');
+    expect(step.message).toContain('network_access = true');
+    expect(step.message).toContain('~/.codex/config.toml');
   });
 });

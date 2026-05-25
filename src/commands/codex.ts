@@ -109,7 +109,7 @@ function buildAuthLoginArgv(profile: string, configPath?: string): string[] {
 
 interface StepOutcome {
   step: string;
-  status: 'ok' | 'skipped' | 'failed';
+  status: 'ok' | 'skipped' | 'failed' | 'warn';
   message?: string;
 }
 
@@ -370,11 +370,33 @@ type SetupOutcome = StepOutcome;
 
 const SETUP_STEPS: readonly StepDef[] = [
   { name: 'check-codex-cli',       description: 'Verify codex CLI on PATH',                                        skippable: false },
-  { name: 'install-switchbot-cli', description: 'Install @switchbot/openapi-cli if missing',                       skippable: true  },
+  { name: 'check-network',         description: 'Probe npm registry; print Codex config hint if offline',          skippable: true  },
+  { name: 'install-switchbot-cli', description: 'Install @switchbot/openapi-cli if missing or outdated',           skippable: true  },
   { name: 'register-plugin',       description: 'Register plugin (Route B git; npm install + Route A on fallback)', skippable: false },
   { name: 'auth',                  description: 'Verify credentials; spawn auth login if missing',                 skippable: true  },
   { name: 'doctor-verify',         description: 'Run 4 base + 3 Codex checks and report health',                   skippable: false },
 ];
+
+function setupStepCheckNetwork(): SetupOutcome {
+  const r = spawnSync(
+    'npm', ['ping'],
+    { encoding: 'utf-8', shell: process.platform === 'win32', timeout: 5000 },
+  );
+  if ((r.status ?? 1) === 0) {
+    return { step: 'check-network', status: 'ok', message: 'npm registry reachable' };
+  }
+  return {
+    step: 'check-network',
+    status: 'warn',
+    message: [
+      'npm registry unreachable — install and plugin registration require network access.',
+      'To enable network in Codex, add to ~/.codex/config.toml:',
+      '  [sandbox_workspace_write]',
+      '  network_access = true',
+      'Then restart Codex and re-run: switchbot codex setup',
+    ].join('\n'),
+  };
+}
 
 function setupStepCheckCodexCli(): SetupOutcome {
   const c = checkCodexCli();
@@ -504,6 +526,7 @@ async function runSetup(
     }
     let outcome: SetupOutcome;
     if (step.name === 'check-codex-cli')             outcome = setupStepCheckCodexCli();
+    else if (step.name === 'check-network')          outcome = setupStepCheckNetwork();
     else if (step.name === 'install-switchbot-cli')  outcome = setupStepInstallSwitchbotCli();
     else if (step.name === 'register-plugin')        outcome = setupStepRegisterPlugin(ctx);
     else if (step.name === 'auth')                   outcome = await setupStepAuth(ctx);
@@ -588,6 +611,7 @@ Environment variables:
           const icon =
             o.status === 'ok'      ? chalk.green('✓') :
             o.status === 'skipped' ? chalk.dim('·') :
+            o.status === 'warn'    ? chalk.yellow('⚠') :
                                      chalk.red('✗');
           console.log(`${icon} ${o.step.padEnd(22)} ${o.message ?? ''}`);
         }
