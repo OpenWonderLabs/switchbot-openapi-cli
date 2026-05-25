@@ -180,6 +180,26 @@ try {
     }
   }
 
+  // Verify ordering: all plugin removes must come before marketplace add
+  const marketplaceAddIdx = registrationSequence.indexOf(
+    `codex plugin marketplace add ${marketplaceSourceRoot}`
+  );
+  const pluginAddIdx = registrationSequence.indexOf('codex plugin add switchbot@switchbot');
+  const pluginRemoveIds = ['switchbot@switchbot', 'switchbot@codex-plugin', 'switchbot@switchbot-skill'];
+  for (const id of pluginRemoveIds) {
+    const removeIdx = registrationSequence.indexOf(`codex plugin remove ${id}`);
+    if (removeIdx === -1 || removeIdx >= marketplaceAddIdx) {
+      throw new Error(
+        `codex plugin remove ${id} must happen before marketplace add (remove idx: ${removeIdx}, marketplace add idx: ${marketplaceAddIdx})`
+      );
+    }
+  }
+  if (pluginAddIdx <= marketplaceAddIdx) {
+    throw new Error(
+      `codex plugin add must happen after marketplace add (add idx: ${pluginAddIdx}, marketplace add idx: ${marketplaceAddIdx})`
+    );
+  }
+
   console.log('codex pack-install smoke ok: tarballs install, setup dry-run is present, hook is non-blocking, fresh install registration uses switchbot@switchbot');
 } finally {
   for (const tarball of packed) {
