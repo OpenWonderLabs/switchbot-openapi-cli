@@ -9,6 +9,9 @@ const repoRoot = path.dirname(scriptDir);
 const workDir = mkdtempSync(path.join(os.tmpdir(), 'switchbot-codex-prefix-'));
 const prefixDir = path.join(workDir, 'prefix');
 const packed = [];
+const expectedPluginVersion = JSON.parse(
+  readFileSync(path.join(repoRoot, 'packages', 'codex-plugin', 'package.json'), 'utf-8')
+).version;
 
 function runNpm(args, options = {}) {
   const npmExecPath = process.env.npm_execpath;
@@ -57,8 +60,8 @@ try {
 
   const pluginPkg = readJson(path.join(pluginRoot, 'package.json'));
   const cliPkg = readJson(path.join(cliRoot, 'package.json'));
-  if (pluginPkg.version !== '0.1.3') {
-    throw new Error(`expected installed codex-plugin version 0.1.3, got ${pluginPkg.version}`);
+  if (pluginPkg.version !== expectedPluginVersion) {
+    throw new Error(`expected installed codex-plugin version ${expectedPluginVersion}, got ${pluginPkg.version}`);
   }
 
   const {
