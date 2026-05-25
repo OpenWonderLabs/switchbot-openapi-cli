@@ -328,4 +328,65 @@ describe('resolveMarketplaceSourceRoot', () => {
       },
     );
   });
+
+  it('throws a helpful EPERM message when symlinkSync fails on dangling-symlink branch', () => {
+    const epermErr = Object.assign(new Error('operation not permitted'), { code: 'EPERM' });
+    const deps = {
+      mkdirSync: () => {},
+      lstatSync: (_p, _opts) => ({ isSymbolicLink: () => true }),  // alias exists as symlink
+      symlinkSync: (_src, _dest, _type) => { throw epermErr; },
+      realpathSync: (_p) => { throw new Error('ENOENT: no such file'); }, // dangling → target gone
+      unlinkSync: () => {},
+    };
+
+    const scopedPath = process.platform === 'win32'
+      ? 'C:\\Users\\test\\node_modules\\@switchbot\\codex-plugin'
+      : '/home/user/node_modules/@switchbot/codex-plugin';
+
+    assert.throws(
+      () => resolveMarketplaceSourceRoot(scopedPath, deps),
+      (err) => {
+        assert.ok(err instanceof Error, 'should throw an Error');
+        assert.ok(err.message.includes('EPERM'), `message should mention EPERM, got: ${err.message}`);
+        assert.ok(
+          err.message.includes('permission denied') || err.message.includes('elevated'),
+          `message should be actionable, got: ${err.message}`,
+        );
+        return true;
+      },
+    );
+  });
+
+  it('throws a helpful EPERM message when symlinkSync fails on stale-target branch', () => {
+    const epermErr = Object.assign(new Error('operation not permitted'), { code: 'EPERM' });
+    let realCallCount = 0;
+    const deps = {
+      mkdirSync: () => {},
+      lstatSync: (_p, _opts) => ({ isSymbolicLink: () => true }),  // alias exists as symlink
+      symlinkSync: (_src, _dest, _type) => { throw epermErr; },
+      realpathSync: (p) => {
+        realCallCount++;
+        // First call = aliasRoot, second call = packageRoot — return different values so paths differ
+        return realCallCount === 1 ? p + '-old' : p + '-new';
+      },
+      unlinkSync: () => {},
+    };
+
+    const scopedPath = process.platform === 'win32'
+      ? 'C:\\Users\\test\\node_modules\\@switchbot\\codex-plugin'
+      : '/home/user/node_modules/@switchbot/codex-plugin';
+
+    assert.throws(
+      () => resolveMarketplaceSourceRoot(scopedPath, deps),
+      (err) => {
+        assert.ok(err instanceof Error, 'should throw an Error');
+        assert.ok(err.message.includes('EPERM'), `message should mention EPERM, got: ${err.message}`);
+        assert.ok(
+          err.message.includes('permission denied') || err.message.includes('elevated'),
+          `message should be actionable, got: ${err.message}`,
+        );
+        return true;
+      },
+    );
+  });
 });
