@@ -43,7 +43,15 @@ function readJsonObject(filePath: string): Record<string, unknown> | null {
 }
 
 function resolveMarketplaceName(packageRoot: string): string {
-  // Check root-level marketplace.json first (canonical path Codex CLI reads)
+  // Check .claude-plugin/marketplace.json (canonical path Codex CLI reads, >=0.1.3)
+  const claudePluginPath = path.join(packageRoot, '.claude-plugin', 'marketplace.json');
+  if (fs.existsSync(claudePluginPath)) {
+    const manifest = readJsonObject(claudePluginPath);
+    if (typeof manifest?.name === 'string' && manifest.name) {
+      return manifest.name;
+    }
+  }
+  // Fall back to root-level marketplace.json (present in pre-0.1.3 local copies)
   const rootManifestPath = path.join(packageRoot, 'marketplace.json');
   if (fs.existsSync(rootManifestPath)) {
     const manifest = readJsonObject(rootManifestPath);
@@ -339,13 +347,19 @@ export function runCodexPluginRegistrationGit(pluginId: string): RegistrationRes
     spawnStr('codex', ['plugin', 'marketplace', 'remove', name]);
   }
   // git clone via marketplace add can take >10 s on slow networks; use 60 s
-  const mkt = spawnStr('codex', [
+  const mktArgs = [
     'plugin', 'marketplace', 'add',
     CODEX_GIT_MARKETPLACE_REPO,
     '--sparse', CODEX_GIT_MARKETPLACE_SPARSE,
     '--sparse', CODEX_GIT_MARKETPLACE_SPARSE2,
     '--ref',    ref,
-  ], timeout);
+  ];
+  let mkt = spawnStr('codex', mktArgs, timeout);
+  // On Windows, git holds file handles briefly after clone; retry once after 10 s.
+  if (mkt.status !== 0 && process.platform === 'win32' && mkt.stderr.includes('os error 32')) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10000);
+    mkt = spawnStr('codex', mktArgs, timeout);
+  }
   if (mkt.status !== 0) {
     return { ok: false, exitCode: mkt.status, stderr: mkt.stderr, stage: 'marketplace-add' };
   }

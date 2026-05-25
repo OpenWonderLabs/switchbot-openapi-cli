@@ -22,22 +22,31 @@ function defaultRunInherit(cmd, args) {
 
 export function resolvePluginIdentifier(packageRoot) {
   let marketplaceName = basename(packageRoot);
-  // Check root-level marketplace.json first (canonical path Codex CLI reads)
-  const rootManifestPath = join(packageRoot, 'marketplace.json');
-  if (existsSync(rootManifestPath)) {
+  // Check .claude-plugin/marketplace.json (canonical path for >=0.1.3)
+  const claudePluginPath = join(packageRoot, '.claude-plugin', 'marketplace.json');
+  if (existsSync(claudePluginPath)) {
     try {
-      const m = JSON.parse(readFileSync(rootManifestPath, 'utf8'));
+      const m = JSON.parse(readFileSync(claudePluginPath, 'utf8'));
       if (m?.name) marketplaceName = m.name;
     } catch {}
   } else {
-    const marketplacePath = join(packageRoot, '.agents', 'plugins', 'marketplace.json');
-    if (existsSync(marketplacePath)) {
+    // Fall back to root-level marketplace.json (pre-0.1.3 local copies)
+    const rootManifestPath = join(packageRoot, 'marketplace.json');
+    if (existsSync(rootManifestPath)) {
       try {
-        const marketplace = JSON.parse(readFileSync(marketplacePath, 'utf8'));
-        if (marketplace?.name) {
-          marketplaceName = marketplace.name;
-        }
+        const m = JSON.parse(readFileSync(rootManifestPath, 'utf8'));
+        if (m?.name) marketplaceName = m.name;
       } catch {}
+    } else {
+      const marketplacePath = join(packageRoot, '.agents', 'plugins', 'marketplace.json');
+      if (existsSync(marketplacePath)) {
+        try {
+          const marketplace = JSON.parse(readFileSync(marketplacePath, 'utf8'));
+          if (marketplace?.name) {
+            marketplaceName = marketplace.name;
+          }
+        } catch {}
+      }
     }
   }
 
