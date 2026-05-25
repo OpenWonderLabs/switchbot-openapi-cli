@@ -1,0 +1,20 @@
+.github/workflows/publish.yml
+  s_ffdcf8765e4b95::t_88275799a40889 98,100,104,108
+  s_ffdcf8765e4b95::t_a84667279aff69 4-6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.1",
+  "base_commit_sha": "6c83c15c7da91a9e8001c8cb495a1c44190643dc",
+  "prompts": {},
+  "sessions": {
+    "s_ffdcf8765e4b95": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9bba38b1-2790-40b0-86d8-af1157ed343b",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
