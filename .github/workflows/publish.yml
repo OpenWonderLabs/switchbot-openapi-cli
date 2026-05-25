@@ -1,8 +1,9 @@
 name: Publish to npm
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - 'v*'
 
 jobs:
   publish:
@@ -94,17 +95,17 @@ jobs:
           echo "OK: codex-plugin peerDep = '$PEER'"
           rm -f "/tmp/$TARBALL"
 
-      - name: Publish root CLI to npm dist-tag next
+      - name: Publish root CLI to npm
         if: steps.detect.outputs.cli_publish == 'true'
-        run: npm publish --tag next --provenance --access public
+        run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Publish codex-plugin to npm dist-tag next
+      - name: Publish codex-plugin to npm
         id: publish_codex
         if: steps.detect.outputs.codex_publish == 'true'
         continue-on-error: true
-        run: npm publish -w @switchbot/codex-plugin --tag next --provenance --access public
+        run: npm publish -w @switchbot/codex-plugin --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
