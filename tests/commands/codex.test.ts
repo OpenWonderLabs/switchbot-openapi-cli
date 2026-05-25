@@ -382,19 +382,21 @@ describe('switchbot codex repair', () => {
     expect(removedIds).toContain('switchbot@switchbot-skill');
   });
 
-  it('remove-plugin falls back to default ID "switchbot@codex-plugin" when npm root -g fails', async () => {
+  it('remove-plugin falls back to default ID "switchbot@switchbot" when npm root -g fails', async () => {
     // verify-cli passes
     runDoctorChecksMock.mockResolvedValueOnce([
       { name: 'node', status: 'ok', detail: 'ok' },
       { name: 'path', status: 'ok', detail: 'ok' },
     ]);
-    // remove-plugin: npm root -g fails → fallback to 'switchbot@codex-plugin'
+    // remove-plugin: npm root -g fails → fallback to 'switchbot@switchbot'
     spawnSyncRepairMock
-      .mockReturnValueOnce({ status: 1, stdout: '', stderr: 'npm error' }) // npm root -g fails
-      .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' })          // remove switchbot@codex-plugin
-      .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' });         // remove legacy id
+      .mockReturnValueOnce({ status: 1, stdout: '', stderr: 'npm error' })  // npm root -g fails
+      .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' })           // remove switchbot@switchbot
+      .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' })           // remove switchbot@codex-plugin
+      .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' })           // remove switchbot@switchbot-skill
+      .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' });          // extra buffer
     // register-plugin: ok
-    registerCodexPluginMock.mockReturnValueOnce({ ok: true, pluginId: 'switchbot@codex-plugin', packageRoot: null });
+    registerCodexPluginMock.mockReturnValueOnce({ ok: true, pluginId: 'switchbot@switchbot', packageRoot: null });
     // doctor-verify
     runDoctorChecksMock.mockResolvedValueOnce(makeBaseChecks());
     checkCodexCliMock.mockReturnValue({ name: 'codex-cli', status: 'ok', detail: 'ok' });
@@ -407,6 +409,7 @@ describe('switchbot codex repair', () => {
       (call) => (call[1] as string[]).includes('remove'),
     );
     const removedIds = removeCalls.map((call) => (call[1] as string[])[2]);
+    expect(removedIds).toContain('switchbot@switchbot');
     expect(removedIds).toContain('switchbot@codex-plugin');
     expect(removedIds).toContain('switchbot@switchbot-skill');
   });

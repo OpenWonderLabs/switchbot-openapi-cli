@@ -9,6 +9,7 @@ import {
   registerCodexPluginAuto,
   resolvePluginId,
   resolveCodexPackageRoot,
+  CODEX_PLUGIN_DEFAULT_ID,
   CODEX_PLUGIN_LEGACY_IDS,
   type Check,
 } from '../install/codex-checks.js';
@@ -172,7 +173,7 @@ function repairStepRemovePlugin(ctx: RepairContext): RepairOutcome {
   let pluginId = ctx.codexPluginId;
   if (!pluginId) {
     const root = resolveCodexPackageRoot();
-    pluginId = root.ok ? resolvePluginId(root.packageRoot) : 'switchbot@codex-plugin';
+    pluginId = root.ok ? resolvePluginId(root.packageRoot) : CODEX_PLUGIN_DEFAULT_ID;
     ctx.codexPluginId = pluginId;
   }
   for (const id of [...new Set([pluginId, ...CODEX_PLUGIN_LEGACY_IDS])]) {
