@@ -22,14 +22,23 @@ function defaultRunInherit(cmd, args) {
 
 export function resolvePluginIdentifier(packageRoot) {
   let marketplaceName = basename(packageRoot);
-  const marketplacePath = join(packageRoot, '.agents', 'plugins', 'marketplace.json');
-  if (existsSync(marketplacePath)) {
+  // Check root-level marketplace.json first (canonical path Codex CLI reads)
+  const rootManifestPath = join(packageRoot, 'marketplace.json');
+  if (existsSync(rootManifestPath)) {
     try {
-      const marketplace = JSON.parse(readFileSync(marketplacePath, 'utf8'));
-      if (marketplace?.name) {
-        marketplaceName = marketplace.name;
-      }
+      const m = JSON.parse(readFileSync(rootManifestPath, 'utf8'));
+      if (m?.name) marketplaceName = m.name;
     } catch {}
+  } else {
+    const marketplacePath = join(packageRoot, '.agents', 'plugins', 'marketplace.json');
+    if (existsSync(marketplacePath)) {
+      try {
+        const marketplace = JSON.parse(readFileSync(marketplacePath, 'utf8'));
+        if (marketplace?.name) {
+          marketplaceName = marketplace.name;
+        }
+      } catch {}
+    }
   }
 
   let pluginName = 'switchbot';
@@ -110,7 +119,7 @@ function formatCodexFailure(step) {
   ].join('\n');
 }
 
-const CODEX_PLUGIN_LEGACY_IDS = ['switchbot@switchbot-skill'];
+const CODEX_PLUGIN_LEGACY_IDS = ['switchbot@codex-plugin', 'switchbot@switchbot-skill'];
 
 export function makeInstall({ checkCli, runInherit, packageRoot, runAuth, resolveRoot = resolveMarketplaceSourceRoot }) {
   return async function install() {
@@ -150,7 +159,7 @@ export function makeInstall({ checkCli, runInherit, packageRoot, runAuth, resolv
     }
 
     const pluginName = resolvePluginIdentifier(packageRoot);
-    for (const id of [pluginName, ...CODEX_PLUGIN_LEGACY_IDS]) {
+    for (const id of [...new Set([pluginName, ...CODEX_PLUGIN_LEGACY_IDS])]) {
       process.stderr.write(`[switchbot-codex] Removing stale plugin ${id} if present...\n`);
       const removeCode = await runInherit('codex', ['plugin', 'remove', id]);
       if (removeCode !== 0) {

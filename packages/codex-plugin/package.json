@@ -33,6 +33,7 @@
     ".codex-plugin/",
     ".agents/",
     ".mcp.json",
+    "marketplace.json",
     "README.md"
   ],
   "peerDependencies": {

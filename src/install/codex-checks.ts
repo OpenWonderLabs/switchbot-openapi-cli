@@ -43,9 +43,18 @@ function readJsonObject(filePath: string): Record<string, unknown> | null {
 }
 
 function resolveMarketplaceName(packageRoot: string): string {
-  const marketplacePath = path.join(packageRoot, '.agents', 'plugins', 'marketplace.json');
-  if (fs.existsSync(marketplacePath)) {
-    const marketplace = readJsonObject(marketplacePath);
+  // Check root-level marketplace.json first (canonical path Codex CLI reads)
+  const rootManifestPath = path.join(packageRoot, 'marketplace.json');
+  if (fs.existsSync(rootManifestPath)) {
+    const manifest = readJsonObject(rootManifestPath);
+    if (typeof manifest?.name === 'string' && manifest.name) {
+      return manifest.name;
+    }
+  }
+  // Fall back to legacy .agents/plugins/marketplace.json
+  const legacyPath = path.join(packageRoot, '.agents', 'plugins', 'marketplace.json');
+  if (fs.existsSync(legacyPath)) {
+    const marketplace = readJsonObject(legacyPath);
     if (typeof marketplace?.name === 'string' && marketplace.name) {
       return marketplace.name;
     }
@@ -244,7 +253,7 @@ export function runCodexPluginRegistration(packageRoot: string, pluginId: string
     return { ok: false, exitCode: mkt.status, stderr: mkt.stderr, stage: 'marketplace-add' };
   }
   // Remove current and legacy IDs; ignore exit codes (best-effort pre-clean).
-  for (const id of [pluginId, ...CODEX_PLUGIN_LEGACY_IDS]) {
+  for (const id of [...new Set([pluginId, ...CODEX_PLUGIN_LEGACY_IDS])]) {
     spawnStr('codex', ['plugin', 'remove', id]);
   }
   const add = spawnStr('codex', ['plugin', 'add', pluginId]);
@@ -290,9 +299,9 @@ export function registerCodexPlugin(): RegisterCodexPluginResult {
 export const CODEX_GIT_MARKETPLACE_REPO   = 'OpenWonderLabs/switchbot-openapi-cli';
 export const CODEX_GIT_MARKETPLACE_SPARSE = 'packages/codex-plugin';
 export const CODEX_GIT_MARKETPLACE_REF    = 'main';
-export const CODEX_PLUGIN_DEFAULT_ID      = 'switchbot@codex-plugin';
+export const CODEX_PLUGIN_DEFAULT_ID      = 'switchbot@switchbot';
 // Known IDs from pre-release installs; cleaned up by both Route A and Route B.
-export const CODEX_PLUGIN_LEGACY_IDS = ['switchbot@switchbot-skill'];
+export const CODEX_PLUGIN_LEGACY_IDS = ['switchbot@codex-plugin', 'switchbot@switchbot-skill'];
 
 export function runCodexPluginRegistrationGit(pluginId: string): RegistrationResult {
   const ref = process.env['CODEX_GIT_MARKETPLACE_REF'] || CODEX_GIT_MARKETPLACE_REF;
@@ -316,7 +325,7 @@ export function runCodexPluginRegistrationGit(pluginId: string): RegistrationRes
     return { ok: false, exitCode: mkt.status, stderr: mkt.stderr, stage: 'marketplace-add' };
   }
   // Pre-clean: remove current ID and any known legacy IDs; ignore exit codes
-  for (const id of [pluginId, ...CODEX_PLUGIN_LEGACY_IDS]) {
+  for (const id of [...new Set([pluginId, ...CODEX_PLUGIN_LEGACY_IDS])]) {
     spawnStr('codex', ['plugin', 'remove', id]);
   }
   const add = spawnStr('codex', ['plugin', 'add', pluginId]);

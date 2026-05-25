@@ -175,7 +175,7 @@ function repairStepRemovePlugin(ctx: RepairContext): RepairOutcome {
     pluginId = root.ok ? resolvePluginId(root.packageRoot) : 'switchbot@codex-plugin';
     ctx.codexPluginId = pluginId;
   }
-  for (const id of [pluginId, ...CODEX_PLUGIN_LEGACY_IDS]) {
+  for (const id of [...new Set([pluginId, ...CODEX_PLUGIN_LEGACY_IDS])]) {
     const r = spawnSync(
       'codex', ['plugin', 'remove', id],
       { encoding: 'utf-8', shell: process.platform === 'win32', timeout: 15000 },
@@ -346,18 +346,66 @@ function registerCodexRepairSubcommand(codex: Command): void {
           console.log(`${icon} ${o.step.padEnd(18)} ${o.message ?? ''}`);
         }
         console.log('');
+        printRepairStatusSummary(outcomes);
+        console.log('');
         if (!anyFailed) {
-          console.log(chalk.green('Repair complete. Restart Codex and run: switchbot devices list'));
+          console.log(chalk.green('Repair complete.'));
+          console.log(chalk.dim('Restart Codex Desktop to reload the SwitchBot skill and MCP tools.'));
+          console.log(chalk.dim('After restart, ask: "List my SwitchBot devices."'));
         } else if (preflightFailed) {
           console.log(chalk.red('Preflight failed — fix the above issue and re-run.'));
         } else {
-          console.log(chalk.yellow('Repair finished with failures. Review the output above.'));
+          console.log(chalk.yellow('Repair finished with failures.'));
+          console.log(chalk.dim('Run: switchbot codex repair --skip re-auth'));
         }
       }
       if (preflightFailed) process.exit(2);
       if (anyFailed) process.exit(1);
       process.exit(0);
     });
+}
+
+// ─── status summary helpers ───────────────────────────────────────────────────
+
+function statusLine(label: string, ok: boolean | null, note?: string): void {
+  const icon = ok === true ? chalk.green('✓') : ok === false ? chalk.red('✗') : chalk.yellow('?');
+  const color = ok === true ? chalk.green : ok === false ? chalk.red : chalk.yellow;
+  const suffix = note ? chalk.dim(`  — ${note}`) : '';
+  console.log(`  ${icon} ${color(label)}${suffix}`);
+}
+
+function printSetupStatusSummary(outcomes: SetupOutcome[]): void {
+  const find = (name: string) => outcomes.find((o) => o.step === name);
+  const isOk = (name: string) => {
+    const o = find(name);
+    return o ? (o.status === 'ok' || o.status === 'skipped') : null;
+  };
+  const cliOk = isOk('install-switchbot-cli');
+  const authOk = isOk('auth');
+  const pluginOk = outcomes.find((o) => o.step === 'register-plugin')?.status === 'ok' ? true
+                 : outcomes.find((o) => o.step === 'register-plugin')?.status === 'failed' ? false
+                 : null;
+  console.log(chalk.bold('Component status:'));
+  statusLine('CLI installed     (switchbot)', cliOk, cliOk === false ? 'run: npm install -g @switchbot/openapi-cli@latest' : undefined);
+  statusLine('Credentials       (API token)', authOk, authOk === false ? 'run: switchbot auth login' : undefined);
+  statusLine('Codex plugin      (switchbot)', pluginOk, pluginOk === false ? 'run: switchbot codex repair' : undefined);
+}
+
+function printRepairStatusSummary(outcomes: RepairOutcome[]): void {
+  const find = (name: string) => outcomes.find((o) => o.step === name);
+  const isOk = (name: string) => {
+    const o = find(name);
+    return o ? (o.status === 'ok' || o.status === 'skipped') : null;
+  };
+  const cliOk = isOk('verify-cli');
+  const authOk = isOk('re-auth');
+  const pluginOk = outcomes.find((o) => o.step === 'register-plugin')?.status === 'ok' ? true
+                 : outcomes.find((o) => o.step === 'register-plugin')?.status === 'failed' ? false
+                 : null;
+  console.log(chalk.bold('Component status:'));
+  statusLine('CLI installed     (switchbot)', cliOk);
+  statusLine('Credentials       (API token)', authOk, authOk === false ? 'run: switchbot auth login' : undefined);
+  statusLine('Codex plugin      (switchbot)', pluginOk, pluginOk === false ? 'run: switchbot codex repair' : undefined);
 }
 
 // ─── setup ───────────────────────────────────────────────────────────────────
@@ -652,12 +700,17 @@ Environment variables:
           console.log(`${icon} ${o.step.padEnd(22)} ${o.message ?? ''}`);
         }
         console.log('');
+        printSetupStatusSummary(outcomes);
+        console.log('');
         if (!anyFailed) {
-          console.log(chalk.green('Setup complete. Restart Codex and run: switchbot devices list'));
+          console.log(chalk.green('Setup complete.'));
+          console.log(chalk.dim('Restart Codex Desktop to load the SwitchBot skill and MCP tools.'));
+          console.log(chalk.dim('After restart, ask: "List my SwitchBot devices."'));
         } else if (preflightFailed) {
           console.log(chalk.red('Preflight failed — install Codex CLI first, then re-run.'));
         } else {
-          console.log(chalk.yellow('Setup finished with failures. Review the output above.'));
+          console.log(chalk.yellow('Setup finished with failures.'));
+          console.log(chalk.dim('Run: switchbot codex repair'));
         }
       }
       if (preflightFailed) process.exit(2);
