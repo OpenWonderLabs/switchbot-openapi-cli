@@ -42,6 +42,8 @@ import {
   registerCodexPlugin,
   registerCodexPluginGit,
   registerCodexPluginAuto,
+  CODEX_GIT_MARKETPLACE_SPARSE,
+  CODEX_GIT_MARKETPLACE_SPARSE2,
 } from '../../src/install/codex-checks.js';
 
 function makeSpawnResult(status: number, stdout: string, stderr = ''): ReturnType<typeof spawnSyncMock> {
@@ -591,6 +593,30 @@ describe('runCodexPluginRegistrationGit', () => {
     expect(mktCall?.[1][refIdx + 1]).toBe('feat/my-branch');
     if (origEnv === undefined) delete process.env['CODEX_GIT_MARKETPLACE_REF'];
     else process.env['CODEX_GIT_MARKETPLACE_REF'] = origEnv;
+  });
+
+  it('passes both --sparse flags (packages/codex-plugin and .claude-plugin) to marketplace add', () => {
+    spawnSyncMock
+      .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (current id: switchbot@switchbot)
+      .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (legacy id: switchbot@codex-plugin)
+      .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (legacy id: switchbot@switchbot-skill)
+      .mockReturnValueOnce(makeSpawnResult(0, ''))  // marketplace remove ×3
+      .mockReturnValueOnce(makeSpawnResult(0, ''))
+      .mockReturnValueOnce(makeSpawnResult(0, ''))
+      .mockReturnValueOnce(makeSpawnResult(0, ''))  // marketplace add (git)
+      .mockReturnValueOnce(makeSpawnResult(0, '')); // plugin add
+    runCodexPluginRegistrationGit('switchbot@switchbot');
+    const calls = spawnSyncMock.mock.calls as [string, string[]][];
+    const mktCall = calls.find(([cmd, args]) => cmd === 'codex' && args.includes('marketplace') && args.includes('add'));
+    expect(mktCall).toBeDefined();
+    const mktArgs = mktCall![1];
+    // Both sparse paths must be present
+    const sparseIndices = mktArgs
+      .map((a, i) => (a === '--sparse' ? i : -1))
+      .filter(i => i >= 0);
+    expect(sparseIndices.length).toBe(2);
+    expect(mktArgs[sparseIndices[0] + 1]).toBe(CODEX_GIT_MARKETPLACE_SPARSE);
+    expect(mktArgs[sparseIndices[1] + 1]).toBe(CODEX_GIT_MARKETPLACE_SPARSE2);
   });
 });
 
