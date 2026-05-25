@@ -77,6 +77,8 @@ npx @switchbot/openapi-cli codex setup
 Then restart Codex and confirm it's working.
 ```
 
+`codex setup` checks the npm registry for the latest CLI version and upgrades automatically if your global install is outdated — no manual `npm install -g` step needed.
+
 **Or run directly (if CLI is already installed):**
 
 ```bash
