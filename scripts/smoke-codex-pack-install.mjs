@@ -2,7 +2,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.dirname(scriptDir);
@@ -63,7 +63,7 @@ try {
   }
 
   for (const requiredPath of [
-    '.agents/plugins/marketplace.json',
+    '.claude-plugin/marketplace.json',
     '.codex-plugin/plugin.json',
     '.codex-plugin/hooks.json',
     '.mcp.json',
@@ -82,13 +82,13 @@ try {
     throw new Error(`plugin displayName must be SwitchBot, got ${pluginManifest?.interface?.displayName ?? '<missing>'}`);
   }
 
-  const marketplace = readJson(path.join(pluginRoot, '.agents', 'plugins', 'marketplace.json'));
-  if (marketplace?.name !== 'codex-plugin') {
-    throw new Error(`marketplace name must be codex-plugin so switchbot@codex-plugin resolves, got ${marketplace?.name ?? '<missing>'}`);
+  const marketplace = readJson(path.join(pluginRoot, '.claude-plugin', 'marketplace.json'));
+  if (marketplace?.name !== 'switchbot') {
+    throw new Error(`marketplace name must be switchbot so switchbot@switchbot resolves, got ${marketplace?.name ?? '<missing>'}`);
   }
   const switchbotEntry = marketplace?.plugins?.find((p) => p?.name === 'switchbot');
-  if (switchbotEntry?.source?.path !== '../../') {
-    throw new Error(`marketplace switchbot plugin source.path must be '../../' (codex resolves it from .agents/plugins/marketplace.json up to packageRoot), got ${switchbotEntry?.source?.path ?? '<missing>'}`);
+  if (switchbotEntry?.source !== './plugins/switchbot') {
+    throw new Error(`marketplace switchbot plugin source must be './plugins/switchbot', got ${switchbotEntry?.source ?? '<missing>'}`);
   }
 
   const hooks = readJson(path.join(pluginRoot, '.codex-plugin', 'hooks.json'));
@@ -140,7 +140,47 @@ try {
     throw new Error(`codex plugin onInstall hook must exit 0; got ${hook.status ?? 1}\nstderr:\n${hook.stderr}`);
   }
 
-  console.log('codex pack-install smoke ok: tarballs install, setup dry-run has 5 steps, hook is non-blocking');
+  const { makeInstall, resolvePluginIdentifier, resolveMarketplaceSourceRoot } = await import(
+    pathToFileURL(path.join(pluginRoot, 'bin', 'install.js')).href
+  );
+  const registrationCalls = [];
+  const installCode = await makeInstall({
+    checkCli: async () => ({ ok: false, message: 'CLI not found' }),
+    runInherit: async (cmd, args) => {
+      registrationCalls.push({ cmd, args });
+      return 0;
+    },
+    packageRoot: pluginRoot,
+    runAuth: async () => 0,
+  })();
+  if (installCode !== 0) {
+    throw new Error(`installed codex plugin makeInstall returned ${installCode}`);
+  }
+
+  const pluginIdentifier = resolvePluginIdentifier(pluginRoot);
+  if (pluginIdentifier !== 'switchbot@switchbot') {
+    throw new Error(`resolved plugin identifier must be switchbot@switchbot, got ${pluginIdentifier}`);
+  }
+  const marketplaceSourceRoot = resolveMarketplaceSourceRoot(pluginRoot);
+  const registrationSequence = registrationCalls.map(({ cmd, args }) => `${cmd} ${args.join(' ')}`);
+  for (const expected of [
+    'npm install -g @switchbot/openapi-cli@latest',
+    'codex plugin remove switchbot@switchbot',
+    'codex plugin remove switchbot@codex-plugin',
+    'codex plugin remove switchbot@switchbot-skill',
+    'codex plugin marketplace remove switchbot',
+    'codex plugin marketplace remove codex-plugin',
+    'codex plugin marketplace remove switchbot-skill',
+    `codex plugin marketplace add ${marketplaceSourceRoot}`,
+    'codex plugin add switchbot@switchbot',
+    'switchbot doctor',
+  ]) {
+    if (!registrationSequence.includes(expected)) {
+      throw new Error(`installed codex plugin registration flow missing "${expected}"\nactual:\n${registrationSequence.join('\n')}`);
+    }
+  }
+
+  console.log('codex pack-install smoke ok: tarballs install, setup dry-run is present, hook is non-blocking, fresh install registration uses switchbot@switchbot');
 } finally {
   for (const tarball of packed) {
     rmSync(tarball, { force: true });

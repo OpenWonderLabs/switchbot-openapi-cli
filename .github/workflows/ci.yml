@@ -146,3 +146,20 @@ jobs:
       - run: npm run build
       - name: npm pack -> npm install tarball -> switchbot --version / policy new / policy validate
         run: npm run smoke:pack-install
+
+  codex-release-gates:
+    name: Codex release gates (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: npm
+      - run: npm ci
+      - run: npm run verify:release-gate

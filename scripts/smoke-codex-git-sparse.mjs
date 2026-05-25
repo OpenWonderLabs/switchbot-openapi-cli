@@ -1,0 +1,70 @@
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.dirname(scriptDir);
+const workDir = mkdtempSync(path.join(os.tmpdir(), 'switchbot-codex-git-sparse-'));
+const stagingDir = path.join(workDir, 'marketplace-add');
+
+function runGit(args, options = {}) {
+  return execFileSync('git', args, {
+    cwd: repoRoot,
+    encoding: 'utf-8',
+    ...options,
+  });
+}
+
+function readJson(filePath) {
+  return JSON.parse(readFileSync(filePath, 'utf-8'));
+}
+
+try {
+  const ref = process.env.CODEX_GIT_MARKETPLACE_REF
+    || runGit(['rev-parse', '--abbrev-ref', 'HEAD']).trim();
+
+  runGit(['clone', '--no-checkout', '--branch', ref, repoRoot, stagingDir], { cwd: workDir });
+  runGit(['-C', stagingDir, 'sparse-checkout', 'init', '--cone'], { cwd: workDir });
+  runGit(['-C', stagingDir, 'sparse-checkout', 'set', '.claude-plugin', 'packages/codex-plugin'], { cwd: workDir });
+  runGit(['-C', stagingDir, 'checkout', ref], { cwd: workDir });
+
+  const rootMarketplacePath = path.join(stagingDir, '.claude-plugin', 'marketplace.json');
+  const packageMarketplacePath = path.join(stagingDir, 'packages', 'codex-plugin', '.claude-plugin', 'marketplace.json');
+  const pluginMcpPath = path.join(stagingDir, 'packages', 'codex-plugin', 'plugins', 'switchbot', '.mcp.json');
+
+  for (const requiredPath of [rootMarketplacePath, packageMarketplacePath, pluginMcpPath]) {
+    if (!existsSync(requiredPath)) {
+      throw new Error(`sparse checkout missing ${path.relative(stagingDir, requiredPath)}`);
+    }
+  }
+
+  const rootMarketplace = readJson(rootMarketplacePath);
+  if (rootMarketplace?.name !== 'switchbot') {
+    throw new Error(`root marketplace name must be switchbot, got ${rootMarketplace?.name ?? '<missing>'}`);
+  }
+  const rootPlugin = rootMarketplace?.plugins?.find((plugin) => plugin?.name === 'switchbot');
+  if (rootPlugin?.source !== './packages/codex-plugin/plugins/switchbot') {
+    throw new Error(
+      `root marketplace switchbot source must be ./packages/codex-plugin/plugins/switchbot, got ${rootPlugin?.source ?? '<missing>'}`,
+    );
+  }
+
+  const packageMarketplace = readJson(packageMarketplacePath);
+  if (packageMarketplace?.name !== 'switchbot') {
+    throw new Error(`package marketplace name must be switchbot, got ${packageMarketplace?.name ?? '<missing>'}`);
+  }
+  const packagePlugin = packageMarketplace?.plugins?.find((plugin) => plugin?.name === 'switchbot');
+  if (packagePlugin?.source !== './plugins/switchbot') {
+    throw new Error(`package marketplace switchbot source must be ./plugins/switchbot, got ${packagePlugin?.source ?? '<missing>'}`);
+  }
+
+  console.log(`codex git sparse smoke ok: ref ${ref} exposes root and package marketplace manifests with switchbot sources`);
+} finally {
+  try {
+    rmSync(workDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  } catch (error) {
+    process.stderr.write(`[smoke-codex-git-sparse] cleanup warning: ${error.message}\n`);
+  }
+}

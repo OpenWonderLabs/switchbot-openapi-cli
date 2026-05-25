@@ -18,9 +18,7 @@ jobs:
           registry-url: https://registry.npmjs.org
           cache: npm
       - run: npm ci
-      - run: npm run build
-      - run: npm test
-      - run: npm run test:workspaces
+      - run: npm run verify:release-gate
 
       - name: Verify tag matches root CLI package.json version
         run: |
@@ -70,14 +68,6 @@ jobs:
             echo "cli_publish=$CLI_PUBLISH"
             echo "codex_publish=$CODEX_PUBLISH"
           } >> "$GITHUB_OUTPUT"
-
-      - name: Smoke test packed root CLI artifact
-        if: steps.detect.outputs.cli_publish == 'true'
-        run: npm run smoke:pack-install
-
-      - name: Smoke test packed Codex install path
-        if: steps.detect.outputs.cli_publish == 'true' || steps.detect.outputs.codex_publish == 'true'
-        run: npm run smoke:codex-pack-install
 
       - name: Verify codex-plugin tarball peerDep is a concrete range
         if: steps.detect.outputs.codex_publish == 'true'

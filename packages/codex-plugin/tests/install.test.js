@@ -1,5 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { makeInstall, resolvePluginIdentifier } from '../bin/install.js';
 
 function makeOkCliCheck(version = '3.7.1') {
@@ -26,6 +28,7 @@ function makeSpawn(exitCode = 0) {
 }
 
 const TEST_ROOT = '/fake/codex-plugin';
+const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 describe('makeInstall', () => {
   it('skips npm install when CLI is already present', async () => {
@@ -254,10 +257,44 @@ describe('makeInstall', () => {
       `expected warning about remove exit code in: ${combined}`,
     );
   });
+
+  it('fresh install from the current package root registers switchbot@switchbot', async () => {
+    const { spawn, calls } = makeSpawn(0);
+    const auth = makeRunAuth(0);
+    const install = makeInstall({
+      checkCli: makeFailCliCheck(),
+      runInherit: spawn,
+      packageRoot: PACKAGE_ROOT,
+      runAuth: auth.runAuth,
+    });
+    const code = await install();
+    assert.equal(code, 0);
+    assert.ok(
+      calls.some(({ cmd, args }) =>
+        cmd === 'codex' &&
+        args[0] === 'plugin' &&
+        args[1] === 'add' &&
+        args[2] === 'switchbot@switchbot'),
+      `expected plugin add switchbot@switchbot in calls: ${JSON.stringify(calls)}`,
+    );
+    assert.ok(
+      calls.some(({ cmd, args }) =>
+        cmd === 'codex' &&
+        args[0] === 'plugin' &&
+        args[1] === 'marketplace' &&
+        args[2] === 'add' &&
+        args[3] === PACKAGE_ROOT),
+      `expected marketplace add ${PACKAGE_ROOT} in calls: ${JSON.stringify(calls)}`,
+    );
+  });
 });
 
 describe('resolvePluginIdentifier', () => {
   it('falls back to basename when the plugin manifest is unavailable', () => {
     assert.equal(resolvePluginIdentifier('/fake/codex-plugin'), 'switchbot@codex-plugin');
+  });
+
+  it('uses the published marketplace manifest from the current package root', () => {
+    assert.equal(resolvePluginIdentifier(PACKAGE_ROOT), 'switchbot@switchbot');
   });
 });

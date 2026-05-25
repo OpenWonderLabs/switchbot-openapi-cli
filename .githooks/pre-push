@@ -4,5 +4,5 @@ set -eu
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
-echo "[pre-push] tarball install smoke"
-npm run verify:pre-push
+echo "[pre-push] release gate"
+npm run verify:release-gate

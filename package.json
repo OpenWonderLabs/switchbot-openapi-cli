@@ -52,6 +52,8 @@
     "start": "node dist/index.js",
     "smoke:pack-install": "node scripts/smoke-pack-install.mjs",
     "smoke:codex-pack-install": "node scripts/smoke-codex-pack-install.mjs",
+    "smoke:codex-git-sparse": "node scripts/smoke-codex-git-sparse.mjs",
+    "smoke:codex-temp-prefix-route-a": "node scripts/smoke-codex-temp-prefix-route-a.mjs",
     "test": "vitest run",
     "test:workspaces": "npm test --workspaces --if-present",
     "test:all": "npm test && npm run test:workspaces",
@@ -59,9 +61,10 @@
     "test:coverage": "vitest run --coverage",
     "test:release-smoke:manual": "npm test -- tests/commands/policy.test.ts tests/commands/devices.test.ts tests/commands/explain.test.ts tests/commands/doctor.test.ts tests/commands/mcp.test.ts tests/commands/health-check.test.ts tests/commands/quota.test.ts tests/commands/status-sync.test.ts tests/status-sync/smoke.test.ts tests/commands/watch.test.ts tests/commands/events.test.ts tests/devices/catalog-fidelity.test.ts tests/commands/schema.test.ts tests/commands/auth.test.ts tests/commands/config.test.ts tests/commands/scenes.test.ts tests/commands/batch.test.ts tests/commands/history.test.ts tests/commands/expand.test.ts tests/commands/webhook.test.ts tests/commands/daemon.test.ts tests/commands/upgrade-check.test.ts tests/commands/install.test.ts tests/commands/uninstall.test.ts tests/commands/rules.test.ts tests/commands/plan.test.ts",
     "verify:pre-commit": "npm run build && npm test -- tests/version.test.ts tests/install/codex-checks.test.ts tests/commands/codex.test.ts && npm run test:workspaces",
-    "verify:pre-push": "npm run build && npm test -- tests/version.test.ts && npm run smoke:pack-install",
+    "verify:release-gate": "npm run build && npm test -- tests/version.test.ts tests/install/codex-checks.test.ts tests/commands/codex.test.ts && npm run test:workspaces && npm run smoke:pack-install && npm run smoke:codex-pack-install && npm run smoke:codex-git-sparse && npm run smoke:codex-temp-prefix-route-a",
+    "verify:pre-push": "npm run verify:release-gate",
     "verify:release": "node scripts/verify-release.mjs",
-    "prepublishOnly": "npm test && npm run build && npm run smoke:pack-install && npm run smoke:codex-pack-install"
+    "prepublishOnly": "npm run verify:release-gate"
   },
   "dependencies": {
     "axios": "^1.7.9",
