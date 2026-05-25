@@ -48,7 +48,7 @@
     "access": "public"
   },
   "scripts": {
-    "test": "node --test tests/*.test.js",
+    "test": "node --test",
     "typecheck": "node --check bin/auth.js && node --check bin/install.js"
   }
 }

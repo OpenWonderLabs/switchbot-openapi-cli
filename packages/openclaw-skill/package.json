@@ -49,7 +49,7 @@
     "access": "public"
   },
   "scripts": {
-    "test": "node --test tests/*.test.js",
+    "test": "node --test",
     "start": "node bin/start.js",
     "typecheck": "node --check bin/start.js && node --check bin/policy-edit.js && node --check index.js"
   }

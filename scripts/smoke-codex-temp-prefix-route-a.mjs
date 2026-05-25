@@ -49,8 +49,14 @@ try {
     stdio: 'inherit',
   });
 
-  const pluginRoot = path.join(prefixDir, 'node_modules', '@switchbot', 'codex-plugin');
-  const cliRoot = path.join(prefixDir, 'node_modules', '@switchbot', 'openapi-cli');
+  // On Linux/macOS, `npm install -g --prefix` puts packages under lib/node_modules/;
+  // on Windows they go directly under node_modules/.
+  const nodeModulesDir =
+    process.platform === 'win32'
+      ? path.join(prefixDir, 'node_modules')
+      : path.join(prefixDir, 'lib', 'node_modules');
+  const pluginRoot = path.join(nodeModulesDir, '@switchbot', 'codex-plugin');
+  const cliRoot = path.join(nodeModulesDir, '@switchbot', 'openapi-cli');
   if (!existsSync(pluginRoot)) {
     throw new Error(`installed plugin root not found: ${pluginRoot}`);
   }
