@@ -1,0 +1,36 @@
+src/commands/codex.ts
+  s_ffdcf8765e4b95::t_e9892e04d33f22 373-374
+  s_ffdcf8765e4b95::t_8d2bdf9cd25083 614
+  s_ffdcf8765e4b95::t_502f4b0055400a 112
+  s_ffdcf8765e4b95::t_cede89be7a853e 529
+  s_ffdcf8765e4b95::t_36f24cca94cdee 380-400
+tests/commands/codex.test.ts
+  s_ffdcf8765e4b95::t_9042d55af38e03 880-944
+  s_ffdcf8765e4b95::t_043cbc0c3bbcaa 452-453
+  s_ffdcf8765e4b95::t_e5f52e19d9f399 413-414
+  s_ffdcf8765e4b95::t_3461e2003534a7 634-635
+  s_ffdcf8765e4b95::t_8bd01aa8be7cb7 522-523
+  s_ffdcf8765e4b95::t_b24d2c0f822aba 680-681
+  s_ffdcf8765e4b95::t_2e7497eafe5329 803-804
+  s_ffdcf8765e4b95::t_d20e7ae2b1f62f 554,562,573,586,588,591
+  s_ffdcf8765e4b95::t_4f98c1e8aecbde 495-496
+  s_ffdcf8765e4b95::t_d70fe1b5e9ef34 728-729,751-755
+  s_ffdcf8765e4b95::t_03f17a2165f4fe 847-848
+  s_ffdcf8765e4b95::t_e191b4120e9c2b 762-763,793
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "4df9edf9d8a1f8d4954f1b5900e5f071f4e54247",
+  "prompts": {},
+  "sessions": {
+    "s_ffdcf8765e4b95": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9bba38b1-2790-40b0-86d8-af1157ed343b",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
