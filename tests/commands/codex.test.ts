@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { runCli } from '../helpers/cli.js';
 import { registerCodexCommand } from '../../src/commands/codex.js';
+import { VERSION } from '../../src/version.js';
 
 const spawnSyncRepairMock = vi.hoisted(() => vi.fn());
 vi.mock('node:child_process', () => ({ spawnSync: spawnSyncRepairMock }));
@@ -403,6 +404,145 @@ describe('switchbot codex setup', () => {
     tryLoadConfigMock.mockReset();
   });
 
+  // ── version-aware install-switchbot-cli step ──────────────────────────────
+
+  it('already at latest published version → skips npm install', async () => {
+    checkCodexCliMock.mockReturnValueOnce({
+      name: 'codex-cli', status: 'ok', detail: { path: '/usr/local/bin/codex' },
+    });
+    // npm view returns VERSION as latest → installed version matches → no upgrade
+    spawnSyncRepairMock.mockReturnValueOnce({
+      status: 0, stdout: VERSION + '\n', stderr: '',
+    });
+    // npm list -g: installed at VERSION
+    spawnSyncRepairMock.mockReturnValueOnce({
+      status: 0,
+      stdout: JSON.stringify({ dependencies: { '@switchbot/openapi-cli': { version: VERSION } } }),
+      stderr: '',
+    });
+    registerCodexPluginMock.mockReturnValueOnce({
+      ok: true, pluginId: 'switchbot@codex-plugin', packageRoot: null,
+    });
+    tryLoadConfigMock.mockReturnValue({ token: 't', secret: 's' });
+    runDoctorChecksMock.mockResolvedValueOnce(makeBaseChecks());
+    checkCodexCliMock.mockReturnValue({ name: 'codex-cli', status: 'ok', detail: 'ok' });
+    checkCodexPluginNpmMock.mockReturnValue({ name: 'codex-plugin-npm', status: 'ok', detail: 'ok' });
+    checkCodexPluginRegisteredMock.mockReturnValue({ name: 'codex-plugin-registered', status: 'ok', detail: 'ok' });
+
+    const { exitCode, stdout } = await runCli(registerCodexCommand, ['codex', 'setup', '--json']);
+    expect(exitCode).toBe(0);
+    const parsed = JSON.parse(stdout.join('')) as {
+      data?: { outcomes: Array<{ step: string; status: string; message?: string }> };
+    };
+    const step = parsed.data!.outcomes.find((o) => o.step === 'install-switchbot-cli')!;
+    expect(step.status).toBe('ok');
+    expect(step.message).toMatch(/already installed/);
+    const installCalls = spawnSyncRepairMock.mock.calls.filter(
+      (c) => (c[1] as string[]).includes('install'),
+    );
+    expect(installCalls).toHaveLength(0);
+  });
+
+  it('outdated version (npm view detects newer) → auto-upgrades and reports versions', async () => {
+    checkCodexCliMock.mockReturnValueOnce({
+      name: 'codex-cli', status: 'ok', detail: { path: '/usr/local/bin/codex' },
+    });
+    // npm view: latest is 99.0.0 (simulates a future release)
+    spawnSyncRepairMock.mockReturnValueOnce({
+      status: 0, stdout: '99.0.0\n', stderr: '',
+    });
+    // npm list -g: installed at 1.0.0
+    spawnSyncRepairMock.mockReturnValueOnce({
+      status: 0,
+      stdout: JSON.stringify({ dependencies: { '@switchbot/openapi-cli': { version: '1.0.0' } } }),
+      stderr: '',
+    });
+    // npm install -g succeeds
+    spawnSyncRepairMock.mockReturnValueOnce({ status: 0, stdout: '', stderr: '' });
+    registerCodexPluginMock.mockReturnValueOnce({
+      ok: true, pluginId: 'switchbot@codex-plugin', packageRoot: null,
+    });
+    tryLoadConfigMock.mockReturnValue({ token: 't', secret: 's' });
+    runDoctorChecksMock.mockResolvedValueOnce(makeBaseChecks());
+    checkCodexCliMock.mockReturnValue({ name: 'codex-cli', status: 'ok', detail: 'ok' });
+    checkCodexPluginNpmMock.mockReturnValue({ name: 'codex-plugin-npm', status: 'ok', detail: 'ok' });
+    checkCodexPluginRegisteredMock.mockReturnValue({ name: 'codex-plugin-registered', status: 'ok', detail: 'ok' });
+
+    const { exitCode, stdout } = await runCli(registerCodexCommand, ['codex', 'setup', '--json']);
+    expect(exitCode).toBe(0);
+    const parsed = JSON.parse(stdout.join('')) as {
+      data?: { outcomes: Array<{ step: string; status: string; message?: string }> };
+    };
+    const step = parsed.data!.outcomes.find((o) => o.step === 'install-switchbot-cli')!;
+    expect(step.status).toBe('ok');
+    expect(step.message).toMatch(/upgraded/);
+    expect(step.message).toContain('1.0.0');
+    expect(step.message).toContain('99.0.0');
+    const installCalls = spawnSyncRepairMock.mock.calls.filter(
+      (c) => (c[1] as string[]).includes('install'),
+    );
+    expect(installCalls).toHaveLength(1);
+  });
+
+  it('upgrade failure returns failed outcome with npm stderr', async () => {
+    checkCodexCliMock.mockReturnValueOnce({
+      name: 'codex-cli', status: 'ok', detail: { path: '/usr/local/bin/codex' },
+    });
+    // npm view: latest is 99.0.0
+    spawnSyncRepairMock.mockReturnValueOnce({ status: 0, stdout: '99.0.0\n', stderr: '' });
+    // npm list -g: installed at 1.0.0
+    spawnSyncRepairMock.mockReturnValueOnce({
+      status: 0,
+      stdout: JSON.stringify({ dependencies: { '@switchbot/openapi-cli': { version: '1.0.0' } } }),
+      stderr: '',
+    });
+    // npm install -g fails
+    spawnSyncRepairMock.mockReturnValueOnce({ status: 1, stdout: '', stderr: 'EACCES permission denied' });
+
+    const { exitCode, stdout } = await runCli(registerCodexCommand, ['codex', 'setup', '--yes', '--json']);
+    expect(exitCode).toBe(1);
+    const parsed = JSON.parse(stdout.join('')) as {
+      data?: { outcomes: Array<{ step: string; status: string; message?: string }> };
+    };
+    const step = parsed.data!.outcomes.find((o) => o.step === 'install-switchbot-cli')!;
+    expect(step.status).toBe('failed');
+    expect(step.message).toContain('EACCES');
+  });
+
+  it('npm view offline → falls back to VERSION as latest, still upgrades if installed is older', async () => {
+    checkCodexCliMock.mockReturnValueOnce({
+      name: 'codex-cli', status: 'ok', detail: { path: '/usr/local/bin/codex' },
+    });
+    // npm view fails (offline)
+    spawnSyncRepairMock.mockReturnValueOnce({ status: 1, stdout: '', stderr: 'ENOTFOUND' });
+    // npm list -g: installed at 1.0.0 (older than VERSION)
+    spawnSyncRepairMock.mockReturnValueOnce({
+      status: 0,
+      stdout: JSON.stringify({ dependencies: { '@switchbot/openapi-cli': { version: '1.0.0' } } }),
+      stderr: '',
+    });
+    // npm install -g succeeds
+    spawnSyncRepairMock.mockReturnValueOnce({ status: 0, stdout: '', stderr: '' });
+    registerCodexPluginMock.mockReturnValueOnce({
+      ok: true, pluginId: 'switchbot@codex-plugin', packageRoot: null,
+    });
+    tryLoadConfigMock.mockReturnValue({ token: 't', secret: 's' });
+    runDoctorChecksMock.mockResolvedValueOnce(makeBaseChecks());
+    checkCodexCliMock.mockReturnValue({ name: 'codex-cli', status: 'ok', detail: 'ok' });
+    checkCodexPluginNpmMock.mockReturnValue({ name: 'codex-plugin-npm', status: 'ok', detail: 'ok' });
+    checkCodexPluginRegisteredMock.mockReturnValue({ name: 'codex-plugin-registered', status: 'ok', detail: 'ok' });
+
+    const { exitCode, stdout } = await runCli(registerCodexCommand, ['codex', 'setup', '--json']);
+    expect(exitCode).toBe(0);
+    const parsed = JSON.parse(stdout.join('')) as {
+      data?: { outcomes: Array<{ step: string; status: string; message?: string }> };
+    };
+    const step = parsed.data!.outcomes.find((o) => o.step === 'install-switchbot-cli')!;
+    expect(step.status).toBe('ok');
+    expect(step.message).toMatch(/upgraded/);
+    expect(step.message).toContain(VERSION);
+  });
+
   it('--dry-run prints the 5-step list without mutating', async () => {
     const { exitCode, stderr } = await runCli(
       registerCodexCommand,
@@ -481,10 +621,14 @@ describe('switchbot codex setup', () => {
     checkCodexCliMock.mockReturnValueOnce({
       name: 'codex-cli', status: 'ok', detail: { path: '/usr/local/bin/codex', version: 'codex 1.2.3' },
     });
+    // npm view: returns current VERSION (no upgrade needed)
+    spawnSyncRepairMock.mockReturnValueOnce({
+      status: 0, stdout: VERSION + '\n', stderr: '',
+    });
     // install-switchbot-cli step: npm list -g returns the package as already installed
     spawnSyncRepairMock.mockReturnValueOnce({
       status: 0,
-      stdout: JSON.stringify({ dependencies: { '@switchbot/openapi-cli': { version: '1.0.0' } } }),
+      stdout: JSON.stringify({ dependencies: { '@switchbot/openapi-cli': { version: VERSION } } }),
       stderr: '',
     });
     // register-plugin: Route B (registerCodexPluginGit) succeeds — no npm install needed
@@ -521,10 +665,14 @@ describe('switchbot codex setup', () => {
     checkCodexCliMock.mockReturnValueOnce({
       name: 'codex-cli', status: 'ok', detail: { path: '/usr/local/bin/codex' },
     });
+    // npm view: returns current VERSION (no upgrade needed)
+    spawnSyncRepairMock.mockReturnValueOnce({
+      status: 0, stdout: VERSION + '\n', stderr: '',
+    });
     // install-switchbot-cli: already installed
     spawnSyncRepairMock.mockReturnValueOnce({
       status: 0,
-      stdout: JSON.stringify({ dependencies: { '@switchbot/openapi-cli': { version: '1.0.0' } } }),
+      stdout: JSON.stringify({ dependencies: { '@switchbot/openapi-cli': { version: VERSION } } }),
       stderr: '',
     });
     // register-plugin: Route B succeeds
@@ -592,6 +740,10 @@ describe('switchbot codex setup', () => {
     checkCodexCliMock.mockReturnValueOnce({
       name: 'codex-cli', status: 'ok', detail: { path: '/usr/local/bin/codex' },
     });
+    // npm view: returns current VERSION (no upgrade needed)
+    spawnSyncRepairMock.mockReturnValueOnce({
+      status: 0, stdout: VERSION + '\n', stderr: '',
+    });
     // npm list -g says not installed
     spawnSyncRepairMock.mockReturnValueOnce({ status: 1, stdout: '{}', stderr: '' });
     // npm install -g fails
@@ -627,10 +779,14 @@ describe('switchbot codex setup', () => {
     checkCodexCliMock.mockReturnValueOnce({
       name: 'codex-cli', status: 'ok', detail: { path: '/usr/local/bin/codex' },
     });
+    // npm view: returns current VERSION (no upgrade needed)
+    spawnSyncRepairMock.mockReturnValueOnce({
+      status: 0, stdout: VERSION + '\n', stderr: '',
+    });
     // install-switchbot-cli: already installed
     spawnSyncRepairMock.mockReturnValueOnce({
       status: 0,
-      stdout: JSON.stringify({ dependencies: { '@switchbot/openapi-cli': { version: '1.0.0' } } }),
+      stdout: JSON.stringify({ dependencies: { '@switchbot/openapi-cli': { version: VERSION } } }),
       stderr: '',
     });
     // register-plugin: registerCodexPluginAuto handles Route B failure + on-demand install internally.
@@ -665,10 +821,14 @@ describe('switchbot codex setup', () => {
     checkCodexCliMock.mockReturnValueOnce({
       name: 'codex-cli', status: 'ok', detail: { path: '/usr/local/bin/codex' },
     });
+    // npm view: returns current VERSION (no upgrade needed)
+    spawnSyncRepairMock.mockReturnValueOnce({
+      status: 0, stdout: VERSION + '\n', stderr: '',
+    });
     // install-switchbot-cli: already installed
     spawnSyncRepairMock.mockReturnValueOnce({
       status: 0,
-      stdout: JSON.stringify({ dependencies: { '@switchbot/openapi-cli': { version: '1.0.0' } } }),
+      stdout: JSON.stringify({ dependencies: { '@switchbot/openapi-cli': { version: VERSION } } }),
       stderr: '',
     });
     // register-plugin: ok

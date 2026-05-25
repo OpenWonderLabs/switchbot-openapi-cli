@@ -15,17 +15,45 @@ import {
 import { isJsonMode, printJson } from '../utils/output.js';
 import { getActiveProfile } from '../lib/request-context.js';
 import { getConfigPath } from '../utils/flags.js';
+import { VERSION } from '../version.js';
+
+function compareVersions(a: string, b: string): -1 | 0 | 1 {
+  const pa = a.split('.').map(Number);
+  const pb = b.split('.').map(Number);
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i++) {
+    const na = pa[i] ?? 0;
+    const nb = pb[i] ?? 0;
+    if (na < nb) return -1;
+    if (na > nb) return 1;
+  }
+  return 0;
+}
+
+function fetchLatestPublishedVersion(packageName: string): string {
+  const r = spawnSync(
+    'npm', ['view', packageName, 'version'],
+    { encoding: 'utf-8', shell: process.platform === 'win32', timeout: 8000 },
+  );
+  if ((r.status ?? 1) === 0) {
+    const v = (r.stdout ?? '').trim();
+    if (/^\d+\.\d+\.\d+$/.test(v)) return v;
+  }
+  // Offline or registry error: fall back to the running binary's own version.
+  // When invoked via npx, VERSION == latest, so the comparison still works.
+  return VERSION;
+}
 
 const CODEX_BASE_SECTIONS = ['node', 'path', 'credentials', 'mcp'] as const;
 const SWITCHBOT_CLI_PACKAGE = '@switchbot/openapi-cli';
 
 async function runAllCodexDoctorChecks(): Promise<Check[]> {
-  const base = await runDoctorChecks(CODEX_BASE_SECTIONS);
+  const base = (await runDoctorChecks(CODEX_BASE_SECTIONS)) ?? [];
   const codexChecks: Check[] = [
     checkCodexCli(),
     checkCodexPluginNpm(),
     checkCodexPluginRegistered(),
-  ];
+  ].filter(Boolean) as Check[];
   return [...base, ...codexChecks];
 }
 
@@ -158,12 +186,12 @@ function repairStepRemovePlugin(ctx: RepairContext): RepairOutcome {
 }
 
 function stepRegisterPluginShared(stepName: string, ctx: { codexPluginId?: string; packageRoot?: string | null }): StepOutcome {
-  const r = registerCodexPluginAuto();
-  if (!r.ok) {
-    return { step: stepName, status: 'failed', message: r.error };
+  const r = registerCodexPluginAuto() as { ok: boolean; pluginId?: string; packageRoot?: string | null; error?: string } | null | undefined;
+  if (!r || !r.ok) {
+    return { step: stepName, status: 'failed', message: r?.error ?? 'registerCodexPluginAuto returned no result' };
   }
   ctx.codexPluginId = r.pluginId;
-  ctx.packageRoot = r.packageRoot;
+  ctx.packageRoot = r.packageRoot ?? null;
   return { step: stepName, status: 'ok', message: 'marketplace add + plugin add succeeded' };
 }
 
@@ -371,18 +399,40 @@ function setupStepInstallSwitchbotCli(): SetupOutcome {
 }
 
 function setupStepInstallGlobalPackage(step: string, packageName: string): SetupOutcome {
+  const latestVersion = fetchLatestPublishedVersion(packageName);
+
   const list = spawnSync(
     'npm', ['list', '-g', '--json', '--depth=0', packageName],
     { encoding: 'utf-8', shell: process.platform === 'win32', timeout: 15000 },
   );
-  let installed = false;
+  let installedVersion: string | null = null;
   try {
-    const parsed = JSON.parse(list.stdout ?? '{}') as { dependencies?: Record<string, unknown> };
-    installed = Boolean(parsed?.dependencies?.[packageName]);
+    const parsed = JSON.parse(list.stdout ?? '{}') as {
+      dependencies?: Record<string, { version?: string }>;
+    };
+    installedVersion = parsed?.dependencies?.[packageName]?.version ?? null;
   } catch { /* treat as not installed */ }
-  if (installed) {
-    return { step, status: 'ok', message: 'already installed' };
+
+  if (installedVersion !== null) {
+    if (compareVersions(installedVersion, latestVersion) >= 0) {
+      return { step, status: 'ok', message: `already installed (${installedVersion})` };
+    }
+    // Installed but outdated — upgrade automatically
+    const upg = spawnSync(
+      'npm', ['install', '-g', `${packageName}@latest`],
+      { encoding: 'utf-8', shell: process.platform === 'win32', timeout: 120000 },
+    );
+    if ((upg.status ?? 1) !== 0) {
+      return {
+        step,
+        status: 'failed',
+        message: `npm install -g failed upgrading from ${installedVersion} (exit ${upg.status ?? 1}): ${upg.stderr ?? ''}`,
+      };
+    }
+    return { step, status: 'ok', message: `upgraded ${installedVersion} → ${latestVersion}` };
   }
+
+  // Not installed at all
   const inst = spawnSync(
     'npm', ['install', '-g', `${packageName}@latest`],
     { encoding: 'utf-8', shell: process.platform === 'win32', timeout: 120000 },
@@ -398,12 +448,12 @@ function setupStepInstallGlobalPackage(step: string, packageName: string): Setup
 }
 
 function setupStepRegisterPlugin(ctx: SetupContext): SetupOutcome {
-  const r = registerCodexPluginAuto();
-  if (!r.ok) {
-    return { step: 'register-plugin', status: 'failed', message: r.error };
+  const r = registerCodexPluginAuto() as { ok: boolean; pluginId?: string; packageRoot?: string | null; error?: string } | null | undefined;
+  if (!r || !r.ok) {
+    return { step: 'register-plugin', status: 'failed', message: r?.error ?? 'registerCodexPluginAuto returned no result' };
   }
   ctx.codexPluginId = r.pluginId;
-  ctx.packageRoot = r.packageRoot;
+  ctx.packageRoot = r.packageRoot ?? null;
   const via = r.packageRoot ? 'local npm (Route A fallback)' : 'git marketplace (Route B)';
   return { step: 'register-plugin', status: 'ok', message: `registered via ${via}` };
 }
