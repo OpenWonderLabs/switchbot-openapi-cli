@@ -75,7 +75,7 @@ describe('checkCredentials', () => {
         err.stderr = 'HTTP 401 unauthorized';
         throw err;
       }
-      if (args.includes('describe')) return { stdout: '{}' };
+      if (args.includes('get')) return { stdout: JSON.stringify({ data: { present: true } }) };
       throw new Error('unexpected');
     };
     const check = makeCheckCredentials(fakeExec);
@@ -93,7 +93,7 @@ describe('checkCredentials', () => {
         err.stderr = 'connect ETIMEDOUT api.switch-bot.com';
         throw err;
       }
-      if (args.includes('describe')) return { stdout: '{}' };
+      if (args.includes('get')) return { stdout: JSON.stringify({ data: { present: true } }) };
       throw new Error('unexpected');
     };
     const check = makeCheckCredentials(fakeExec);
@@ -135,7 +135,7 @@ describe('checkCredentials', () => {
       if (args.includes('doctor')) {
         return { stdout: JSON.stringify({ data: { credentials: { configured: false } } }) };
       }
-      if (args.includes('describe')) return { stdout: '{}' };
+      if (args.includes('get')) return { stdout: JSON.stringify({ data: { present: true } }) };
       throw new Error('unexpected');
     };
     const check = makeCheckCredentials(fakeExec);
