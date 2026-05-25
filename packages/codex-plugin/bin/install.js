@@ -22,31 +22,21 @@ function defaultRunInherit(cmd, args) {
 
 export function resolvePluginIdentifier(packageRoot) {
   let marketplaceName = basename(packageRoot);
-  // Check .claude-plugin/marketplace.json (canonical path for >=0.1.3)
-  const claudePluginPath = join(packageRoot, '.claude-plugin', 'marketplace.json');
-  if (existsSync(claudePluginPath)) {
-    try {
-      const m = JSON.parse(readFileSync(claudePluginPath, 'utf8'));
-      if (m?.name) marketplaceName = m.name;
-    } catch {}
-  } else {
-    // Fall back to root-level marketplace.json (pre-0.1.3 local copies)
-    const rootManifestPath = join(packageRoot, 'marketplace.json');
-    if (existsSync(rootManifestPath)) {
+
+  // Check manifest paths in priority order; stop at first valid name found.
+  // Sequential independent if blocks allow fallbacks to work even if earlier
+  // files exist but have invalid JSON (e.g., interrupted write).
+  const manifestPaths = [
+    join(packageRoot, '.claude-plugin', 'marketplace.json'),
+    join(packageRoot, 'marketplace.json'),
+    join(packageRoot, '.agents', 'plugins', 'marketplace.json'),
+  ];
+  for (const p of manifestPaths) {
+    if (existsSync(p)) {
       try {
-        const m = JSON.parse(readFileSync(rootManifestPath, 'utf8'));
-        if (m?.name) marketplaceName = m.name;
+        const m = JSON.parse(readFileSync(p, 'utf8'));
+        if (m?.name) { marketplaceName = m.name; break; }
       } catch {}
-    } else {
-      const marketplacePath = join(packageRoot, '.agents', 'plugins', 'marketplace.json');
-      if (existsSync(marketplacePath)) {
-        try {
-          const marketplace = JSON.parse(readFileSync(marketplacePath, 'utf8'));
-          if (marketplace?.name) {
-            marketplaceName = marketplace.name;
-          }
-        } catch {}
-      }
     }
   }
 
