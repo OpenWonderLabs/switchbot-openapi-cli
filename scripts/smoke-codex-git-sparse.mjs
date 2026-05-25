@@ -24,14 +24,18 @@ function readJson(filePath) {
 try {
   let ref = process.env.CODEX_GIT_MARKETPLACE_REF;
   if (!ref) {
-    const abbrev = runGit(['rev-parse', '--abbrev-ref', 'HEAD']).trim();
-    ref = abbrev === 'HEAD'
-      ? runGit(['rev-parse', 'HEAD']).trim()  // detached HEAD: use full SHA
-      : abbrev;
+    try {
+      const abbrev = runGit(['rev-parse', '--abbrev-ref', 'HEAD']).trim();
+      ref = abbrev === 'HEAD'
+        ? runGit(['rev-parse', 'HEAD']).trim()  // detached HEAD: use full SHA
+        : abbrev;
+    } catch (err) {
+      throw new Error(`Failed to determine git ref for smoke test: ${err.message}`);
+    }
   }
 
   // Clone: use --branch only for named branches; for SHAs clone without --branch then checkout
-  if (ref.match(/^[0-9a-f]{40}$/)) {
+  if (ref.match(/^[0-9a-fA-F]{40}$/)) {
     runGit(['clone', '--no-checkout', repoRoot, stagingDir], { cwd: workDir });
   } else {
     runGit(['clone', '--no-checkout', '--branch', ref, repoRoot, stagingDir], { cwd: workDir });
