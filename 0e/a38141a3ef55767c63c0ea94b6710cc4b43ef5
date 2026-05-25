@@ -1,0 +1,23 @@
+tests/commands/codex.test.ts
+  s_ffdcf8765e4b95::t_1123439e4b7f4a 73-93
+  s_ffdcf8765e4b95::t_c2882cf3282932 3
+src/commands/codex.ts
+  s_ffdcf8765e4b95::t_b89b5395849809 20-24
+  s_ffdcf8765e4b95::t_89ccdecf041e12 42
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "0ea38141a3ef55767c63c0ea94b6710cc4b43ef5",
+  "prompts": {},
+  "sessions": {
+    "s_ffdcf8765e4b95": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9bba38b1-2790-40b0-86d8-af1157ed343b",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
