@@ -85,10 +85,12 @@ async function tryDoctor(exec) {
   }
 }
 
-async function tryKeychainDescribe(exec) {
+async function tryKeychainGet(exec) {
   try {
-    await exec('switchbot', ['auth', 'keychain', 'describe', '--json'], { timeout: 8000 });
-    return true;
+    const { stdout } = await exec('switchbot', ['auth', 'keychain', 'get', '--json'], { timeout: 8000 });
+    const parsed = JSON.parse(stdout);
+    const data = parsed?.data ?? parsed;
+    return data?.present === true;
   } catch {
     return false;
   }
@@ -104,7 +106,7 @@ export function makeCheckCredentials(exec) {
       // CLI missing — fall through to keychain
     }
 
-    const hasKeychainCredentials = await tryKeychainDescribe(exec);
+    const hasKeychainCredentials = await tryKeychainGet(exec);
 
     if (doctorResult?.reason === 'doctor-failed') {
       const errorKey = classifyDoctorFailure(doctorResult.detail ?? '', hasKeychainCredentials);
