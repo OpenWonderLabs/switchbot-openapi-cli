@@ -62,6 +62,21 @@ function computeAliasPath() {
   return join(os.homedir(), '.switchbot', 'codex-plugin-marketplace');
 }
 
+function createAlias(src, dest, type, deps) {
+  try {
+    deps.symlinkSync(src, dest, type);
+  } catch (err) {
+    if (err && err.code === 'EPERM') {
+      throw new Error(
+        `Cannot create ${type} at ${dest}: permission denied (EPERM). ` +
+          `On Windows, run the installer from an elevated terminal, ` +
+          `or install to a path without @-scoped segments.`,
+      );
+    }
+    throw err;
+  }
+}
+
 export function resolveMarketplaceSourceRoot(packageRoot, deps = defaultFsDeps) {
   // NOTE: This function is FROZEN. The canonical implementation lives in
   // src/install/codex-checks.ts. Do NOT sync new changes here.
@@ -80,7 +95,7 @@ export function resolveMarketplaceSourceRoot(packageRoot, deps = defaultFsDeps) 
 
   const stat = deps.lstatSync(aliasRoot, { throwIfNoEntry: false });
   if (!stat) {
-    deps.symlinkSync(packageRoot, aliasRoot, linkType);
+    createAlias(packageRoot, aliasRoot, linkType, deps);
     return aliasRoot;
   }
 
@@ -93,7 +108,7 @@ export function resolveMarketplaceSourceRoot(packageRoot, deps = defaultFsDeps) 
     } catch {
       // Dangling symlink: target was deleted (e.g. nvm switch, npm uninstall).
       deps.unlinkSync(aliasRoot);
-      deps.symlinkSync(packageRoot, aliasRoot, linkType);
+      createAlias(packageRoot, aliasRoot, linkType, deps);
       return aliasRoot;
     }
     const pathsMatch = process.platform === 'win32'
@@ -103,7 +118,7 @@ export function resolveMarketplaceSourceRoot(packageRoot, deps = defaultFsDeps) 
       return aliasRoot;
     }
     deps.unlinkSync(aliasRoot);
-    deps.symlinkSync(packageRoot, aliasRoot, linkType);
+    createAlias(packageRoot, aliasRoot, linkType, deps);
     return aliasRoot;
   }
 

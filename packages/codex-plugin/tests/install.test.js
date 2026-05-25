@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { makeInstall, resolvePluginIdentifier } from '../bin/install.js';
+import { makeInstall, resolvePluginIdentifier, resolveMarketplaceSourceRoot } from '../bin/install.js';
 
 function makeOkCliCheck(version = '3.7.1') {
   return async () => ({ ok: true, version });
@@ -296,5 +296,36 @@ describe('resolvePluginIdentifier', () => {
 
   it('uses the published marketplace manifest from the current package root', () => {
     assert.equal(resolvePluginIdentifier(PACKAGE_ROOT), 'switchbot@switchbot');
+  });
+});
+
+describe('resolveMarketplaceSourceRoot', () => {
+  it('resolveMarketplaceSourceRoot throws a helpful message when symlinkSync fails with EPERM', () => {
+    const epermErr = Object.assign(new Error('operation not permitted'), { code: 'EPERM' });
+    const deps = {
+      mkdirSync: () => {},
+      lstatSync: (_p, _opts) => null,           // alias does not exist → first-create branch
+      symlinkSync: (_src, _dest, _type) => { throw epermErr; },
+      realpathSync: (p) => p,
+      unlinkSync: () => {},
+    };
+
+    // Use a path that triggers needsAlias on any platform
+    const scopedPath = process.platform === 'win32'
+      ? 'C:\\Users\\test\\node_modules\\@switchbot\\codex-plugin'
+      : '/home/user/node_modules/@switchbot/codex-plugin';
+
+    assert.throws(
+      () => resolveMarketplaceSourceRoot(scopedPath, deps),
+      (err) => {
+        assert.ok(err instanceof Error, 'should throw an Error');
+        assert.ok(err.message.includes('EPERM'), `message should mention EPERM, got: ${err.message}`);
+        assert.ok(
+          err.message.includes('permission denied') || err.message.includes('elevated'),
+          `message should be actionable, got: ${err.message}`,
+        );
+        return true;
+      },
+    );
   });
 });
