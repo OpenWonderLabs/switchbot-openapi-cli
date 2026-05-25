@@ -3,7 +3,7 @@
     "switchbot": {
       "command": "node",
       "args": ["${pluginDir}/bin/start.js"],
-      "description": "SwitchBot smart-home MCP server (devices_list, devices_status, devices_describe, devices_command, scenes_list, scenes_run)"
+      "description": "SwitchBot smart-home MCP server bootstrapper; launches the full tool surface exposed by `switchbot mcp serve`"
     }
   }
 }
