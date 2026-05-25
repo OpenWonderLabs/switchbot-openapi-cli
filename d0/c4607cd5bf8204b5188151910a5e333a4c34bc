@@ -1,0 +1,22 @@
+src/commands/capabilities.ts
+  s_ffdcf8765e4b95::t_49ce7adfc82783 217
+packages/codex-plugin/setup/check-credentials.js
+  s_ffdcf8765e4b95::t_b3351e84d310da 109
+  s_ffdcf8765e4b95::t_e84524c41c1758 88,90-93
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.1",
+  "base_commit_sha": "d0c4607cd5bf8204b5188151910a5e333a4c34bc",
+  "prompts": {},
+  "sessions": {
+    "s_ffdcf8765e4b95": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9bba38b1-2790-40b0-86d8-af1157ed343b",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
