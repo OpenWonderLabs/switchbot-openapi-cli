@@ -484,6 +484,8 @@ describe('switchbot codex setup', () => {
     });
     // npm install -g succeeds
     spawnSyncRepairMock.mockReturnValueOnce({ status: 0, stdout: '', stderr: '' });
+    // resolveInstalledVersion re-verify after upgrade
+    spawnSyncRepairMock.mockReturnValueOnce({ status: 0, stdout: JSON.stringify({ dependencies: { '@switchbot/openapi-cli': { version: '99.0.0' } } }), stderr: '' });
     registerCodexPluginMock.mockReturnValueOnce({
       ok: true, pluginId: 'switchbot@codex-plugin', packageRoot: null,
     });
@@ -559,6 +561,8 @@ describe('switchbot codex setup', () => {
     });
     // npm install -g succeeds
     spawnSyncRepairMock.mockReturnValueOnce({ status: 0, stdout: '', stderr: '' });
+    // resolveInstalledVersion re-verify after upgrade
+    spawnSyncRepairMock.mockReturnValueOnce({ status: 0, stdout: JSON.stringify({ dependencies: { '@switchbot/openapi-cli': { version: VERSION } } }), stderr: '' });
     registerCodexPluginMock.mockReturnValueOnce({
       ok: true, pluginId: 'switchbot@codex-plugin', packageRoot: null,
     });

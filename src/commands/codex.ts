@@ -424,6 +424,21 @@ function setupStepInstallSwitchbotCli(): SetupOutcome {
   );
 }
 
+function resolveInstalledVersion(packageName: string): string | null {
+  const r = spawnSync(
+    'npm', ['list', '-g', '--json', '--depth=0', packageName],
+    { encoding: 'utf-8', shell: process.platform === 'win32', timeout: 15000 },
+  );
+  try {
+    const parsed = JSON.parse(r.stdout ?? '{}') as {
+      dependencies?: Record<string, { version?: string }>;
+    };
+    return parsed?.dependencies?.[packageName]?.version ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function setupStepInstallGlobalPackage(step: string, packageName: string): SetupOutcome {
   const { version: latestVersion, fromRegistry } = fetchLatestPublishedVersion(packageName);
   const registryNote = fromRegistry ? '' : ' (registry unreachable, used running version as reference)';
@@ -455,7 +470,8 @@ function setupStepInstallGlobalPackage(step: string, packageName: string): Setup
         message: `npm install -g failed upgrading from ${installedVersion} (exit ${upg.status ?? 1}): ${upg.stderr ?? ''}`,
       };
     }
-    return { step, status: 'ok', message: `upgraded ${installedVersion} → ${latestVersion}` };
+    const newVersion = resolveInstalledVersion(packageName) ?? latestVersion;
+    return { step, status: 'ok', message: `upgraded ${installedVersion} → ${newVersion}` };
   }
 
   const inst = spawnSync(
@@ -469,7 +485,8 @@ function setupStepInstallGlobalPackage(step: string, packageName: string): Setup
       message: `npm install -g failed (exit ${inst.status ?? 1}): ${inst.stderr ?? ''}`,
     };
   }
-  return { step, status: 'ok', message: `installed ${packageName}@${latestVersion}` };
+  const installedNow = resolveInstalledVersion(packageName) ?? latestVersion;
+  return { step, status: 'ok', message: `installed ${packageName}@${installedNow}` };
 }
 
 function setupStepRegisterPlugin(ctx: SetupContext): SetupOutcome {
