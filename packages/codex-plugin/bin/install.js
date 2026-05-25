@@ -120,6 +120,7 @@ function formatCodexFailure(step) {
 }
 
 const CODEX_PLUGIN_LEGACY_IDS = ['switchbot@codex-plugin', 'switchbot@switchbot-skill'];
+const CODEX_MARKETPLACE_LEGACY_NAMES = ['switchbot', 'codex-plugin', 'switchbot-skill'];
 
 export function makeInstall({ checkCli, runInherit, packageRoot, runAuth, resolveRoot = resolveMarketplaceSourceRoot }) {
   return async function install() {
@@ -140,12 +141,33 @@ export function makeInstall({ checkCli, runInherit, packageRoot, runAuth, resolv
       process.stderr.write(`[switchbot-codex] CLI ${cliCheck.version} detected.\n`);
     }
 
+    const pluginName = resolvePluginIdentifier(packageRoot);
+    // Pre-clean before marketplace add: removing the last plugin from a marketplace
+    // causes Codex to auto-delete the marketplace entry, so removes must happen
+    // before we register the new marketplace — not after.
+    for (const id of [...new Set([pluginName, ...CODEX_PLUGIN_LEGACY_IDS])]) {
+      process.stderr.write(`[switchbot-codex] Removing stale plugin ${id} if present...\n`);
+      const removeCode = await runInherit('codex', ['plugin', 'remove', id]);
+      if (removeCode !== 0) {
+        process.stderr.write(`[switchbot-codex] Warning: plugin remove exited ${removeCode}; continuing.\n`);
+      }
+    }
+
     let marketplaceRoot;
     try {
       marketplaceRoot = resolveRoot(packageRoot);
     } catch (err) {
       process.stderr.write(`[switchbot-codex] Cannot prepare marketplace path: ${err.message}\n`);
       return 1;
+    }
+    // Also remove marketplace records: stale DB entries cause marketplace add to say
+    // "already added" without recreating the directory, making plugin add fail.
+    for (const name of CODEX_MARKETPLACE_LEGACY_NAMES) {
+      process.stderr.write(`[switchbot-codex] Removing stale marketplace ${name} if present...\n`);
+      const mktRemoveCode = await runInherit('codex', ['plugin', 'marketplace', 'remove', name]);
+      if (mktRemoveCode !== 0) {
+        process.stderr.write(`[switchbot-codex] Warning: marketplace remove exited ${mktRemoveCode}; continuing.\n`);
+      }
     }
     process.stderr.write(`[switchbot-codex] Registering plugin at ${marketplaceRoot}...\n`);
     const marketplaceCode = await runInherit('codex', ['plugin', 'marketplace', 'add', marketplaceRoot]);
@@ -158,14 +180,6 @@ export function makeInstall({ checkCli, runInherit, packageRoot, runAuth, resolv
       return marketplaceCode;
     }
 
-    const pluginName = resolvePluginIdentifier(packageRoot);
-    for (const id of [...new Set([pluginName, ...CODEX_PLUGIN_LEGACY_IDS])]) {
-      process.stderr.write(`[switchbot-codex] Removing stale plugin ${id} if present...\n`);
-      const removeCode = await runInherit('codex', ['plugin', 'remove', id]);
-      if (removeCode !== 0) {
-        process.stderr.write(`[switchbot-codex] Warning: plugin remove exited ${removeCode}; continuing.\n`);
-      }
-    }
     process.stderr.write(`[switchbot-codex] Adding plugin ${pluginName}...\n`);
     const pluginCode = await runInherit('codex', ['plugin', 'add', pluginName]);
     if (pluginCode !== 0) {

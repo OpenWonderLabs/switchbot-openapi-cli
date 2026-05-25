@@ -39,12 +39,16 @@ describe('makeInstall', () => {
     });
     const code = await install();
     assert.equal(code, 0);
-    assert.equal(calls.length, 5);
-    assert.deepEqual(calls[0], { cmd: 'codex', args: ['plugin', 'marketplace', 'add', TEST_ROOT] });
-    assert.deepEqual(calls[1], { cmd: 'codex', args: ['plugin', 'remove', 'switchbot@codex-plugin'] });
-    assert.deepEqual(calls[2], { cmd: 'codex', args: ['plugin', 'remove', 'switchbot@switchbot-skill'] });
-    assert.deepEqual(calls[3], { cmd: 'codex', args: ['plugin', 'add', 'switchbot@codex-plugin'] });
-    assert.deepEqual(calls[4], { cmd: 'switchbot', args: ['doctor'] });
+    // Order: plugin remove×2, marketplace remove×3, marketplace add, plugin add, doctor
+    assert.equal(calls.length, 8);
+    assert.deepEqual(calls[0], { cmd: 'codex', args: ['plugin', 'remove', 'switchbot@codex-plugin'] });
+    assert.deepEqual(calls[1], { cmd: 'codex', args: ['plugin', 'remove', 'switchbot@switchbot-skill'] });
+    assert.deepEqual(calls[2], { cmd: 'codex', args: ['plugin', 'marketplace', 'remove', 'switchbot'] });
+    assert.deepEqual(calls[3], { cmd: 'codex', args: ['plugin', 'marketplace', 'remove', 'codex-plugin'] });
+    assert.deepEqual(calls[4], { cmd: 'codex', args: ['plugin', 'marketplace', 'remove', 'switchbot-skill'] });
+    assert.deepEqual(calls[5], { cmd: 'codex', args: ['plugin', 'marketplace', 'add', TEST_ROOT] });
+    assert.deepEqual(calls[6], { cmd: 'codex', args: ['plugin', 'add', 'switchbot@codex-plugin'] });
+    assert.deepEqual(calls[7], { cmd: 'switchbot', args: ['doctor'] });
     assert.equal(auth.calls.length, 1);
   });
 
@@ -59,13 +63,17 @@ describe('makeInstall', () => {
     });
     const code = await install();
     assert.equal(code, 0);
-    assert.equal(calls.length, 6);
+    // Order: npm install, plugin remove×2, marketplace remove×3, marketplace add, plugin add, doctor
+    assert.equal(calls.length, 9);
     assert.deepEqual(calls[0], { cmd: 'npm', args: ['install', '-g', '@switchbot/openapi-cli@latest'] });
-    assert.deepEqual(calls[1], { cmd: 'codex', args: ['plugin', 'marketplace', 'add', TEST_ROOT] });
-    assert.deepEqual(calls[2], { cmd: 'codex', args: ['plugin', 'remove', 'switchbot@codex-plugin'] });
-    assert.deepEqual(calls[3], { cmd: 'codex', args: ['plugin', 'remove', 'switchbot@switchbot-skill'] });
-    assert.deepEqual(calls[4], { cmd: 'codex', args: ['plugin', 'add', 'switchbot@codex-plugin'] });
-    assert.deepEqual(calls[5], { cmd: 'switchbot', args: ['doctor'] });
+    assert.deepEqual(calls[1], { cmd: 'codex', args: ['plugin', 'remove', 'switchbot@codex-plugin'] });
+    assert.deepEqual(calls[2], { cmd: 'codex', args: ['plugin', 'remove', 'switchbot@switchbot-skill'] });
+    assert.deepEqual(calls[3], { cmd: 'codex', args: ['plugin', 'marketplace', 'remove', 'switchbot'] });
+    assert.deepEqual(calls[4], { cmd: 'codex', args: ['plugin', 'marketplace', 'remove', 'codex-plugin'] });
+    assert.deepEqual(calls[5], { cmd: 'codex', args: ['plugin', 'marketplace', 'remove', 'switchbot-skill'] });
+    assert.deepEqual(calls[6], { cmd: 'codex', args: ['plugin', 'marketplace', 'add', TEST_ROOT] });
+    assert.deepEqual(calls[7], { cmd: 'codex', args: ['plugin', 'add', 'switchbot@codex-plugin'] });
+    assert.deepEqual(calls[8], { cmd: 'switchbot', args: ['doctor'] });
     assert.equal(auth.calls.length, 1);
   });
 
@@ -90,7 +98,9 @@ describe('makeInstall', () => {
     const auth = makeRunAuth(0);
     const spawn = (cmd, args) => {
       callCount++;
-      return Promise.resolve(callCount === 1 ? 2 : 0);
+      // calls 1-2: plugin removes (warn+continue), 3-5: marketplace removes (warn+continue)
+      // call 6: marketplace add — fail
+      return Promise.resolve(callCount === 6 ? 2 : 0);
     };
     const install = makeInstall({
       checkCli: makeOkCliCheck(),
@@ -100,7 +110,7 @@ describe('makeInstall', () => {
     });
     const code = await install();
     assert.equal(code, 2);
-    assert.equal(callCount, 1);
+    assert.equal(callCount, 6);
     assert.equal(auth.calls.length, 0);
   });
 
@@ -109,8 +119,8 @@ describe('makeInstall', () => {
     const auth = makeRunAuth(0);
     const spawn = (cmd, args) => {
       callCount++;
-      // calls: 1=marketplace add, 2=remove current, 3=remove legacy, 4=plugin add
-      return Promise.resolve(callCount === 4 ? 3 : 0);
+      // calls: 1-2=plugin removes, 3-5=marketplace removes, 6=marketplace add, 7=plugin add
+      return Promise.resolve(callCount === 7 ? 3 : 0);
     };
     const install = makeInstall({
       checkCli: makeOkCliCheck(),
@@ -120,7 +130,7 @@ describe('makeInstall', () => {
     });
     const code = await install();
     assert.equal(code, 3);
-    assert.equal(callCount, 4);
+    assert.equal(callCount, 7);
     assert.equal(auth.calls.length, 0);
   });
 
@@ -135,7 +145,8 @@ describe('makeInstall', () => {
     });
     const code = await install();
     assert.equal(code, 4);
-    assert.equal(calls.length, 4);
+    // plugin remove×2, marketplace remove×3, marketplace add, plugin add (no doctor — auth failed)
+    assert.equal(calls.length, 7);
     assert.equal(auth.calls.length, 1);
   });
 
@@ -154,8 +165,9 @@ describe('makeInstall', () => {
     });
     const code = await install();
     assert.equal(code, 5);
-    assert.equal(calls.length, 5);
-    assert.deepEqual(calls[4], { cmd: 'switchbot', args: ['doctor'] });
+    // plugin remove×2, marketplace remove×3, marketplace add, plugin add, doctor
+    assert.equal(calls.length, 8);
+    assert.deepEqual(calls[7], { cmd: 'switchbot', args: ['doctor'] });
     assert.equal(auth.calls.length, 1);
   });
 
@@ -174,7 +186,8 @@ describe('makeInstall', () => {
     });
     const code = await install();
     assert.equal(code, 127);
-    assert.equal(callCount, 1);
+    // plugin remove×2 and marketplace remove×3 warn+continue; marketplace add returns 127 → stops
+    assert.equal(callCount, 6);
     assert.equal(auth.calls.length, 0);
   });
 
@@ -211,7 +224,7 @@ describe('makeInstall', () => {
     let callCount = 0;
     const spawn = (cmd, args) => {
       callCount++;
-      // calls: 1=marketplace add, 2=remove current → failure, 3=remove legacy, 4=plugin add, 5=doctor
+      // calls: 1=plugin remove current, 2=plugin remove legacy → fail, rest succeed
       return Promise.resolve(callCount === 2 ? 1 : 0);
     };
     const auth = makeRunAuth(0);
@@ -233,7 +246,8 @@ describe('makeInstall', () => {
     }
 
     assert.equal(code, 0, 'install should still succeed');
-    assert.equal(callCount, 5, 'all five spawn calls should be made');
+    // plugin remove×2, marketplace remove×3, marketplace add, plugin add, doctor
+    assert.equal(callCount, 8, 'all eight spawn calls should be made');
     const combined = errChunks.join('');
     assert.ok(
       combined.includes('Warning') && combined.includes('remove') && combined.includes('exited'),

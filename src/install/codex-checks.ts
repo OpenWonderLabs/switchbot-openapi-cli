@@ -248,13 +248,21 @@ export function checkCodexPluginRegistered(): Check {
 
 export function runCodexPluginRegistration(packageRoot: string, pluginId: string): RegistrationResult {
   const marketplaceRoot = resolveMarketplaceSourceRoot(packageRoot);
+  // Pre-clean before marketplace add: removing the last plugin from a marketplace
+  // causes Codex to auto-delete the marketplace entry, so removes must happen
+  // before we register the new marketplace — not after.
+  for (const id of [...new Set([pluginId, ...CODEX_PLUGIN_LEGACY_IDS])]) {
+    spawnStr('codex', ['plugin', 'remove', id]);
+  }
+  // Also remove the marketplace records: when plugin remove deletes the last plugin,
+  // Codex removes the directory but leaves a stale DB record. The next `marketplace add`
+  // then says "already added" without recreating the directory, causing `plugin add` to fail.
+  for (const name of CODEX_MARKETPLACE_LEGACY_NAMES) {
+    spawnStr('codex', ['plugin', 'marketplace', 'remove', name]);
+  }
   const mkt = spawnStr('codex', ['plugin', 'marketplace', 'add', marketplaceRoot]);
   if (mkt.status !== 0) {
     return { ok: false, exitCode: mkt.status, stderr: mkt.stderr, stage: 'marketplace-add' };
-  }
-  // Remove current and legacy IDs; ignore exit codes (best-effort pre-clean).
-  for (const id of [...new Set([pluginId, ...CODEX_PLUGIN_LEGACY_IDS])]) {
-    spawnStr('codex', ['plugin', 'remove', id]);
   }
   const add = spawnStr('codex', ['plugin', 'add', pluginId]);
   return { ok: add.status === 0, exitCode: add.status, stderr: add.stderr, stage: 'plugin-add' };
@@ -302,6 +310,11 @@ export const CODEX_GIT_MARKETPLACE_REF    = 'main';
 export const CODEX_PLUGIN_DEFAULT_ID      = 'switchbot@switchbot';
 // Known IDs from pre-release installs; cleaned up by both Route A and Route B.
 export const CODEX_PLUGIN_LEGACY_IDS = ['switchbot@codex-plugin', 'switchbot@switchbot-skill'];
+// Marketplace names derived from legacy IDs (pluginName@marketplaceName → marketplaceName).
+// Removed before marketplace add to clear stale Codex internal state — when plugin remove
+// deletes the last plugin in a marketplace Codex removes the directory but leaves a DB record,
+// causing the next `marketplace add` to say "already added" without recreating the directory.
+export const CODEX_MARKETPLACE_LEGACY_NAMES = ['switchbot', 'codex-plugin', 'switchbot-skill'];
 
 export function runCodexPluginRegistrationGit(pluginId: string): RegistrationResult {
   const ref = process.env['CODEX_GIT_MARKETPLACE_REF'] || CODEX_GIT_MARKETPLACE_REF;
@@ -314,6 +327,16 @@ export function runCodexPluginRegistrationGit(pluginId: string): RegistrationRes
     );
   }
   const timeout = _timeoutValid ? _parsedTimeout : 60000;
+  // Pre-clean before marketplace add: removing the last plugin from a marketplace
+  // causes Codex to auto-delete the marketplace entry, so removes must happen
+  // before we register the new marketplace — not after.
+  for (const id of [...new Set([pluginId, ...CODEX_PLUGIN_LEGACY_IDS])]) {
+    spawnStr('codex', ['plugin', 'remove', id]);
+  }
+  // Also remove the marketplace records to clear stale Codex DB state (see Route A counterpart).
+  for (const name of CODEX_MARKETPLACE_LEGACY_NAMES) {
+    spawnStr('codex', ['plugin', 'marketplace', 'remove', name]);
+  }
   // git clone via marketplace add can take >10 s on slow networks; use 60 s
   const mkt = spawnStr('codex', [
     'plugin', 'marketplace', 'add',
@@ -323,10 +346,6 @@ export function runCodexPluginRegistrationGit(pluginId: string): RegistrationRes
   ], timeout);
   if (mkt.status !== 0) {
     return { ok: false, exitCode: mkt.status, stderr: mkt.stderr, stage: 'marketplace-add' };
-  }
-  // Pre-clean: remove current ID and any known legacy IDs; ignore exit codes
-  for (const id of [...new Set([pluginId, ...CODEX_PLUGIN_LEGACY_IDS])]) {
-    spawnStr('codex', ['plugin', 'remove', id]);
   }
   const add = spawnStr('codex', ['plugin', 'add', pluginId]);
   return { ok: add.status === 0, exitCode: add.status, stderr: add.stderr, stage: 'plugin-add' };
