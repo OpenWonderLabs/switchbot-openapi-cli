@@ -32,6 +32,9 @@ jobs:
           - package: '@switchbot/codex-plugin'
             version_path: 'packages/codex-plugin/package.json'
             kind: plugin
+          - package: '@switchbot/openclaw-skill'
+            version_path: 'packages/openclaw-skill/package.json'
+            kind: plugin
     steps:
       - uses: actions/checkout@v4
         with:

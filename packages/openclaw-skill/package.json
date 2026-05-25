@@ -1,8 +1,8 @@
 {
   "name": "@switchbot/openclaw-skill",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
-  "description": "OpenClaw plugin that drives @switchbot/openapi-cli >= 3.7.1. Exposes 6 MCP tools (devices_list/status/describe/command, scenes_list/run) for SwitchBot smart-home control.",
+  "description": "OpenClaw plugin that bootstraps and delegates to `switchbot mcp serve`, exposing the full SwitchBot MCP tool surface through @switchbot/openapi-cli >= 3.7.1.",
   "homepage": "https://github.com/OpenWonderLabs/switchbot-openapi-cli/tree/main/packages/openclaw-skill",
   "repository": {
     "type": "git",
@@ -37,7 +37,6 @@
   },
   "files": [
     "index.js",
-    "cli.js",
     ".claude-plugin/",
     ".mcp.json",
     "bin/",
@@ -50,8 +49,8 @@
     "access": "public"
   },
   "scripts": {
-    "test": "node --test tests/*.test.js",
+    "test": "node --test",
     "start": "node bin/start.js",
-    "typecheck": "node --check bin/start.js && node --check bin/policy-edit.js && node --check cli.js && node --check index.js"
+    "typecheck": "node --check bin/start.js && node --check bin/policy-edit.js && node --check index.js"
   }
 }

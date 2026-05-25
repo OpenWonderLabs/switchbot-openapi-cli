@@ -10,7 +10,7 @@
 //   --help      Print this help.
 //
 // Default (no args): bootstrap wrapper — auto-installs CLI, verifies credentials,
-// starts daemon if needed, then exec switchbot mcp serve (exposes all 24 MCP tools).
+// starts daemon if needed, then exec switchbot mcp serve (the CLI-owned MCP surface).
 // Only credential setup requires user action; everything else is automatic.
 
 import { readFileSync } from 'node:fs';
@@ -62,7 +62,7 @@ See https://github.com/OpenWonderLabs/switchbot-openapi-cli for full docs.`);
   // [3] Daemon needed? → auto-start if automation rules are active
   await checkDaemon();
 
-  // [4] Hand off to switchbot mcp serve — exposes all 24 MCP tools
+  // [4] Hand off to switchbot mcp serve — the CLI owns the MCP tool surface
   try {
     execFileSync('switchbot', ['mcp', 'serve'], { stdio: 'inherit' });
   } catch (err) {

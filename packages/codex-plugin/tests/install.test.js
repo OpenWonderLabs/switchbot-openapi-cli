@@ -1,6 +1,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { makeInstall, resolvePluginIdentifier } from '../bin/install.js';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { makeInstall, resolvePluginIdentifier, resolveMarketplaceSourceRoot } from '../bin/install.js';
 
 function makeOkCliCheck(version = '3.7.1') {
   return async () => ({ ok: true, version });
@@ -26,6 +28,7 @@ function makeSpawn(exitCode = 0) {
 }
 
 const TEST_ROOT = '/fake/codex-plugin';
+const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 describe('makeInstall', () => {
   it('skips npm install when CLI is already present', async () => {
@@ -39,12 +42,16 @@ describe('makeInstall', () => {
     });
     const code = await install();
     assert.equal(code, 0);
-    assert.equal(calls.length, 5);
-    assert.deepEqual(calls[0], { cmd: 'codex', args: ['plugin', 'marketplace', 'add', TEST_ROOT] });
-    assert.deepEqual(calls[1], { cmd: 'codex', args: ['plugin', 'remove', 'switchbot@codex-plugin'] });
-    assert.deepEqual(calls[2], { cmd: 'codex', args: ['plugin', 'remove', 'switchbot@switchbot-skill'] });
-    assert.deepEqual(calls[3], { cmd: 'codex', args: ['plugin', 'add', 'switchbot@codex-plugin'] });
-    assert.deepEqual(calls[4], { cmd: 'switchbot', args: ['doctor'] });
+    // Order: plugin remove×2, marketplace remove×3, marketplace add, plugin add, doctor
+    assert.equal(calls.length, 8);
+    assert.deepEqual(calls[0], { cmd: 'codex', args: ['plugin', 'remove', 'switchbot@codex-plugin'] });
+    assert.deepEqual(calls[1], { cmd: 'codex', args: ['plugin', 'remove', 'switchbot@switchbot-skill'] });
+    assert.deepEqual(calls[2], { cmd: 'codex', args: ['plugin', 'marketplace', 'remove', 'switchbot'] });
+    assert.deepEqual(calls[3], { cmd: 'codex', args: ['plugin', 'marketplace', 'remove', 'codex-plugin'] });
+    assert.deepEqual(calls[4], { cmd: 'codex', args: ['plugin', 'marketplace', 'remove', 'switchbot-skill'] });
+    assert.deepEqual(calls[5], { cmd: 'codex', args: ['plugin', 'marketplace', 'add', TEST_ROOT] });
+    assert.deepEqual(calls[6], { cmd: 'codex', args: ['plugin', 'add', 'switchbot@codex-plugin'] });
+    assert.deepEqual(calls[7], { cmd: 'switchbot', args: ['doctor'] });
     assert.equal(auth.calls.length, 1);
   });
 
@@ -59,13 +66,17 @@ describe('makeInstall', () => {
     });
     const code = await install();
     assert.equal(code, 0);
-    assert.equal(calls.length, 6);
+    // Order: npm install, plugin remove×2, marketplace remove×3, marketplace add, plugin add, doctor
+    assert.equal(calls.length, 9);
     assert.deepEqual(calls[0], { cmd: 'npm', args: ['install', '-g', '@switchbot/openapi-cli@latest'] });
-    assert.deepEqual(calls[1], { cmd: 'codex', args: ['plugin', 'marketplace', 'add', TEST_ROOT] });
-    assert.deepEqual(calls[2], { cmd: 'codex', args: ['plugin', 'remove', 'switchbot@codex-plugin'] });
-    assert.deepEqual(calls[3], { cmd: 'codex', args: ['plugin', 'remove', 'switchbot@switchbot-skill'] });
-    assert.deepEqual(calls[4], { cmd: 'codex', args: ['plugin', 'add', 'switchbot@codex-plugin'] });
-    assert.deepEqual(calls[5], { cmd: 'switchbot', args: ['doctor'] });
+    assert.deepEqual(calls[1], { cmd: 'codex', args: ['plugin', 'remove', 'switchbot@codex-plugin'] });
+    assert.deepEqual(calls[2], { cmd: 'codex', args: ['plugin', 'remove', 'switchbot@switchbot-skill'] });
+    assert.deepEqual(calls[3], { cmd: 'codex', args: ['plugin', 'marketplace', 'remove', 'switchbot'] });
+    assert.deepEqual(calls[4], { cmd: 'codex', args: ['plugin', 'marketplace', 'remove', 'codex-plugin'] });
+    assert.deepEqual(calls[5], { cmd: 'codex', args: ['plugin', 'marketplace', 'remove', 'switchbot-skill'] });
+    assert.deepEqual(calls[6], { cmd: 'codex', args: ['plugin', 'marketplace', 'add', TEST_ROOT] });
+    assert.deepEqual(calls[7], { cmd: 'codex', args: ['plugin', 'add', 'switchbot@codex-plugin'] });
+    assert.deepEqual(calls[8], { cmd: 'switchbot', args: ['doctor'] });
     assert.equal(auth.calls.length, 1);
   });
 
@@ -90,7 +101,9 @@ describe('makeInstall', () => {
     const auth = makeRunAuth(0);
     const spawn = (cmd, args) => {
       callCount++;
-      return Promise.resolve(callCount === 1 ? 2 : 0);
+      // calls 1-2: plugin removes (warn+continue), 3-5: marketplace removes (warn+continue)
+      // call 6: marketplace add — fail
+      return Promise.resolve(callCount === 6 ? 2 : 0);
     };
     const install = makeInstall({
       checkCli: makeOkCliCheck(),
@@ -100,7 +113,7 @@ describe('makeInstall', () => {
     });
     const code = await install();
     assert.equal(code, 2);
-    assert.equal(callCount, 1);
+    assert.equal(callCount, 6);
     assert.equal(auth.calls.length, 0);
   });
 
@@ -109,8 +122,8 @@ describe('makeInstall', () => {
     const auth = makeRunAuth(0);
     const spawn = (cmd, args) => {
       callCount++;
-      // calls: 1=marketplace add, 2=remove current, 3=remove legacy, 4=plugin add
-      return Promise.resolve(callCount === 4 ? 3 : 0);
+      // calls: 1-2=plugin removes, 3-5=marketplace removes, 6=marketplace add, 7=plugin add
+      return Promise.resolve(callCount === 7 ? 3 : 0);
     };
     const install = makeInstall({
       checkCli: makeOkCliCheck(),
@@ -120,7 +133,7 @@ describe('makeInstall', () => {
     });
     const code = await install();
     assert.equal(code, 3);
-    assert.equal(callCount, 4);
+    assert.equal(callCount, 7);
     assert.equal(auth.calls.length, 0);
   });
 
@@ -135,7 +148,8 @@ describe('makeInstall', () => {
     });
     const code = await install();
     assert.equal(code, 4);
-    assert.equal(calls.length, 4);
+    // plugin remove×2, marketplace remove×3, marketplace add, plugin add (no doctor — auth failed)
+    assert.equal(calls.length, 7);
     assert.equal(auth.calls.length, 1);
   });
 
@@ -154,8 +168,9 @@ describe('makeInstall', () => {
     });
     const code = await install();
     assert.equal(code, 5);
-    assert.equal(calls.length, 5);
-    assert.deepEqual(calls[4], { cmd: 'switchbot', args: ['doctor'] });
+    // plugin remove×2, marketplace remove×3, marketplace add, plugin add, doctor
+    assert.equal(calls.length, 8);
+    assert.deepEqual(calls[7], { cmd: 'switchbot', args: ['doctor'] });
     assert.equal(auth.calls.length, 1);
   });
 
@@ -174,7 +189,8 @@ describe('makeInstall', () => {
     });
     const code = await install();
     assert.equal(code, 127);
-    assert.equal(callCount, 1);
+    // plugin remove×2 and marketplace remove×3 warn+continue; marketplace add returns 127 → stops
+    assert.equal(callCount, 6);
     assert.equal(auth.calls.length, 0);
   });
 
@@ -211,7 +227,7 @@ describe('makeInstall', () => {
     let callCount = 0;
     const spawn = (cmd, args) => {
       callCount++;
-      // calls: 1=marketplace add, 2=remove current → failure, 3=remove legacy, 4=plugin add, 5=doctor
+      // calls: 1=plugin remove current, 2=plugin remove legacy → fail, rest succeed
       return Promise.resolve(callCount === 2 ? 1 : 0);
     };
     const auth = makeRunAuth(0);
@@ -233,11 +249,42 @@ describe('makeInstall', () => {
     }
 
     assert.equal(code, 0, 'install should still succeed');
-    assert.equal(callCount, 5, 'all five spawn calls should be made');
+    // plugin remove×2, marketplace remove×3, marketplace add, plugin add, doctor
+    assert.equal(callCount, 8, 'all eight spawn calls should be made');
     const combined = errChunks.join('');
     assert.ok(
       combined.includes('Warning') && combined.includes('remove') && combined.includes('exited'),
       `expected warning about remove exit code in: ${combined}`,
+    );
+  });
+
+  it('fresh install from the current package root registers switchbot@switchbot', async () => {
+    const { spawn, calls } = makeSpawn(0);
+    const auth = makeRunAuth(0);
+    const install = makeInstall({
+      checkCli: makeFailCliCheck(),
+      runInherit: spawn,
+      packageRoot: PACKAGE_ROOT,
+      runAuth: auth.runAuth,
+    });
+    const code = await install();
+    assert.equal(code, 0);
+    assert.ok(
+      calls.some(({ cmd, args }) =>
+        cmd === 'codex' &&
+        args[0] === 'plugin' &&
+        args[1] === 'add' &&
+        args[2] === 'switchbot@switchbot'),
+      `expected plugin add switchbot@switchbot in calls: ${JSON.stringify(calls)}`,
+    );
+    assert.ok(
+      calls.some(({ cmd, args }) =>
+        cmd === 'codex' &&
+        args[0] === 'plugin' &&
+        args[1] === 'marketplace' &&
+        args[2] === 'add' &&
+        args[3] === PACKAGE_ROOT),
+      `expected marketplace add ${PACKAGE_ROOT} in calls: ${JSON.stringify(calls)}`,
     );
   });
 });
@@ -245,5 +292,101 @@ describe('makeInstall', () => {
 describe('resolvePluginIdentifier', () => {
   it('falls back to basename when the plugin manifest is unavailable', () => {
     assert.equal(resolvePluginIdentifier('/fake/codex-plugin'), 'switchbot@codex-plugin');
+  });
+
+  it('uses the published marketplace manifest from the current package root', () => {
+    assert.equal(resolvePluginIdentifier(PACKAGE_ROOT), 'switchbot@switchbot');
+  });
+});
+
+describe('resolveMarketplaceSourceRoot', () => {
+  it('resolveMarketplaceSourceRoot throws a helpful message when symlinkSync fails with EPERM', () => {
+    const epermErr = Object.assign(new Error('operation not permitted'), { code: 'EPERM' });
+    const deps = {
+      mkdirSync: () => {},
+      lstatSync: (_p, _opts) => null,           // alias does not exist → first-create branch
+      symlinkSync: (_src, _dest, _type) => { throw epermErr; },
+      realpathSync: (p) => p,
+      unlinkSync: () => {},
+    };
+
+    // Use a path that triggers needsAlias on any platform
+    const scopedPath = process.platform === 'win32'
+      ? 'C:\\Users\\test\\node_modules\\@switchbot\\codex-plugin'
+      : '/home/user/node_modules/@switchbot/codex-plugin';
+
+    assert.throws(
+      () => resolveMarketplaceSourceRoot(scopedPath, deps),
+      (err) => {
+        assert.ok(err instanceof Error, 'should throw an Error');
+        assert.ok(err.message.includes('EPERM'), `message should mention EPERM, got: ${err.message}`);
+        assert.ok(
+          err.message.includes('permission denied') || err.message.includes('elevated'),
+          `message should be actionable, got: ${err.message}`,
+        );
+        return true;
+      },
+    );
+  });
+
+  it('throws a helpful EPERM message when symlinkSync fails on dangling-symlink branch', () => {
+    const epermErr = Object.assign(new Error('operation not permitted'), { code: 'EPERM' });
+    const deps = {
+      mkdirSync: () => {},
+      lstatSync: (_p, _opts) => ({ isSymbolicLink: () => true }),  // alias exists as symlink
+      symlinkSync: (_src, _dest, _type) => { throw epermErr; },
+      realpathSync: (_p) => { throw new Error('ENOENT: no such file'); }, // dangling → target gone
+      unlinkSync: () => {},
+    };
+
+    const scopedPath = process.platform === 'win32'
+      ? 'C:\\Users\\test\\node_modules\\@switchbot\\codex-plugin'
+      : '/home/user/node_modules/@switchbot/codex-plugin';
+
+    assert.throws(
+      () => resolveMarketplaceSourceRoot(scopedPath, deps),
+      (err) => {
+        assert.ok(err instanceof Error, 'should throw an Error');
+        assert.ok(err.message.includes('EPERM'), `message should mention EPERM, got: ${err.message}`);
+        assert.ok(
+          err.message.includes('permission denied') || err.message.includes('elevated'),
+          `message should be actionable, got: ${err.message}`,
+        );
+        return true;
+      },
+    );
+  });
+
+  it('throws a helpful EPERM message when symlinkSync fails on stale-target branch', () => {
+    const epermErr = Object.assign(new Error('operation not permitted'), { code: 'EPERM' });
+    let realCallCount = 0;
+    const deps = {
+      mkdirSync: () => {},
+      lstatSync: (_p, _opts) => ({ isSymbolicLink: () => true }),  // alias exists as symlink
+      symlinkSync: (_src, _dest, _type) => { throw epermErr; },
+      realpathSync: (p) => {
+        realCallCount++;
+        // First call = aliasRoot, second call = packageRoot — return different values so paths differ
+        return realCallCount === 1 ? p + '-old' : p + '-new';
+      },
+      unlinkSync: () => {},
+    };
+
+    const scopedPath = process.platform === 'win32'
+      ? 'C:\\Users\\test\\node_modules\\@switchbot\\codex-plugin'
+      : '/home/user/node_modules/@switchbot/codex-plugin';
+
+    assert.throws(
+      () => resolveMarketplaceSourceRoot(scopedPath, deps),
+      (err) => {
+        assert.ok(err instanceof Error, 'should throw an Error');
+        assert.ok(err.message.includes('EPERM'), `message should mention EPERM, got: ${err.message}`);
+        assert.ok(
+          err.message.includes('permission denied') || err.message.includes('elevated'),
+          `message should be actionable, got: ${err.message}`,
+        );
+        return true;
+      },
+    );
   });
 });

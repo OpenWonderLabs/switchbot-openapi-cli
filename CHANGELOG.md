@@ -9,6 +9,11 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **OpenClaw plugin publish path** — `@switchbot/openclaw-skill` is back in the monorepo npm publish matrix. `publish.yml` now version-checks and publishes it alongside the CLI and Codex plugin, while `npm-published-smoke.yml` verifies the published tarball through the shared plugin smoke path.
+- **OpenClaw package metadata** — `packages/openclaw-skill/README.md`, `.mcp.json`, and package metadata now describe the actual runtime contract: OpenClaw bootstraps via `bin/start.js`, then delegates to `switchbot mcp serve` for the CLI-owned MCP tool surface.
+
 ## [3.7.3]
 
 ### Added

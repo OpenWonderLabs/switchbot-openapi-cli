@@ -43,9 +43,26 @@ function readJsonObject(filePath: string): Record<string, unknown> | null {
 }
 
 function resolveMarketplaceName(packageRoot: string): string {
-  const marketplacePath = path.join(packageRoot, '.agents', 'plugins', 'marketplace.json');
-  if (fs.existsSync(marketplacePath)) {
-    const marketplace = readJsonObject(marketplacePath);
+  // Check .claude-plugin/marketplace.json (canonical path Codex CLI reads, >=0.1.3)
+  const claudePluginPath = path.join(packageRoot, '.claude-plugin', 'marketplace.json');
+  if (fs.existsSync(claudePluginPath)) {
+    const manifest = readJsonObject(claudePluginPath);
+    if (typeof manifest?.name === 'string' && manifest.name) {
+      return manifest.name;
+    }
+  }
+  // Fall back to root-level marketplace.json (present in pre-0.1.3 local copies)
+  const rootManifestPath = path.join(packageRoot, 'marketplace.json');
+  if (fs.existsSync(rootManifestPath)) {
+    const manifest = readJsonObject(rootManifestPath);
+    if (typeof manifest?.name === 'string' && manifest.name) {
+      return manifest.name;
+    }
+  }
+  // Fall back to legacy .agents/plugins/marketplace.json
+  const legacyPath = path.join(packageRoot, '.agents', 'plugins', 'marketplace.json');
+  if (fs.existsSync(legacyPath)) {
+    const marketplace = readJsonObject(legacyPath);
     if (typeof marketplace?.name === 'string' && marketplace.name) {
       return marketplace.name;
     }
@@ -78,6 +95,22 @@ function computeAliasPath(): string {
   return path.join(os.homedir(), '.switchbot', 'codex-plugin-marketplace');
 }
 
+function createAlias(src: string, dest: string, type: fs.symlink.Type): void {
+  try {
+    fs.symlinkSync(src, dest, type);
+  } catch (err: unknown) {
+    const nodeErr = err as NodeJS.ErrnoException;
+    if (nodeErr.code === 'EPERM') {
+      throw new Error(
+        `Cannot create ${type} at ${dest}: permission denied (EPERM). ` +
+          `On Windows, run the installer from an elevated terminal, ` +
+          `or install to a path without @-scoped segments.`,
+      );
+    }
+    throw err;
+  }
+}
+
 export function resolveMarketplaceSourceRoot(packageRoot: string): string {
   // Codex misclassifies local paths containing `@`-scoped npm segments
   // (e.g. `…/node_modules/@switchbot/codex-plugin`) as ref-bearing git sources,
@@ -97,7 +130,7 @@ export function resolveMarketplaceSourceRoot(packageRoot: string): string {
 
   const stat = fs.lstatSync(aliasRoot, { throwIfNoEntry: false });
   if (!stat) {
-    fs.symlinkSync(packageRoot, aliasRoot, linkType);
+    createAlias(packageRoot, aliasRoot, linkType);
     return aliasRoot;
   }
 
@@ -111,7 +144,7 @@ export function resolveMarketplaceSourceRoot(packageRoot: string): string {
       // Dangling symlink: target was deleted (e.g. nvm switch, npm uninstall).
       // Recreate it pointing at the current packageRoot.
       fs.unlinkSync(aliasRoot);
-      fs.symlinkSync(packageRoot, aliasRoot, linkType);
+      createAlias(packageRoot, aliasRoot, linkType);
       return aliasRoot;
     }
     const pathsMatch = process.platform === 'win32'
@@ -119,7 +152,7 @@ export function resolveMarketplaceSourceRoot(packageRoot: string): string {
       : aliasReal === packageReal;
     if (pathsMatch) return aliasRoot;
     fs.unlinkSync(aliasRoot);
-    fs.symlinkSync(packageRoot, aliasRoot, linkType);
+    createAlias(packageRoot, aliasRoot, linkType);
     return aliasRoot;
   }
 
@@ -239,13 +272,21 @@ export function checkCodexPluginRegistered(): Check {
 
 export function runCodexPluginRegistration(packageRoot: string, pluginId: string): RegistrationResult {
   const marketplaceRoot = resolveMarketplaceSourceRoot(packageRoot);
+  // Pre-clean before marketplace add: removing the last plugin from a marketplace
+  // causes Codex to auto-delete the marketplace entry, so removes must happen
+  // before we register the new marketplace — not after.
+  for (const id of [...new Set([pluginId, ...CODEX_PLUGIN_LEGACY_IDS])]) {
+    spawnStr('codex', ['plugin', 'remove', id]);
+  }
+  // Also remove the marketplace records: when plugin remove deletes the last plugin,
+  // Codex removes the directory but leaves a stale DB record. The next `marketplace add`
+  // then says "already added" without recreating the directory, causing `plugin add` to fail.
+  for (const name of CODEX_MARKETPLACE_LEGACY_NAMES) {
+    spawnStr('codex', ['plugin', 'marketplace', 'remove', name]);
+  }
   const mkt = spawnStr('codex', ['plugin', 'marketplace', 'add', marketplaceRoot]);
   if (mkt.status !== 0) {
     return { ok: false, exitCode: mkt.status, stderr: mkt.stderr, stage: 'marketplace-add' };
-  }
-  // Remove current and legacy IDs; ignore exit codes (best-effort pre-clean).
-  for (const id of [pluginId, ...CODEX_PLUGIN_LEGACY_IDS]) {
-    spawnStr('codex', ['plugin', 'remove', id]);
   }
   const add = spawnStr('codex', ['plugin', 'add', pluginId]);
   return { ok: add.status === 0, exitCode: add.status, stderr: add.stderr, stage: 'plugin-add' };
@@ -288,11 +329,17 @@ export function registerCodexPlugin(): RegisterCodexPluginResult {
 
 // ─── Git-based marketplace registration (Route B) ────────────────────────────
 export const CODEX_GIT_MARKETPLACE_REPO   = 'OpenWonderLabs/switchbot-openapi-cli';
-export const CODEX_GIT_MARKETPLACE_SPARSE = 'packages/codex-plugin';
+export const CODEX_GIT_MARKETPLACE_SPARSE  = 'packages/codex-plugin';
+export const CODEX_GIT_MARKETPLACE_SPARSE2 = '.claude-plugin';
 export const CODEX_GIT_MARKETPLACE_REF    = 'main';
-export const CODEX_PLUGIN_DEFAULT_ID      = 'switchbot@codex-plugin';
+export const CODEX_PLUGIN_DEFAULT_ID      = 'switchbot@switchbot';
 // Known IDs from pre-release installs; cleaned up by both Route A and Route B.
-export const CODEX_PLUGIN_LEGACY_IDS = ['switchbot@switchbot-skill'];
+export const CODEX_PLUGIN_LEGACY_IDS = ['switchbot@codex-plugin', 'switchbot@switchbot-skill'];
+// Marketplace names derived from legacy IDs (pluginName@marketplaceName → marketplaceName).
+// Removed before marketplace add to clear stale Codex internal state — when plugin remove
+// deletes the last plugin in a marketplace Codex removes the directory but leaves a DB record,
+// causing the next `marketplace add` to say "already added" without recreating the directory.
+export const CODEX_MARKETPLACE_LEGACY_NAMES = ['switchbot', 'codex-plugin', 'switchbot-skill'];
 
 export function runCodexPluginRegistrationGit(pluginId: string): RegistrationResult {
   const ref = process.env['CODEX_GIT_MARKETPLACE_REF'] || CODEX_GIT_MARKETPLACE_REF;
@@ -305,19 +352,32 @@ export function runCodexPluginRegistrationGit(pluginId: string): RegistrationRes
     );
   }
   const timeout = _timeoutValid ? _parsedTimeout : 60000;
+  // Pre-clean before marketplace add: removing the last plugin from a marketplace
+  // causes Codex to auto-delete the marketplace entry, so removes must happen
+  // before we register the new marketplace — not after.
+  for (const id of [...new Set([pluginId, ...CODEX_PLUGIN_LEGACY_IDS])]) {
+    spawnStr('codex', ['plugin', 'remove', id]);
+  }
+  // Also remove the marketplace records to clear stale Codex DB state (see Route A counterpart).
+  for (const name of CODEX_MARKETPLACE_LEGACY_NAMES) {
+    spawnStr('codex', ['plugin', 'marketplace', 'remove', name]);
+  }
   // git clone via marketplace add can take >10 s on slow networks; use 60 s
-  const mkt = spawnStr('codex', [
+  const mktArgs = [
     'plugin', 'marketplace', 'add',
     CODEX_GIT_MARKETPLACE_REPO,
     '--sparse', CODEX_GIT_MARKETPLACE_SPARSE,
+    '--sparse', CODEX_GIT_MARKETPLACE_SPARSE2,
     '--ref',    ref,
-  ], timeout);
+  ];
+  let mkt = spawnStr('codex', mktArgs, timeout);
+  // On Windows, git holds file handles briefly after clone; retry once after 10 s.
+  if (mkt.status !== 0 && process.platform === 'win32' && mkt.stderr.includes('os error 32')) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10000);
+    mkt = spawnStr('codex', mktArgs, timeout);
+  }
   if (mkt.status !== 0) {
     return { ok: false, exitCode: mkt.status, stderr: mkt.stderr, stage: 'marketplace-add' };
-  }
-  // Pre-clean: remove current ID and any known legacy IDs; ignore exit codes
-  for (const id of [pluginId, ...CODEX_PLUGIN_LEGACY_IDS]) {
-    spawnStr('codex', ['plugin', 'remove', id]);
   }
   const add = spawnStr('codex', ['plugin', 'add', pluginId]);
   return { ok: add.status === 0, exitCode: add.status, stderr: add.stderr, stage: 'plugin-add' };

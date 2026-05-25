@@ -22,14 +22,22 @@ function defaultRunInherit(cmd, args) {
 
 export function resolvePluginIdentifier(packageRoot) {
   let marketplaceName = basename(packageRoot);
-  const marketplacePath = join(packageRoot, '.agents', 'plugins', 'marketplace.json');
-  if (existsSync(marketplacePath)) {
-    try {
-      const marketplace = JSON.parse(readFileSync(marketplacePath, 'utf8'));
-      if (marketplace?.name) {
-        marketplaceName = marketplace.name;
-      }
-    } catch {}
+
+  // Check manifest paths in priority order; stop at first valid name found.
+  // Sequential independent if blocks allow fallbacks to work even if earlier
+  // files exist but have invalid JSON (e.g., interrupted write).
+  const manifestPaths = [
+    join(packageRoot, '.claude-plugin', 'marketplace.json'),
+    join(packageRoot, 'marketplace.json'),
+    join(packageRoot, '.agents', 'plugins', 'marketplace.json'),
+  ];
+  for (const p of manifestPaths) {
+    if (existsSync(p)) {
+      try {
+        const m = JSON.parse(readFileSync(p, 'utf8'));
+        if (m?.name) { marketplaceName = m.name; break; }
+      } catch {}
+    }
   }
 
   let pluginName = 'switchbot';
@@ -54,6 +62,21 @@ function computeAliasPath() {
   return join(os.homedir(), '.switchbot', 'codex-plugin-marketplace');
 }
 
+function createAlias(src, dest, type, deps) {
+  try {
+    deps.symlinkSync(src, dest, type);
+  } catch (err) {
+    if (err && err.code === 'EPERM') {
+      throw new Error(
+        `Cannot create ${type} at ${dest}: permission denied (EPERM). ` +
+          `On Windows, run the installer from an elevated terminal, ` +
+          `or install to a path without @-scoped segments.`,
+      );
+    }
+    throw err;
+  }
+}
+
 export function resolveMarketplaceSourceRoot(packageRoot, deps = defaultFsDeps) {
   // NOTE: This function is FROZEN. The canonical implementation lives in
   // src/install/codex-checks.ts. Do NOT sync new changes here.
@@ -72,7 +95,7 @@ export function resolveMarketplaceSourceRoot(packageRoot, deps = defaultFsDeps) 
 
   const stat = deps.lstatSync(aliasRoot, { throwIfNoEntry: false });
   if (!stat) {
-    deps.symlinkSync(packageRoot, aliasRoot, linkType);
+    createAlias(packageRoot, aliasRoot, linkType, deps);
     return aliasRoot;
   }
 
@@ -85,7 +108,7 @@ export function resolveMarketplaceSourceRoot(packageRoot, deps = defaultFsDeps) 
     } catch {
       // Dangling symlink: target was deleted (e.g. nvm switch, npm uninstall).
       deps.unlinkSync(aliasRoot);
-      deps.symlinkSync(packageRoot, aliasRoot, linkType);
+      createAlias(packageRoot, aliasRoot, linkType, deps);
       return aliasRoot;
     }
     const pathsMatch = process.platform === 'win32'
@@ -95,7 +118,7 @@ export function resolveMarketplaceSourceRoot(packageRoot, deps = defaultFsDeps) 
       return aliasRoot;
     }
     deps.unlinkSync(aliasRoot);
-    deps.symlinkSync(packageRoot, aliasRoot, linkType);
+    createAlias(packageRoot, aliasRoot, linkType, deps);
     return aliasRoot;
   }
 
@@ -110,7 +133,8 @@ function formatCodexFailure(step) {
   ].join('\n');
 }
 
-const CODEX_PLUGIN_LEGACY_IDS = ['switchbot@switchbot-skill'];
+const CODEX_PLUGIN_LEGACY_IDS = ['switchbot@codex-plugin', 'switchbot@switchbot-skill'];
+const CODEX_MARKETPLACE_LEGACY_NAMES = ['switchbot', 'codex-plugin', 'switchbot-skill'];
 
 export function makeInstall({ checkCli, runInherit, packageRoot, runAuth, resolveRoot = resolveMarketplaceSourceRoot }) {
   return async function install() {
@@ -131,12 +155,33 @@ export function makeInstall({ checkCli, runInherit, packageRoot, runAuth, resolv
       process.stderr.write(`[switchbot-codex] CLI ${cliCheck.version} detected.\n`);
     }
 
+    const pluginName = resolvePluginIdentifier(packageRoot);
+    // Pre-clean before marketplace add: removing the last plugin from a marketplace
+    // causes Codex to auto-delete the marketplace entry, so removes must happen
+    // before we register the new marketplace — not after.
+    for (const id of [...new Set([pluginName, ...CODEX_PLUGIN_LEGACY_IDS])]) {
+      process.stderr.write(`[switchbot-codex] Removing stale plugin ${id} if present...\n`);
+      const removeCode = await runInherit('codex', ['plugin', 'remove', id]);
+      if (removeCode !== 0) {
+        process.stderr.write(`[switchbot-codex] Warning: plugin remove exited ${removeCode}; continuing.\n`);
+      }
+    }
+
     let marketplaceRoot;
     try {
       marketplaceRoot = resolveRoot(packageRoot);
     } catch (err) {
       process.stderr.write(`[switchbot-codex] Cannot prepare marketplace path: ${err.message}\n`);
       return 1;
+    }
+    // Also remove marketplace records: stale DB entries cause marketplace add to say
+    // "already added" without recreating the directory, making plugin add fail.
+    for (const name of CODEX_MARKETPLACE_LEGACY_NAMES) {
+      process.stderr.write(`[switchbot-codex] Removing stale marketplace ${name} if present...\n`);
+      const mktRemoveCode = await runInherit('codex', ['plugin', 'marketplace', 'remove', name]);
+      if (mktRemoveCode !== 0) {
+        process.stderr.write(`[switchbot-codex] Warning: marketplace remove exited ${mktRemoveCode}; continuing.\n`);
+      }
     }
     process.stderr.write(`[switchbot-codex] Registering plugin at ${marketplaceRoot}...\n`);
     const marketplaceCode = await runInherit('codex', ['plugin', 'marketplace', 'add', marketplaceRoot]);
@@ -149,14 +194,6 @@ export function makeInstall({ checkCli, runInherit, packageRoot, runAuth, resolv
       return marketplaceCode;
     }
 
-    const pluginName = resolvePluginIdentifier(packageRoot);
-    for (const id of [pluginName, ...CODEX_PLUGIN_LEGACY_IDS]) {
-      process.stderr.write(`[switchbot-codex] Removing stale plugin ${id} if present...\n`);
-      const removeCode = await runInherit('codex', ['plugin', 'remove', id]);
-      if (removeCode !== 0) {
-        process.stderr.write(`[switchbot-codex] Warning: plugin remove exited ${removeCode}; continuing.\n`);
-      }
-    }
     process.stderr.write(`[switchbot-codex] Adding plugin ${pluginName}...\n`);
     const pluginCode = await runInherit('codex', ['plugin', 'add', pluginName]);
     if (pluginCode !== 0) {

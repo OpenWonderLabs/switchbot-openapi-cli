@@ -1,19 +1,23 @@
 // packages/openclaw-skill/index.js
-import { buildCliArgs, runCli } from './cli.js';
+//
+// This package does not register a hand-maintained JavaScript tool subset.
+// OpenClaw launches the stdio entry declared in `.mcp.json`, which executes
+// `bin/start.js`; that bootstrapper then delegates to `switchbot mcp serve`.
 
-const TOOLS = [
-  'devices_list',
-  'devices_status',
-  'devices_describe',
-  'devices_command',
-  'scenes_list',
-  'scenes_run',
-];
+export const MCP_SERVER_NAME = 'switchbot';
+export const MCP_TRANSPORT = 'stdio';
+export const MCP_ENTRY_COMMAND = 'node';
+export const MCP_ENTRY_ARGS = ['${pluginDir}/bin/start.js'];
+export const MCP_DELEGATE_COMMAND = ['switchbot', 'mcp', 'serve'];
 
 export function createServer() {
-  const _registeredTools = {};
-  for (const tool of TOOLS) {
-    _registeredTools[tool] = (params) => runCli(buildCliArgs({ tool, params }));
-  }
-  return { _registeredTools };
+  return {
+    name: MCP_SERVER_NAME,
+    transport: MCP_TRANSPORT,
+    command: MCP_ENTRY_COMMAND,
+    args: [...MCP_ENTRY_ARGS],
+    delegateCommand: [...MCP_DELEGATE_COMMAND],
+  };
 }
+
+export default createServer;

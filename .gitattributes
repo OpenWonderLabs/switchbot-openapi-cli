@@ -1,0 +1,19 @@
+# Normalize line endings to LF in the repository.
+# On checkout, Git will not convert to CRLF (eol=lf for text files).
+# This eliminates phantom "modified" entries on Windows when core.autocrlf=true.
+
+* text=auto eol=lf
+
+# Explicitly binary — never touch line endings.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.woff binary
+*.woff2 binary
+*.ttf  binary
+*.eot  binary
+*.zip  binary
+*.gz   binary
+*.tar  binary

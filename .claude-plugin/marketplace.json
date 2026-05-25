@@ -1,15 +1,10 @@
 {
-  "name": "codex-plugin",
-  "interface": {
-    "displayName": "SwitchBot"
-  },
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "switchbot",
   "plugins": [
     {
       "name": "switchbot",
-      "source": {
-        "source": "local",
-        "path": "../../"
-      },
+      "source": "./packages/codex-plugin/plugins/switchbot",
       "policy": {
         "installation": "AVAILABLE",
         "authentication": "ON_INSTALL"

@@ -1,6 +1,6 @@
 # @switchbot/openclaw-skill
 
-SwitchBot smart-home skill for [OpenClaw](https://openclaw.ai) — proxies all 24 MCP tools from `@switchbot/openapi-cli` so AI agents can control devices, run scenes, manage automation rules, and query audit logs.
+SwitchBot smart-home skill for [OpenClaw](https://openclaw.ai) — bootstraps the local SwitchBot CLI and delegates to `switchbot mcp serve`, so AI agents get the full MCP tool surface exposed by the installed `@switchbot/openapi-cli`.
 
 ## Prerequisites
 
@@ -25,7 +25,7 @@ installed, at `>=3.7.1`, and authenticated. Safe to re-run.
 
 ## MCP Tools
 
-All 24 tools exposed by `switchbot mcp serve` are available. Key groups:
+This plugin does not maintain its own hand-written tool subset. OpenClaw launches `bin/start.js`, and that wrapper hands off to `switchbot mcp serve`, so the exact tool list stays aligned with the installed CLI version. Key groups include:
 
 | Tool | Description |
 |---|---|
@@ -56,7 +56,7 @@ the MCP server via the declarations in:
 `bin/start.js` installs it automatically. If credentials are missing, it
 outputs a `setupRequired` prompt asking you to run
 `switchbot config set-token`. Once configured, the plugin stays out of the
-way and proxies the full 24-tool MCP server on every launch.
+way and delegates every launch to the CLI-owned MCP server.
 
 To start manually (for debugging):
 
