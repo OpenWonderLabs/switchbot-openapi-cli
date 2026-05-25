@@ -166,7 +166,8 @@ describe('runCodexPluginRegistration', () => {
     spawnSyncMock
       .mockReturnValueOnce(makeSpawnResult(0, ''))  // marketplace add
       .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (current id)
-      .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (legacy id)
+      .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (legacy id 1: switchbot@codex-plugin)
+      .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (legacy id 2: switchbot@switchbot-skill)
       .mockReturnValueOnce(makeSpawnResult(0, '')); // plugin add
     const result = runCodexPluginRegistration('/some/path', 'switchbot@pkg');
     expect(result.ok).toBe(true);
@@ -185,7 +186,8 @@ describe('runCodexPluginRegistration', () => {
     spawnSyncMock
       .mockReturnValueOnce(makeSpawnResult(0, ''))
       .mockReturnValueOnce(makeSpawnResult(0, ''))                // plugin remove (current id)
-      .mockReturnValueOnce(makeSpawnResult(0, ''))                // plugin remove (legacy id)
+      .mockReturnValueOnce(makeSpawnResult(0, ''))                // plugin remove (legacy id 1: switchbot@codex-plugin)
+      .mockReturnValueOnce(makeSpawnResult(0, ''))                // plugin remove (legacy id 2: switchbot@switchbot-skill)
       .mockReturnValueOnce(makeSpawnResult(1, '', 'plugin add error'));
     const result = runCodexPluginRegistration('/some/path', 'switchbot@pkg');
     expect(result.ok).toBe(false);
@@ -539,8 +541,9 @@ describe('registerCodexPluginAuto', () => {
   it('returns git result when Route B succeeds', () => {
     spawnSyncMock
       .mockReturnValueOnce(makeSpawnResult(0, ''))  // marketplace add (git)
-      .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (current id)
-      .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (legacy id)
+      .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (switchbot@switchbot — current)
+      .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (switchbot@codex-plugin — legacy)
+      .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (switchbot@switchbot-skill — legacy)
       .mockReturnValueOnce(makeSpawnResult(0, '')); // plugin add
     const r = registerCodexPluginAuto();
     expect(r.ok).toBe(true);
@@ -738,14 +741,15 @@ describe('stepRegisterCodexPlugin', () => {
   it('sets codexPluginRegistered and codexPluginIdentifier on success', async () => {
     spawnSyncMock
       .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' })  // marketplace add (git)
-      .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' })  // plugin remove (current id)
-      .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' })  // plugin remove (legacy id)
+      .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' })  // plugin remove (switchbot@switchbot — current)
+      .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' })  // plugin remove (switchbot@codex-plugin — legacy)
+      .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' })  // plugin remove (switchbot@switchbot-skill — legacy)
       .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' }); // plugin add
     const step = stepRegisterCodexPlugin();
     const ctx = makeCtx();
     await step.execute(ctx);
     expect(ctx.codexPluginRegistered).toBe(true);
-    expect(ctx.codexPluginIdentifier).toBe('switchbot@codex-plugin');
+    expect(ctx.codexPluginIdentifier).toBe('switchbot@switchbot');
   });
 
   it('throws when runCodexPluginRegistration fails', async () => {
