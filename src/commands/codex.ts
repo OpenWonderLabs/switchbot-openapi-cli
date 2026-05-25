@@ -30,18 +30,18 @@ function compareVersions(a: string, b: string): -1 | 0 | 1 {
   return 0;
 }
 
-function fetchLatestPublishedVersion(packageName: string): string {
+function fetchLatestPublishedVersion(packageName: string): { version: string; fromRegistry: boolean } {
   const r = spawnSync(
     'npm', ['view', packageName, 'version'],
     { encoding: 'utf-8', shell: process.platform === 'win32', timeout: 8000 },
   );
   if ((r.status ?? 1) === 0) {
     const v = (r.stdout ?? '').trim();
-    if (/^\d+\.\d+\.\d+$/.test(v)) return v;
+    if (/^\d+\.\d+\.\d+$/.test(v)) return { version: v, fromRegistry: true };
   }
   // Offline or registry error: fall back to the running binary's own version.
   // When invoked via npx, VERSION == latest, so the comparison still works.
-  return VERSION;
+  return { version: VERSION, fromRegistry: false };
 }
 
 const CODEX_BASE_SECTIONS = ['node', 'path', 'credentials', 'mcp'] as const;
@@ -399,7 +399,8 @@ function setupStepInstallSwitchbotCli(): SetupOutcome {
 }
 
 function setupStepInstallGlobalPackage(step: string, packageName: string): SetupOutcome {
-  const latestVersion = fetchLatestPublishedVersion(packageName);
+  const { version: latestVersion, fromRegistry } = fetchLatestPublishedVersion(packageName);
+  const registryNote = fromRegistry ? '' : ' (registry unreachable, used running version as reference)';
 
   const list = spawnSync(
     'npm', ['list', '-g', '--json', '--depth=0', packageName],
@@ -415,9 +416,8 @@ function setupStepInstallGlobalPackage(step: string, packageName: string): Setup
 
   if (installedVersion !== null) {
     if (compareVersions(installedVersion, latestVersion) >= 0) {
-      return { step, status: 'ok', message: `already installed (${installedVersion})` };
+      return { step, status: 'ok', message: `already installed (${installedVersion})${registryNote}` };
     }
-    // Installed but outdated — upgrade automatically
     const upg = spawnSync(
       'npm', ['install', '-g', `${packageName}@latest`],
       { encoding: 'utf-8', shell: process.platform === 'win32', timeout: 120000 },
@@ -432,7 +432,6 @@ function setupStepInstallGlobalPackage(step: string, packageName: string): Setup
     return { step, status: 'ok', message: `upgraded ${installedVersion} → ${latestVersion}` };
   }
 
-  // Not installed at all
   const inst = spawnSync(
     'npm', ['install', '-g', `${packageName}@latest`],
     { encoding: 'utf-8', shell: process.platform === 'win32', timeout: 120000 },
@@ -444,7 +443,7 @@ function setupStepInstallGlobalPackage(step: string, packageName: string): Setup
       message: `npm install -g failed (exit ${inst.status ?? 1}): ${inst.stderr ?? ''}`,
     };
   }
-  return { step, status: 'ok', message: `installed ${packageName}@latest` };
+  return { step, status: 'ok', message: `installed ${packageName}@${latestVersion}` };
 }
 
 function setupStepRegisterPlugin(ctx: SetupContext): SetupOutcome {
