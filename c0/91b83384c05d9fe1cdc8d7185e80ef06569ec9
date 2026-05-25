@@ -1,0 +1,27 @@
+packages/codex-plugin/bin/install.js
+  s_0857ba53256199::t_fcbd5339751ed7 25-27,29,33-35,37-38,40-49
+packages/codex-plugin/package.json
+  s_0857ba53256199::t_10f0910f3b137c 3
+  s_0857ba53256199::t_5ffdc2995da562 34-35
+src/install/codex-checks.ts
+  s_0857ba53256199::t_7505ecc661e289 356
+  s_0857ba53256199::t_08ef30f0205087 358,360
+  s_0857ba53256199::t_d95fc2bdb027bc 350,357,359,361-362
+  s_0857ba53256199::t_979f964a1dcc00 46-54
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.1",
+  "base_commit_sha": "c091b83384c05d9fe1cdc8d7185e80ef06569ec9",
+  "prompts": {},
+  "sessions": {
+    "s_0857ba53256199": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7ee9e770-9683-4ad6-a210-7292b9d12706",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
