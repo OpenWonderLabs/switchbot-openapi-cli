@@ -95,6 +95,22 @@ function computeAliasPath(): string {
   return path.join(os.homedir(), '.switchbot', 'codex-plugin-marketplace');
 }
 
+function createAlias(src: string, dest: string, type: fs.symlink.Type): void {
+  try {
+    fs.symlinkSync(src, dest, type);
+  } catch (err: unknown) {
+    const nodeErr = err as NodeJS.ErrnoException;
+    if (nodeErr.code === 'EPERM') {
+      throw new Error(
+        `Cannot create ${type} at ${dest}: permission denied (EPERM). ` +
+          `On Windows, run the installer from an elevated terminal, ` +
+          `or install to a path without @-scoped segments.`,
+      );
+    }
+    throw err;
+  }
+}
+
 export function resolveMarketplaceSourceRoot(packageRoot: string): string {
   // Codex misclassifies local paths containing `@`-scoped npm segments
   // (e.g. `…/node_modules/@switchbot/codex-plugin`) as ref-bearing git sources,
@@ -114,7 +130,7 @@ export function resolveMarketplaceSourceRoot(packageRoot: string): string {
 
   const stat = fs.lstatSync(aliasRoot, { throwIfNoEntry: false });
   if (!stat) {
-    fs.symlinkSync(packageRoot, aliasRoot, linkType);
+    createAlias(packageRoot, aliasRoot, linkType);
     return aliasRoot;
   }
 
@@ -128,7 +144,7 @@ export function resolveMarketplaceSourceRoot(packageRoot: string): string {
       // Dangling symlink: target was deleted (e.g. nvm switch, npm uninstall).
       // Recreate it pointing at the current packageRoot.
       fs.unlinkSync(aliasRoot);
-      fs.symlinkSync(packageRoot, aliasRoot, linkType);
+      createAlias(packageRoot, aliasRoot, linkType);
       return aliasRoot;
     }
     const pathsMatch = process.platform === 'win32'
@@ -136,7 +152,7 @@ export function resolveMarketplaceSourceRoot(packageRoot: string): string {
       : aliasReal === packageReal;
     if (pathsMatch) return aliasRoot;
     fs.unlinkSync(aliasRoot);
-    fs.symlinkSync(packageRoot, aliasRoot, linkType);
+    createAlias(packageRoot, aliasRoot, linkType);
     return aliasRoot;
   }
 
