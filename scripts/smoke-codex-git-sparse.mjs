@@ -22,10 +22,20 @@ function readJson(filePath) {
 }
 
 try {
-  const ref = process.env.CODEX_GIT_MARKETPLACE_REF
-    || runGit(['rev-parse', '--abbrev-ref', 'HEAD']).trim();
+  let ref = process.env.CODEX_GIT_MARKETPLACE_REF;
+  if (!ref) {
+    const abbrev = runGit(['rev-parse', '--abbrev-ref', 'HEAD']).trim();
+    ref = abbrev === 'HEAD'
+      ? runGit(['rev-parse', 'HEAD']).trim()  // detached HEAD: use full SHA
+      : abbrev;
+  }
 
-  runGit(['clone', '--no-checkout', '--branch', ref, repoRoot, stagingDir], { cwd: workDir });
+  // Clone: use --branch only for named branches; for SHAs clone without --branch then checkout
+  if (ref.match(/^[0-9a-f]{40}$/)) {
+    runGit(['clone', '--no-checkout', repoRoot, stagingDir], { cwd: workDir });
+  } else {
+    runGit(['clone', '--no-checkout', '--branch', ref, repoRoot, stagingDir], { cwd: workDir });
+  }
   runGit(['-C', stagingDir, 'sparse-checkout', 'init', '--cone'], { cwd: workDir });
   runGit(['-C', stagingDir, 'sparse-checkout', 'set', '.claude-plugin', 'packages/codex-plugin'], { cwd: workDir });
   runGit(['-C', stagingDir, 'checkout', ref], { cwd: workDir });
