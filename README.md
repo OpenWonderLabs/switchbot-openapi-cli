@@ -28,7 +28,20 @@ Every surface shares the same catalog, cache, and HMAC client.
 npm install -g @switchbot/openapi-cli
 ```
 
-Requires Node.js ≥ 18 and a SwitchBot account with **Developer Options** enabled.
+Requires Node.js ≥ 18. Run `switchbot auth login` to authenticate via browser — no Developer Options needed.
+
+To use API token/secret directly instead, first obtain your credentials from the SwitchBot app:
+
+1. Open the SwitchBot app → tap your profile avatar (top-right)
+2. Go to **Preferences** → **App Version**, tap the version number 10 times to unlock Developer Options
+3. Return to **Preferences** → **Developer Options**
+4. Copy your **Token** and **Secret Key**
+
+Then run:
+
+```bash
+switchbot config set-token <token> <secret>
+```
 
 ---
 
@@ -67,9 +80,9 @@ switchbot doctor                            # self-check
 
 ## Codex integration
 
-The Codex plugin is self-hosted in this repo (`packages/codex-plugin/`) — no separate npm package required.
+The Codex plugin is published to npm as [`@switchbot/codex-plugin`](https://www.npmjs.com/package/@switchbot/codex-plugin).
 
-**Paste into Codex chat:**
+**Recommended — paste into Codex chat:**
 
 ```
 Please set up the SwitchBot integration for me by running:
@@ -77,28 +90,46 @@ npx @switchbot/openapi-cli codex setup
 Then restart Codex and confirm it's working.
 ```
 
-`codex setup` checks the npm registry for the latest CLI version and upgrades automatically if your global install is outdated — no manual `npm install -g` step needed.
+`codex setup` installs or upgrades the CLI and plugin packages, registers the plugin with Codex, and opens a browser login page to save credentials to the OS keychain — no token copy-paste needed.
 
-**Or run directly (if CLI is already installed):**
+**Or install directly:**
 
 ```bash
-codex plugin marketplace add OpenWonderLabs/switchbot-openapi-cli \
-  --sparse packages/codex-plugin --ref main
-codex plugin add switchbot@codex-plugin
-switchbot auth login
+npm install -g @switchbot/codex-plugin
+switchbot-codex-install        # registers the plugin with Codex
+switchbot auth login           # browser OAuth — saves to OS keychain
 ```
+
+---
+
+## OpenClaw integration
+
+The OpenClaw skill is published to npm as [`@switchbot/openclaw-skill`](https://www.npmjs.com/package/@switchbot/openclaw-skill).
+
+```bash
+openclaw plugins install @switchbot/openclaw-skill   # via OpenClaw plugin manager (recommended)
+# or
+npm install -g @switchbot/openclaw-skill             # via npm
+
+switchbot-openclaw setup   # verify CLI install and credentials
+switchbot auth login       # browser OAuth — saves to OS keychain
+```
+
+`switchbot-openclaw setup` verifies `@switchbot/openapi-cli` is installed at `>=3.7.1` and authenticated. Safe to re-run.
 
 ---
 
 ## Credentials
 
+> **Recommended:** use `switchbot auth login` for browser-based OAuth — credentials are stored securely in the OS keychain and never need to be copy-pasted anywhere.
+
 Priority: env vars → OS keychain → `~/.switchbot/config.json`
 
 ```bash
-switchbot auth login                   # browser OAuth (recommended)
-switchbot config set-token <t> <s>    # manual setup
-export SWITCHBOT_TOKEN=... SWITCHBOT_SECRET=...   # CI / env override
-switchbot auth keychain set/get/delete # OS keychain management
+switchbot auth login                             # browser OAuth — opens login page, saves to OS keychain
+switchbot config set-token <token> <secret>     # manual setup (alternative)
+export SWITCHBOT_TOKEN=... SWITCHBOT_SECRET=... # CI / env override
+switchbot auth keychain set/get/delete          # OS keychain management
 ```
 
 ---
