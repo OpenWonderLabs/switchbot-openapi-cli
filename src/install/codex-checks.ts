@@ -341,6 +341,12 @@ export const CODEX_PLUGIN_LEGACY_IDS = ['switchbot@codex-plugin', 'switchbot@swi
 // causing the next `marketplace add` to say "already added" without recreating the directory.
 export const CODEX_MARKETPLACE_LEGACY_NAMES = ['switchbot', 'codex-plugin', 'switchbot-skill'];
 
+function isCodexProcessRunning(): boolean {
+  if (process.platform !== 'win32') return false;
+  const r = spawnStr('tasklist', ['/FI', 'IMAGENAME eq Codex.exe', '/NH', '/FO', 'CSV'], 5000);
+  return r.status === 0 && r.stdout.toLowerCase().includes('codex.exe');
+}
+
 export function runCodexPluginRegistrationGit(pluginId: string): RegistrationResult {
   const ref = process.env['CODEX_GIT_MARKETPLACE_REF'] || CODEX_GIT_MARKETPLACE_REF;
   const _envTimeout = process.env['CODEX_MARKETPLACE_ADD_TIMEOUT'];
@@ -371,10 +377,19 @@ export function runCodexPluginRegistrationGit(pluginId: string): RegistrationRes
     '--ref',    ref,
   ];
   let mkt = spawnStr('codex', mktArgs, timeout);
-  // On Windows, git holds file handles briefly after clone; retry once after 10 s.
+  // On Windows, git holds file handles briefly after clone.
+  // Detect if Codex Desktop is running and warn; then retry with exponential backoff.
   if (mkt.status !== 0 && process.platform === 'win32' && mkt.stderr.includes('os error 32')) {
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10000);
-    mkt = spawnStr('codex', mktArgs, timeout);
+    if (isCodexProcessRunning()) {
+      process.stderr.write(
+        '[switchbot] Warning: Codex.exe is running. Close Codex Desktop before running setup to avoid file-lock errors.\n',
+      );
+    }
+    for (const delay of [2000, 5000, 10000]) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delay);
+      mkt = spawnStr('codex', mktArgs, timeout);
+      if (mkt.status === 0 || !mkt.stderr.includes('os error 32')) break;
+    }
   }
   if (mkt.status !== 0) {
     return { ok: false, exitCode: mkt.status, stderr: mkt.stderr, stage: 'marketplace-add' };
@@ -457,6 +472,13 @@ function installCodexPluginGlobally(): { ok: boolean; installed?: boolean; error
  * environments where @switchbot/codex-plugin is already installed locally.
  */
 export function registerCodexPluginAuto(): RegisterCodexPluginResult {
+  // Idempotency guard: if the plugin is already registered and healthy, skip all mutation.
+  const preCheck = checkCodexPluginRegistered();
+  if (preCheck.status === 'ok') {
+    const pluginName = (preCheck.detail as { pluginName?: string }).pluginName;
+    return { ok: true, pluginId: pluginName ?? CODEX_PLUGIN_DEFAULT_ID, packageRoot: null };
+  }
+
   // Route B: git marketplace — no local npm package required
   const git = registerCodexPluginGit();
   if (git.ok) return git;
