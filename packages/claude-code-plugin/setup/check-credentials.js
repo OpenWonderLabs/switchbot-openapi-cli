@@ -111,5 +111,7 @@ export function makeCheckCredentials(exec) {
   };
 }
 
-const defaultExec = promisify(execFile);
+const _execFile = promisify(execFile);
+const defaultExec = (cmd, args, opts) =>
+  _execFile(cmd, args, { ...opts, shell: process.platform === 'win32' });
 export const checkCredentials = makeCheckCredentials(defaultExec);
