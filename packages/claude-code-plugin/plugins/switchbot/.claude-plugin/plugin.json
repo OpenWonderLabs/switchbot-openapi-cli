@@ -2,25 +2,8 @@
   "name": "switchbot",
   "version": "0.1.0",
   "description": "Control SwitchBot smart-home devices from Claude Code via MCP.",
-  "mcpServers": "./.mcp.json",
-  "hooks": {
-    "onInstall": {
-      "command": "node",
-      "args": ["../../../bin/auth.js", "--hook"]
-    }
+  "author": {
+    "name": "OpenWonderLabs"
   },
-  "interface": {
-    "displayName": "SwitchBot",
-    "shortDescription": "Control SwitchBot devices and scenes from Claude Code.",
-    "longDescription": "Use the SwitchBot OpenAPI CLI through MCP to inspect devices, run scenes, control smart-home hardware, and respect policy-based safety gates.",
-    "category": "Productivity",
-    "capabilities": ["Interactive", "Read", "Write"],
-    "websiteURL": "https://github.com/OpenWonderLabs/switchbot-openapi-cli",
-    "defaultPrompt": [
-      "List my SwitchBot devices.",
-      "Check the status of my lights.",
-      "Run a SwitchBot scene safely."
-    ],
-    "brandColor": "#E7462E"
-  }
+  "homepage": "https://github.com/OpenWonderLabs/switchbot-openapi-cli"
 }

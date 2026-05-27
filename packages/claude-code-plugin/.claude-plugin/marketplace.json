@@ -1,15 +1,22 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "switchbot",
+  "description": "SwitchBot smart-home plugin for Claude Code — MCP server with 24 tools for controlling devices and scenes",
+  "owner": {
+    "name": "OpenWonderLabs",
+    "email": "developer@wondertechlabs.com"
+  },
   "plugins": [
     {
       "name": "switchbot",
-      "source": "./plugins/switchbot",
-      "policy": {
-        "installation": "AVAILABLE",
-        "authentication": "ON_INSTALL"
+      "description": "Control SwitchBot smart-home devices from Claude Code via MCP.",
+      "version": "0.1.0",
+      "author": {
+        "name": "OpenWonderLabs"
       },
-      "category": "Productivity"
+      "source": "./plugins/switchbot",
+      "category": "productivity",
+      "homepage": "https://github.com/OpenWonderLabs/switchbot-openapi-cli"
     }
   ]
 }
