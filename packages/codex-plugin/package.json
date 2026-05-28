@@ -33,6 +33,7 @@
     ".codex-plugin/",
     ".claude-plugin/",
     "plugins/",
+    "marketplace.json",
     ".mcp.json",
     "README.md"
   ],

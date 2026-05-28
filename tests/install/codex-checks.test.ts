@@ -283,6 +283,17 @@ describe('resolvePluginId', () => {
     readFileSyncMock.mockReturnValue('{}');
     expect(resolvePluginId('/some/path/codex-plugin')).toBe('switchbot@codex-plugin');
   });
+
+  it('uses root-level marketplace.json name when .claude-plugin is absent', () => {
+    existsSyncMock.mockImplementation((p: string) => {
+      if (p.includes('.claude-plugin')) return false;   // .claude-plugin NOT present
+      if (p.endsWith('marketplace.json')) return true;  // root marketplace.json IS present
+      if (p.endsWith('plugin.json')) return true;
+      return false;
+    });
+    readFileSyncMock.mockReturnValue('{"name":"switchbot"}');
+    expect(resolvePluginId('/some/path/codex-plugin')).toBe('switchbot@switchbot');
+  });
 });
 
 describe('resolveMarketplaceSourceRoot', () => {

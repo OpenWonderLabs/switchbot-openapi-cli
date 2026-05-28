@@ -1,20 +1,9 @@
 {
   "name": "switchbot",
-  "interface": {
-    "displayName": "SwitchBot"
-  },
   "plugins": [
     {
       "name": "switchbot",
-      "source": {
-        "source": "local",
-        "path": "./plugins/switchbot"
-      },
-      "policy": {
-        "installation": "AVAILABLE",
-        "authentication": "ON_INSTALL"
-      },
-      "category": "Productivity"
+      "source": "./plugins/switchbot"
     }
   ]
 }
