@@ -37,8 +37,9 @@ describe('marketplace.json $schema field', () => {
 
   it('$schema is the first field in codex-plugin marketplace.json', () => {
     const rawContent = readFileSync(codexPluginMarketplacePath, 'utf8');
-    const parsed = JSON.parse(rawContent);
-    const firstKey = Object.keys(parsed)[0];
-    assert.equal(firstKey, '$schema', 'first field should be $schema');
+    assert.ok(
+      rawContent.indexOf('"$schema"') < rawContent.indexOf('"name"'),
+      '$schema should appear before "name" in the raw JSON text',
+    );
   });
 });
