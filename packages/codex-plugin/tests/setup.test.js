@@ -101,6 +101,22 @@ describe('checkCredentials', () => {
     assert.deepEqual(result, { ok: true, source: 'keychain' });
   });
 
+  it('returns ok:false with doctor-check-failed when network error and no keychain', async () => {
+    const fakeExec = async (cmd, args) => {
+      if (args.includes('doctor')) {
+        const err = new Error('ETIMEDOUT');
+        err.stderr = 'connect ETIMEDOUT api.switch-bot.com';
+        throw err;
+      }
+      if (args.includes('get')) return { stdout: JSON.stringify({ data: { present: false } }) };
+      throw new Error('unexpected');
+    };
+    const check = makeCheckCredentials(fakeExec);
+    const result = await check();
+    assert.equal(result.ok, false);
+    assert.equal(result.errorKey, 'doctor-check-failed');
+  });
+
   it('returns ok:true from keychain when doctor fails for a non-auth reason and keychain has credentials', async () => {
     const fakeExec = async (cmd, args) => {
       if (args.includes('doctor')) {
