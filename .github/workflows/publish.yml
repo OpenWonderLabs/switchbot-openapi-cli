@@ -35,13 +35,16 @@ jobs:
           CLI_VERSION=$(node -p "require('./package.json').version")
           CODEX_VERSION=$(node -p "require('./packages/codex-plugin/package.json').version")
           OPENCLAW_VERSION=$(node -p "require('./packages/openclaw-skill/package.json').version")
-          echo "Root CLI:        @switchbot/openapi-cli@$CLI_VERSION"
-          echo "Codex plugin:    @switchbot/codex-plugin@$CODEX_VERSION"
-          echo "OpenClaw plugin: @switchbot/openclaw-skill@$OPENCLAW_VERSION"
+          CLAUDE_CODE_VERSION=$(node -p "require('./packages/claude-code-plugin/package.json').version")
+          echo "Root CLI:              @switchbot/openapi-cli@$CLI_VERSION"
+          echo "Codex plugin:          @switchbot/codex-plugin@$CODEX_VERSION"
+          echo "OpenClaw plugin:       @switchbot/openclaw-skill@$OPENCLAW_VERSION"
+          echo "Claude Code plugin:    @switchbot/claude-code-plugin@$CLAUDE_CODE_VERSION"
           {
             echo "cli_version=$CLI_VERSION"
             echo "codex_version=$CODEX_VERSION"
             echo "openclaw_version=$OPENCLAW_VERSION"
+            echo "claude_code_version=$CLAUDE_CODE_VERSION"
           } >> "$GITHUB_OUTPUT"
         id: versions
 
@@ -51,6 +54,7 @@ jobs:
           CLI_VERSION: ${{ steps.versions.outputs.cli_version }}
           CODEX_VERSION: ${{ steps.versions.outputs.codex_version }}
           OPENCLAW_VERSION: ${{ steps.versions.outputs.openclaw_version }}
+          CLAUDE_CODE_VERSION: ${{ steps.versions.outputs.claude_code_version }}
         run: |
           # For each package, query npm; if the exact version is already published, skip.
           check_unpublished() {
@@ -67,13 +71,16 @@ jobs:
           CLI_PUBLISH=$(check_unpublished "@switchbot/openapi-cli" "$CLI_VERSION")
           CODEX_PUBLISH=$(check_unpublished "@switchbot/codex-plugin" "$CODEX_VERSION")
           OPENCLAW_PUBLISH=$(check_unpublished "@switchbot/openclaw-skill" "$OPENCLAW_VERSION")
+          CLAUDE_CODE_PUBLISH=$(check_unpublished "@switchbot/claude-code-plugin" "$CLAUDE_CODE_VERSION")
           echo "cli_publish=$CLI_PUBLISH"
           echo "codex_publish=$CODEX_PUBLISH"
           echo "openclaw_publish=$OPENCLAW_PUBLISH"
+          echo "claude_code_publish=$CLAUDE_CODE_PUBLISH"
           {
             echo "cli_publish=$CLI_PUBLISH"
             echo "codex_publish=$CODEX_PUBLISH"
             echo "openclaw_publish=$OPENCLAW_PUBLISH"
+            echo "claude_code_publish=$CLAUDE_CODE_PUBLISH"
           } >> "$GITHUB_OUTPUT"
 
       - name: Verify codex-plugin tarball peerDep is a concrete range
@@ -106,6 +113,21 @@ jobs:
           echo "OK: openclaw-skill peerDep = '$PEER'"
           rm -f "/tmp/$TARBALL"
 
+      - name: Verify claude-code-plugin tarball peerDep is a concrete range
+        if: steps.detect.outputs.claude_code_publish == 'true'
+        run: |
+          TARBALL=$(npm pack -w @switchbot/claude-code-plugin --pack-destination /tmp/ 2>&1 | tail -1)
+          PEER=$(tar -xOzf "/tmp/$TARBALL" package/package.json | node -e "
+            const p = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+            console.log(p.peerDependencies?.['@switchbot/openapi-cli'] || '');
+          ")
+          if [ -z "$PEER" ] || echo "$PEER" | grep -q "workspace:"; then
+            echo "FAIL: claude-code-plugin peerDep is missing or unrewritten workspace:* — got: '$PEER'"
+            exit 1
+          fi
+          echo "OK: claude-code-plugin peerDep = '$PEER'"
+          rm -f "/tmp/$TARBALL"
+
       - name: Publish root CLI to npm
         if: steps.detect.outputs.cli_publish == 'true'
         run: npm publish --provenance --access public
@@ -128,6 +150,14 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+      - name: Publish claude-code-plugin to npm
+        id: publish_claude_code
+        if: steps.detect.outputs.claude_code_publish == 'true'
+        continue-on-error: true
+        run: npm publish -w @switchbot/claude-code-plugin --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       - name: Annotate plugin publish failures
         if: steps.detect.outputs.codex_publish == 'true' && steps.publish_codex.outcome == 'failure'
         run: |
@@ -137,3 +167,8 @@ jobs:
         if: steps.detect.outputs.openclaw_publish == 'true' && steps.publish_openclaw.outcome == 'failure'
         run: |
           echo "::warning::openclaw-skill publish step failed; root CLI promotion is unaffected. Investigate before next release."
+
+      - name: Annotate Claude Code plugin publish failures
+        if: steps.detect.outputs.claude_code_publish == 'true' && steps.publish_claude_code.outcome == 'failure'
+        run: |
+          echo "::warning::claude-code-plugin publish step failed; root CLI promotion is unaffected. Investigate before next release."
