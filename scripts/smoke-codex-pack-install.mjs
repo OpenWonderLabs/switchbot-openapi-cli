@@ -63,7 +63,7 @@ try {
   }
 
   for (const requiredPath of [
-    '.claude-plugin/marketplace.json',
+    '.agents/plugins/marketplace.json',
     '.codex-plugin/plugin.json',
     '.codex-plugin/hooks.json',
     '.mcp.json',
@@ -82,7 +82,7 @@ try {
     throw new Error(`plugin displayName must be SwitchBot, got ${pluginManifest?.interface?.displayName ?? '<missing>'}`);
   }
 
-  const marketplace = readJson(path.join(pluginRoot, '.claude-plugin', 'marketplace.json'));
+  const marketplace = readJson(path.join(pluginRoot, '.agents', 'plugins', 'marketplace.json'));
   if (marketplace?.name !== 'switchbot') {
     throw new Error(`marketplace name must be switchbot so switchbot@switchbot resolves, got ${marketplace?.name ?? '<missing>'}`);
   }

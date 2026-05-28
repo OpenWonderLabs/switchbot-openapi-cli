@@ -202,4 +202,4 @@ Never retry `destructive` actions automatically. For `mutation` retries, use a l
 
 Targets `@switchbot/openapi-cli` ≥ 3.7.1. If `switchbot --version` is older: `npm update -g @switchbot/openapi-cli`.
 
-<!-- MAINTENANCE: Identical copy at skills/switchbot/SKILL.md — keep both in sync. -->
+<!-- MAINTENANCE: Identical copy at plugins/switchbot/skills/switchbot/SKILL.md — keep both in sync. -->
