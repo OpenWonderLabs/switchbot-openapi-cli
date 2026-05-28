@@ -115,6 +115,8 @@ describe('checkCredentials', () => {
     const result = await check();
     assert.equal(result.ok, false);
     assert.equal(result.errorKey, 'doctor-check-failed');
+    assert.match(result.message, /health check/i);
+    assert.match(result.message, /switchbot doctor/);
   });
 
   it('returns ok:true from keychain when doctor fails for a non-auth reason and keychain has credentials', async () => {
