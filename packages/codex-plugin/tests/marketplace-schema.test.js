@@ -8,6 +8,7 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
 describe('marketplace.json $schema field', () => {
   const codexPluginMarketplacePath = resolve(__dirname, '../.agents/plugins/marketplace.json');
+  // claude-code-plugin intentionally keeps .claude-plugin/ — that's Claude Code's naming convention
   const claudeCodePluginMarketplacePath = resolve(__dirname, '../../claude-code-plugin/.claude-plugin/marketplace.json');
 
   it('codex-plugin marketplace.json contains $schema field', () => {
