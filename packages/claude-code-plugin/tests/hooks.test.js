@@ -44,6 +44,12 @@ describe('hooks.json files', () => {
         assert.ok(existsSync(resolved),
           `onInstall.args[0] "${relPath}" resolves to "${resolved}" which does not exist`);
       });
+
+      it('onInstall.args has exactly one element', () => {
+        const hooks = JSON.parse(readFileSync(hooksPath, 'utf8'));
+        const args = hooks?.onInstall?.args;
+        assert.equal(args.length, 1, 'onInstall.args should have exactly one element');
+      });
     });
   }
 });
