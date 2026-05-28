@@ -25,31 +25,34 @@ describe('hooks.json files', () => {
         assert.ok(existsSync(hooksPath), `Missing: ${hooksPath}`);
       });
 
-      it('is valid JSON', () => {
-        const raw = readFileSync(hooksPath, 'utf8');
-        assert.doesNotThrow(() => JSON.parse(raw), `Invalid JSON in ${hooksPath}`);
-      });
+      if (existsSync(hooksPath)) {
+        it('is valid JSON', () => {
+          const raw = readFileSync(hooksPath, 'utf8');
+          assert.doesNotThrow(() => JSON.parse(raw), `Invalid JSON in ${hooksPath}`);
+        });
 
-      it('has onInstall.command === "node"', () => {
-        const hooks = JSON.parse(readFileSync(hooksPath, 'utf8'));
-        assert.equal(hooks?.onInstall?.command, 'node',
-          `Expected onInstall.command to be "node" in ${hooksPath}`);
-      });
+        it('has onInstall.command === "node"', () => {
+          const hooks = JSON.parse(readFileSync(hooksPath, 'utf8'));
+          assert.equal(hooks?.onInstall?.command, 'node',
+            `Expected onInstall.command to be "node" in ${hooksPath}`);
+        });
 
-      it('onInstall.args[0] resolves to an existing file', () => {
-        const hooks = JSON.parse(readFileSync(hooksPath, 'utf8'));
-        const relPath = hooks?.onInstall?.args?.[0];
-        assert.ok(typeof relPath === 'string', `onInstall.args[0] must be a string in ${hooksPath}`);
-        const resolved = resolve(dirname(hooksPath), relPath);
-        assert.ok(existsSync(resolved),
-          `onInstall.args[0] "${relPath}" resolves to "${resolved}" which does not exist`);
-      });
+        it('onInstall.args[0] resolves to an existing file', () => {
+          const hooks = JSON.parse(readFileSync(hooksPath, 'utf8'));
+          const relPath = hooks?.onInstall?.args?.[0];
+          assert.ok(typeof relPath === 'string', `onInstall.args[0] must be a string in ${hooksPath}`);
+          const resolved = resolve(dirname(hooksPath), relPath);
+          assert.ok(existsSync(resolved),
+            `onInstall.args[0] "${relPath}" resolves to "${resolved}" which does not exist`);
+        });
 
-      it('onInstall.args has exactly one element', () => {
-        const hooks = JSON.parse(readFileSync(hooksPath, 'utf8'));
-        const args = hooks?.onInstall?.args;
-        assert.equal(args.length, 1, 'onInstall.args should have exactly one element');
-      });
+        it('onInstall.args has exactly one element', () => {
+          const hooks = JSON.parse(readFileSync(hooksPath, 'utf8'));
+          const args = hooks?.onInstall?.args;
+          assert.ok(Array.isArray(args), `onInstall.args must be an array in ${hooksPath}`);
+          assert.equal(args.length, 1, `onInstall.args should have exactly one element in ${hooksPath}`);
+        });
+      }
     });
   }
 });
