@@ -98,6 +98,9 @@ export function makeCheckCredentials(exec) {
 
     if (doctorResult?.reason === 'doctor-failed') {
       const errorKey = classifyDoctorFailure(doctorResult.detail ?? '', hasKeychainCredentials);
+      if (errorKey === 'doctor-check-failed' && hasKeychainCredentials) {
+        return { ok: true, source: 'keychain' };
+      }
       return { ok: false, errorKey, message: formatError(errorKey) };
     }
 

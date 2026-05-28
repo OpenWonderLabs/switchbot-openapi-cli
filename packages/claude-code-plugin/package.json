@@ -45,6 +45,6 @@
   },
   "scripts": {
     "test": "node --test",
-    "typecheck": "node --check bin/auth.js"
+    "typecheck": "node --check bin/auth.js && node --check setup/check-cli.js && node --check setup/check-credentials.js"
   }
 }

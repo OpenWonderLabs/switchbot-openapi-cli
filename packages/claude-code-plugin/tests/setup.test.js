@@ -86,7 +86,7 @@ describe('checkCredentials', () => {
     assert.match(result.message, /switchbot auth logout/);
   });
 
-  it('returns doctor-check-failed when doctor errors look like network failures', async () => {
+  it('returns ok:true from keychain when doctor fails with a network error and keychain has credentials', async () => {
     const fakeExec = async (cmd, args) => {
       if (args.includes('doctor')) {
         const err = new Error('ETIMEDOUT');
@@ -98,10 +98,40 @@ describe('checkCredentials', () => {
     };
     const check = makeCheckCredentials(fakeExec);
     const result = await check();
+    assert.deepEqual(result, { ok: true, source: 'keychain' });
+  });
+
+  it('returns ok:false with doctor-check-failed when network error and no keychain', async () => {
+    const fakeExec = async (cmd, args) => {
+      if (args.includes('doctor')) {
+        const err = new Error('ETIMEDOUT');
+        err.stderr = 'connect ETIMEDOUT api.switch-bot.com';
+        throw err;
+      }
+      if (args.includes('get')) return { stdout: JSON.stringify({ data: { present: false } }) };
+      throw new Error('unexpected');
+    };
+    const check = makeCheckCredentials(fakeExec);
+    const result = await check();
     assert.equal(result.ok, false);
     assert.equal(result.errorKey, 'doctor-check-failed');
     assert.match(result.message, /health check/i);
     assert.match(result.message, /switchbot doctor/);
+  });
+
+  it('returns ok:true from keychain when doctor fails for a non-auth reason and keychain has credentials', async () => {
+    const fakeExec = async (cmd, args) => {
+      if (args.includes('doctor')) {
+        const err = new Error('doctor failed');
+        err.stdout = JSON.stringify({ data: { overall: 'fail', checks: [{ name: 'policy', status: 'fail' }] } });
+        throw err;
+      }
+      if (args.includes('get')) return { stdout: JSON.stringify({ data: { present: true } }) };
+      throw new Error('unexpected');
+    };
+    const check = makeCheckCredentials(fakeExec);
+    const result = await check();
+    assert.deepEqual(result, { ok: true, source: 'keychain' });
   });
 
   it('returns ok:false when both doctor and keychain describe fail', async () => {

@@ -110,6 +110,9 @@ export function makeCheckCredentials(exec) {
 
     if (doctorResult?.reason === 'doctor-failed') {
       const errorKey = classifyDoctorFailure(doctorResult.detail ?? '', hasKeychainCredentials);
+      if (errorKey === 'doctor-check-failed' && hasKeychainCredentials) {
+        return { ok: true, source: 'keychain' };
+      }
       return { ok: false, errorKey, message: formatError(errorKey) };
     }
 
@@ -123,5 +126,7 @@ export function makeCheckCredentials(exec) {
   };
 }
 
-const defaultExec = promisify(execFile);
+const _execFile = promisify(execFile);
+const defaultExec = (cmd, args, opts) =>
+  _execFile(cmd, args, { ...opts, shell: process.platform === 'win32' });
 export const checkCredentials = makeCheckCredentials(defaultExec);
