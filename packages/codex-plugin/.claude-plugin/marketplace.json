@@ -1,0 +1,9 @@
+{
+  "name": "switchbot",
+  "plugins": [
+    {
+      "name": "switchbot",
+      "source": "./plugins/switchbot"
+    }
+  ]
+}
