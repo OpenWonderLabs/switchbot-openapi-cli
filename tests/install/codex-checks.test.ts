@@ -669,6 +669,31 @@ describe('runCodexPluginRegistrationGit', () => {
       Object.defineProperty(process, 'platform', { value: savedPlatform, configurable: true });
     }
   });
+
+  it('stops retrying when error changes from os error 32 to a different error', () => {
+    const savedPlatform = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    const atomicsSpy = vi.spyOn(Atomics, 'wait').mockReturnValue('ok' as ReturnType<typeof Atomics.wait>);
+    try {
+      spawnSyncMock
+        .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove ×2
+        .mockReturnValueOnce(makeSpawnResult(0, ''))
+        .mockReturnValueOnce(makeSpawnResult(0, ''))  // marketplace remove ×3
+        .mockReturnValueOnce(makeSpawnResult(0, ''))
+        .mockReturnValueOnce(makeSpawnResult(0, ''))
+        .mockReturnValueOnce(makeSpawnResult(1, '', 'os error 32 locked'))         // first attempt: file lock
+        .mockReturnValueOnce(makeSpawnResult(1, '', '"Codex.exe" not found'))       // tasklist: not running
+        .mockReturnValueOnce(makeSpawnResult(1, '', 'network timeout'));            // retry 1: different error → break
+      const r = runCodexPluginRegistrationGit('switchbot@codex-plugin');
+      expect(r.ok).toBe(false);
+      expect(r.stderr).toBe('network timeout');
+      // Only one Atomics.wait call (before the single retry that changed error type)
+      expect(atomicsSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      atomicsSpy.mockRestore();
+      Object.defineProperty(process, 'platform', { value: savedPlatform, configurable: true });
+    }
+  });
 });
 
 describe('registerCodexPluginAuto', () => {
