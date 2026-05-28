@@ -98,10 +98,22 @@ describe('checkCredentials', () => {
     };
     const check = makeCheckCredentials(fakeExec);
     const result = await check();
-    assert.equal(result.ok, false);
-    assert.equal(result.errorKey, 'doctor-check-failed');
-    assert.match(result.message, /health check/i);
-    assert.match(result.message, /switchbot doctor/);
+    assert.deepEqual(result, { ok: true, source: 'keychain' });
+  });
+
+  it('returns ok:true from keychain when doctor fails for a non-auth reason and keychain has credentials', async () => {
+    const fakeExec = async (cmd, args) => {
+      if (args.includes('doctor')) {
+        const err = new Error('doctor failed');
+        err.stdout = JSON.stringify({ data: { overall: 'fail', checks: [{ name: 'policy', status: 'fail' }] } });
+        throw err;
+      }
+      if (args.includes('get')) return { stdout: JSON.stringify({ data: { present: true } }) };
+      throw new Error('unexpected');
+    };
+    const check = makeCheckCredentials(fakeExec);
+    const result = await check();
+    assert.deepEqual(result, { ok: true, source: 'keychain' });
   });
 
   it('returns ok:false when both doctor and keychain describe fail', async () => {
