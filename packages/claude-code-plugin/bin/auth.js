@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 import { checkCli as defaultCheckCli } from '../setup/check-cli.js';
 import { checkCredentials as defaultCheckCredentials } from '../setup/check-credentials.js';
 import { formatError } from '../lib/error-messages.js';
@@ -45,7 +47,8 @@ export function makeRunOnInstall({ checkCli, checkCredentials, runInherit }) {
   };
 }
 
-const isMain = process.argv[1]?.replace(/\\/g, '/').endsWith('bin/auth.js');
+const isMain = !!process.argv[1] &&
+  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) {
   const run = makeRunOnInstall({
     checkCli: defaultCheckCli,
