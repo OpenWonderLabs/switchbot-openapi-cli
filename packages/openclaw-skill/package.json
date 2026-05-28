@@ -21,8 +21,7 @@
     "switchbot",
     "mcp",
     "smart-home",
-    "iot",
-    "claude-plugin"
+    "iot"
   ],
   "license": "MIT",
   "engines": {
@@ -37,7 +36,6 @@
   },
   "files": [
     "index.js",
-    ".claude-plugin/",
     ".mcp.json",
     "bin/",
     "lib/",
