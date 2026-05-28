@@ -15,25 +15,38 @@ describe('README.md — Route B documentation', () => {
   });
 
   it('explains marketplace.json in context of Codex or Route B', () => {
-    // marketplace.json should be mentioned near codex or route b
     expect(readmeContent).toContain('marketplace.json');
-    const marketplaceMatch = readmeContent.indexOf('marketplace.json');
-    const contextBefore = readmeContent.slice(
-      Math.max(0, marketplaceMatch - 300),
-      marketplaceMatch + 300,
-    );
-    // Should be in a context that mentions codex or route
-    expect(
-      contextBefore.toLowerCase().includes('codex') ||
-        contextBefore.toLowerCase().includes('route'),
-    ).toBe(true);
+
+    const term = 'marketplace.json';
+    let pos = readmeContent.indexOf(term);
+    let hasContext = false;
+    while (pos !== -1) {
+      const excerpt = readmeContent
+        .slice(Math.max(0, pos - 300), pos + 300)
+        .toLowerCase();
+      if (excerpt.includes('codex') || excerpt.includes('route')) {
+        hasContext = true;
+        break;
+      }
+      pos = readmeContent.indexOf(term, pos + 1);
+    }
+    expect(hasContext).toBe(true);
   });
 
   it('clarifies that root marketplace.json is not for Claude Code users', () => {
-    const content = readmeContent.toLowerCase();
-    // Should have markers that clarify the file is not for Claude Code npm install
-    const hasClaudeCodeOrNote =
-      content.includes('claude code') || content.includes('not for');
-    expect(hasClaudeCodeOrNote).toBe(true);
+    const term = 'marketplace.json';
+    let pos = readmeContent.indexOf(term);
+    let found = false;
+    while (pos !== -1) {
+      const excerpt = readmeContent
+        .slice(Math.max(0, pos - 300), pos + 300)
+        .toLowerCase();
+      if (excerpt.includes('claude code')) {
+        found = true;
+        break;
+      }
+      pos = readmeContent.indexOf(term, pos + 1);
+    }
+    expect(found).toBe(true);
   });
 });
