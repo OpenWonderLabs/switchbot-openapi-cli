@@ -1,6 +1,6 @@
 {
   "name": "@switchbot/openclaw-skill",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "description": "OpenClaw plugin that bootstraps and delegates to `switchbot mcp serve`, exposing the full SwitchBot MCP tool surface through @switchbot/openapi-cli >= 3.7.1.",
   "homepage": "https://github.com/OpenWonderLabs/switchbot-openapi-cli/tree/main/packages/openclaw-skill",
