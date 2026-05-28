@@ -49,6 +49,7 @@
     "access": "public"
   },
   "scripts": {
+    "prepare": "node scripts/sync-skill.mjs",
     "test": "node --test",
     "typecheck": "node --check bin/auth.js && node --check bin/install.js"
   }
