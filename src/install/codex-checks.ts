@@ -43,7 +43,7 @@ function readJsonObject(filePath: string): Record<string, unknown> | null {
 }
 
 function resolveMarketplaceName(packageRoot: string): string {
-  // .agents/plugins/marketplace.json — Codex CLI primary path (>=0.1.3)
+  // .agents/plugins/marketplace.json — Codex CLI primary path (replaces .claude-plugin/ from 0.1.3)
   const agentsPluginsPath = path.join(packageRoot, '.agents', 'plugins', 'marketplace.json');
   if (fs.existsSync(agentsPluginsPath)) {
     const manifest = readJsonObject(agentsPluginsPath);
