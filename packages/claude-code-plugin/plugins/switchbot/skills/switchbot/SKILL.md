@@ -201,3 +201,5 @@ Never retry `destructive` actions automatically. For `mutation` retries, use a l
 ## Version
 
 Targets `@switchbot/openapi-cli` ≥ 3.7.1. If `switchbot --version` is older: `npm update -g @switchbot/openapi-cli`.
+
+<!-- MAINTENANCE: Claude Code-specific variant of packages/codex-plugin/skills/switchbot/SKILL.md — update alongside the codex copies when shared sections change. -->
