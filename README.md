@@ -142,6 +142,8 @@ switchbot auth login                                # browser OAuth — saves to
 
 `claude plugins add` runs the `onInstall` hook automatically. If SwitchBot credentials are not yet configured, a browser login window opens. Run `switchbot-claude-auth` at any time to re-authenticate.
 
+**Note:** The root `marketplace.json` file in this repo is for Codex CLI Route B (git sparse clone) and points to the Codex plugin at `packages/codex-plugin/plugins/switchbot`. Claude Code users install via npm and do not use this file.
+
 ---
 
 ## Credentials
