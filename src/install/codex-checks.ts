@@ -43,28 +43,20 @@ function readJsonObject(filePath: string): Record<string, unknown> | null {
 }
 
 function resolveMarketplaceName(packageRoot: string): string {
-  // Check .claude-plugin/marketplace.json (canonical path Codex CLI reads, >=0.1.3)
-  const claudePluginPath = path.join(packageRoot, '.claude-plugin', 'marketplace.json');
-  if (fs.existsSync(claudePluginPath)) {
-    const manifest = readJsonObject(claudePluginPath);
+  // .agents/plugins/marketplace.json — Codex CLI primary path (>=0.1.3)
+  const agentsPluginsPath = path.join(packageRoot, '.agents', 'plugins', 'marketplace.json');
+  if (fs.existsSync(agentsPluginsPath)) {
+    const manifest = readJsonObject(agentsPluginsPath);
     if (typeof manifest?.name === 'string' && manifest.name) {
       return manifest.name;
     }
   }
-  // Fall back to root-level marketplace.json (present in pre-0.1.3 local copies)
+  // Fall back to root-level marketplace.json (pre-0.1.3 local copies)
   const rootManifestPath = path.join(packageRoot, 'marketplace.json');
   if (fs.existsSync(rootManifestPath)) {
     const manifest = readJsonObject(rootManifestPath);
     if (typeof manifest?.name === 'string' && manifest.name) {
       return manifest.name;
-    }
-  }
-  // Fall back to legacy .agents/plugins/marketplace.json
-  const legacyPath = path.join(packageRoot, '.agents', 'plugins', 'marketplace.json');
-  if (fs.existsSync(legacyPath)) {
-    const marketplace = readJsonObject(legacyPath);
-    if (typeof marketplace?.name === 'string' && marketplace.name) {
-      return marketplace.name;
     }
   }
   return path.basename(packageRoot);

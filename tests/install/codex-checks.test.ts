@@ -283,9 +283,9 @@ describe('resolvePluginId', () => {
     expect(resolvePluginId('/some/path/codex-plugin')).toBe('switchbot@codex-plugin');
   });
 
-  it('uses root-level marketplace.json name when .claude-plugin is absent', () => {
+  it('uses root-level marketplace.json when .agents/plugins/ is absent', () => {
     existsSyncMock.mockImplementation((p: string) => {
-      if (p.includes('.claude-plugin')) return false;   // .claude-plugin NOT present
+      if (p.includes('.agents')) return false;          // .agents/plugins/ NOT present
       if (p.endsWith('marketplace.json')) return true;  // root marketplace.json IS present
       if (p.endsWith('plugin.json')) return true;
       return false;
