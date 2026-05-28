@@ -43,7 +43,6 @@ import {
   registerCodexPluginGit,
   registerCodexPluginAuto,
   CODEX_GIT_MARKETPLACE_SPARSE,
-  CODEX_GIT_MARKETPLACE_SPARSE2,
 } from '../../src/install/codex-checks.js';
 
 function makeSpawnResult(status: number, stdout: string, stderr = ''): ReturnType<typeof spawnSyncMock> {
@@ -606,7 +605,7 @@ describe('runCodexPluginRegistrationGit', () => {
     else process.env['CODEX_GIT_MARKETPLACE_REF'] = origEnv;
   });
 
-  it('passes both --sparse flags (packages/codex-plugin and .claude-plugin) to marketplace add', () => {
+  it('passes exactly one --sparse flag (packages/codex-plugin) to marketplace add', () => {
     spawnSyncMock
       .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (current id: switchbot@switchbot)
       .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (legacy id: switchbot@codex-plugin)
@@ -621,13 +620,11 @@ describe('runCodexPluginRegistrationGit', () => {
     const mktCall = calls.find(([cmd, args]) => cmd === 'codex' && args.includes('marketplace') && args.includes('add'));
     expect(mktCall).toBeDefined();
     const mktArgs = mktCall![1];
-    // Both sparse paths must be present
     const sparseIndices = mktArgs
       .map((a, i) => (a === '--sparse' ? i : -1))
       .filter(i => i >= 0);
-    expect(sparseIndices.length).toBe(2);
+    expect(sparseIndices.length).toBe(1);
     expect(mktArgs[sparseIndices[0] + 1]).toBe(CODEX_GIT_MARKETPLACE_SPARSE);
-    expect(mktArgs[sparseIndices[1] + 1]).toBe(CODEX_GIT_MARKETPLACE_SPARSE2);
   });
 
   it('retries with exponential backoff on Windows os error 32 and succeeds on second attempt', () => {

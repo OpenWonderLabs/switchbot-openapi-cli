@@ -330,7 +330,6 @@ export function registerCodexPlugin(): RegisterCodexPluginResult {
 // ─── Git-based marketplace registration (Route B) ────────────────────────────
 export const CODEX_GIT_MARKETPLACE_REPO   = 'OpenWonderLabs/switchbot-openapi-cli';
 export const CODEX_GIT_MARKETPLACE_SPARSE  = 'packages/codex-plugin';
-export const CODEX_GIT_MARKETPLACE_SPARSE2 = '.claude-plugin';
 export const CODEX_GIT_MARKETPLACE_REF    = 'main';
 export const CODEX_PLUGIN_DEFAULT_ID      = 'switchbot@switchbot';
 // Known IDs from pre-release installs; cleaned up by both Route A and Route B.
@@ -373,7 +372,6 @@ export function runCodexPluginRegistrationGit(pluginId: string): RegistrationRes
     'plugin', 'marketplace', 'add',
     CODEX_GIT_MARKETPLACE_REPO,
     '--sparse', CODEX_GIT_MARKETPLACE_SPARSE,
-    '--sparse', CODEX_GIT_MARKETPLACE_SPARSE2,
     '--ref',    ref,
   ];
   let mkt = spawnStr('codex', mktArgs, timeout);
