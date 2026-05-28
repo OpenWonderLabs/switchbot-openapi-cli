@@ -31,7 +31,7 @@
     "setup/",
     "skills/",
     ".codex-plugin/",
-    ".claude-plugin/",
+    ".agents/",
     "plugins/",
     "marketplace.json",
     ".mcp.json",
