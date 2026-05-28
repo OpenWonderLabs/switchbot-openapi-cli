@@ -6,7 +6,7 @@ import { formatError } from '../lib/error-messages.js';
 
 function defaultRunInherit(cmd, args) {
   return new Promise((resolve) => {
-    const p = spawn(cmd, args, { stdio: 'inherit' });
+    const p = spawn(cmd, args, { stdio: 'inherit', shell: process.platform === 'win32' });
     p.on('close', code => resolve(code ?? 0));
     p.on('error', () => resolve(127));
   });
