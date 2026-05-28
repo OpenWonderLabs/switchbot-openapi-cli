@@ -86,7 +86,7 @@ describe('checkCredentials', () => {
     assert.match(result.message, /switchbot auth logout/);
   });
 
-  it('returns doctor-check-failed when doctor errors look like network failures', async () => {
+  it('returns ok:true from keychain when doctor fails with a network error and keychain has credentials', async () => {
     const fakeExec = async (cmd, args) => {
       if (args.includes('doctor')) {
         const err = new Error('ETIMEDOUT');
