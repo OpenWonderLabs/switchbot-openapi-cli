@@ -119,6 +119,31 @@ switchbot auth login       # browser OAuth — saves to OS keychain
 
 ---
 
+## Claude Code integration
+
+The Claude Code plugin is published to npm as [`@switchbot/claude-code-plugin`](https://www.npmjs.com/package/@switchbot/claude-code-plugin).
+
+**Recommended — paste into Claude Code chat:**
+
+```
+Please set up the SwitchBot integration for me by running:
+npm install -g @switchbot/claude-code-plugin
+claude plugins add @switchbot/claude-code-plugin
+Then restart Claude Code and confirm it's working.
+```
+
+**Or install directly:**
+
+```bash
+npm install -g @switchbot/claude-code-plugin
+claude plugins add @switchbot/claude-code-plugin   # registers the MCP server and skill
+switchbot auth login                                # browser OAuth — saves to OS keychain
+```
+
+`claude plugins add` runs the `onInstall` hook automatically. If SwitchBot credentials are not yet configured, a browser login window opens. Run `switchbot-claude-auth` at any time to re-authenticate.
+
+---
+
 ## Credentials
 
 > **Recommended:** use `switchbot auth login` for browser-based OAuth — credentials are stored securely in the OS keychain and never need to be copy-pasted anywhere.
