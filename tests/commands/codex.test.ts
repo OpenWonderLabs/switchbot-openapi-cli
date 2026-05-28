@@ -426,6 +426,9 @@ describe('switchbot codex setup', () => {
     checkCodexPluginRegisteredMock.mockReset();
     registerCodexPluginMock.mockReset();
     tryLoadConfigMock.mockReset();
+    // Default: fast-path bypass for tests that set all other guards to ok.
+    // Tests that explicitly test the fast path override this with mockReturnValue('ok').
+    checkCodexPluginRegisteredMock.mockReturnValueOnce({ name: 'codex-plugin-registered', status: 'warn', detail: 'not yet' });
   });
 
   // ── version-aware install-switchbot-cli step ──────────────────────────────
@@ -449,8 +452,6 @@ describe('switchbot codex setup', () => {
     runDoctorChecksMock.mockResolvedValueOnce(makeBaseChecks());
     checkCodexCliMock.mockReturnValue({ name: 'codex-cli', status: 'ok', detail: 'ok' });
     checkCodexPluginNpmMock.mockReturnValue({ name: 'codex-plugin-npm', status: 'ok', detail: 'ok' });
-    // fast-path bypass: first call returns warn so fast path skips; pipeline doctor-verify uses persistent ok
-    checkCodexPluginRegisteredMock.mockReturnValueOnce({ name: 'codex-plugin-registered', status: 'warn', detail: 'not yet' });
     checkCodexPluginRegisteredMock.mockReturnValue({ name: 'codex-plugin-registered', status: 'ok', detail: 'ok' });
 
     const { exitCode, stdout } = await runCli(registerCodexCommand, ['codex', 'setup', '--json']);
@@ -847,8 +848,6 @@ describe('switchbot codex setup', () => {
     runDoctorChecksMock.mockResolvedValueOnce(makeBaseChecks());
     checkCodexCliMock.mockReturnValue({ name: 'codex-cli', status: 'ok', detail: 'ok' });
     checkCodexPluginNpmMock.mockReturnValue({ name: 'codex-plugin-npm', status: 'ok', detail: 'ok' });
-    // fast-path bypass: first call returns warn so fast path skips; pipeline doctor-verify uses persistent ok
-    checkCodexPluginRegisteredMock.mockReturnValueOnce({ name: 'codex-plugin-registered', status: 'warn', detail: 'not yet' });
     checkCodexPluginRegisteredMock.mockReturnValue({ name: 'codex-plugin-registered', status: 'ok', detail: 'ok' });
 
     const { exitCode, stdout } = await runCli(
@@ -887,8 +886,6 @@ describe('switchbot codex setup', () => {
     runDoctorChecksMock.mockResolvedValueOnce(makeBaseChecks());
     checkCodexCliMock.mockReturnValue({ name: 'codex-cli', status: 'ok', detail: 'ok' });
     checkCodexPluginNpmMock.mockReturnValue({ name: 'codex-plugin-npm', status: 'ok', detail: 'ok' });
-    // fast-path bypass: first call returns warn so isAlreadyConfigured() → false; pipeline uses persistent ok
-    checkCodexPluginRegisteredMock.mockReturnValueOnce({ name: 'codex-plugin-registered', status: 'warn', detail: 'not yet' });
     checkCodexPluginRegisteredMock.mockReturnValue({ name: 'codex-plugin-registered', status: 'ok', detail: 'ok' });
 
     const { exitCode, stdout } = await runCli(
@@ -959,8 +956,6 @@ describe('switchbot codex setup', () => {
     runDoctorChecksMock.mockResolvedValueOnce(makeBaseChecks());
     checkCodexCliMock.mockReturnValue({ name: 'codex-cli', status: 'ok', detail: 'ok' });
     checkCodexPluginNpmMock.mockReturnValue({ name: 'codex-plugin-npm', status: 'ok', detail: 'ok' });
-    // fast-path bypass: first call returns warn so isAlreadyConfigured() → false; pipeline uses persistent ok
-    checkCodexPluginRegisteredMock.mockReturnValueOnce({ name: 'codex-plugin-registered', status: 'warn', detail: 'not yet' });
     checkCodexPluginRegisteredMock.mockReturnValue({ name: 'codex-plugin-registered', status: 'ok', detail: 'ok' });
 
     const { exitCode, stdout } = await runCli(registerCodexCommand, ['codex', 'setup', '--json']);
@@ -987,8 +982,6 @@ describe('switchbot codex setup', () => {
     runDoctorChecksMock.mockResolvedValueOnce(makeBaseChecks());
     checkCodexCliMock.mockReturnValue({ name: 'codex-cli', status: 'ok', detail: 'ok' });
     checkCodexPluginNpmMock.mockReturnValue({ name: 'codex-plugin-npm', status: 'ok', detail: 'ok' });
-    // fast-path bypass: first call returns warn so isAlreadyConfigured() → false; pipeline uses persistent ok
-    checkCodexPluginRegisteredMock.mockReturnValueOnce({ name: 'codex-plugin-registered', status: 'warn', detail: 'not yet' });
     checkCodexPluginRegisteredMock.mockReturnValue({ name: 'codex-plugin-registered', status: 'ok', detail: 'ok' });
 
     const { exitCode, stdout } = await runCli(registerCodexCommand, ['codex', 'setup', '--json']);
@@ -1014,6 +1007,7 @@ describe('switchbot codex setup', () => {
     checkCodexCliMock.mockReturnValue({ name: 'codex-cli', status: 'ok', detail: { path: '/usr/local/bin/codex' } });
     tryLoadConfigMock.mockReturnValue({ token: 't', secret: 's' });
     checkCodexPluginNpmMock.mockReturnValue({ name: 'codex-plugin-npm', status: 'ok', detail: 'ok' });
+    checkCodexPluginRegisteredMock.mockReset();
     checkCodexPluginRegisteredMock.mockReturnValue({ name: 'codex-plugin-registered', status: 'ok', detail: { pluginName: 'switchbot@switchbot' } });
 
     const { exitCode, stdout } = await runCli(registerCodexCommand, ['codex', 'setup', '--json']);
@@ -1031,6 +1025,7 @@ describe('switchbot codex setup', () => {
     checkCodexCliMock.mockReturnValue({ name: 'codex-cli', status: 'ok', detail: { path: '/usr/local/bin/codex' } });
     tryLoadConfigMock.mockReturnValue({ token: 't', secret: 's' });
     checkCodexPluginNpmMock.mockReturnValue({ name: 'codex-plugin-npm', status: 'ok', detail: 'ok' });
+    checkCodexPluginRegisteredMock.mockReset();
     checkCodexPluginRegisteredMock.mockReturnValue({ name: 'codex-plugin-registered', status: 'ok', detail: { pluginName: 'switchbot@switchbot' } });
 
     const { exitCode, stdout } = await runCli(registerCodexCommand, ['codex', 'setup']);

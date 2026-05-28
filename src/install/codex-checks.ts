@@ -465,7 +465,10 @@ export function registerCodexPluginAuto(): RegisterCodexPluginResult {
   // Idempotency guard: if the plugin is already registered and healthy, skip all mutation.
   const preCheck = checkCodexPluginRegistered();
   if (preCheck.status === 'ok') {
-    const pluginName = (preCheck.detail as { pluginName?: string }).pluginName;
+    const d = preCheck.detail;
+    const pluginName = typeof d === 'object' && d !== null && 'pluginName' in d
+      ? String(d.pluginName)
+      : undefined;
     return { ok: true, pluginId: pluginName ?? CODEX_PLUGIN_DEFAULT_ID, packageRoot: null };
   }
 

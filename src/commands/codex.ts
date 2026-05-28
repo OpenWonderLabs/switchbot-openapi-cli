@@ -588,7 +588,7 @@ async function setupStepDoctorVerify(): Promise<SetupOutcome> {
   };
 }
 
-async function isAlreadyConfigured(): Promise<boolean> {
+export async function isAlreadyConfigured(): Promise<boolean> {
   if (checkCodexCli().status !== 'ok') return false;
   if (!await credentialsPresent()) return false;
   if (checkCodexPluginNpm().status !== 'ok') return false;
