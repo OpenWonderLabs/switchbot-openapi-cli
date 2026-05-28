@@ -27,9 +27,8 @@ export function resolvePluginIdentifier(packageRoot) {
   // Sequential independent if blocks allow fallbacks to work even if earlier
   // files exist but have invalid JSON (e.g., interrupted write).
   const manifestPaths = [
-    join(packageRoot, '.claude-plugin', 'marketplace.json'),
-    join(packageRoot, 'marketplace.json'),
     join(packageRoot, '.agents', 'plugins', 'marketplace.json'),
+    join(packageRoot, 'marketplace.json'),
   ];
   for (const p of manifestPaths) {
     if (existsSync(p)) {

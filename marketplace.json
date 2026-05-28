@@ -3,7 +3,7 @@
   "plugins": [
     {
       "name": "switchbot",
-      "source": "./plugins/switchbot"
+      "source": "./packages/codex-plugin/plugins/switchbot"
     }
   ]
 }

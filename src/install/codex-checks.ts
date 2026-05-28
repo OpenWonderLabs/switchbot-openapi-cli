@@ -43,28 +43,20 @@ function readJsonObject(filePath: string): Record<string, unknown> | null {
 }
 
 function resolveMarketplaceName(packageRoot: string): string {
-  // Check .claude-plugin/marketplace.json (canonical path Codex CLI reads, >=0.1.3)
-  const claudePluginPath = path.join(packageRoot, '.claude-plugin', 'marketplace.json');
-  if (fs.existsSync(claudePluginPath)) {
-    const manifest = readJsonObject(claudePluginPath);
+  // .agents/plugins/marketplace.json — Codex CLI primary path (replaces .claude-plugin/ from 0.1.3)
+  const agentsPluginsPath = path.join(packageRoot, '.agents', 'plugins', 'marketplace.json');
+  if (fs.existsSync(agentsPluginsPath)) {
+    const manifest = readJsonObject(agentsPluginsPath);
     if (typeof manifest?.name === 'string' && manifest.name) {
       return manifest.name;
     }
   }
-  // Fall back to root-level marketplace.json (present in pre-0.1.3 local copies)
+  // Fall back to root-level marketplace.json (pre-0.1.3 local copies)
   const rootManifestPath = path.join(packageRoot, 'marketplace.json');
   if (fs.existsSync(rootManifestPath)) {
     const manifest = readJsonObject(rootManifestPath);
     if (typeof manifest?.name === 'string' && manifest.name) {
       return manifest.name;
-    }
-  }
-  // Fall back to legacy .agents/plugins/marketplace.json
-  const legacyPath = path.join(packageRoot, '.agents', 'plugins', 'marketplace.json');
-  if (fs.existsSync(legacyPath)) {
-    const marketplace = readJsonObject(legacyPath);
-    if (typeof marketplace?.name === 'string' && marketplace.name) {
-      return marketplace.name;
     }
   }
   return path.basename(packageRoot);
@@ -330,7 +322,6 @@ export function registerCodexPlugin(): RegisterCodexPluginResult {
 // ─── Git-based marketplace registration (Route B) ────────────────────────────
 export const CODEX_GIT_MARKETPLACE_REPO   = 'OpenWonderLabs/switchbot-openapi-cli';
 export const CODEX_GIT_MARKETPLACE_SPARSE  = 'packages/codex-plugin';
-export const CODEX_GIT_MARKETPLACE_SPARSE2 = '.claude-plugin';
 export const CODEX_GIT_MARKETPLACE_REF    = 'main';
 export const CODEX_PLUGIN_DEFAULT_ID      = 'switchbot@switchbot';
 // Known IDs from pre-release installs; cleaned up by both Route A and Route B.
@@ -340,6 +331,12 @@ export const CODEX_PLUGIN_LEGACY_IDS = ['switchbot@codex-plugin', 'switchbot@swi
 // deletes the last plugin in a marketplace Codex removes the directory but leaves a DB record,
 // causing the next `marketplace add` to say "already added" without recreating the directory.
 export const CODEX_MARKETPLACE_LEGACY_NAMES = ['switchbot', 'codex-plugin', 'switchbot-skill'];
+
+function isCodexProcessRunning(): boolean {
+  if (process.platform !== 'win32') return false;
+  const r = spawnStr('tasklist', ['/FI', 'IMAGENAME eq Codex.exe', '/NH', '/FO', 'CSV'], 5000);
+  return r.status === 0 && r.stdout.toLowerCase().includes('codex.exe');
+}
 
 export function runCodexPluginRegistrationGit(pluginId: string): RegistrationResult {
   const ref = process.env['CODEX_GIT_MARKETPLACE_REF'] || CODEX_GIT_MARKETPLACE_REF;
@@ -367,14 +364,22 @@ export function runCodexPluginRegistrationGit(pluginId: string): RegistrationRes
     'plugin', 'marketplace', 'add',
     CODEX_GIT_MARKETPLACE_REPO,
     '--sparse', CODEX_GIT_MARKETPLACE_SPARSE,
-    '--sparse', CODEX_GIT_MARKETPLACE_SPARSE2,
     '--ref',    ref,
   ];
   let mkt = spawnStr('codex', mktArgs, timeout);
-  // On Windows, git holds file handles briefly after clone; retry once after 10 s.
+  // On Windows, git holds file handles briefly after clone.
+  // Detect if Codex Desktop is running and warn; then retry with exponential backoff.
   if (mkt.status !== 0 && process.platform === 'win32' && mkt.stderr.includes('os error 32')) {
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10000);
-    mkt = spawnStr('codex', mktArgs, timeout);
+    if (isCodexProcessRunning()) {
+      process.stderr.write(
+        '[switchbot] Warning: Codex.exe is running. Close Codex Desktop before running setup to avoid file-lock errors.\n',
+      );
+    }
+    for (const delay of [2000, 5000, 10000]) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delay);
+      mkt = spawnStr('codex', mktArgs, timeout);
+      if (mkt.status === 0 || !mkt.stderr.includes('os error 32')) break;
+    }
   }
   if (mkt.status !== 0) {
     return { ok: false, exitCode: mkt.status, stderr: mkt.stderr, stage: 'marketplace-add' };
@@ -457,6 +462,16 @@ function installCodexPluginGlobally(): { ok: boolean; installed?: boolean; error
  * environments where @switchbot/codex-plugin is already installed locally.
  */
 export function registerCodexPluginAuto(): RegisterCodexPluginResult {
+  // Idempotency guard: if the plugin is already registered and healthy, skip all mutation.
+  const preCheck = checkCodexPluginRegistered();
+  if (preCheck.status === 'ok') {
+    const d = preCheck.detail;
+    const pluginName = typeof d === 'object' && d !== null && 'pluginName' in d
+      ? String(d.pluginName)
+      : undefined;
+    return { ok: true, pluginId: pluginName ?? CODEX_PLUGIN_DEFAULT_ID, packageRoot: null };
+  }
+
   // Route B: git marketplace — no local npm package required
   const git = registerCodexPluginGit();
   if (git.ok) return git;

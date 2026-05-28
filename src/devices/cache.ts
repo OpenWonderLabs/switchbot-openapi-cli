@@ -166,6 +166,7 @@ export function updateCacheFromDeviceList(body: DeviceListBodyShape): void {
   }
   for (const d of body.infraredRemoteList) {
     if (!d.deviceId) continue;
+    const hub = d.hubDeviceId ? devices[d.hubDeviceId] : undefined;
     devices[d.deviceId] = {
       type: d.remoteType,
       typeSource: 'remoteType',
@@ -173,6 +174,9 @@ export function updateCacheFromDeviceList(body: DeviceListBodyShape): void {
       category: 'ir',
       hubDeviceId: d.hubDeviceId,
       controlType: d.controlType,
+      familyName: hub?.familyName,
+      roomID: hub?.roomID,
+      roomName: hub?.roomName,
     };
   }
 

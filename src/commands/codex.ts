@@ -417,6 +417,7 @@ interface SetupContext {
   codexPluginId?: string;
   packageRoot?: string | null;
   nonInteractive: boolean;
+  upgrade: boolean;
 }
 
 type SetupOutcome = StepOutcome;
@@ -466,10 +467,11 @@ function setupStepCheckCodexCli(): SetupOutcome {
   return { step: 'check-codex-cli', status: 'ok', message: where };
 }
 
-function setupStepInstallSwitchbotCli(): SetupOutcome {
+function setupStepInstallSwitchbotCli(ctx: SetupContext): SetupOutcome {
   return setupStepInstallGlobalPackage(
     'install-switchbot-cli',
     SWITCHBOT_CLI_PACKAGE,
+    { upgrade: ctx.upgrade },
   );
 }
 
@@ -488,10 +490,7 @@ function resolveInstalledVersion(packageName: string): string | null {
   }
 }
 
-function setupStepInstallGlobalPackage(step: string, packageName: string): SetupOutcome {
-  const { version: latestVersion, fromRegistry } = fetchLatestPublishedVersion(packageName);
-  const registryNote = fromRegistry ? '' : ' (registry unreachable, used running version as reference)';
-
+function setupStepInstallGlobalPackage(step: string, packageName: string, opts: { upgrade: boolean }): SetupOutcome {
   const list = spawnSync(
     'npm', ['list', '-g', '--json', '--depth=0', packageName],
     { encoding: 'utf-8', shell: process.platform === 'win32', timeout: 15000 },
@@ -503,6 +502,13 @@ function setupStepInstallGlobalPackage(step: string, packageName: string): Setup
     };
     installedVersion = parsed?.dependencies?.[packageName]?.version ?? null;
   } catch { /* treat as not installed */ }
+
+  if (installedVersion !== null && !opts.upgrade) {
+    return { step, status: 'ok', message: `already installed (${installedVersion})` };
+  }
+
+  const { version: latestVersion, fromRegistry } = fetchLatestPublishedVersion(packageName);
+  const registryNote = fromRegistry ? '' : ' (registry unreachable, used running version as reference)';
 
   if (installedVersion !== null) {
     if (compareVersions(installedVersion, latestVersion) >= 0) {
@@ -582,6 +588,14 @@ async function setupStepDoctorVerify(): Promise<SetupOutcome> {
   };
 }
 
+export async function isAlreadyConfigured(): Promise<boolean> {
+  if (checkCodexCli().status !== 'ok') return false;
+  if (!await credentialsPresent()) return false;
+  if (checkCodexPluginNpm().status !== 'ok') return false;
+  if (checkCodexPluginRegistered().status !== 'ok') return false;
+  return true;
+}
+
 async function runSetup(
   skip: Set<string>,
   ctx: SetupContext,
@@ -608,7 +622,7 @@ async function runSetup(
     let outcome: SetupOutcome;
     if (step.name === 'check-codex-cli')             outcome = setupStepCheckCodexCli();
     else if (step.name === 'check-network')          outcome = setupStepCheckNetwork();
-    else if (step.name === 'install-switchbot-cli')  outcome = setupStepInstallSwitchbotCli();
+    else if (step.name === 'install-switchbot-cli')  outcome = setupStepInstallSwitchbotCli(ctx);
     else if (step.name === 'register-plugin')        outcome = setupStepRegisterPlugin(ctx);
     else if (step.name === 'auth')                   outcome = await setupStepAuth(ctx);
     else                                             outcome = await setupStepDoctorVerify();
@@ -631,12 +645,13 @@ function registerCodexSetupSubcommand(codex: Command): void {
     .description('Bootstrap the Codex integration end-to-end: install packages if missing, register plugin, auth, verify')
     .option('--skip <names>', 'Comma-separated step names to skip (skippable: "install-switchbot-cli", "auth"; deprecated no-ops: "install-codex-plugin")')
     .option('--yes', 'Non-interactive mode: do not spawn auth login, fail fast if credentials missing')
+    .option('--upgrade', 'Upgrade @switchbot/openapi-cli to the latest published version if already installed')
     .addHelpText('after', `
 Environment variables:
   CODEX_GIT_MARKETPLACE_REF        Git ref used when registering via git marketplace (default: main)
   CODEX_MARKETPLACE_ADD_TIMEOUT    Timeout in ms for "codex plugin marketplace add" (default: 60000)
 `)
-    .action(async (opts: { skip?: string; yes?: boolean }, command: Command) => {
+    .action(async (opts: { skip?: string; yes?: boolean; upgrade?: boolean }, command: Command) => {
       const skip = new Set(
         (opts.skip ?? '').split(',').map((s) => s.trim()).filter(Boolean),
       );
@@ -681,7 +696,21 @@ Environment variables:
         profile,
         configPath,
         nonInteractive: Boolean(opts.yes),
+        upgrade: Boolean(opts.upgrade),
       };
+
+      // Fast path: when no steps are skipped and all required components are already
+      // present and healthy, skip the full setup pipeline.
+      if (skip.size === 0 && !ctx.upgrade && await isAlreadyConfigured()) {
+        if (isJsonMode()) {
+          printJson({ ok: true, alreadyConfigured: true, outcomes: [] });
+        } else {
+          console.log(chalk.green('Already configured, nothing to do.'));
+          console.log(chalk.dim('Run: switchbot codex doctor  — to verify health'));
+        }
+        process.exit(0);
+        return;
+      }
 
       if (!isJsonMode()) console.log(chalk.bold('Setting up Codex integration...'));
       if (!isJsonMode()) console.log('');

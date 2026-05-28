@@ -165,6 +165,68 @@ describe('device cache', () => {
     // Default path should NOT have been created.
     expect(fs.existsSync(path.join(tmpDir, '.switchbot', 'devices.json'))).toBe(false);
   });
+
+  it('IR device inherits familyName/roomID/roomName from its hub', () => {
+    updateCacheFromDeviceList({
+      deviceList: [{
+        deviceId: 'HUB-1',
+        deviceName: 'Mini Hub',
+        deviceType: 'Hub Mini',
+        familyName: '公司',
+        roomID: 'ROOM-42',
+        roomName: 'Office',
+      }],
+      infraredRemoteList: [{
+        deviceId: 'IR-A',
+        deviceName: 'Office TV',
+        remoteType: 'TV',
+        hubDeviceId: 'HUB-1',
+      }],
+    });
+    const ir = getCachedDevice('IR-A');
+    expect(ir).not.toBeNull();
+    expect(ir!.familyName).toBe('公司');
+    expect(ir!.roomID).toBe('ROOM-42');
+    expect(ir!.roomName).toBe('Office');
+    expect(ir!.category).toBe('ir');
+  });
+
+  it('IR device with hubDeviceId not in the device list gets no room/family metadata', () => {
+    updateCacheFromDeviceList({
+      deviceList: [],
+      infraredRemoteList: [{
+        deviceId: 'IR-ORPHAN',
+        deviceName: 'Orphan AC',
+        remoteType: 'Air Conditioner',
+        hubDeviceId: 'HUB-MISSING',
+      }],
+    });
+    const ir = getCachedDevice('IR-ORPHAN');
+    expect(ir).not.toBeNull();
+    expect(ir!.familyName).toBeUndefined();
+    expect(ir!.roomID).toBeUndefined();
+    expect(ir!.roomName).toBeUndefined();
+  });
+
+  it('IR device inherits undefined room/family when hub itself has no metadata', () => {
+    updateCacheFromDeviceList({
+      deviceList: [{
+        deviceId: 'HUB-BARE',
+        deviceName: 'Bare Hub',
+        deviceType: 'Hub Mini',
+      }],
+      infraredRemoteList: [{
+        deviceId: 'IR-B',
+        deviceName: 'Bedroom Fan',
+        remoteType: 'Fan',
+        hubDeviceId: 'HUB-BARE',
+      }],
+    });
+    const ir = getCachedDevice('IR-B');
+    expect(ir!.familyName).toBeUndefined();
+    expect(ir!.roomID).toBeUndefined();
+    expect(ir!.roomName).toBeUndefined();
+  });
 });
 
 describe('list cache TTL', () => {

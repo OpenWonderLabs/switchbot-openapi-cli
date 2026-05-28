@@ -34,7 +34,7 @@ Drive the user's SwitchBot smart home through the `switchbot` CLI. Always query 
 
 ## Network requirements
 
-`switchbot codex setup` requires outbound internet (npm registry + GitHub). If it fails with a network error, read `references/codex-network.md` for the `~/.codex/config.toml` fix.
+Claude Code configures the SwitchBot MCP server automatically via `.mcp.json` — no manual setup required. The MCP server needs outbound HTTPS to `api.switch-bot.com`. If connection errors appear, see `references/claude-code-network.md`.
 
 ---
 
@@ -202,4 +202,4 @@ Never retry `destructive` actions automatically. For `mutation` retries, use a l
 
 Targets `@switchbot/openapi-cli` ≥ 3.7.1. If `switchbot --version` is older: `npm update -g @switchbot/openapi-cli`.
 
-<!-- MAINTENANCE: Identical copy at plugins/switchbot/skills/switchbot/SKILL.md — keep both in sync. -->
+<!-- MAINTENANCE: Claude Code-specific variant of packages/codex-plugin/skills/switchbot/SKILL.md — update alongside the codex copies when shared sections change. -->

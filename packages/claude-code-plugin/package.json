@@ -1,18 +1,18 @@
 {
-  "name": "@switchbot/codex-plugin",
-  "version": "0.1.3",
+  "name": "@switchbot/claude-code-plugin",
+  "version": "0.1.0",
   "type": "module",
-  "description": "SwitchBot Codex plugin — wires Codex to the SwitchBot CLI MCP server (24 tools, zero Node.js dependencies)",
-  "homepage": "https://github.com/OpenWonderLabs/switchbot-openapi-cli/tree/main/packages/codex-plugin",
+  "description": "SwitchBot Claude Code plugin — wires Claude Code to the SwitchBot CLI MCP server (24 tools, zero Node.js dependencies)",
+  "homepage": "https://github.com/OpenWonderLabs/switchbot-openapi-cli/tree/main/packages/claude-code-plugin",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/OpenWonderLabs/switchbot-openapi-cli.git",
-    "directory": "packages/codex-plugin"
+    "directory": "packages/claude-code-plugin"
   },
   "bugs": "https://github.com/OpenWonderLabs/switchbot-openapi-cli/issues",
   "license": "MIT",
   "keywords": [
-    "codex",
+    "claude-code",
     "switchbot",
     "smart-home",
     "iot",
@@ -22,19 +22,14 @@
     "node": ">=18"
   },
   "bin": {
-    "switchbot-codex-auth": "./bin/auth.js",
-    "switchbot-codex-install": "./bin/install.js"
+    "switchbot-claude-auth": "./bin/auth.js"
   },
   "files": [
     "bin/",
     "lib/",
     "setup/",
-    "skills/",
-    ".codex-plugin/",
-    ".agents/plugins/",
+    ".claude-plugin/",
     "plugins/",
-    "marketplace.json",
-    ".mcp.json",
     "README.md"
   ],
   "peerDependencies": {
@@ -49,8 +44,7 @@
     "access": "public"
   },
   "scripts": {
-    "prepare": "node scripts/sync-skill.mjs",
     "test": "node --test",
-    "typecheck": "node --check bin/auth.js && node --check bin/install.js"
+    "typecheck": "node --check bin/auth.js"
   }
 }

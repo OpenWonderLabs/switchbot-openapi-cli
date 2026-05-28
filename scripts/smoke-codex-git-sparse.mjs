@@ -45,7 +45,7 @@ try {
   runGit(['-C', stagingDir, 'checkout', ref], { cwd: workDir });
 
   const rootMarketplacePath = path.join(stagingDir, '.claude-plugin', 'marketplace.json');
-  const packageMarketplacePath = path.join(stagingDir, 'packages', 'codex-plugin', '.claude-plugin', 'marketplace.json');
+  const packageMarketplacePath = path.join(stagingDir, 'packages', 'codex-plugin', '.agents', 'plugins', 'marketplace.json');
   const pluginMcpPath = path.join(stagingDir, 'packages', 'codex-plugin', 'plugins', 'switchbot', '.mcp.json');
 
   for (const requiredPath of [rootMarketplacePath, packageMarketplacePath, pluginMcpPath]) {

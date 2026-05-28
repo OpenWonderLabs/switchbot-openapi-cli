@@ -47,10 +47,7 @@ Full tool reference: `switchbot mcp tools`
 ## Usage
 
 The server communicates over **stdio** (MCP protocol). OpenClaw launches
-the MCP server via the declarations in:
-
-- `.claude-plugin/plugin.json` — bundle identity
-- `.mcp.json` — stdio launcher (`node ${pluginDir}/bin/start.js`)
+the MCP server via `.mcp.json` — stdio launcher (`node ${pluginDir}/bin/start.js`).
 
 **First launch auto-setup**: if `@switchbot/openapi-cli` is not installed,
 `bin/start.js` installs it automatically. If credentials are missing, it

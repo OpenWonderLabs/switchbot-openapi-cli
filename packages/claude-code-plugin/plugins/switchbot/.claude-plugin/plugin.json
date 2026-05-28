@@ -1,0 +1,9 @@
+{
+  "name": "switchbot",
+  "version": "0.1.0",
+  "description": "Control SwitchBot smart-home devices from Claude Code via MCP.",
+  "author": {
+    "name": "OpenWonderLabs"
+  },
+  "homepage": "https://github.com/OpenWonderLabs/switchbot-openapi-cli"
+}

@@ -1,0 +1,6 @@
+{
+  "switchbot": {
+    "command": "switchbot",
+    "args": ["mcp", "serve", "--tools", "all"]
+  }
+}
