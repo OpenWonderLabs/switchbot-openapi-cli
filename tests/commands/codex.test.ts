@@ -1127,4 +1127,70 @@ describe('switchbot codex setup', () => {
     expect(parsed.data?.alreadyConfigured).toBeFalsy();
     expect(parsed.data?.outcomes.length).toBeGreaterThan(0);
   });
+
+  // ── Guards: our changes must not affect setup ─────────────────────────────
+
+  it('register-plugin always runs in setup even when checkCodexPluginRegistered returns ok mid-pipeline', async () => {
+    // Scenario: fast path is bypassed (isAlreadyConfigured → false because beforeEach returns warn
+    // for the first checkCodexPluginRegistered call), but during the pipeline itself the check
+    // returns ok. Setup must NOT apply the repair-style idempotency skip — it has no preflight-plugin
+    // step, so registerCodexPluginAuto must always be called exactly once.
+    checkCodexCliMock.mockReturnValueOnce({ name: 'codex-cli', status: 'ok', detail: { path: '/usr/bin/codex' } });
+    spawnSyncRepairMock.mockReturnValueOnce({ status: 0, stdout: 'Ping success', stderr: '' });
+    spawnSyncRepairMock.mockReturnValueOnce({
+      status: 0,
+      stdout: JSON.stringify({ dependencies: { '@switchbot/openapi-cli': { version: VERSION } } }),
+      stderr: '',
+    });
+    registerCodexPluginMock.mockReturnValueOnce({ ok: true, pluginId: 'switchbot@switchbot', packageRoot: null });
+    tryLoadConfigMock.mockReturnValue({ token: 't', secret: 's' });
+    runDoctorChecksMock.mockResolvedValueOnce(makeBaseChecks());
+    checkCodexCliMock.mockReturnValue({ name: 'codex-cli', status: 'ok', detail: 'ok' });
+    checkCodexPluginNpmMock.mockReturnValue({ name: 'codex-plugin-npm', status: 'ok', detail: 'ok' });
+    // Plugin appears already registered mid-pipeline (should not cause register-plugin to skip)
+    checkCodexPluginRegisteredMock.mockReturnValue({ name: 'codex-plugin-registered', status: 'ok', detail: { pluginName: 'switchbot@switchbot' } });
+
+    const { exitCode, stdout } = await runCli(registerCodexCommand, ['codex', 'setup', '--json']);
+    expect(exitCode).toBe(0);
+    const parsed = JSON.parse(stdout.join('')) as {
+      data?: { outcomes: Array<{ step: string; status: string }> };
+    };
+    expect(parsed.data!.outcomes.find((o) => o.step === 'register-plugin')?.status).toBe('ok');
+    // registerCodexPluginAuto must be called — no idempotency skip in setup
+    expect(registerCodexPluginMock).toHaveBeenCalledOnce();
+  });
+
+  it('exits 1 when register-plugin fails during setup', async () => {
+    checkCodexCliMock.mockReturnValueOnce({ name: 'codex-cli', status: 'ok', detail: { path: '/usr/bin/codex' } });
+    spawnSyncRepairMock.mockReturnValueOnce({ status: 0, stdout: 'Ping success', stderr: '' });
+    spawnSyncRepairMock.mockReturnValueOnce({
+      status: 0,
+      stdout: JSON.stringify({ dependencies: { '@switchbot/openapi-cli': { version: VERSION } } }),
+      stderr: '',
+    });
+    registerCodexPluginMock.mockReturnValueOnce({
+      ok: false,
+      pluginId: 'switchbot@switchbot',
+      packageRoot: null,
+      error: 'marketplace-add exit 1: no supported manifest',
+      exitCode: 1,
+      stderr: 'no supported manifest',
+    });
+    tryLoadConfigMock.mockReturnValue({ token: 't', secret: 's' });
+    // doctor-verify still runs after register-plugin fails
+    runDoctorChecksMock.mockResolvedValueOnce(makeBaseChecks());
+    checkCodexCliMock.mockReturnValue({ name: 'codex-cli', status: 'ok', detail: 'ok' });
+    checkCodexPluginNpmMock.mockReturnValue({ name: 'codex-plugin-npm', status: 'ok', detail: 'ok' });
+    checkCodexPluginRegisteredMock.mockReturnValue({ name: 'codex-plugin-registered', status: 'ok', detail: 'ok' });
+
+    const { exitCode, stdout } = await runCli(registerCodexCommand, ['codex', 'setup', '--json']);
+    expect(exitCode).toBe(1);
+    const parsed = JSON.parse(stdout.join('')) as {
+      data?: { ok: boolean; outcomes: Array<{ step: string; status: string; message?: string }> };
+    };
+    expect(parsed.data?.ok).toBe(false);
+    const step = parsed.data!.outcomes.find((o) => o.step === 'register-plugin')!;
+    expect(step.status).toBe('failed');
+    expect(step.message).toContain('marketplace-add');
+  });
 });
