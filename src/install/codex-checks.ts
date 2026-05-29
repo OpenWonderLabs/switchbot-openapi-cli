@@ -43,18 +43,22 @@ function readJsonObject(filePath: string): Record<string, unknown> | null {
 }
 
 function resolveMarketplaceName(packageRoot: string): string {
-  // .agents/plugins/marketplace.json — Codex CLI primary path (replaces .claude-plugin/ from 0.1.3)
-  const agentsPluginsPath = path.join(packageRoot, '.agents', 'plugins', 'marketplace.json');
-  if (fs.existsSync(agentsPluginsPath)) {
-    const manifest = readJsonObject(agentsPluginsPath);
+  // Root-level marketplace.json is the authoritative source: it is what
+  // `codex plugin marketplace add <path>` validates and what Codex registers
+  // the marketplace name from. Always prefer it so the constructed plugin ID
+  // (e.g. switchbot@switchbot) matches what Codex expects for `plugin add`.
+  const rootManifestPath = path.join(packageRoot, 'marketplace.json');
+  if (fs.existsSync(rootManifestPath)) {
+    const manifest = readJsonObject(rootManifestPath);
     if (typeof manifest?.name === 'string' && manifest.name) {
       return manifest.name;
     }
   }
-  // Fall back to root-level marketplace.json (pre-0.1.3 local copies)
-  const rootManifestPath = path.join(packageRoot, 'marketplace.json');
-  if (fs.existsSync(rootManifestPath)) {
-    const manifest = readJsonObject(rootManifestPath);
+  // Legacy fallback: .agents/plugins/marketplace.json (present in packages
+  // published before the root-level manifest was introduced).
+  const agentsPluginsPath = path.join(packageRoot, '.agents', 'plugins', 'marketplace.json');
+  if (fs.existsSync(agentsPluginsPath)) {
+    const manifest = readJsonObject(agentsPluginsPath);
     if (typeof manifest?.name === 'string' && manifest.name) {
       return manifest.name;
     }
@@ -233,14 +237,15 @@ export function checkCodexPluginRegistered(): Check {
     const arr = JSON.parse(raw) as unknown[];
     const match = arr.find(
       (p) => typeof p === 'object' && p !== null && 'name' in p &&
-        String((p as Record<string, unknown>).name).includes('switchbot'),
+        /switchbot@/i.test(String((p as Record<string, unknown>).name)),
     );
     found = Boolean(match);
     pluginName = found ? String((match as Record<string, unknown>).name) : '';
   } catch {
-    const line = raw.split('\n').find((l) => l.toLowerCase().includes('switchbot'));
-    found = Boolean(line);
-    pluginName = line?.trim() ?? '';
+    // Only match plugin-ID lines (contain '@'), not marketplace title lines like "Marketplace switchbot"
+    const pluginLine = raw.split('\n').find((l) => /switchbot@/i.test(l));
+    found = Boolean(pluginLine);
+    pluginName = pluginLine?.trim() ?? '';
   }
   if (!found) {
     return {
@@ -320,10 +325,13 @@ export function registerCodexPlugin(): RegisterCodexPluginResult {
 }
 
 // ─── Git-based marketplace registration (Route B) ────────────────────────────
-export const CODEX_GIT_MARKETPLACE_REPO   = 'OpenWonderLabs/switchbot-openapi-cli';
+export const CODEX_GIT_MARKETPLACE_REPO    = 'OpenWonderLabs/switchbot-openapi-cli';
 export const CODEX_GIT_MARKETPLACE_SPARSE  = 'packages/codex-plugin';
-export const CODEX_GIT_MARKETPLACE_REF    = 'main';
-export const CODEX_PLUGIN_DEFAULT_ID      = 'switchbot@switchbot';
+// Root-level .agents/plugins/marketplace.json — required so Codex validates the
+// manifest at the checkout root (it does not descend into sparse subdirectories).
+export const CODEX_GIT_MARKETPLACE_SPARSE2 = '.agents/plugins';
+export const CODEX_GIT_MARKETPLACE_REF     = 'main';
+export const CODEX_PLUGIN_DEFAULT_ID       = 'switchbot@switchbot';
 // Known IDs from pre-release installs; cleaned up by both Route A and Route B.
 export const CODEX_PLUGIN_LEGACY_IDS = ['switchbot@codex-plugin', 'switchbot@switchbot-skill'];
 // Marketplace names derived from legacy IDs (pluginName@marketplaceName → marketplaceName).
@@ -364,18 +372,25 @@ export function runCodexPluginRegistrationGit(pluginId: string): RegistrationRes
     'plugin', 'marketplace', 'add',
     CODEX_GIT_MARKETPLACE_REPO,
     '--sparse', CODEX_GIT_MARKETPLACE_SPARSE,
+    '--sparse', CODEX_GIT_MARKETPLACE_SPARSE2,
     '--ref',    ref,
   ];
   let mkt = spawnStr('codex', mktArgs, timeout);
-  // On Windows, git holds file handles briefly after clone.
-  // Detect if Codex Desktop is running and warn; then retry with exponential backoff.
+  // On Windows, git holds file handles briefly after clone (os error 32).
+  // If the local npm package is already available (Route A), skip retries and
+  // return immediately so registerCodexPluginAuto can fall back to Route A
+  // without burning 17 s of wait time. Only retry when Route A is absent
+  // (fresh machine with no npm package installed yet).
   if (mkt.status !== 0 && process.platform === 'win32' && mkt.stderr.includes('os error 32')) {
     if (isCodexProcessRunning()) {
       process.stderr.write(
         '[switchbot] Warning: Codex.exe is running. Close Codex Desktop before running setup to avoid file-lock errors.\n',
       );
     }
-    for (const delay of [2000, 5000, 10000]) {
+    const _routeARoot = resolveCodexPackageRoot();
+    const routeAAvailable = _routeARoot.ok && fs.existsSync(_routeARoot.packageRoot);
+    const delays = routeAAvailable ? [] : [2000, 5000, 10000];
+    for (const delay of delays) {
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delay);
       mkt = spawnStr('codex', mktArgs, timeout);
       if (mkt.status === 0 || !mkt.stderr.includes('os error 32')) break;
@@ -475,6 +490,13 @@ export function registerCodexPluginAuto(): RegisterCodexPluginResult {
   // Route B: git marketplace — no local npm package required
   const git = registerCodexPluginGit();
   if (git.ok) return git;
+
+  // When Route B fails with a Windows file-lock (os error 32) the git clone
+  // held open handles that Codex couldn't release. Route A uses the local npm
+  // package and never touches git, so fall back and log the specific reason.
+  if (process.platform === 'win32' && (git.stderr ?? git.error ?? '').includes('os error 32')) {
+    process.stderr.write('[switchbot] Route B: Windows file-lock (os error 32) — falling back to Route A (local npm path)\n');
+  }
 
   // Route A: local npm path (fast path if already installed)
   const npm = registerCodexPlugin();

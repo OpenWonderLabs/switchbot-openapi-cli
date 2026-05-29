@@ -69,6 +69,7 @@ try {
     'plugins/switchbot/.claude-plugin/hooks.json',
     'plugins/switchbot/.claude-plugin/plugin.json',
     'plugins/switchbot/.mcp.json',
+    'plugins/switchbot/skills/switchbot/SKILL.md',  // must be packed: plugin.json declares skills: ./skills/
   ]) {
     const fullPath = path.join(pluginRoot, ...requiredPath.split('/'));
     if (!existsSync(fullPath)) {
@@ -96,6 +97,28 @@ try {
   const hookScript = path.resolve(path.join(pluginRoot, '.claude-plugin'), hookArgs[0]);
   if (!existsSync(hookScript)) {
     throw new Error(`onInstall args[0] resolves to a non-existent file: ${hookScript}`);
+  }
+
+  // Verify plugin-level hooks (the ones Claude Code actually executes, since source → ./plugins/switchbot)
+  const pluginJson = readJson(path.join(pluginRoot, 'plugins', 'switchbot', '.claude-plugin', 'plugin.json'));
+  if (pluginJson?.skills !== './skills/') {
+    throw new Error(`plugin.json skills must be './skills/', got ${pluginJson?.skills ?? '<missing>'}`);
+  }
+
+  const pluginHooks = readJson(path.join(pluginRoot, 'plugins', 'switchbot', '.claude-plugin', 'hooks.json'));
+  if (pluginHooks?.onInstall?.command !== 'node') {
+    throw new Error(`plugin-level onInstall command must be 'node', got ${pluginHooks?.onInstall?.command ?? '<missing>'}`);
+  }
+  const pluginHookArgs = pluginHooks?.onInstall?.args ?? [];
+  if (!Array.isArray(pluginHookArgs) || pluginHookArgs.length === 0) {
+    throw new Error(`plugin-level onInstall args must be a non-empty array, got ${JSON.stringify(pluginHookArgs)}`);
+  }
+  const pluginHookScript = path.resolve(
+    path.join(pluginRoot, 'plugins', 'switchbot', '.claude-plugin'),
+    pluginHookArgs[0],
+  );
+  if (!existsSync(pluginHookScript)) {
+    throw new Error(`plugin-level onInstall args[0] resolves to a non-existent file: ${pluginHookScript}`);
   }
 
   // Verify auth.js syntax is valid

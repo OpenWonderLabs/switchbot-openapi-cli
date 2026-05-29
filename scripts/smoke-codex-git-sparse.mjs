@@ -41,32 +41,33 @@ try {
     runGit(['clone', '--no-checkout', '--branch', ref, repoRoot, stagingDir], { cwd: workDir });
   }
   runGit(['-C', stagingDir, 'sparse-checkout', 'init', '--cone'], { cwd: workDir });
-  runGit(['-C', stagingDir, 'sparse-checkout', 'set', '.claude-plugin', 'packages/codex-plugin', 'packages/claude-code-plugin'], { cwd: workDir });
+  runGit(['-C', stagingDir, 'sparse-checkout', 'set', '.agents/plugins', '.claude-plugin', 'packages/codex-plugin', 'packages/claude-code-plugin'], { cwd: workDir });
   runGit(['-C', stagingDir, 'checkout', ref], { cwd: workDir });
 
-  // .claude-plugin/marketplace.json — Claude Code plugin marketplace entry point
-  const rootMarketplacePath = path.join(stagingDir, '.claude-plugin', 'marketplace.json');
-  // packages/codex-plugin/.agents/plugins/marketplace.json — Codex Route B entry point
+  // <repo-root>/.agents/plugins/marketplace.json — Codex Route B entry point (Codex validates manifest at checkout root)
+  const rootCodexMarketplacePath = path.join(stagingDir, '.agents', 'plugins', 'marketplace.json');
+  // packages/codex-plugin/.agents/plugins/marketplace.json — package-level entry (Route A / resolveMarketplaceName fallback)
   const packageMarketplacePath = path.join(stagingDir, 'packages', 'codex-plugin', '.agents', 'plugins', 'marketplace.json');
   const pluginMcpPath = path.join(stagingDir, 'packages', 'codex-plugin', 'plugins', 'switchbot', '.mcp.json');
   // packages/claude-code-plugin/plugins/switchbot — Claude Code plugin source
   const claudeCodePluginJsonPath = path.join(stagingDir, 'packages', 'claude-code-plugin', 'plugins', 'switchbot', '.claude-plugin', 'plugin.json');
 
-  for (const requiredPath of [rootMarketplacePath, packageMarketplacePath, pluginMcpPath, claudeCodePluginJsonPath]) {
+  for (const requiredPath of [rootCodexMarketplacePath, packageMarketplacePath, pluginMcpPath, claudeCodePluginJsonPath]) {
     if (!existsSync(requiredPath)) {
       throw new Error(`sparse checkout missing ${path.relative(stagingDir, requiredPath)}`);
     }
   }
 
-  // Root marketplace must point to the Claude Code plugin directory
-  const rootMarketplace = readJson(rootMarketplacePath);
-  if (rootMarketplace?.name !== 'switchbot') {
-    throw new Error(`root marketplace name must be switchbot, got ${rootMarketplace?.name ?? '<missing>'}`);
+  // Repo-root Codex manifest: Codex validates this file when `codex plugin marketplace add <path>` is called.
+  // It must exist at the checkout root and its source must point to the real plugin directory.
+  const rootCodexMarketplace = readJson(rootCodexMarketplacePath);
+  if (rootCodexMarketplace?.name !== 'switchbot') {
+    throw new Error(`root Codex marketplace name must be switchbot, got ${rootCodexMarketplace?.name ?? '<missing>'}`);
   }
-  const rootPlugin = rootMarketplace?.plugins?.find((plugin) => plugin?.name === 'switchbot');
-  if (rootPlugin?.source !== './packages/claude-code-plugin/plugins/switchbot') {
+  const rootCodexPlugin = rootCodexMarketplace?.plugins?.find((p) => p?.name === 'switchbot');
+  if (rootCodexPlugin?.source !== './packages/codex-plugin/plugins/switchbot') {
     throw new Error(
-      `root marketplace switchbot source must be ./packages/claude-code-plugin/plugins/switchbot, got ${rootPlugin?.source ?? '<missing>'}`,
+      `root Codex marketplace switchbot source must be ./packages/codex-plugin/plugins/switchbot, got ${rootCodexPlugin?.source ?? '<missing>'}`,
     );
   }
 
@@ -74,12 +75,12 @@ try {
   if (packageMarketplace?.name !== 'switchbot') {
     throw new Error(`package marketplace name must be switchbot, got ${packageMarketplace?.name ?? '<missing>'}`);
   }
-  const packagePlugin = packageMarketplace?.plugins?.find((plugin) => plugin?.name === 'switchbot');
+  const packagePlugin = packageMarketplace?.plugins?.find((p) => p?.name === 'switchbot');
   if (packagePlugin?.source !== './plugins/switchbot') {
     throw new Error(`package marketplace switchbot source must be ./plugins/switchbot, got ${packagePlugin?.source ?? '<missing>'}`);
   }
 
-  console.log(`codex git sparse smoke ok: ref ${ref} exposes Claude Code and Codex marketplace manifests with correct sources`);
+  console.log(`codex git sparse smoke ok: ref ${ref} exposes Codex root manifest + package manifest with correct sources`);
 } finally {
   try {
     rmSync(workDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });

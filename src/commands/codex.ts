@@ -134,6 +134,7 @@ interface RepairContext {
   codexPluginId?: string;
   packageRoot?: string | null;
   nonInteractive: boolean;
+  pluginAlreadyOk?: boolean;
 }
 
 type RepairOutcome = StepOutcome;
@@ -169,7 +170,23 @@ async function repairStepReAuth(ctx: RepairContext): Promise<RepairOutcome> {
   return { step: 're-auth', status: 'ok', message: 'auth login completed' };
 }
 
+function repairStepPreflightPlugin(ctx: RepairContext): RepairOutcome {
+  const check = checkCodexPluginRegistered();
+  if (check.status === 'ok') {
+    ctx.pluginAlreadyOk = true;
+    const detail = check.detail as { pluginName?: string } | undefined;
+    const name = detail?.pluginName ? ` (${detail.pluginName})` : '';
+    return { step: 'preflight-plugin', status: 'ok', message: `already registered${name} — skipping remove + re-register` };
+  }
+  const detail = check.detail as { message?: string; reason?: string } | undefined;
+  const hint = detail?.message ?? detail?.reason ?? '';
+  return { step: 'preflight-plugin', status: 'ok', message: `not registered${hint ? `: ${hint}` : ''} — will register` };
+}
+
 function repairStepRemovePlugin(ctx: RepairContext): RepairOutcome {
+  if (ctx.pluginAlreadyOk) {
+    return { step: 'remove-plugin', status: 'skipped', message: 'plugin already registered — skipped' };
+  }
   let pluginId = ctx.codexPluginId;
   if (!pluginId) {
     const root = resolveCodexPackageRoot();
@@ -199,6 +216,9 @@ function stepRegisterPluginShared(stepName: string, ctx: { codexPluginId?: strin
 }
 
 function repairStepRegisterPlugin(ctx: RepairContext): RepairOutcome {
+  if (ctx.pluginAlreadyOk) {
+    return { step: 'register-plugin', status: 'skipped', message: 'plugin already registered — nothing to do' };
+  }
   return stepRegisterPluginShared('register-plugin', ctx);
 }
 
@@ -223,11 +243,12 @@ interface StepDef {
 }
 
 const REPAIR_STEPS: readonly StepDef[] = [
-  { name: 'verify-cli',      description: 'Verify node and switchbot binary on PATH',    skippable: false },
-  { name: 're-auth',         description: 'Check credentials; spawn auth login if missing', skippable: true  },
-  { name: 'remove-plugin',   description: 'codex plugin remove (best-effort, non-fatal)', skippable: true  },
-  { name: 'register-plugin', description: 'codex plugin marketplace add + plugin add',    skippable: false },
-  { name: 'doctor-verify',   description: 'Run Codex doctor checks and report health',    skippable: false },
+  { name: 'verify-cli',       description: 'Verify node and switchbot binary on PATH',                    skippable: false },
+  { name: 're-auth',          description: 'Check credentials; spawn auth login if missing',              skippable: true  },
+  { name: 'preflight-plugin', description: 'Check if Codex plugin is already registered (skips re-register if ok)', skippable: true  },
+  { name: 'remove-plugin',    description: 'codex plugin remove (best-effort, non-fatal)',                skippable: true  },
+  { name: 'register-plugin',  description: 'codex plugin marketplace add + plugin add',                   skippable: false },
+  { name: 'doctor-verify',    description: 'Run Codex doctor checks and report health',                   skippable: false },
 ];
 
 // Step names removed from SETUP_STEPS/REPAIR_STEPS in past releases; silently
@@ -263,6 +284,7 @@ async function runRepair(
     let outcome: RepairOutcome;
     if (step.name === 'verify-cli')           outcome = await repairStepVerifyCli(ctx);
     else if (step.name === 're-auth')          outcome = await repairStepReAuth(ctx);
+    else if (step.name === 'preflight-plugin') outcome = repairStepPreflightPlugin(ctx);
     else if (step.name === 'remove-plugin')    outcome = repairStepRemovePlugin(ctx);
     else if (step.name === 'register-plugin')  outcome = repairStepRegisterPlugin(ctx);
     else                                       outcome = await repairStepDoctorVerify();
