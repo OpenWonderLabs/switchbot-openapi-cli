@@ -9,6 +9,17 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [3.7.8]
+
+### Fixed
+
+- **Codex marketplace name mismatch** — `resolveMarketplaceName` previously read `.agents/plugins/marketplace.json` (name=`codex-plugin`) before the root `marketplace.json` (name=`switchbot`), causing the plugin ID to resolve as `switchbot@codex-plugin` while Codex registered the marketplace as `switchbot`. Priority flipped: root manifest is now authoritative, matching what `codex plugin marketplace add` validates.
+- **Route B git sparse checkout missing manifest at checkout root** — Codex validates `<checkout-root>/.agents/plugins/marketplace.json`; the sparse set only included `packages/codex-plugin`, so the manifest was absent. Added repo-root `.agents/plugins/marketplace.json` and `--sparse .agents/plugins` to the Route B registration call.
+- **`checkCodexPluginRegistered` false positive** — the text and JSON fallback paths matched any output containing `switchbot`, including the `Marketplace switchbot` title line. Both paths now require the `switchbot@` pattern so only actual plugin-ID lines are accepted.
+- **Windows `os error 32` stalls Route B for 17 s** — when a git file-lock is detected and the local `@switchbot/codex-plugin` package directory already exists, the 2 s / 5 s / 10 s retry sequence is skipped and `registerCodexPluginAuto` falls back to Route A immediately. On a fresh machine where the package is absent, the retry sequence is preserved. An explicit stderr message names the fallback reason.
+- **`codex repair` re-registers when already healthy** — new `preflight-plugin` step runs `checkCodexPluginRegistered` before the destructive remove+re-register cycle. When the plugin is already installed, both `remove-plugin` and `register-plugin` are auto-skipped. Force re-registration with `--skip preflight-plugin`.
+- **`@switchbot/claude-code-plugin` `plugin.json` missing `skills` field** — `plugins/switchbot/.claude-plugin/plugin.json` did not declare `"skills": "./skills/"`, so Claude Code would not load `SKILL.md` and the skill instructions would be absent. Field added.
+
 ## [3.7.7]
 
 ### Added
