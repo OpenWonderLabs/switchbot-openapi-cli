@@ -43,6 +43,7 @@ import {
   registerCodexPluginGit,
   registerCodexPluginAuto,
   CODEX_GIT_MARKETPLACE_SPARSE,
+  CODEX_GIT_MARKETPLACE_SPARSE2,
 } from '../../src/install/codex-checks.js';
 
 function makeSpawnResult(status: number, stdout: string, stderr = ''): ReturnType<typeof spawnSyncMock> {
@@ -157,6 +158,33 @@ describe('checkCodexPluginRegistered', () => {
     spawnSyncMock
       .mockReturnValueOnce(makeSpawnResult(0, '/usr/local/bin/codex\n'))
       .mockReturnValueOnce(makeSpawnResult(1, '', 'error'));
+    const result = checkCodexPluginRegistered();
+    expect(result.status).toBe('warn');
+  });
+
+  it('returns warn when list contains only marketplace title line "Marketplace switchbot" (no plugin ID)', () => {
+    spawnSyncMock
+      .mockReturnValueOnce(makeSpawnResult(0, '/usr/local/bin/codex\n'))
+      .mockReturnValueOnce(makeSpawnResult(0, 'Marketplace switchbot\n'));
+    const result = checkCodexPluginRegistered();
+    expect(result.status).toBe('warn');
+    const msg = String((result.detail as Record<string, unknown>).message ?? '');
+    expect(msg).toContain('switchbot codex repair');
+  });
+
+  it('returns ok when list contains plugin-ID line switchbot@switchbot installed', () => {
+    spawnSyncMock
+      .mockReturnValueOnce(makeSpawnResult(0, '/usr/local/bin/codex\n'))
+      .mockReturnValueOnce(makeSpawnResult(0, 'Marketplace switchbot\n  switchbot@switchbot  installed, enabled  0.1.5\n'));
+    const result = checkCodexPluginRegistered();
+    expect(result.status).toBe('ok');
+    expect(String((result.detail as Record<string, unknown>).pluginName)).toContain('switchbot@');
+  });
+
+  it('returns warn when marketplace title is present but plugin ID says not installed', () => {
+    spawnSyncMock
+      .mockReturnValueOnce(makeSpawnResult(0, '/usr/local/bin/codex\n'))
+      .mockReturnValueOnce(makeSpawnResult(0, 'Marketplace switchbot\n  switchbot@switchbot  not installed\n'));
     const result = checkCodexPluginRegistered();
     expect(result.status).toBe('warn');
   });
@@ -613,7 +641,7 @@ describe('runCodexPluginRegistrationGit', () => {
     else process.env['CODEX_GIT_MARKETPLACE_REF'] = origEnv;
   });
 
-  it('passes exactly one --sparse flag (packages/codex-plugin) to marketplace add', () => {
+  it('passes exactly two --sparse flags (packages/codex-plugin and .agents/plugins) to marketplace add', () => {
     spawnSyncMock
       .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (current id: switchbot@switchbot)
       .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (legacy id: switchbot@codex-plugin)
@@ -631,8 +659,9 @@ describe('runCodexPluginRegistrationGit', () => {
     const sparseIndices = mktArgs
       .map((a, i) => (a === '--sparse' ? i : -1))
       .filter(i => i >= 0);
-    expect(sparseIndices.length).toBe(1);
+    expect(sparseIndices.length).toBe(2);
     expect(mktArgs[sparseIndices[0] + 1]).toBe(CODEX_GIT_MARKETPLACE_SPARSE);
+    expect(mktArgs[sparseIndices[1] + 1]).toBe(CODEX_GIT_MARKETPLACE_SPARSE2);
   });
 
   it('retries with exponential backoff on Windows os error 32 and succeeds on second attempt', () => {

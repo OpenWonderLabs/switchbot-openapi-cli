@@ -237,14 +237,15 @@ export function checkCodexPluginRegistered(): Check {
     const arr = JSON.parse(raw) as unknown[];
     const match = arr.find(
       (p) => typeof p === 'object' && p !== null && 'name' in p &&
-        String((p as Record<string, unknown>).name).includes('switchbot'),
+        /switchbot@/i.test(String((p as Record<string, unknown>).name)),
     );
     found = Boolean(match);
     pluginName = found ? String((match as Record<string, unknown>).name) : '';
   } catch {
-    const line = raw.split('\n').find((l) => l.toLowerCase().includes('switchbot'));
-    found = Boolean(line);
-    pluginName = line?.trim() ?? '';
+    // Only match plugin-ID lines (contain '@'), not marketplace title lines like "Marketplace switchbot"
+    const pluginLine = raw.split('\n').find((l) => /switchbot@/i.test(l));
+    found = Boolean(pluginLine);
+    pluginName = pluginLine?.trim() ?? '';
   }
   if (!found) {
     return {
@@ -324,10 +325,13 @@ export function registerCodexPlugin(): RegisterCodexPluginResult {
 }
 
 // ─── Git-based marketplace registration (Route B) ────────────────────────────
-export const CODEX_GIT_MARKETPLACE_REPO   = 'OpenWonderLabs/switchbot-openapi-cli';
+export const CODEX_GIT_MARKETPLACE_REPO    = 'OpenWonderLabs/switchbot-openapi-cli';
 export const CODEX_GIT_MARKETPLACE_SPARSE  = 'packages/codex-plugin';
-export const CODEX_GIT_MARKETPLACE_REF    = 'main';
-export const CODEX_PLUGIN_DEFAULT_ID      = 'switchbot@switchbot';
+// Root-level .agents/plugins/marketplace.json — required so Codex validates the
+// manifest at the checkout root (it does not descend into sparse subdirectories).
+export const CODEX_GIT_MARKETPLACE_SPARSE2 = '.agents/plugins';
+export const CODEX_GIT_MARKETPLACE_REF     = 'main';
+export const CODEX_PLUGIN_DEFAULT_ID       = 'switchbot@switchbot';
 // Known IDs from pre-release installs; cleaned up by both Route A and Route B.
 export const CODEX_PLUGIN_LEGACY_IDS = ['switchbot@codex-plugin', 'switchbot@switchbot-skill'];
 // Marketplace names derived from legacy IDs (pluginName@marketplaceName → marketplaceName).
@@ -368,6 +372,7 @@ export function runCodexPluginRegistrationGit(pluginId: string): RegistrationRes
     'plugin', 'marketplace', 'add',
     CODEX_GIT_MARKETPLACE_REPO,
     '--sparse', CODEX_GIT_MARKETPLACE_SPARSE,
+    '--sparse', CODEX_GIT_MARKETPLACE_SPARSE2,
     '--ref',    ref,
   ];
   let mkt = spawnStr('codex', mktArgs, timeout);
