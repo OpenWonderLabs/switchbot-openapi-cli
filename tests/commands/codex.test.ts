@@ -174,6 +174,7 @@ describe('switchbot codex repair', () => {
     const out = stderr.join('\n');
     expect(out).toContain('verify-cli');
     expect(out).toContain('re-auth');
+    expect(out).toContain('preflight-plugin');
     expect(out).toContain('remove-plugin');
     expect(out).toContain('register-plugin');
     expect(out).toContain('doctor-verify');
@@ -186,7 +187,7 @@ describe('switchbot codex repair', () => {
       { name: 'node', status: 'fail', detail: 'Node 16 < required v18' },
       { name: 'path', status: 'ok', detail: 'ok' },
     ]);
-    const { exitCode } = await runCli(registerCodexCommand, ['codex', 'repair', '--skip', 're-auth,remove-plugin,register-plugin,doctor-verify']);
+    const { exitCode } = await runCli(registerCodexCommand, ['codex', 'repair', '--skip', 're-auth,preflight-plugin,remove-plugin,register-plugin,doctor-verify']);
     expect(exitCode).toBe(2);
   });
 
@@ -196,6 +197,8 @@ describe('switchbot codex repair', () => {
       { name: 'node', status: 'ok', detail: 'ok' },
       { name: 'path', status: 'ok', detail: 'ok' },
     ]);
+    // preflight-plugin: not registered → register-plugin will run
+    checkCodexPluginRegisteredMock.mockReturnValueOnce({ name: 'codex-plugin-registered', status: 'fail', detail: { message: 'not found' } });
     // C4.3: register-plugin now mocks at the registerCodexPlugin boundary, not spawnSync.
     registerCodexPluginMock.mockReturnValueOnce({
       ok: true,
@@ -228,6 +231,8 @@ describe('switchbot codex repair', () => {
       { name: 'node', status: 'ok', detail: 'ok' },
       { name: 'path', status: 'ok', detail: 'ok' },
     ]);
+    // preflight-plugin: not registered → register-plugin will run
+    checkCodexPluginRegisteredMock.mockReturnValueOnce({ name: 'codex-plugin-registered', status: 'fail', detail: { message: 'not found' } });
     // C4.3: register-plugin failure surfaces via the shared helper's normalized error.
     registerCodexPluginMock.mockReturnValueOnce({
       ok: false,
@@ -359,6 +364,8 @@ describe('switchbot codex repair', () => {
     ]);
     // re-auth: credentials present → no spawn
     tryLoadConfigMock.mockReturnValue({ token: 't', secret: 's' });
+    // preflight-plugin: not registered → remove-plugin and register-plugin will run
+    checkCodexPluginRegisteredMock.mockReturnValueOnce({ name: 'codex-plugin-registered', status: 'fail', detail: { message: 'not found' } });
     // remove-plugin: resolveCodexPackageRoot npm root -g, then remove current id + legacy id
     spawnSyncRepairMock
       .mockReturnValueOnce({ status: 0, stdout: '/usr/local/lib/node_modules\n', stderr: '' }) // npm root -g
@@ -388,6 +395,8 @@ describe('switchbot codex repair', () => {
       { name: 'node', status: 'ok', detail: 'ok' },
       { name: 'path', status: 'ok', detail: 'ok' },
     ]);
+    // preflight-plugin: not registered → remove-plugin and register-plugin will run
+    checkCodexPluginRegisteredMock.mockReturnValueOnce({ name: 'codex-plugin-registered', status: 'fail', detail: { message: 'not found' } });
     // remove-plugin: npm root -g fails → fallback to 'switchbot@switchbot'
     spawnSyncRepairMock
       .mockReturnValueOnce({ status: 1, stdout: '', stderr: 'npm error' })  // npm root -g fails
@@ -412,6 +421,62 @@ describe('switchbot codex repair', () => {
     expect(removedIds).toContain('switchbot@switchbot');
     expect(removedIds).toContain('switchbot@codex-plugin');
     expect(removedIds).toContain('switchbot@switchbot-skill');
+  });
+
+  it('preflight-plugin ok → remove-plugin and register-plugin are auto-skipped (idempotent)', async () => {
+    runDoctorChecksMock.mockResolvedValueOnce([
+      { name: 'node', status: 'ok', detail: 'ok' },
+      { name: 'path', status: 'ok', detail: 'ok' },
+    ]);
+    tryLoadConfigMock.mockReturnValue({ token: 't', secret: 's' });
+    // preflight-plugin: already registered → set pluginAlreadyOk
+    checkCodexPluginRegisteredMock.mockReturnValueOnce({ name: 'codex-plugin-registered', status: 'ok', detail: { pluginName: 'switchbot@switchbot' } });
+    // doctor-verify
+    runDoctorChecksMock.mockResolvedValueOnce(makeBaseChecks());
+    checkCodexCliMock.mockReturnValue({ name: 'codex-cli', status: 'ok', detail: 'ok' });
+    checkCodexPluginNpmMock.mockReturnValue({ name: 'codex-plugin-npm', status: 'ok', detail: 'ok' });
+    checkCodexPluginRegisteredMock.mockReturnValue({ name: 'codex-plugin-registered', status: 'ok', detail: 'ok' });
+
+    const { exitCode, stdout } = await runCli(registerCodexCommand, ['codex', 'repair', '--json', '--skip', 're-auth']);
+    expect(exitCode).toBe(0);
+    const parsed = JSON.parse(stdout.join('')) as { data?: { outcomes: Array<{ step: string; status: string }> } };
+    const outcomes = parsed.data!.outcomes;
+    expect(outcomes.find((o) => o.step === 'preflight-plugin')?.status).toBe('ok');
+    expect(outcomes.find((o) => o.step === 'remove-plugin')?.status).toBe('skipped');
+    expect(outcomes.find((o) => o.step === 'register-plugin')?.status).toBe('skipped');
+    // registerCodexPluginAuto must NOT be called
+    expect(registerCodexPluginMock).not.toHaveBeenCalled();
+  });
+
+  it('preflight-plugin fail → remove-plugin and register-plugin run normally', async () => {
+    runDoctorChecksMock.mockResolvedValueOnce([
+      { name: 'node', status: 'ok', detail: 'ok' },
+      { name: 'path', status: 'ok', detail: 'ok' },
+    ]);
+    tryLoadConfigMock.mockReturnValue({ token: 't', secret: 's' });
+    // preflight-plugin: not registered
+    checkCodexPluginRegisteredMock.mockReturnValueOnce({ name: 'codex-plugin-registered', status: 'fail', detail: { message: 'switchbot not found' } });
+    // remove-plugin: npm root -g + removes
+    spawnSyncRepairMock
+      .mockReturnValueOnce({ status: 0, stdout: '/usr/local/lib/node_modules\n', stderr: '' })
+      .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' })
+      .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' });
+    // register-plugin: ok
+    registerCodexPluginMock.mockReturnValueOnce({ ok: true, pluginId: 'switchbot@switchbot', packageRoot: null });
+    // doctor-verify
+    runDoctorChecksMock.mockResolvedValueOnce(makeBaseChecks());
+    checkCodexCliMock.mockReturnValue({ name: 'codex-cli', status: 'ok', detail: 'ok' });
+    checkCodexPluginNpmMock.mockReturnValue({ name: 'codex-plugin-npm', status: 'ok', detail: 'ok' });
+    checkCodexPluginRegisteredMock.mockReturnValue({ name: 'codex-plugin-registered', status: 'ok', detail: 'ok' });
+
+    const { exitCode, stdout } = await runCli(registerCodexCommand, ['codex', 'repair', '--json', '--skip', 're-auth']);
+    expect(exitCode).toBe(0);
+    const parsed = JSON.parse(stdout.join('')) as { data?: { outcomes: Array<{ step: string; status: string }> } };
+    const outcomes = parsed.data!.outcomes;
+    expect(outcomes.find((o) => o.step === 'preflight-plugin')?.status).toBe('ok');
+    expect(outcomes.find((o) => o.step === 'remove-plugin')?.status).toBe('ok');
+    expect(outcomes.find((o) => o.step === 'register-plugin')?.status).toBe('ok');
+    expect(registerCodexPluginMock).toHaveBeenCalledOnce();
   });
 });
 
