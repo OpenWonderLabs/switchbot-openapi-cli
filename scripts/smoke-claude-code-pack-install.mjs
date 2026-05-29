@@ -98,6 +98,23 @@ try {
     throw new Error(`onInstall args[0] resolves to a non-existent file: ${hookScript}`);
   }
 
+  // Verify plugin-level hooks (the ones Claude Code actually executes, since source → ./plugins/switchbot)
+  const pluginHooks = readJson(path.join(pluginRoot, 'plugins', 'switchbot', '.claude-plugin', 'hooks.json'));
+  if (pluginHooks?.onInstall?.command !== 'node') {
+    throw new Error(`plugin-level onInstall command must be 'node', got ${pluginHooks?.onInstall?.command ?? '<missing>'}`);
+  }
+  const pluginHookArgs = pluginHooks?.onInstall?.args ?? [];
+  if (!Array.isArray(pluginHookArgs) || pluginHookArgs.length === 0) {
+    throw new Error(`plugin-level onInstall args must be a non-empty array, got ${JSON.stringify(pluginHookArgs)}`);
+  }
+  const pluginHookScript = path.resolve(
+    path.join(pluginRoot, 'plugins', 'switchbot', '.claude-plugin'),
+    pluginHookArgs[0],
+  );
+  if (!existsSync(pluginHookScript)) {
+    throw new Error(`plugin-level onInstall args[0] resolves to a non-existent file: ${pluginHookScript}`);
+  }
+
   // Verify auth.js syntax is valid
   execFileSync(process.execPath, ['--check', path.join(pluginRoot, 'bin', 'auth.js')], {
     encoding: 'utf-8',
