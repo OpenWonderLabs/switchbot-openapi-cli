@@ -3,6 +3,12 @@ name: Publish to npm
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run — skip npm publish steps'
+        type: boolean
+        default: false
 
 jobs:
   publish:
@@ -21,6 +27,7 @@ jobs:
       - run: npm run verify:release-gate
 
       - name: Verify tag matches root CLI package.json version
+        if: github.event_name == 'release'
         run: |
           PKG_VERSION=$(node -p "require('./package.json').version")
           TAG_VERSION="${GITHUB_REF_NAME#v}"
@@ -129,14 +136,14 @@ jobs:
           rm -f "/tmp/$TARBALL"
 
       - name: Publish root CLI to npm
-        if: steps.detect.outputs.cli_publish == 'true'
+        if: steps.detect.outputs.cli_publish == 'true' && inputs.dry_run != true
         run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish codex-plugin to npm
         id: publish_codex
-        if: steps.detect.outputs.codex_publish == 'true'
+        if: steps.detect.outputs.codex_publish == 'true' && inputs.dry_run != true
         continue-on-error: true
         run: npm publish -w @switchbot/codex-plugin --provenance --access public
         env:
@@ -144,7 +151,7 @@ jobs:
 
       - name: Publish openclaw-skill to npm
         id: publish_openclaw
-        if: steps.detect.outputs.openclaw_publish == 'true'
+        if: steps.detect.outputs.openclaw_publish == 'true' && inputs.dry_run != true
         continue-on-error: true
         run: npm publish -w @switchbot/openclaw-skill --provenance --access public
         env:
@@ -152,7 +159,7 @@ jobs:
 
       - name: Publish claude-code-plugin to npm
         id: publish_claude_code
-        if: steps.detect.outputs.claude_code_publish == 'true'
+        if: steps.detect.outputs.claude_code_publish == 'true' && inputs.dry_run != true
         continue-on-error: true
         run: npm publish -w @switchbot/claude-code-plugin --provenance --access public
         env:
