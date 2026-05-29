@@ -376,15 +376,20 @@ export function runCodexPluginRegistrationGit(pluginId: string): RegistrationRes
     '--ref',    ref,
   ];
   let mkt = spawnStr('codex', mktArgs, timeout);
-  // On Windows, git holds file handles briefly after clone.
-  // Detect if Codex Desktop is running and warn; then retry with exponential backoff.
+  // On Windows, git holds file handles briefly after clone (os error 32).
+  // If the local npm package is already available (Route A), skip retries and
+  // return immediately so registerCodexPluginAuto can fall back to Route A
+  // without burning 17 s of wait time. Only retry when Route A is absent
+  // (fresh machine with no npm package installed yet).
   if (mkt.status !== 0 && process.platform === 'win32' && mkt.stderr.includes('os error 32')) {
     if (isCodexProcessRunning()) {
       process.stderr.write(
         '[switchbot] Warning: Codex.exe is running. Close Codex Desktop before running setup to avoid file-lock errors.\n',
       );
     }
-    for (const delay of [2000, 5000, 10000]) {
+    const routeAAvailable = resolveCodexPackageRoot().ok;
+    const delays = routeAAvailable ? [] : [2000, 5000, 10000];
+    for (const delay of delays) {
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delay);
       mkt = spawnStr('codex', mktArgs, timeout);
       if (mkt.status === 0 || !mkt.stderr.includes('os error 32')) break;
@@ -484,6 +489,13 @@ export function registerCodexPluginAuto(): RegisterCodexPluginResult {
   // Route B: git marketplace — no local npm package required
   const git = registerCodexPluginGit();
   if (git.ok) return git;
+
+  // When Route B fails with a Windows file-lock (os error 32) the git clone
+  // held open handles that Codex couldn't release. Route A uses the local npm
+  // package and never touches git, so fall back and log the specific reason.
+  if (process.platform === 'win32' && (git.stderr ?? git.error ?? '').includes('os error 32')) {
+    process.stderr.write('[switchbot] Route B: Windows file-lock (os error 32) — falling back to Route A (local npm path)\n');
+  }
 
   // Route A: local npm path (fast path if already installed)
   const npm = registerCodexPlugin();

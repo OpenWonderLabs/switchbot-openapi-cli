@@ -677,6 +677,7 @@ describe('runCodexPluginRegistrationGit', () => {
         .mockReturnValueOnce(makeSpawnResult(0, ''))
         .mockReturnValueOnce(makeSpawnResult(1, '', 'os error 32 locked'))  // marketplace add: fails
         .mockReturnValueOnce(makeSpawnResult(1, '', '"Codex.exe" not found'))  // tasklist: Codex not running
+        .mockReturnValueOnce(makeSpawnResult(1, '', 'npm error'))  // npm root -g: Route A not available → retries
         .mockReturnValueOnce(makeSpawnResult(0, ''))  // retry 1 (2s backoff): succeeds
         .mockReturnValueOnce(makeSpawnResult(0, '')); // plugin add
       const r = runCodexPluginRegistrationGit('switchbot@codex-plugin');
@@ -703,6 +704,7 @@ describe('runCodexPluginRegistrationGit', () => {
         .mockReturnValueOnce(makeSpawnResult(0, ''))
         .mockReturnValueOnce(makeSpawnResult(1, '', 'os error 32'))  // marketplace add: fails
         .mockReturnValueOnce(makeSpawnResult(0, '"Codex.exe","123","Console","1","10MB"'))  // tasklist: Codex running
+        .mockReturnValueOnce(makeSpawnResult(1, '', 'npm error'))  // npm root -g: Route A not available → retries
         .mockReturnValueOnce(makeSpawnResult(1, '', 'os error 32'))  // retry 1: still fails
         .mockReturnValueOnce(makeSpawnResult(1, '', 'os error 32'))  // retry 2: still fails
         .mockReturnValueOnce(makeSpawnResult(1, '', 'os error 32')); // retry 3: still fails
@@ -728,12 +730,38 @@ describe('runCodexPluginRegistrationGit', () => {
         .mockReturnValueOnce(makeSpawnResult(0, ''))
         .mockReturnValueOnce(makeSpawnResult(1, '', 'os error 32 locked'))         // first attempt: file lock
         .mockReturnValueOnce(makeSpawnResult(1, '', '"Codex.exe" not found'))       // tasklist: not running
+        .mockReturnValueOnce(makeSpawnResult(1, '', 'npm error'))                   // npm root -g: Route A not available → retry
         .mockReturnValueOnce(makeSpawnResult(1, '', 'network timeout'));            // retry 1: different error → break
       const r = runCodexPluginRegistrationGit('switchbot@codex-plugin');
       expect(r.ok).toBe(false);
       expect(r.stderr).toBe('network timeout');
       // Only one Atomics.wait call (before the single retry that changed error type)
       expect(atomicsSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      atomicsSpy.mockRestore();
+      Object.defineProperty(process, 'platform', { value: savedPlatform, configurable: true });
+    }
+  });
+
+  it('skips retries immediately when Route A is available (npm root -g ok) on os error 32', () => {
+    const savedPlatform = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    const atomicsSpy = vi.spyOn(Atomics, 'wait').mockReturnValue('ok' as ReturnType<typeof Atomics.wait>);
+    try {
+      spawnSyncMock
+        .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove ×2
+        .mockReturnValueOnce(makeSpawnResult(0, ''))
+        .mockReturnValueOnce(makeSpawnResult(0, ''))  // marketplace remove ×3
+        .mockReturnValueOnce(makeSpawnResult(0, ''))
+        .mockReturnValueOnce(makeSpawnResult(0, ''))
+        .mockReturnValueOnce(makeSpawnResult(1, '', 'os error 32'))  // marketplace add: fails
+        .mockReturnValueOnce(makeSpawnResult(1, '', '"Codex.exe" not found'))  // tasklist: not running
+        .mockReturnValueOnce(makeSpawnResult(0, '/usr/local/lib/node_modules\n'));  // npm root -g: Route A AVAILABLE → skip retries
+      const r = runCodexPluginRegistrationGit('switchbot@codex-plugin');
+      expect(r.ok).toBe(false);
+      expect(r.stderr).toContain('os error 32');
+      // No retries — Atomics.wait must NOT have been called
+      expect(atomicsSpy).not.toHaveBeenCalled();
     } finally {
       atomicsSpy.mockRestore();
       Object.defineProperty(process, 'platform', { value: savedPlatform, configurable: true });
@@ -1057,6 +1085,50 @@ describe('registerCodexPluginAuto', () => {
     expect(r.pluginId).toContain('switchbot');
     // Only the two check calls — no marketplace or plugin mutation
     expect(spawnSyncMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('logs file-lock fallback message and immediately uses Route A when Route B fails with os error 32 on Windows', () => {
+    const savedPlatform = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    const atomicsSpy = vi.spyOn(Atomics, 'wait').mockReturnValue('ok' as ReturnType<typeof Atomics.wait>);
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    existsSyncMock.mockReturnValue(true);
+    try {
+      spawnSyncMock
+        .mockReturnValueOnce(makeSpawnResult(1, '', 'not found'))     // where codex → idempotency skips
+        // Route B pre-clean
+        .mockReturnValueOnce(makeSpawnResult(0, ''))                  // plugin remove (switchbot@switchbot)
+        .mockReturnValueOnce(makeSpawnResult(0, ''))                  // plugin remove (switchbot@codex-plugin)
+        .mockReturnValueOnce(makeSpawnResult(0, ''))                  // plugin remove (switchbot@switchbot-skill)
+        .mockReturnValueOnce(makeSpawnResult(0, ''))                  // marketplace remove ×3
+        .mockReturnValueOnce(makeSpawnResult(0, ''))
+        .mockReturnValueOnce(makeSpawnResult(0, ''))
+        // Route B marketplace add: file lock
+        .mockReturnValueOnce(makeSpawnResult(1, '', 'os error 32 locked'))
+        .mockReturnValueOnce(makeSpawnResult(1, '', '"Codex.exe" not found'))  // tasklist
+        .mockReturnValueOnce(makeSpawnResult(0, '/usr/local/lib/node_modules\n'))  // npm root -g: Route A available → skip retries
+        // Route A: npm root -g (resolveCodexPackageRoot in registerCodexPlugin)
+        .mockReturnValueOnce(makeSpawnResult(0, '/usr/local/lib/node_modules\n'))
+        // Route A pre-clean
+        .mockReturnValueOnce(makeSpawnResult(0, ''))                  // plugin remove ×2
+        .mockReturnValueOnce(makeSpawnResult(0, ''))
+        .mockReturnValueOnce(makeSpawnResult(0, ''))                  // marketplace remove ×3
+        .mockReturnValueOnce(makeSpawnResult(0, ''))
+        .mockReturnValueOnce(makeSpawnResult(0, ''))
+        .mockReturnValueOnce(makeSpawnResult(0, ''))                  // marketplace add (local): ok
+        .mockReturnValueOnce(makeSpawnResult(0, ''));                 // plugin add: ok
+      const r = registerCodexPluginAuto();
+      expect(r.ok).toBe(true);
+      expect(r.packageRoot).toMatch(/codex-plugin/);
+      // No retries (Route A was available)
+      expect(atomicsSpy).not.toHaveBeenCalled();
+      // File-lock fallback message must appear
+      expect(stderrSpy).toHaveBeenCalledWith(expect.stringMatching(/file.lock|os error 32/i));
+    } finally {
+      stderrSpy.mockRestore();
+      atomicsSpy.mockRestore();
+      Object.defineProperty(process, 'platform', { value: savedPlatform, configurable: true });
+    }
   });
 });
 
