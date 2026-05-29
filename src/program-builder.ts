@@ -31,6 +31,7 @@ import { registerHealthCommand } from './commands/health.js';
 import { registerUpgradeCheckCommand } from './commands/upgrade-check.js';
 import { registerDaemonCommand } from './commands/daemon.js';
 import { registerCodexCommand } from './commands/codex.js';
+import { registerClaudeCodeCommand } from './commands/claude-code.js';
 
 const require = createRequire(import.meta.url);
 
@@ -38,7 +39,7 @@ export const TOP_LEVEL_COMMANDS = [
   'config', 'devices', 'scenes', 'webhook', 'completion', 'mcp',
   'quota', 'catalog', 'cache', 'events', 'doctor', 'schema',
   'history', 'plan', 'capabilities', 'agent-bootstrap', 'install', 'uninstall', 'status-sync',
-  'health', 'upgrade-check', 'daemon', 'reset', 'codex',
+  'health', 'upgrade-check', 'daemon', 'reset', 'codex', 'claude-code',
 ] as const;
 
 const cacheModeArg = (value: string): string => {
@@ -123,6 +124,7 @@ export function buildProgram(): Command {
   registerUpgradeCheckCommand(program);
   registerDaemonCommand(program);
   registerCodexCommand(program);
+  registerClaudeCodeCommand(program);
 
   return program;
 }
