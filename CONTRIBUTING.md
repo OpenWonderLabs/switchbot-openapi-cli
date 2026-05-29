@@ -28,3 +28,14 @@ Example body:
 The CHANGELOG itself follows Keep a Changelog + SemVer, with a
 **Changed (BREAKING)** section whenever a release introduces a breaking
 change (even in a patch version).
+
+## Plugin hook strategies
+
+The two plugin packages use different `onInstall` hook strategies — this is intentional:
+
+| Package | Hook command | Reason |
+|---------|-------------|--------|
+| `packages/claude-code-plugin` | `node ../bin/auth.js` (relative path) | Claude Code installs the full npm package; `bin/` is always adjacent. |
+| `packages/codex-plugin` | `switchbot-codex-auth` (global binary) | Codex may install only the `plugins/switchbot/` sub-directory, placing it in `~/.codex/plugins/switchbot/`. A relative path to `bin/auth.js` would escape the plugin directory and fail. Using the globally-installed binary works regardless of install layout. |
+
+When changing either hook, preserve this distinction. Do not "unify" them without first verifying that both installation layouts still resolve the hook correctly.

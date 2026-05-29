@@ -9,6 +9,18 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [3.7.7]
+
+### Added
+
+- **`switchbot claude-code setup` command** — 6-step pipeline that bootstraps Claude Code integration end-to-end: verify `claude` CLI on PATH, optionally install `@switchbot/openapi-cli`, register the MCP server via `claude mcp add --scope user`, authenticate, and run a health check. Supports `--yes` (non-interactive), `--skip`, `--dry-run`, `--json`. Paste `npx @switchbot/openapi-cli claude-code setup` into Claude Code chat to set up without opening a terminal.
+- **Claude Code Plugin Marketplace support** — `.claude-plugin/marketplace.json` now correctly points to `packages/claude-code-plugin/plugins/switchbot` so `/plugin marketplace add OpenWonderLabs/switchbot-openapi-cli` followed by `/plugin install switchbot@switchbot` works end-to-end. `smoke-codex-git-sparse.mjs` extended to validate both the Claude Code and Codex marketplace entry points.
+
+### Fixed
+
+- **`switchbot auth login` clears device/status cache** — switching accounts no longer returns stale data from the previous account's cache. `clearCache()` and `clearStatusCache()` are called immediately after new credentials are saved.
+- **`codex setup --help` / `claude-code setup --help`** — both commands now list `--dry-run` and `--json` under a "Global flags that also apply to this command" section so users do not have to discover them from the README.
+
 ## [3.7.5]
 
 ### Fixed
