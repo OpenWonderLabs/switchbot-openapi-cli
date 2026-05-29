@@ -69,6 +69,7 @@ try {
     'plugins/switchbot/.claude-plugin/hooks.json',
     'plugins/switchbot/.claude-plugin/plugin.json',
     'plugins/switchbot/.mcp.json',
+    'plugins/switchbot/skills/switchbot/SKILL.md',  // must be packed: plugin.json declares skills: ./skills/
   ]) {
     const fullPath = path.join(pluginRoot, ...requiredPath.split('/'));
     if (!existsSync(fullPath)) {
@@ -99,6 +100,11 @@ try {
   }
 
   // Verify plugin-level hooks (the ones Claude Code actually executes, since source → ./plugins/switchbot)
+  const pluginJson = readJson(path.join(pluginRoot, 'plugins', 'switchbot', '.claude-plugin', 'plugin.json'));
+  if (pluginJson?.skills !== './skills/') {
+    throw new Error(`plugin.json skills must be './skills/', got ${pluginJson?.skills ?? '<missing>'}`);
+  }
+
   const pluginHooks = readJson(path.join(pluginRoot, 'plugins', 'switchbot', '.claude-plugin', 'hooks.json'));
   if (pluginHooks?.onInstall?.command !== 'node') {
     throw new Error(`plugin-level onInstall command must be 'node', got ${pluginHooks?.onInstall?.command ?? '<missing>'}`);
