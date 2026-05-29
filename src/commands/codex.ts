@@ -647,6 +647,10 @@ function registerCodexSetupSubcommand(codex: Command): void {
     .option('--yes', 'Non-interactive mode: do not spawn auth login, fail fast if credentials missing')
     .option('--upgrade', 'Upgrade @switchbot/openapi-cli to the latest published version if already installed')
     .addHelpText('after', `
+Global flags that also apply to this command:
+  --dry-run    Print step list without executing any changes
+  --json       Emit machine-readable JSON output
+
 Environment variables:
   CODEX_GIT_MARKETPLACE_REF        Git ref used when registering via git marketplace (default: main)
   CODEX_MARKETPLACE_ADD_TIMEOUT    Timeout in ms for "codex plugin marketplace add" (default: 60000)
