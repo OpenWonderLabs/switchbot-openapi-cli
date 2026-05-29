@@ -5,5 +5,8 @@
   "author": {
     "name": "OpenWonderLabs"
   },
-  "homepage": "https://github.com/OpenWonderLabs/switchbot-openapi-cli"
+  "repository": "https://github.com/OpenWonderLabs/switchbot-openapi-cli",
+  "homepage": "https://github.com/OpenWonderLabs/switchbot-openapi-cli",
+  "license": "MIT",
+  "keywords": ["switchbot", "smart-home", "iot", "mcp"]
 }
