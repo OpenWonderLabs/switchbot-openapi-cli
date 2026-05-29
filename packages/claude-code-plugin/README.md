@@ -8,25 +8,22 @@ SwitchBot plugin for [Claude Code](https://claude.ai/claude-code) — wires Clau
 npm install -g @switchbot/claude-code-plugin
 ```
 
-Then register as a Claude Code Marketplace source:
+Then register the MCP server with Claude Code:
 
 ```bash
-claude plugins add @switchbot/claude-code-plugin
+claude mcp add switchbot -- switchbot mcp serve --tools all
 ```
 
-Claude Code will run the `onInstall` hook automatically. If SwitchBot credentials are not configured, a browser login window will open.
-
-## Manual auth setup
-
-```bash
-switchbot-claude-auth
-```
-
-Or via the CLI directly:
+If SwitchBot credentials are not yet configured, run:
 
 ```bash
 switchbot auth login
-switchbot doctor
+```
+
+Or use the bundled helper at any time to re-authenticate:
+
+```bash
+switchbot-claude-auth
 ```
 
 ## Requirements

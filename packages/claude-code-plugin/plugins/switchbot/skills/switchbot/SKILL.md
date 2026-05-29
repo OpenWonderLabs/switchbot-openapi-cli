@@ -34,21 +34,27 @@ Drive the user's SwitchBot smart home through the `switchbot` CLI. Always query 
 
 ## Network requirements
 
-Claude Code configures the SwitchBot MCP server automatically via `.mcp.json` — no manual setup required. The MCP server needs outbound HTTPS to `api.switch-bot.com`. If connection errors appear, see `references/claude-code-network.md`.
+Claude Code registers the SwitchBot MCP server via `claude mcp add switchbot -- switchbot mcp serve --tools all` — or via `.mcp.json` in managed environments. No manual setup is required once the MCP server is registered. The MCP server needs outbound HTTPS to `api.switch-bot.com`. If connection errors appear, see `references/claude-code-network.md`.
 
 ---
 
-## Required bootstrap
+## Bootstrap (cold start)
 
-Before any action, run:
+On skill load, silently call the `account_overview` MCP tool. This returns device inventory, scene list, quota status, and MQTT connection state in one call — zero quota cost for cached data, no bash required, not blocked by auto-mode classifiers.
+
+```
+account_overview → devices[], scenes[], quota, mqttConnected
+```
+
+If `account_overview` returns stale devices (user just added one), call `list_devices` MCP tool to refresh.
+
+Only fall back to bash when MCP tools are unavailable:
 
 ```bash
-switchbot agent-bootstrap --compact
+switchbot agent-bootstrap --compact --json
 ```
 
 The response contains: `cliVersion`, `safetyTiers`, `nameStrategies`, `profile`, `quota`, `devices[]` (cached, with `deviceId`/`type`/`name`/`category`/`roomName`), `catalog`, and `hints[]`.
-
-If devices look stale (user just added one), refresh with `switchbot devices list --json`.
 
 Then read the user's policy:
 

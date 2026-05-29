@@ -121,28 +121,27 @@ switchbot auth login       # browser OAuth — saves to OS keychain
 
 ## Claude Code integration
 
-The Claude Code plugin is published to npm as [`@switchbot/claude-code-plugin`](https://www.npmjs.com/package/@switchbot/claude-code-plugin).
-
-**Recommended — paste into Claude Code chat:**
-
-```
-Please set up the SwitchBot integration for me by running:
-npm install -g @switchbot/claude-code-plugin
-claude plugins add @switchbot/claude-code-plugin
-Then restart Claude Code and confirm it's working.
-```
-
-**Or install directly:**
+**Step 0 — verify first.** If the MCP server is already configured (e.g. via a managed environment or prior setup), no additional steps are needed:
 
 ```bash
-npm install -g @switchbot/claude-code-plugin
-claude plugins add @switchbot/claude-code-plugin   # registers the MCP server and skill
-switchbot auth login                                # browser OAuth — saves to OS keychain
+switchbot doctor --json
 ```
 
-`claude plugins add` runs the `onInstall` hook automatically. If SwitchBot credentials are not yet configured, a browser login window opens. Run `switchbot-claude-auth` at any time to re-authenticate.
+If 24 tools are visible and the integration is healthy, you're done.
 
-**Note:** The root `marketplace.json` file in this repo is for Codex CLI Route B (git sparse clone) and points to the Codex plugin at `packages/codex-plugin/plugins/switchbot`. Claude Code users install via npm and do not use this file.
+**Fresh setup:**
+
+```bash
+npm install -g @switchbot/openapi-cli
+claude mcp add switchbot -- switchbot mcp serve --tools all
+switchbot auth login                     # browser OAuth — saves to OS keychain
+```
+
+Run `switchbot doctor --json` afterwards to confirm everything is working.
+
+The optional skill package [`@switchbot/claude-code-plugin`](https://www.npmjs.com/package/@switchbot/claude-code-plugin) bundles the SKILL.md context document and install hook. Install it only if your environment does not already load the skill automatically.
+
+**Note:** The root `marketplace.json` file in this repo is for Codex CLI Route B (git sparse clone) and points to the Codex plugin at `packages/codex-plugin/plugins/switchbot`. Claude Code users register via `claude mcp add` and do not use this file.
 
 ---
 
