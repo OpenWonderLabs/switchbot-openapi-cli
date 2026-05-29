@@ -95,10 +95,8 @@ Then restart Codex and confirm it's working.
 **Or install directly:**
 
 ```bash
-npm install -g @switchbot/codex-plugin
-switchbot-codex-install        # registers the plugin with Codex
-switchbot auth login           # browser OAuth — saves to OS keychain
-switchbot codex doctor         # verify
+npm install -g @switchbot/openapi-cli @switchbot/codex-plugin
+switchbot codex setup           # one-shot bootstrap: register, auth, verify
 ```
 
 **Or install via Codex Plugin Marketplace** (requires Codex CLI with marketplace support):
