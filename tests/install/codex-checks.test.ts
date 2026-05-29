@@ -294,12 +294,12 @@ describe('resolvePluginId', () => {
     expect(resolvePluginId('/some/path/codex-plugin')).toBe('switchbot@switchbot');
   });
 
-  it('prefers .agents/plugins/marketplace.json over root marketplace.json', () => {
+  it('prefers root marketplace.json over .agents/plugins/marketplace.json', () => {
     existsSyncMock.mockImplementation((p: string) => p.endsWith('marketplace.json'));
     readFileSyncMock.mockImplementation((p: string) =>
       p.includes('.agents') ? '{"name":"agents-name"}' : '{"name":"root-name"}'
     );
-    expect(resolvePluginId('/some/path')).toBe('switchbot@agents-name');
+    expect(resolvePluginId('/some/path')).toBe('switchbot@root-name');
   });
 });
 

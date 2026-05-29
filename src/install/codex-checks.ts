@@ -43,18 +43,22 @@ function readJsonObject(filePath: string): Record<string, unknown> | null {
 }
 
 function resolveMarketplaceName(packageRoot: string): string {
-  // .agents/plugins/marketplace.json — Codex CLI primary path (replaces .claude-plugin/ from 0.1.3)
-  const agentsPluginsPath = path.join(packageRoot, '.agents', 'plugins', 'marketplace.json');
-  if (fs.existsSync(agentsPluginsPath)) {
-    const manifest = readJsonObject(agentsPluginsPath);
+  // Root-level marketplace.json is the authoritative source: it is what
+  // `codex plugin marketplace add <path>` validates and what Codex registers
+  // the marketplace name from. Always prefer it so the constructed plugin ID
+  // (e.g. switchbot@switchbot) matches what Codex expects for `plugin add`.
+  const rootManifestPath = path.join(packageRoot, 'marketplace.json');
+  if (fs.existsSync(rootManifestPath)) {
+    const manifest = readJsonObject(rootManifestPath);
     if (typeof manifest?.name === 'string' && manifest.name) {
       return manifest.name;
     }
   }
-  // Fall back to root-level marketplace.json (pre-0.1.3 local copies)
-  const rootManifestPath = path.join(packageRoot, 'marketplace.json');
-  if (fs.existsSync(rootManifestPath)) {
-    const manifest = readJsonObject(rootManifestPath);
+  // Legacy fallback: .agents/plugins/marketplace.json (present in packages
+  // published before the root-level manifest was introduced).
+  const agentsPluginsPath = path.join(packageRoot, '.agents', 'plugins', 'marketplace.json');
+  if (fs.existsSync(agentsPluginsPath)) {
+    const manifest = readJsonObject(agentsPluginsPath);
     if (typeof manifest?.name === 'string' && manifest.name) {
       return manifest.name;
     }
