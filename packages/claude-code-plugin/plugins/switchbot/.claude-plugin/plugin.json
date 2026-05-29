@@ -1,5 +1,6 @@
 {
   "name": "switchbot",
+  "displayName": "SwitchBot",
   "version": "0.1.0",
   "description": "Control SwitchBot smart-home devices from Claude Code via MCP.",
   "author": {

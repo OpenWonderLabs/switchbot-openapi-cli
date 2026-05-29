@@ -147,7 +147,14 @@ switchbot claude-code setup
 
 The optional skill package [`@switchbot/claude-code-plugin`](https://www.npmjs.com/package/@switchbot/claude-code-plugin) bundles the SKILL.md context document. Install it only if your environment does not already load the skill automatically.
 
-**Note:** The root `marketplace.json` file in this repo is for Codex CLI Route B (git sparse clone) and points to the Codex plugin at `packages/codex-plugin/plugins/switchbot`. Claude Code users register via `switchbot claude-code setup` and do not use this file.
+**Or install via Claude Code Plugin Marketplace:**
+
+```
+/plugin marketplace add OpenWonderLabs/switchbot-openapi-cli
+/plugin install switchbot@switchbot
+```
+
+**Note:** The root `marketplace.json` in this repo is for Codex CLI Route B (git sparse clone) and points to `packages/codex-plugin/plugins/switchbot`. The `.claude-plugin/marketplace.json` is for Claude Code Plugin Marketplace and points to `packages/claude-code-plugin/plugins/switchbot`.
 
 ---
 
