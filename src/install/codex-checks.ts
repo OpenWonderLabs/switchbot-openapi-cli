@@ -387,7 +387,8 @@ export function runCodexPluginRegistrationGit(pluginId: string): RegistrationRes
         '[switchbot] Warning: Codex.exe is running. Close Codex Desktop before running setup to avoid file-lock errors.\n',
       );
     }
-    const routeAAvailable = resolveCodexPackageRoot().ok;
+    const _routeARoot = resolveCodexPackageRoot();
+    const routeAAvailable = _routeARoot.ok && fs.existsSync(_routeARoot.packageRoot);
     const delays = routeAAvailable ? [] : [2000, 5000, 10000];
     for (const delay of delays) {
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delay);

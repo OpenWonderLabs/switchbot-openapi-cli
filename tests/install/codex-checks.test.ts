@@ -743,10 +743,12 @@ describe('runCodexPluginRegistrationGit', () => {
     }
   });
 
-  it('skips retries immediately when Route A is available (npm root -g ok) on os error 32', () => {
+  it('skips retries immediately when Route A package directory exists on os error 32', () => {
     const savedPlatform = process.platform;
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
     const atomicsSpy = vi.spyOn(Atomics, 'wait').mockReturnValue('ok' as ReturnType<typeof Atomics.wait>);
+    // Package directory exists → Route A is truly available → skip retries
+    existsSyncMock.mockReturnValueOnce(true);
     try {
       spawnSyncMock
         .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove ×2
@@ -756,12 +758,40 @@ describe('runCodexPluginRegistrationGit', () => {
         .mockReturnValueOnce(makeSpawnResult(0, ''))
         .mockReturnValueOnce(makeSpawnResult(1, '', 'os error 32'))  // marketplace add: fails
         .mockReturnValueOnce(makeSpawnResult(1, '', '"Codex.exe" not found'))  // tasklist: not running
-        .mockReturnValueOnce(makeSpawnResult(0, '/usr/local/lib/node_modules\n'));  // npm root -g: Route A AVAILABLE → skip retries
+        .mockReturnValueOnce(makeSpawnResult(0, '/usr/local/lib/node_modules\n'));  // npm root -g: ok + existsSync true → skip retries
       const r = runCodexPluginRegistrationGit('switchbot@codex-plugin');
       expect(r.ok).toBe(false);
       expect(r.stderr).toContain('os error 32');
       // No retries — Atomics.wait must NOT have been called
       expect(atomicsSpy).not.toHaveBeenCalled();
+    } finally {
+      atomicsSpy.mockRestore();
+      Object.defineProperty(process, 'platform', { value: savedPlatform, configurable: true });
+    }
+  });
+
+  it('retries when npm root -g succeeds but package directory does not exist (fresh machine)', () => {
+    const savedPlatform = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    const atomicsSpy = vi.spyOn(Atomics, 'wait').mockReturnValue('ok' as ReturnType<typeof Atomics.wait>);
+    // Package directory NOT present → Route A not truly available → retries happen
+    existsSyncMock.mockReturnValueOnce(false);
+    try {
+      spawnSyncMock
+        .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove ×2
+        .mockReturnValueOnce(makeSpawnResult(0, ''))
+        .mockReturnValueOnce(makeSpawnResult(0, ''))  // marketplace remove ×3
+        .mockReturnValueOnce(makeSpawnResult(0, ''))
+        .mockReturnValueOnce(makeSpawnResult(0, ''))
+        .mockReturnValueOnce(makeSpawnResult(1, '', 'os error 32'))  // marketplace add: fails
+        .mockReturnValueOnce(makeSpawnResult(1, '', '"Codex.exe" not found'))  // tasklist: not running
+        .mockReturnValueOnce(makeSpawnResult(0, '/usr/local/lib/node_modules\n'))  // npm root -g: ok but existsSync → false
+        .mockReturnValueOnce(makeSpawnResult(0, ''))  // retry 1 (2s): succeeds
+        .mockReturnValueOnce(makeSpawnResult(0, '')); // plugin add
+      const r = runCodexPluginRegistrationGit('switchbot@codex-plugin');
+      expect(r.ok).toBe(true);
+      // One retry happened (package dir absent → delays not empty)
+      expect(atomicsSpy).toHaveBeenCalledTimes(1);
     } finally {
       atomicsSpy.mockRestore();
       Object.defineProperty(process, 'platform', { value: savedPlatform, configurable: true });
