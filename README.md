@@ -98,6 +98,15 @@ Then restart Codex and confirm it's working.
 npm install -g @switchbot/codex-plugin
 switchbot-codex-install        # registers the plugin with Codex
 switchbot auth login           # browser OAuth — saves to OS keychain
+switchbot codex doctor         # verify
+```
+
+**Or install via Codex Plugin Marketplace** (requires Codex CLI with marketplace support):
+
+```bash
+codex plugin marketplace add OpenWonderLabs/switchbot-openapi-cli
+codex plugin add switchbot@switchbot
+switchbot auth login
 ```
 
 ---
@@ -107,9 +116,10 @@ switchbot auth login           # browser OAuth — saves to OS keychain
 The OpenClaw skill is published to npm as [`@switchbot/openclaw-skill`](https://www.npmjs.com/package/@switchbot/openclaw-skill).
 
 ```bash
-openclaw plugins install @switchbot/openclaw-skill   # via OpenClaw plugin manager (recommended)
+npm install -g @switchbot/openapi-cli               # required CLI
+openclaw plugins install @switchbot/openclaw-skill  # via OpenClaw plugin manager (recommended)
 # or
-npm install -g @switchbot/openclaw-skill             # via npm
+npm install -g @switchbot/openclaw-skill            # via npm
 
 switchbot-openclaw setup   # verify CLI install and credentials
 switchbot auth login       # browser OAuth — saves to OS keychain
@@ -147,7 +157,7 @@ switchbot claude-code setup
 
 The optional skill package [`@switchbot/claude-code-plugin`](https://www.npmjs.com/package/@switchbot/claude-code-plugin) bundles the SKILL.md context document. Install it only if your environment does not already load the skill automatically.
 
-**Or install via Claude Code Plugin Marketplace:**
+**Or install via Claude Code Plugin Marketplace** (requires Claude Code with plugin marketplace support enabled):
 
 ```
 /plugin marketplace add OpenWonderLabs/switchbot-openapi-cli
