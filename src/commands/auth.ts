@@ -25,6 +25,7 @@ import { stringArg } from '../utils/arg-parsers.js';
 import { getActiveProfile } from '../lib/request-context.js';
 import { getConfigPath } from '../utils/flags.js';
 import { saveConfig } from '../config.js';
+import { clearCache, clearStatusCache } from '../devices/cache.js';
 import {
   CredentialBundle,
   selectCredentialStore,
@@ -446,6 +447,12 @@ export function registerAuthCommand(program: Command): void {
         }
         backendName = store.name;
       }
+
+      // Credentials changed — clear device/status cache so the next list
+      // fetches fresh data for the new account instead of returning stale
+      // results from the previous account's cache.
+      clearCache();
+      clearStatusCache();
 
       if (isJsonMode()) {
         printJson({

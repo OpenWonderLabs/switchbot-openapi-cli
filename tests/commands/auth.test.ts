@@ -415,10 +415,26 @@ vi.mock('../../src/auth/verify.js', () => ({
   verifyCredentials: (...args: unknown[]) => verifyCredsMock(...args),
 }));
 
+const clearCacheMock = vi.fn();
+const clearStatusCacheMock = vi.fn();
+
+vi.mock('../../src/devices/cache.js', async () => {
+  const actual = await vi.importActual<typeof import('../../src/devices/cache.js')>(
+    '../../src/devices/cache.js',
+  );
+  return {
+    ...actual,
+    clearCache: (...args: unknown[]) => clearCacheMock(...args),
+    clearStatusCache: (...args: unknown[]) => clearStatusCacheMock(...args),
+  };
+});
+
 describe('auth login', () => {
   beforeEach(() => {
     browserLoginMock.mockReset();
     verifyCredsMock.mockReset();
+    clearCacheMock.mockReset();
+    clearStatusCacheMock.mockReset();
   });
 
   it('saves credentials and exits 0 on success', async () => {
@@ -483,5 +499,26 @@ describe('auth login', () => {
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
+  });
+
+  it('clears device and status cache after successful login', async () => {
+    browserLoginMock.mockResolvedValue({ token: 'tok-new', secret: 'sec-new' });
+    verifyCredsMock.mockResolvedValue({ ok: true });
+    const store = makeStore({ writable: true });
+    selectMock.mockResolvedValue(store);
+
+    const res = await runCli(['auth', 'login', '--no-open']);
+    expect(res.exitCode).toBe(0);
+    expect(clearCacheMock).toHaveBeenCalledOnce();
+    expect(clearStatusCacheMock).toHaveBeenCalledOnce();
+  });
+
+  it('does not clear cache when login fails', async () => {
+    browserLoginMock.mockRejectedValue(new Error('user cancelled'));
+
+    const res = await runCli(['auth', 'login', '--no-open']);
+    expect(res.exitCode).toBe(1);
+    expect(clearCacheMock).not.toHaveBeenCalled();
+    expect(clearStatusCacheMock).not.toHaveBeenCalled();
   });
 });
