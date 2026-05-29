@@ -235,6 +235,11 @@ export function registerClaudeCodeCommand(program: Command): void {
     .description('Bootstrap the Claude Code integration: install CLI if missing, register MCP server, auth, verify')
     .option('--skip <names>', 'Comma-separated step names to skip (skippable: "install-switchbot-cli", "auth")')
     .option('--yes', 'Non-interactive mode: do not spawn auth login, fail fast if credentials missing')
+    .addHelpText('after', `
+Global flags that also apply to this command:
+  --dry-run    Print step list without executing any changes
+  --json       Emit machine-readable JSON output
+`)
     .action(async (opts: { skip?: string; yes?: boolean }, command: Command) => {
       const skip = new Set((opts.skip ?? '').split(',').map((s) => s.trim()).filter(Boolean));
       const skipCheck = validateSkip(skip);
