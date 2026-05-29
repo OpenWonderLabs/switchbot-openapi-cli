@@ -1,6 +1,8 @@
 {
-  "switchbot": {
-    "command": "switchbot",
-    "args": ["mcp", "serve", "--tools", "all"]
+  "mcpServers": {
+    "switchbot": {
+      "command": "switchbot",
+      "args": ["mcp", "serve", "--tools", "all"]
+    }
   }
 }

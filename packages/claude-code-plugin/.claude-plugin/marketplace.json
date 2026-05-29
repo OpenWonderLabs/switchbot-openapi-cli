@@ -15,7 +15,7 @@
         "name": "OpenWonderLabs"
       },
       "source": "./plugins/switchbot",
-      "category": "productivity",
+      "category": "Productivity",
       "homepage": "https://github.com/OpenWonderLabs/switchbot-openapi-cli"
     }
   ]

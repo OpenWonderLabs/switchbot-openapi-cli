@@ -41,27 +41,32 @@ try {
     runGit(['clone', '--no-checkout', '--branch', ref, repoRoot, stagingDir], { cwd: workDir });
   }
   runGit(['-C', stagingDir, 'sparse-checkout', 'init', '--cone'], { cwd: workDir });
-  runGit(['-C', stagingDir, 'sparse-checkout', 'set', '.claude-plugin', 'packages/codex-plugin'], { cwd: workDir });
+  runGit(['-C', stagingDir, 'sparse-checkout', 'set', '.claude-plugin', 'packages/codex-plugin', 'packages/claude-code-plugin'], { cwd: workDir });
   runGit(['-C', stagingDir, 'checkout', ref], { cwd: workDir });
 
+  // .claude-plugin/marketplace.json — Claude Code plugin marketplace entry point
   const rootMarketplacePath = path.join(stagingDir, '.claude-plugin', 'marketplace.json');
+  // packages/codex-plugin/.agents/plugins/marketplace.json — Codex Route B entry point
   const packageMarketplacePath = path.join(stagingDir, 'packages', 'codex-plugin', '.agents', 'plugins', 'marketplace.json');
   const pluginMcpPath = path.join(stagingDir, 'packages', 'codex-plugin', 'plugins', 'switchbot', '.mcp.json');
+  // packages/claude-code-plugin/plugins/switchbot — Claude Code plugin source
+  const claudeCodePluginJsonPath = path.join(stagingDir, 'packages', 'claude-code-plugin', 'plugins', 'switchbot', '.claude-plugin', 'plugin.json');
 
-  for (const requiredPath of [rootMarketplacePath, packageMarketplacePath, pluginMcpPath]) {
+  for (const requiredPath of [rootMarketplacePath, packageMarketplacePath, pluginMcpPath, claudeCodePluginJsonPath]) {
     if (!existsSync(requiredPath)) {
       throw new Error(`sparse checkout missing ${path.relative(stagingDir, requiredPath)}`);
     }
   }
 
+  // Root marketplace must point to the Claude Code plugin directory
   const rootMarketplace = readJson(rootMarketplacePath);
   if (rootMarketplace?.name !== 'switchbot') {
     throw new Error(`root marketplace name must be switchbot, got ${rootMarketplace?.name ?? '<missing>'}`);
   }
   const rootPlugin = rootMarketplace?.plugins?.find((plugin) => plugin?.name === 'switchbot');
-  if (rootPlugin?.source !== './packages/codex-plugin/plugins/switchbot') {
+  if (rootPlugin?.source !== './packages/claude-code-plugin/plugins/switchbot') {
     throw new Error(
-      `root marketplace switchbot source must be ./packages/codex-plugin/plugins/switchbot, got ${rootPlugin?.source ?? '<missing>'}`,
+      `root marketplace switchbot source must be ./packages/claude-code-plugin/plugins/switchbot, got ${rootPlugin?.source ?? '<missing>'}`,
     );
   }
 
@@ -74,7 +79,7 @@ try {
     throw new Error(`package marketplace switchbot source must be ./plugins/switchbot, got ${packagePlugin?.source ?? '<missing>'}`);
   }
 
-  console.log(`codex git sparse smoke ok: ref ${ref} exposes root and package marketplace manifests with switchbot sources`);
+  console.log(`codex git sparse smoke ok: ref ${ref} exposes Claude Code and Codex marketplace manifests with correct sources`);
 } finally {
   try {
     rmSync(workDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });

@@ -95,9 +95,16 @@ Then restart Codex and confirm it's working.
 **Or install directly:**
 
 ```bash
-npm install -g @switchbot/codex-plugin
-switchbot-codex-install        # registers the plugin with Codex
-switchbot auth login           # browser OAuth — saves to OS keychain
+npm install -g @switchbot/openapi-cli @switchbot/codex-plugin
+switchbot codex setup           # one-shot bootstrap: register, auth, verify
+```
+
+**Or install via Codex Plugin Marketplace** (requires Codex CLI with marketplace support):
+
+```bash
+codex plugin marketplace add OpenWonderLabs/switchbot-openapi-cli
+codex plugin add switchbot@switchbot
+switchbot auth login
 ```
 
 ---
@@ -107,9 +114,10 @@ switchbot auth login           # browser OAuth — saves to OS keychain
 The OpenClaw skill is published to npm as [`@switchbot/openclaw-skill`](https://www.npmjs.com/package/@switchbot/openclaw-skill).
 
 ```bash
-openclaw plugins install @switchbot/openclaw-skill   # via OpenClaw plugin manager (recommended)
+npm install -g @switchbot/openapi-cli               # required CLI
+openclaw plugins install @switchbot/openclaw-skill  # via OpenClaw plugin manager (recommended)
 # or
-npm install -g @switchbot/openclaw-skill             # via npm
+npm install -g @switchbot/openclaw-skill            # via npm
 
 switchbot-openclaw setup   # verify CLI install and credentials
 switchbot auth login       # browser OAuth — saves to OS keychain
@@ -121,27 +129,40 @@ switchbot auth login       # browser OAuth — saves to OS keychain
 
 ## Claude Code integration
 
-**Step 0 — verify first.** If the MCP server is already configured (e.g. via a managed environment or prior setup), no additional steps are needed:
+**Already configured? Paste into Claude Code chat:**
 
-```bash
-switchbot doctor --json
+```
+Is my SwitchBot integration working? Please check and list my devices.
 ```
 
-If 24 tools are visible and the integration is healthy, you're done.
+Claude will call `account_overview` or `switchbot doctor` to verify — no terminal needed.
 
-**Fresh setup:**
+**Fresh setup — paste into Claude Code chat:**
+
+```
+Please set up my SwitchBot integration by running:
+npx @switchbot/openapi-cli claude-code setup
+```
+
+Claude will run the setup command via the Bash tool. It installs the CLI if missing, registers the MCP server via `claude mcp add --scope user`, and opens a browser login if credentials are not yet configured. Restart Claude Code afterwards to load the MCP tools.
+
+**Or run manually in your terminal:**
 
 ```bash
 npm install -g @switchbot/openapi-cli
-claude mcp add switchbot -- switchbot mcp serve --tools all
-switchbot auth login                     # browser OAuth — saves to OS keychain
+switchbot claude-code setup
 ```
 
-Run `switchbot doctor --json` afterwards to confirm everything is working.
+The optional skill package [`@switchbot/claude-code-plugin`](https://www.npmjs.com/package/@switchbot/claude-code-plugin) bundles the SKILL.md context document. Install it only if your environment does not already load the skill automatically.
 
-The optional skill package [`@switchbot/claude-code-plugin`](https://www.npmjs.com/package/@switchbot/claude-code-plugin) bundles the SKILL.md context document and install hook. Install it only if your environment does not already load the skill automatically.
+**Or install via Claude Code Plugin Marketplace** (requires Claude Code with plugin marketplace support enabled):
 
-**Note:** The root `marketplace.json` file in this repo is for Codex CLI Route B (git sparse clone) and points to the Codex plugin at `packages/codex-plugin/plugins/switchbot`. Claude Code users register via `claude mcp add` and do not use this file.
+```
+/plugin marketplace add OpenWonderLabs/switchbot-openapi-cli
+/plugin install switchbot@switchbot
+```
+
+**Note:** The root `marketplace.json` in this repo is for Codex CLI Route B (git sparse clone) and points to `packages/codex-plugin/plugins/switchbot`. The `.claude-plugin/marketplace.json` is for Claude Code Plugin Marketplace and points to `packages/claude-code-plugin/plugins/switchbot`.
 
 ---
 
