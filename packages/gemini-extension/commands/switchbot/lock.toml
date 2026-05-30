@@ -1,0 +1,8 @@
+description = "Lock a SwitchBot Smart Lock"
+prompt = """
+Lock the SwitchBot Smart Lock the user names. Resolve the name to a deviceId (alias → exact →
+prefix → substring → fuzzy). Verify the device is a Smart Lock via describe_device. This is a
+mutation-tier command — confirm if policy.yaml requires it. Use the send_command MCP tool with
+command "lock". Report the result.
+User input: {{args}}
+"""

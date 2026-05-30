@@ -1,0 +1,9 @@
+description = "Toggle a SwitchBot device power state (on→off or off→on)"
+prompt = """
+Toggle the SwitchBot device the user names. Resolve the name to a deviceId (alias → exact →
+prefix → substring → fuzzy). Verify the device supports "toggle" via describe_device (Plug Mini,
+Relay Switch, etc.). This is a mutation-tier command. Note: toggle is non-idempotent — the
+result depends on current state. Use the send_command MCP tool with command "toggle".
+Report the result.
+User input: {{args}}
+"""

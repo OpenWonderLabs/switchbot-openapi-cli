@@ -1,0 +1,10 @@
+description = "Unlock a SwitchBot Smart Lock (destructive — requires confirmation)"
+prompt = """
+Unlock the SwitchBot Smart Lock the user names. Resolve the name to a deviceId (alias → exact →
+prefix → substring → fuzzy). Verify the device is a Smart Lock via describe_device.
+
+IMPORTANT: This is a DESTRUCTIVE-tier command. You MUST confirm with the user before executing.
+Prefer showing a dry-run first. Use the send_command MCP tool with command "unlock" and
+confirm: true. Warn the user that unlocking allows physical entry.
+User input: {{args}}
+"""

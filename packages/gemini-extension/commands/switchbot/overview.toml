@@ -1,0 +1,7 @@
+description = "Account overview: all devices, scenes, quota, MQTT status in one call"
+prompt = """
+Show a complete overview of the user's SwitchBot account. Call the account_overview MCP tool
+to get everything in one shot: device list, scenes, quota usage, cache status, and MQTT
+connection state. Present a structured summary with sections for each category. Highlight any
+issues (quota near limit, MQTT disconnected, devices without cloud service enabled).
+"""

@@ -1,0 +1,15 @@
+description = "Generate an execution plan from natural language (e.g. 'turn off all lights')"
+prompt = """
+Generate a SwitchBot execution plan from the user's intent. First resolve any device names to
+deviceIds using list_devices (alias → exact → prefix → substring → fuzzy). Then call
+plan_suggest with the intent and device_ids to generate a plan.
+
+Show the generated plan to the user for review. Ask if they want to:
+1. Execute it (call plan_run with yes:true)
+2. Execute with dry-run first (call plan_run without yes:true)
+3. Modify it before executing
+4. Cancel
+
+Never execute destructive plans without explicit user confirmation.
+User input: {{args}}
+"""

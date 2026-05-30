@@ -31,13 +31,36 @@ This writes the MCP server entry directly to `~/.gemini/settings.json`.
 
 - 24 MCP tools for device control, scene execution, automation rules, and diagnostics
 - `GEMINI.md` context file (auto-loaded) with safety tiers, name resolution, authority chain
-- 6 slash commands:
+- 23 slash commands:
+
+  **Discovery & Diagnostics:**
+  - `/switchbot:overview` — full account snapshot (devices, scenes, quota, MQTT)
   - `/switchbot:list-devices` — list all devices with live status
   - `/switchbot:status <name>` — live status for a named device
-  - `/switchbot:turn-on <name>` — turn on a named device
-  - `/switchbot:turn-off <name>` — turn off a named device
-  - `/switchbot:run-scene <name>` — execute a named scene
+  - `/switchbot:describe <name>` — device capabilities and supported commands
+  - `/switchbot:history <name>` — device state history and trends
   - `/switchbot:doctor` — integration health check
+
+  **Device Control:**
+  - `/switchbot:turn-on <name>` — turn on a device
+  - `/switchbot:turn-off <name>` — turn off a device
+  - `/switchbot:toggle <name>` — toggle power state
+  - `/switchbot:press <name>` — press a Bot button
+  - `/switchbot:open <name>` — open a Curtain/Blind
+  - `/switchbot:close <name>` — close a Curtain/Blind
+  - `/switchbot:pause <name>` — pause movement
+  - `/switchbot:lock <name>` — lock a Smart Lock
+  - `/switchbot:unlock <name>` — unlock a Smart Lock (destructive, requires confirmation)
+  - `/switchbot:set-brightness <name> <0-100>` — set light brightness
+  - `/switchbot:set-color <name> <color>` — set light RGB color
+  - `/switchbot:set-color-temp <name> <2700-6500>` — set color temperature
+  - `/switchbot:set-position <name> <0-100>` — set curtain/blind position
+
+  **Scenes & Automation:**
+  - `/switchbot:run-scene <name>` — execute a scene
+  - `/switchbot:plan <intent>` — generate an execution plan from natural language
+  - `/switchbot:rule <intent>` — create an automation rule from natural language
+  - `/switchbot:audit [--since 1h]` — query command/rule execution history
 
 ## Requirements
 
