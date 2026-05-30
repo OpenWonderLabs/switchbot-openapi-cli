@@ -8,6 +8,8 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const commandsDir = resolve(__dirname, '../commands/switchbot');
 const tomlFiles = readdirSync(commandsDir).filter((f) => f.endsWith('.toml'));
 
+const NO_ARGS_COMMANDS = new Set(['doctor.toml', 'list-devices.toml', 'overview.toml']);
+
 describe('commands/switchbot/ TOML files', () => {
   it('has exactly 23 command files (matches README)', () => {
     assert.equal(tomlFiles.length, 23, `expected 23 commands, found ${tomlFiles.length}`);
@@ -28,9 +30,15 @@ describe('commands/switchbot/ TOML files', () => {
         assert.ok(hasPrompt, `${file} must have a multi-line prompt field`);
       });
 
-      it('includes {{args}} for user input', () => {
-        assert.ok(content.includes('{{args}}'), `${file} must include {{args}} placeholder`);
-      });
+      if (NO_ARGS_COMMANDS.has(file)) {
+        it('does NOT include {{args}} (zero-argument command)', () => {
+          assert.ok(!content.includes('{{args}}'), `${file} is a no-arg command and should not have {{args}}`);
+        });
+      } else {
+        it('includes {{args}} for user input', () => {
+          assert.ok(content.includes('{{args}}'), `${file} must include {{args}} placeholder`);
+        });
+      }
     });
   }
 });

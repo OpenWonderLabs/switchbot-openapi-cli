@@ -105,16 +105,20 @@ function setupStepRegisterMcp(): StepOutcome {
 }
 
 async function setupStepAuth(ctx: { profile: string; configPath?: string; nonInteractive: boolean }): Promise<StepOutcome> {
-  if (await credentialsPresent()) return { step: 'auth', status: 'ok', message: 'credentials present' };
+  if (await credentialsPresent()) {
+    return { step: 'auth', status: 'ok', message: 'credentials present (synced from switchbot CLI config)' };
+  }
   if (ctx.nonInteractive) {
     return { step: 'auth', status: 'failed', message: JSON.stringify({ reason: 'credentials-missing', hint: 'run: switchbot auth login' }) };
   }
+  console.log(chalk.dim('No existing credentials found. Starting auth login...'));
+  console.log(chalk.dim('Tip: credentials configured here are shared with the Gemini extension.'));
   const r = spawnSync(process.execPath, buildAuthLoginArgv(ctx.profile, ctx.configPath), { stdio: 'inherit' });
   if ((r.status ?? 1) !== 0) return { step: 'auth', status: 'failed', message: `auth login exited ${r.status ?? 1}` };
-  return { step: 'auth', status: 'ok', message: 'auth login completed' };
+  return { step: 'auth', status: 'ok', message: 'auth login completed — credentials will be used by Gemini extension' };
 }
 
-const GEMINI_DOCTOR_SECTIONS = ['node', 'path', 'credentials', 'mcp'] as const;
+const GEMINI_DOCTOR_SECTIONS = ['node', 'path', 'credentials', 'mcp', 'policy'] as const;
 
 async function setupStepDoctorVerify(): Promise<StepOutcome> {
   const checks: Check[] = (await runDoctorChecks(GEMINI_DOCTOR_SECTIONS)) ?? [];
@@ -234,7 +238,7 @@ Global flags that also apply to this command:
       const { outcomes, anyFailed, preflightFailed } = await runSetup(skip, ctx);
 
       if (isJsonMode()) {
-        printJson({ ok: !anyFailed, hasWarnings: outcomes.some((o) => o.status === 'warn'), preflightFailed, outcomes });
+        printJson({ ok: !anyFailed, hasWarnings: outcomes.some((o) => o.status === 'warn'), preflightFailed, outcomes, ...(anyFailed ? {} : { extensionHint: 'gemini extensions install @switchbot/gemini-extension' }) });
       } else {
         for (const o of outcomes) {
           const icon = o.status === 'ok' ? chalk.green('✓') : o.status === 'skipped' ? chalk.dim('·') : o.status === 'warn' ? chalk.yellow('⚠') : chalk.red('✗');
@@ -244,6 +248,11 @@ Global flags that also apply to this command:
         if (!anyFailed) {
           console.log(chalk.green('Setup complete.'));
           console.log(chalk.dim('Restart Gemini CLI to load the SwitchBot MCP tools.'));
+          console.log('');
+          console.log(chalk.yellow('Recommended: install the full extension for safety context + slash commands:'));
+          console.log(chalk.dim('  gemini extensions install @switchbot/gemini-extension'));
+          console.log(chalk.dim('  (provides GEMINI.md safety tiers, name resolution, and 23 slash commands)'));
+          console.log('');
           console.log(chalk.dim('After restart, ask: "List my SwitchBot devices."'));
         } else if (preflightFailed) {
           console.log(chalk.red('Preflight failed — install Gemini CLI first (https://github.com/google-gemini/gemini-cli), then re-run.'));

@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 /**
- * Gemini extension release gate — validates the extension package is well-formed.
+ * Gemini extension release gate — static validation (NOT a pack+install test).
+ * Validates: manifest schema, GEMINI.md existence, command file count, MCP server config.
+ * The Gemini extension is installed via `gemini extensions link`, not npm, so no tarball test applies.
  */
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';

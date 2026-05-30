@@ -27,6 +27,13 @@ switchbot gemini setup
 
 This writes the MCP server entry directly to `~/.gemini/settings.json`.
 
+> **Note:** MCP-only mode does not load `GEMINI.md` — the AI model will lack safety-tier
+> awareness and slash commands. For the full experience, use Option A or follow the upgrade
+> hint shown after setup completes.
+
+> **Local development:** If testing an unreleased version, use `npm link` in the repo root
+> instead of `npm install -g`, then run `switchbot gemini setup`.
+
 ## What the extension provides
 
 - 24 MCP tools for device control, scene execution, automation rules, and diagnostics

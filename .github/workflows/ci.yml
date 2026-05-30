@@ -198,6 +198,6 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
-      - run: npm run smoke:gemini-pack-install
+      - run: npm run smoke:gemini-extension-lint
       - name: Workspace tests
         run: cd packages/gemini-extension && node --test
