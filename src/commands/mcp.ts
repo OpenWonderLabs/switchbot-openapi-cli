@@ -456,7 +456,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
     {
       title: 'Send a control command to a device',
       description:
-        'Execute a control command on a device (turnOn, setColor, startClean, unlock, openDoor, createKey, etc.). Destructive commands require confirm:true and are still blocked in the default safety profile; use the reviewed plan workflow unless an explicit dev profile allows direct execution. Commands are validated offline against the device catalog. Use idempotencyKey to safely deduplicate retries within 60 seconds.',
+        'Execute a control command on a device (turnOn, setColor, startClean, unlock, openDoor, createKey, etc.). Safety tiers: mutation (turnOn/Off, setBrightness, setColor) — runs freely; destructive (lock, unlock, openDoor, createKey, deleteKey) — requires confirm:true and is blocked in the default safety profile. Use the reviewed plan workflow for destructive commands unless an explicit dev profile allows direct execution. Commands are validated offline against the device catalog. Use idempotencyKey to safely deduplicate retries within 60 seconds.',
       _meta: { agentSafetyTier: 'action' },
       inputSchema: z.object({
         deviceId: z.string().describe('Device ID from list_devices'),

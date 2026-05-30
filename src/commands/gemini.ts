@@ -101,7 +101,8 @@ function setupStepInstallSwitchbotCli(): StepOutcome {
 function setupStepRegisterMcp(): StepOutcome {
   const r = registerMcp();
   if (!r.ok) return { step: 'register-mcp', status: 'failed', message: r.error };
-  return { step: 'register-mcp', status: 'ok', message: r.alreadyRegistered ? 'already registered' : 'registered switchbot MCP server' };
+  const hint = 'For slash commands + full context: gemini extensions install @switchbot/gemini-extension';
+  return { step: 'register-mcp', status: 'ok', message: r.alreadyRegistered ? `already registered. ${hint}` : `registered switchbot MCP server. ${hint}` };
 }
 
 async function setupStepAuth(ctx: { profile: string; configPath?: string; nonInteractive: boolean }): Promise<StepOutcome> {
