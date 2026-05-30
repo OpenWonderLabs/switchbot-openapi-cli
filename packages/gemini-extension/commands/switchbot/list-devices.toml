@@ -1,0 +1,7 @@
+description = "List all SwitchBot devices with name, type, room, and current on/off or sensor status"
+prompt = """
+List all SwitchBot devices. For each device show: name, type, room, and current status (on/off,
+temperature, humidity, or battery as applicable). Use the list_devices MCP tool to get the
+device inventory, then get_device_status for each physical device. Present the result as a
+concise table.
+"""

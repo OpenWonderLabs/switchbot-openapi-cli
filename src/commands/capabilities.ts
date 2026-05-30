@@ -219,6 +219,8 @@ export const COMMAND_META: Record<string, CommandMeta> = {
   'codex repair': ACTION_LOCAL,
   'codex setup': ACTION_LOCAL,
   'claude-code setup': ACTION_LOCAL,
+  'gemini setup': ACTION_LOCAL,
+  'gemini doctor': READ_LOCAL,
   'uninstall': ACTION_LOCAL,
   'upgrade-check': READ_REMOTE,
   'webhook setup': ACTION_REMOTE,

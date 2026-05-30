@@ -1,0 +1,8 @@
+description = "Turn off a SwitchBot device (pass device name or ID)"
+prompt = """
+Turn off the SwitchBot device the user names. Resolve the name to a deviceId (alias → exact →
+prefix → substring → fuzzy). Check that the device supports the turnOff command via describe_device.
+This is a mutation-tier command — confirm if policy.yaml requires it. Use the send_command MCP
+tool with command "turnOff". Report the result.
+User input: {{args}}
+"""
