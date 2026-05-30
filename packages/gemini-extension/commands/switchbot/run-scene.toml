@@ -1,0 +1,8 @@
+description = "Execute a SwitchBot scene by name"
+prompt = """
+Execute the SwitchBot scene the user names. First call list_scenes to get available scenes,
+then find the one matching the user's input (exact name match, then substring). Confirm with
+the user before executing if multiple scenes match. Use the run_scene MCP tool to execute.
+Report the result and note that scene execution is one-way — there is no automatic undo.
+User input: {{args}}
+"""

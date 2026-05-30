@@ -1,0 +1,7 @@
+description = "Show live status for a specific SwitchBot device (pass device name or ID)"
+prompt = """
+Show the current live status for the SwitchBot device the user names. Resolve the device name
+to a deviceId using the name-resolution algorithm (alias → exact → prefix → substring → fuzzy),
+then call get_device_status. If multiple devices match, list them and ask the user to pick one.
+User input: {{args}}
+"""

@@ -1,0 +1,14 @@
+description = "Query the audit log for recent commands and rule firings"
+prompt = """
+Query the SwitchBot audit log. Use audit_query to find recent entries based on the user's
+request. Default to the last 1 hour if no time range is specified.
+
+If the user asks for a summary or statistics, use audit_stats instead. If they ask about a
+specific rule, filter by rule_name. If they ask about a specific device, filter by device_id.
+
+Supported filters: time range (since, from/to), kinds (command, rule-fire, rule-throttled),
+results (ok, error, dry-run), device_id, rule_name.
+
+Present the results as a concise table or summary.
+User input: {{args}}
+"""

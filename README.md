@@ -109,24 +109,6 @@ switchbot auth login
 
 ---
 
-## OpenClaw integration
-
-The OpenClaw skill is published to npm as [`@switchbot/openclaw-skill`](https://www.npmjs.com/package/@switchbot/openclaw-skill).
-
-```bash
-npm install -g @switchbot/openapi-cli               # required CLI
-openclaw plugins install @switchbot/openclaw-skill  # via OpenClaw plugin manager (recommended)
-# or
-npm install -g @switchbot/openclaw-skill            # via npm
-
-switchbot-openclaw setup   # verify CLI install and credentials
-switchbot auth login       # browser OAuth — saves to OS keychain
-```
-
-`switchbot-openclaw setup` verifies `@switchbot/openapi-cli` is installed at `>=3.7.1` and authenticated. Safe to re-run.
-
----
-
 ## Claude Code integration
 
 **Already configured? Paste into Claude Code chat:**
@@ -163,6 +145,71 @@ The optional skill package [`@switchbot/claude-code-plugin`](https://www.npmjs.c
 ```
 
 **Note:** The root `marketplace.json` in this repo is for Codex CLI Route B (git sparse clone) and points to `packages/codex-plugin/plugins/switchbot`. The `.claude-plugin/marketplace.json` is for Claude Code Plugin Marketplace and points to `packages/claude-code-plugin/plugins/switchbot`.
+
+---
+
+## Gemini CLI integration
+
+The Gemini extension is in [`packages/gemini-extension/`](./packages/gemini-extension/) — it provides 24 MCP tools, a GEMINI.md context file, and 23 slash commands.
+
+**Recommended — paste into Gemini CLI chat:**
+
+```
+Please set up the SwitchBot integration for me by running:
+npx @switchbot/openapi-cli gemini setup
+Then restart Gemini CLI and confirm it's working by listing my devices.
+```
+
+`gemini setup` installs or upgrades the CLI, registers the MCP server in `~/.gemini/settings.json`, and opens a browser login page to save credentials to the OS keychain — no token copy-paste needed.
+
+**Or install the full extension (adds 23 slash commands + GEMINI.md context):**
+
+```bash
+npm install -g @switchbot/openapi-cli
+git clone https://github.com/OpenWonderLabs/switchbot-openapi-cli.git
+gemini extensions link ./switchbot-openapi-cli/packages/gemini-extension
+```
+
+Gemini CLI prompts for `SWITCHBOT_TOKEN` and `SWITCHBOT_SECRET` during install (stored securely in system keychain).
+
+**Or run MCP-only setup directly in your terminal:**
+
+```bash
+npm install -g @switchbot/openapi-cli
+switchbot gemini setup
+```
+
+**Verify:**
+
+```bash
+switchbot gemini doctor
+```
+
+After setup, restart Gemini CLI and ask: "List my SwitchBot devices."
+
+---
+
+## OpenClaw integration
+
+The OpenClaw skill is published to npm as [`@switchbot/openclaw-skill`](https://www.npmjs.com/package/@switchbot/openclaw-skill).
+
+**Paste into OpenClaw chat:**
+
+```
+Please set up the SwitchBot integration for me by running:
+npx @switchbot/openapi-cli install --agent openclaw
+Then confirm it's working by listing my devices.
+```
+
+**Or install directly:**
+
+```bash
+npm install -g @switchbot/openapi-cli
+openclaw plugins install @switchbot/openclaw-skill
+switchbot auth login
+```
+
+`switchbot-openclaw setup` verifies `@switchbot/openapi-cli` is installed at `>=3.7.1` and authenticated. Safe to re-run.
 
 ---
 
@@ -208,6 +255,13 @@ switchbot scenes execute <sceneId>
 switchbot codex setup [--yes] [--dry-run] [--json]   # full bootstrap
 switchbot codex doctor [--quiet] [--json]             # 7-check health summary
 switchbot codex repair [--skip re-auth] [--yes]       # re-register + re-verify
+```
+
+### `gemini`
+
+```bash
+switchbot gemini setup [--yes] [--dry-run] [--json]   # register MCP in ~/.gemini/settings.json
+switchbot gemini doctor [--quiet] [--json]             # check CLI + MCP + credentials health
 ```
 
 ### `auth`

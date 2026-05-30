@@ -10,6 +10,7 @@ import { getPrimedCredentials } from './credentials/prime.js';
 export interface SwitchBotConfig {
   token: string;
   secret: string;
+  accountName?: string;
   label?: string;
   description?: string;
   limits?: { dailyCap?: number };
@@ -21,6 +22,7 @@ export interface ConfigSummary {
   path?: string;
   token?: string;
   secret?: string;
+  accountName?: string;
   label?: string;
   description?: string;
   dailyCap?: number;
@@ -178,6 +180,7 @@ export function saveConfig(token: string, secret: string, extras?: Partial<Switc
   const cfg: SwitchBotConfig = {
     token,
     secret,
+    ...(existing.accountName ? { accountName: existing.accountName } : {}),
     ...(existing.label ? { label: existing.label } : {}),
     ...(existing.description ? { description: existing.description } : {}),
     ...(existing.limits ? { limits: existing.limits } : {}),
@@ -186,8 +189,10 @@ export function saveConfig(token: string, secret: string, extras?: Partial<Switc
   if (extras) {
     const label = sanitizeOptionalString(extras.label);
     const description = sanitizeOptionalString(extras.description);
+    const accountName = sanitizeOptionalString(extras.accountName);
     if (label !== undefined) cfg.label = label;
     if (description !== undefined) cfg.description = description;
+    if (accountName !== undefined) cfg.accountName = accountName;
     if (extras.limits) cfg.limits = { ...(cfg.limits ?? {}), ...extras.limits };
     if (extras.defaults) cfg.defaults = { ...(cfg.defaults ?? {}), ...extras.defaults };
   }
@@ -242,6 +247,7 @@ export function showConfig(): void {
     return;
   }
   console.log(`Credential source: ${summary.path}`);
+  if (summary.accountName) console.log(`account: ${summary.accountName}`);
   if (summary.label) console.log(`label : ${summary.label}`);
   if (summary.description) console.log(`desc  : ${summary.description}`);
   console.log(`token : ${summary.token ?? ''}`);
@@ -273,6 +279,7 @@ export function getConfigSummary(): ConfigSummary {
     return {
       source: 'file',
       path: file,
+      accountName: cfg.accountName,
       label: cfg.label,
       description: cfg.description,
       token: maskCredential(cfg.token),

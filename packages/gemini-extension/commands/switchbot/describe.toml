@@ -1,0 +1,9 @@
+description = "Describe a device's capabilities, supported commands, and suggested actions"
+prompt = """
+Describe the SwitchBot device the user names in detail. Resolve the device name to a deviceId
+(alias → exact → prefix → substring → fuzzy). Call the describe_device MCP tool with live:true
+to get: device metadata, catalog entry, supported commands with parameters, safety tiers, and
+current live status values. Present the information clearly, highlighting what actions can be
+taken with this specific device.
+User input: {{args}}
+"""

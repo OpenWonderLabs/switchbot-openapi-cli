@@ -2,9 +2,8 @@ import { existsSync } from 'fs';
 import open from 'open';
 import { generateState } from './csrf.js';
 import { bindCallbackServer } from './oauth-callback.js';
-import { exchangeCodeForCredentials } from './token-exchange.js';
+import { exchangeCodeForCredentials, type ExchangeResult } from './token-exchange.js';
 import { SP_OAUTH_LOGIN_URL, OAUTH_CLIENT_ID, OAUTH_SCOPE, LOGIN_TIMEOUT_MS } from './constants.js';
-import type { CredentialBundle } from '../credentials/keychain.js';
 
 export interface BrowserLoginOptions {
   /** When true, print the login URL instead of opening the browser. */
@@ -23,7 +22,7 @@ export interface BrowserLoginOptions {
  *   3. User logs in (email/password or social — all handled by the hosted page).
  *   4. Hosted page redirects back with code → exchange for credentials.
  */
-export async function browserLogin(options: BrowserLoginOptions = {}): Promise<CredentialBundle> {
+export async function browserLogin(options: BrowserLoginOptions = {}): Promise<ExchangeResult> {
   const {
     noOpen = false,
     timeoutMs = LOGIN_TIMEOUT_MS,

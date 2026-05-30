@@ -36,6 +36,10 @@ function decryptField(hexCipher: string): string {
 
 // ── Main export ───────────────────────────────────────────────────────────────
 
+export interface ExchangeResult extends CredentialBundle {
+  accountName?: string;
+}
+
 /**
  * Exchange an OAuth authorization code for SwitchBot v1.1 credentials.
  *
@@ -51,7 +55,7 @@ function decryptField(hexCipher: string): string {
 export async function exchangeCodeForCredentials(
   code: string,
   redirectUri: string,
-): Promise<CredentialBundle> {
+): Promise<ExchangeResult> {
 
   // ── Step 1: code → access_token ──────────────────────────────────────────
   let accessToken: string;
@@ -92,10 +96,11 @@ export async function exchangeCodeForCredentials(
     throw err;
   }
 
-  // ── Step 2: access_token → botRegion ────────────────────────────────────
+  // ── Step 2: access_token → botRegion + accountName ─────────────────────
   let botRegion = DEFAULT_BOT_REGION;
+  let accountName: string | undefined;
   try {
-    const resp = await axios.post<{ statusCode?: number; body?: { botRegion?: string } }>(
+    const resp = await axios.post<{ statusCode?: number; body?: { botRegion?: string; nickname?: string; email?: string; username?: string } }>(
       `${ACCOUNT_API_BASE}${ENDPOINTS.userInfo}`,
       {},
       {
@@ -105,6 +110,7 @@ export async function exchangeCodeForCredentials(
     );
     const raw = resp.data?.body?.botRegion ?? '';
     if (KNOWN_BOT_REGIONS.has(raw)) botRegion = raw;
+    accountName = resp.data?.body?.nickname || resp.data?.body?.email || resp.data?.body?.username || undefined;
   } catch {
     // Non-fatal: fall back to default region
   }
@@ -132,7 +138,7 @@ export async function exchangeCodeForCredentials(
       );
     }
 
-    return { token: decryptField(encToken), secret: decryptField(encSecret) };
+    return { token: decryptField(encToken), secret: decryptField(encSecret), accountName };
   } catch (err) {
     if (axios.isAxiosError(err)) {
       const status = err.response?.status;

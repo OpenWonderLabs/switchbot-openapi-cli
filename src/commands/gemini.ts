@@ -1,0 +1,277 @@
+import { Command } from 'commander';
+import chalk from 'chalk';
+import { spawnSync } from 'node:child_process';
+import { runDoctorChecks } from './doctor.js';
+import {
+  checkGeminiCli,
+  checkMcpRegistered,
+  registerMcp,
+  type Check,
+} from '../install/gemini-checks.js';
+import { isJsonMode, printJson } from '../utils/output.js';
+import { getActiveProfile } from '../lib/request-context.js';
+import { getConfigPath } from '../utils/flags.js';
+
+const SWITCHBOT_CLI_PACKAGE = '@switchbot/openapi-cli';
+
+async function credentialsPresent(): Promise<boolean> {
+  try {
+    const { tryLoadConfig } = await import('../config.js');
+    const cfg = tryLoadConfig();
+    return Boolean(cfg?.token && cfg?.secret);
+  } catch {
+    return false;
+  }
+}
+
+function buildAuthLoginArgv(profile: string, configPath?: string): string[] {
+  const cliPath = process.argv[1] ?? '';
+  return [
+    cliPath,
+    ...(profile !== 'default' ? ['--profile', profile] : []),
+    ...(configPath ? ['--config', configPath] : []),
+    'auth', 'login',
+  ];
+}
+
+interface StepOutcome {
+  step: string;
+  status: 'ok' | 'skipped' | 'failed' | 'warn';
+  message?: string;
+}
+
+interface StepDef {
+  name: string;
+  description: string;
+  skippable: boolean;
+}
+
+const SETUP_STEPS: readonly StepDef[] = [
+  { name: 'check-gemini-cli',      description: 'Verify gemini CLI on PATH',                                    skippable: false },
+  { name: 'check-network',         description: 'Probe npm registry',                                           skippable: true  },
+  { name: 'install-switchbot-cli', description: 'Install @switchbot/openapi-cli if missing or outdated',        skippable: true  },
+  { name: 'register-mcp',          description: 'Write switchbot MCP entry to ~/.gemini/settings.json',         skippable: false },
+  { name: 'auth',                  description: 'Verify credentials; spawn auth login if missing',              skippable: true  },
+  { name: 'doctor-verify',         description: 'Run base doctor checks and report health',                     skippable: false },
+];
+
+function validateSkip(skip: Set<string>): { ok: true } | { ok: false; offending: string } {
+  const skippable = new Set(SETUP_STEPS.filter((s) => s.skippable).map((s) => s.name));
+  for (const name of skip) {
+    if (!skippable.has(name)) return { ok: false, offending: name };
+  }
+  return { ok: true };
+}
+
+function setupStepCheckGeminiCli(): StepOutcome {
+  const c = checkGeminiCli();
+  if (c.status === 'fail') {
+    const msg = typeof c.detail === 'string' ? c.detail : (c.detail as { message?: string }).message ?? JSON.stringify(c.detail);
+    return { step: 'check-gemini-cli', status: 'failed', message: msg };
+  }
+  const detail = c.detail as { version?: string };
+  return { step: 'check-gemini-cli', status: 'ok', message: `gemini ${detail.version ?? ''}`.trim() };
+}
+
+function setupStepCheckNetwork(): StepOutcome {
+  const r = spawnSync('npm', ['ping'], { encoding: 'utf-8', shell: process.platform === 'win32', timeout: 5_000 });
+  if ((r.status ?? 1) === 0) return { step: 'check-network', status: 'ok', message: 'npm registry reachable' };
+  return { step: 'check-network', status: 'warn', message: 'npm registry unreachable — install-switchbot-cli will be skipped' };
+}
+
+function setupStepInstallSwitchbotCli(): StepOutcome {
+  const list = spawnSync('npm', ['list', '-g', '--json', '--depth=0', SWITCHBOT_CLI_PACKAGE], {
+    encoding: 'utf-8', shell: process.platform === 'win32', timeout: 15_000,
+  });
+  let installed: string | null = null;
+  try {
+    const parsed = JSON.parse(list.stdout ?? '{}') as { dependencies?: Record<string, { version?: string }> };
+    installed = parsed.dependencies?.[SWITCHBOT_CLI_PACKAGE]?.version ?? null;
+  } catch { /* not installed */ }
+  if (installed !== null) return { step: 'install-switchbot-cli', status: 'ok', message: `already installed (${installed})` };
+  const inst = spawnSync('npm', ['install', '-g', `${SWITCHBOT_CLI_PACKAGE}@latest`], {
+    encoding: 'utf-8', shell: process.platform === 'win32', timeout: 120_000,
+  });
+  if ((inst.status ?? 1) !== 0) {
+    return { step: 'install-switchbot-cli', status: 'failed', message: `npm install -g failed (exit ${inst.status ?? 1}): ${inst.stderr ?? ''}` };
+  }
+  return { step: 'install-switchbot-cli', status: 'ok', message: `installed ${SWITCHBOT_CLI_PACKAGE}` };
+}
+
+function setupStepRegisterMcp(): StepOutcome {
+  const r = registerMcp();
+  if (!r.ok) return { step: 'register-mcp', status: 'failed', message: r.error };
+  const hint = 'For slash commands + full context: gemini extensions install @switchbot/gemini-extension';
+  return { step: 'register-mcp', status: 'ok', message: r.alreadyRegistered ? `already registered. ${hint}` : `registered switchbot MCP server. ${hint}` };
+}
+
+async function setupStepAuth(ctx: { profile: string; configPath?: string; nonInteractive: boolean }): Promise<StepOutcome> {
+  if (await credentialsPresent()) {
+    return { step: 'auth', status: 'ok', message: 'credentials present (synced from switchbot CLI config)' };
+  }
+  if (ctx.nonInteractive) {
+    return { step: 'auth', status: 'failed', message: JSON.stringify({ reason: 'credentials-missing', hint: 'run: switchbot auth login' }) };
+  }
+  console.log(chalk.dim('No existing credentials found. Starting auth login...'));
+  console.log(chalk.dim('Tip: credentials configured here are shared with the Gemini extension.'));
+  const r = spawnSync(process.execPath, buildAuthLoginArgv(ctx.profile, ctx.configPath), { stdio: 'inherit' });
+  if ((r.status ?? 1) !== 0) return { step: 'auth', status: 'failed', message: `auth login exited ${r.status ?? 1}` };
+  return { step: 'auth', status: 'ok', message: 'auth login completed — credentials will be used by Gemini extension' };
+}
+
+const GEMINI_DOCTOR_SECTIONS = ['node', 'path', 'credentials', 'mcp', 'policy'] as const;
+
+async function setupStepDoctorVerify(): Promise<StepOutcome> {
+  const checks: Check[] = (await runDoctorChecks(GEMINI_DOCTOR_SECTIONS)) ?? [];
+  const mcpCheck = checkMcpRegistered();
+  const all = [...checks, mcpCheck];
+  const summary = { ok: all.filter((c) => c.status === 'ok').length, warn: all.filter((c) => c.status === 'warn').length, fail: all.filter((c) => c.status === 'fail').length };
+  return { step: 'doctor-verify', status: summary.fail > 0 ? 'failed' : 'ok', message: `${summary.ok} ok, ${summary.warn} warn, ${summary.fail} fail` };
+}
+
+export async function isGeminiAlreadyConfigured(): Promise<boolean> {
+  if (checkGeminiCli().status !== 'ok') return false;
+  if (checkMcpRegistered().status !== 'ok') return false;
+  if (!await credentialsPresent()) return false;
+  return true;
+}
+
+async function runSetup(
+  skip: Set<string>,
+  ctx: { profile: string; configPath?: string; nonInteractive: boolean },
+): Promise<{ outcomes: StepOutcome[]; anyFailed: boolean; preflightFailed: boolean }> {
+  const outcomes: StepOutcome[] = [];
+  let preflightFailed = false;
+  let networkOffline = false;
+  for (const step of SETUP_STEPS) {
+    if (step.name === 'install-switchbot-cli' && networkOffline && !skip.has(step.name)) {
+      outcomes.push({ step: step.name, status: 'skipped', message: 'skipped: npm registry unreachable' });
+      continue;
+    }
+    if (skip.has(step.name)) { outcomes.push({ step: step.name, status: 'skipped' }); continue; }
+    let outcome: StepOutcome;
+    if      (step.name === 'check-gemini-cli')      outcome = setupStepCheckGeminiCli();
+    else if (step.name === 'check-network')          outcome = setupStepCheckNetwork();
+    else if (step.name === 'install-switchbot-cli')  outcome = setupStepInstallSwitchbotCli();
+    else if (step.name === 'register-mcp')           outcome = setupStepRegisterMcp();
+    else if (step.name === 'auth')                   outcome = await setupStepAuth(ctx);
+    else                                             outcome = await setupStepDoctorVerify();
+    outcomes.push(outcome);
+    if (step.name === 'check-gemini-cli' && outcome.status === 'failed') { preflightFailed = true; break; }
+    if (step.name === 'check-network' && outcome.status === 'warn') networkOffline = true;
+  }
+  return { outcomes, anyFailed: outcomes.some((o) => o.status === 'failed'), preflightFailed };
+}
+
+function registerGeminiDoctorSubcommand(gemini: Command): void {
+  gemini
+    .command('doctor')
+    .description('Check Gemini integration health (CLI, MCP registration, credentials)')
+    .option('-q, --quiet', 'Only show warn/fail checks')
+    .action(async (opts: { quiet?: boolean }) => {
+      const base = (await runDoctorChecks(GEMINI_DOCTOR_SECTIONS)) ?? [];
+      const mcpCheck = checkMcpRegistered();
+      const all = [...base, mcpCheck];
+      const summary = { ok: all.filter((c) => c.status === 'ok').length, warn: all.filter((c) => c.status === 'warn').length, fail: all.filter((c) => c.status === 'fail').length };
+      const hasFail = summary.fail > 0;
+      if (isJsonMode()) {
+        printJson({ ok: !hasFail, overall: hasFail ? 'fail' : summary.warn > 0 ? 'warn' : 'ok', summary, checks: all });
+      } else {
+        for (const c of all) {
+          if (opts.quiet && c.status === 'ok') continue;
+          const icon = c.status === 'ok' ? chalk.green('✓') : c.status === 'warn' ? chalk.yellow('⚠') : chalk.red('✗');
+          const detail = typeof c.detail === 'string' ? c.detail : JSON.stringify(c.detail);
+          console.log(`${icon} ${c.name.padEnd(24)} ${detail}`);
+        }
+        console.log('');
+        console.log(`${summary.ok} ok, ${summary.warn} warn, ${summary.fail} fail`);
+        if (hasFail || summary.warn > 0) console.log(chalk.dim('Run: switchbot gemini setup'));
+      }
+      process.exit(hasFail ? 1 : 0);
+    });
+}
+
+function registerGeminiSetupSubcommand(gemini: Command): void {
+  gemini
+    .command('setup')
+    .description('Bootstrap the Gemini CLI integration: install CLI if missing, register MCP server, auth, verify')
+    .option('--skip <names>', 'Comma-separated step names to skip (skippable: "check-network", "install-switchbot-cli", "auth")')
+    .option('--yes', 'Non-interactive mode: do not spawn auth login, fail fast if credentials missing')
+    .addHelpText('after', `
+Global flags that also apply to this command:
+  --dry-run    Print step list without executing any changes
+  --json       Emit machine-readable JSON output
+`)
+    .action(async (opts: { skip?: string; yes?: boolean }, command: Command) => {
+      const skip = new Set((opts.skip ?? '').split(',').map((s) => s.trim()).filter(Boolean));
+      const skipCheck = validateSkip(skip);
+      if (!skipCheck.ok) { console.error(`invalid --skip: '${skipCheck.offending}' is not skippable`); process.exit(2); return; }
+
+      const globalOpts = command.parent?.parent?.opts() ?? {};
+      const dryRun = Boolean(globalOpts.dryRun);
+      const profile = getActiveProfile() ?? 'default';
+      const configPath = getConfigPath();
+
+      if (dryRun) {
+        if (isJsonMode()) {
+          printJson({ dryRun: true, steps: SETUP_STEPS.map((s) => ({ name: s.name, description: s.description, skippable: s.skippable, willSkip: skip.has(s.name) })) });
+        } else {
+          console.log(chalk.bold('switchbot gemini setup — dry run'));
+          console.log('');
+          for (const s of SETUP_STEPS) {
+            console.log(`${skip.has(s.name) ? chalk.dim('  · (skip)') : '  •'} ${s.name.padEnd(24)} ${s.description}`);
+          }
+          console.log('');
+          console.log(chalk.dim('No changes made. Re-run without --dry-run to apply.'));
+        }
+        process.exit(0); return;
+      }
+
+      if (skip.size === 0 && await isGeminiAlreadyConfigured()) {
+        if (isJsonMode()) printJson({ ok: true, alreadyConfigured: true, outcomes: [] });
+        else { console.log(chalk.green('Already configured, nothing to do.')); console.log(chalk.dim('Run: switchbot gemini doctor  — to verify health')); }
+        process.exit(0); return;
+      }
+
+      if (!isJsonMode()) { console.log(chalk.bold('Setting up Gemini CLI integration...')); console.log(''); }
+
+      const ctx = { profile, configPath, nonInteractive: Boolean(opts.yes) };
+      const { outcomes, anyFailed, preflightFailed } = await runSetup(skip, ctx);
+
+      if (isJsonMode()) {
+        printJson({ ok: !anyFailed, hasWarnings: outcomes.some((o) => o.status === 'warn'), preflightFailed, outcomes, ...(anyFailed ? {} : { extensionHint: 'gemini extensions install @switchbot/gemini-extension' }) });
+      } else {
+        for (const o of outcomes) {
+          const icon = o.status === 'ok' ? chalk.green('✓') : o.status === 'skipped' ? chalk.dim('·') : o.status === 'warn' ? chalk.yellow('⚠') : chalk.red('✗');
+          console.log(`${icon} ${o.step.padEnd(24)} ${o.message ?? ''}`);
+        }
+        console.log('');
+        if (!anyFailed) {
+          console.log(chalk.green('Setup complete.'));
+          console.log(chalk.dim('Restart Gemini CLI to load the SwitchBot MCP tools.'));
+          console.log('');
+          console.log(chalk.yellow('Recommended: install the full extension for safety context + slash commands:'));
+          console.log(chalk.dim('  gemini extensions install @switchbot/gemini-extension'));
+          console.log(chalk.dim('  (provides GEMINI.md safety tiers, name resolution, and 23 slash commands)'));
+          console.log('');
+          console.log(chalk.dim('After restart, ask: "List my SwitchBot devices."'));
+        } else if (preflightFailed) {
+          console.log(chalk.red('Preflight failed — install Gemini CLI first (https://github.com/google-gemini/gemini-cli), then re-run.'));
+        } else {
+          console.log(chalk.yellow('Setup finished with failures.'));
+          console.log(chalk.dim('Run: switchbot gemini setup  — to retry'));
+        }
+      }
+      if (preflightFailed) process.exit(2);
+      if (anyFailed) process.exit(1);
+      process.exit(0);
+    });
+}
+
+export function registerGeminiCommand(program: Command): void {
+  const gemini = program
+    .command('gemini')
+    .description('Gemini CLI integration management (setup, health)');
+  registerGeminiDoctorSubcommand(gemini);
+  registerGeminiSetupSubcommand(gemini);
+}

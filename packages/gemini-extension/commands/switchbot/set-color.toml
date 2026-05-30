@@ -1,0 +1,14 @@
+description = "Set color of a SwitchBot light (pass device name and color)"
+prompt = """
+Set the color of the SwitchBot light the user names. Resolve the device name to a deviceId
+(alias → exact → prefix → substring → fuzzy). Verify the device supports "setColor" via
+describe_device (Color Bulb, LED Strip Light, etc.). This is a mutation-tier command.
+
+Color format is R:G:B (0-255 each). Convert natural language colors:
+- "red" → "255:0:0", "green" → "0:255:0", "blue" → "0:0:255"
+- "warm white" → "255:200:150", "cool white" → "200:220:255"
+- "purple" → "128:0:128", "orange" → "255:165:0", "pink" → "255:192:203"
+
+Use the send_command MCP tool with command "setColor" and the R:G:B parameter. Report the result.
+User input: {{args}}
+"""

@@ -1,0 +1,9 @@
+description = "Close a SwitchBot Curtain, Blind Tilt, or Roller Shade"
+prompt = """
+Close the SwitchBot Curtain, Blind Tilt, or Roller Shade the user names. Resolve the name to a
+deviceId (alias → exact → prefix → substring → fuzzy). Verify the device supports "close" or
+"setPosition" via describe_device. This is a mutation-tier command. Use the send_command MCP
+tool — prefer setPosition with parameter "100" (fully closed) if supported, otherwise use
+command "close". Report the result.
+User input: {{args}}
+"""

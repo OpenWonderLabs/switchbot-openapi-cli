@@ -1,0 +1,30 @@
+{
+  "name": "switchbot",
+  "version": "0.1.0",
+  "description": "Control SwitchBot smart-home devices from Gemini CLI via MCP (24 tools, policy-based safety gates)",
+  "contextFileName": "GEMINI.md",
+  "mcpServers": {
+    "switchbot": {
+      "command": "switchbot",
+      "args": ["mcp", "serve", "--tools", "all"],
+      "env": {
+        "SWITCHBOT_TOKEN": "${SWITCHBOT_TOKEN}",
+        "SWITCHBOT_SECRET": "${SWITCHBOT_SECRET}"
+      }
+    }
+  },
+  "settings": [
+    {
+      "name": "SwitchBot Token",
+      "description": "Your SwitchBot Open API token (required). Get it from the SwitchBot app: Profile → Preferences → Developer Options → Open API. If you previously ran `switchbot auth login`, the token is already stored in ~/.switchbot/config.json — you can copy it from there.",
+      "envVar": "SWITCHBOT_TOKEN",
+      "sensitive": true
+    },
+    {
+      "name": "SwitchBot Secret",
+      "description": "Your SwitchBot Open API secret (required, shown alongside the token in Developer Options). Same location as above — also stored in ~/.switchbot/config.json if you used `switchbot auth login`.",
+      "envVar": "SWITCHBOT_SECRET",
+      "sensitive": true
+    }
+  ]
+}
