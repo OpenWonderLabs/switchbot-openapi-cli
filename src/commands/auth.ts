@@ -31,6 +31,7 @@ import {
   selectCredentialStore,
 } from '../credentials/keychain.js';
 import { browserLogin } from '../auth/browser-login.js';
+import type { ExchangeResult } from '../auth/token-exchange.js';
 import { verifyCredentials } from '../auth/verify.js';
 
 function activeProfile(): string {
@@ -393,7 +394,7 @@ export function registerAuthCommand(program: Command): void {
       const profile = activeProfile();
       const timeoutMs = Math.max(10, parseInt(options.timeout, 10) || 120) * 1000;
 
-      let creds: CredentialBundle;
+      let creds: ExchangeResult;
       try {
         creds = await browserLogin({
           noOpen: !options.open,
@@ -423,7 +424,7 @@ export function registerAuthCommand(program: Command): void {
       let backendName: string;
       if (getConfigPath()) {
         try {
-          saveConfig(creds.token, creds.secret);
+          saveConfig(creds.token, creds.secret, creds.accountName ? { accountName: creds.accountName } : undefined);
         } catch (err) {
           exitWithError({
             code: 1,
@@ -460,12 +461,14 @@ export function registerAuthCommand(program: Command): void {
           backend: backendName,
           loggedIn: true,
           verified: true,
+          accountName: creds.accountName,
           token: { length: creds.token.length, masked: maskValue(creds.token) },
         });
         return;
       }
 
       console.log(`✓ Credentials verified and saved to backend "${backendName}" for profile "${profile}".`);
+      if (creds.accountName) console.log(`account: ${creds.accountName}`);
       console.log(`token : ${maskValue(creds.token)} (${creds.token.length} chars)`);
       console.log(`secret: ${maskValue(creds.secret)} (${creds.secret.length} chars)`);
     });
