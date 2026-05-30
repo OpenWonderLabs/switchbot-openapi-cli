@@ -9,6 +9,24 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [3.7.9]
+
+### Added
+
+- **Gemini CLI extension** — new `@switchbot/gemini-extension` package (v0.1.0) wires Gemini CLI to the SwitchBot MCP server via the native Extension system. Includes 23 slash commands, GEMINI.md safety context, and credential injection via `env` mapping.
+- **`switchbot gemini setup`** — 6-step bootstrap pipeline: verify Gemini CLI, install switchbot CLI, register MCP server, authenticate, run doctor. Supports `--yes`, `--skip`, `--dry-run`, `--json`.
+- **`switchbot gemini doctor`** — health check covering node, path, credentials, MCP registration, and policy validation.
+- **CI `gemini-release-gates` job** — cross-platform (Ubuntu + Windows) static validation of extension manifest and command files.
+
+### Fixed
+
+- **Credential prime cache TTL** — added 5 s TTL to primed credentials so MCP hot-reload picks up rotated tokens without restart.
+- **OAuth account name** — `config show` now displays the account name from OAuth userinfo endpoint.
+
+### Changed
+
+- **`send_command` tool description** — explicitly lists mutation vs destructive commands so AI agents respect safety tiers even without GEMINI.md context.
+
 ## [3.7.8]
 
 ### Fixed
