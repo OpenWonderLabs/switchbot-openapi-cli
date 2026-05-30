@@ -4,4 +4,5 @@ Run a health check on the SwitchBot integration. Execute: switchbot doctor --jso
 Parse the output and report: CLI version, credential status, MCP server status, and quota usage.
 Flag any failures with remediation hints. If the CLI is not found, instruct the user to run:
   npm install -g @switchbot/openapi-cli
+User input: {{args}}
 """

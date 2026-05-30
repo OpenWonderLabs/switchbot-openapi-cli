@@ -66,13 +66,15 @@ This writes the MCP server entry directly to `~/.gemini/settings.json`.
 
 - Node.js ≥ 18
 - `@switchbot/openapi-cli` ≥ 3.7.1 (global install provides the `switchbot` binary)
-- Gemini CLI (https://github.com/google-gemini/gemini-cli)
+- Gemini CLI ≥ 0.2.x (https://github.com/google-gemini/gemini-cli) — required for `settings` / keychain support
 
 ## Verify
 
 ```bash
-switchbot --version       # must be ≥ 3.7.1
-switchbot doctor          # credentials + MCP health
+switchbot --version              # must be ≥ 3.7.1
+switchbot doctor                 # credentials + MCP health
+gemini extensions list           # confirm "switchbot" appears
+switchbot gemini doctor          # full integration health check
 ```
 
 Restart Gemini CLI after install, then ask: **"List my SwitchBot devices."**

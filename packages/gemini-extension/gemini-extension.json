@@ -6,7 +6,11 @@
   "mcpServers": {
     "switchbot": {
       "command": "switchbot",
-      "args": ["mcp", "serve", "--tools", "all"]
+      "args": ["mcp", "serve", "--tools", "all"],
+      "env": {
+        "SWITCHBOT_TOKEN": "${SWITCHBOT_TOKEN}",
+        "SWITCHBOT_SECRET": "${SWITCHBOT_SECRET}"
+      }
     }
   },
   "settings": [

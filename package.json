@@ -56,6 +56,7 @@
     "smoke:codex-temp-prefix-route-a": "node scripts/smoke-codex-temp-prefix-route-a.mjs",
     "smoke:codex-route-b-live": "node scripts/smoke-codex-route-b-live.mjs",
     "smoke:claude-code-pack-install": "node scripts/smoke-claude-code-pack-install.mjs",
+    "smoke:gemini-pack-install": "node scripts/smoke-gemini-pack-install.mjs",
     "test": "vitest run",
     "test:workspaces": "npm test --workspaces --if-present",
     "test:all": "npm test && npm run test:workspaces",

@@ -50,6 +50,14 @@ switchbot policy validate --live --json
 
 If no policy file exists, proceed with default safety tiers and tell the user they can create one with `switchbot policy new`.
 
+On first use (or if the user reports trouble), verify integration health:
+
+```bash
+switchbot gemini doctor --json
+```
+
+Report any failing checks to the user with remediation steps.
+
 ---
 
 ## Resolving a name to a device

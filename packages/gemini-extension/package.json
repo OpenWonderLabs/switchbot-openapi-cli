@@ -17,9 +17,6 @@
   "peerDependencies": {
     "@switchbot/openapi-cli": ">=3.7.1"
   },
-  "peerDependenciesMeta": {
-    "@switchbot/openapi-cli": { "optional": true }
-  },
   "publishConfig": { "access": "public" },
   "scripts": {
     "test": "node --test"

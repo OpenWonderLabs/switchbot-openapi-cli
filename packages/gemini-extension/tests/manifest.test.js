@@ -37,6 +37,13 @@ describe('gemini-extension.json manifest', () => {
     }
   });
 
+  it('mcpServers.switchbot.env maps credentials from settings', () => {
+    const env = manifest.mcpServers?.switchbot?.env;
+    assert.ok(env, 'mcpServers.switchbot.env must be defined');
+    assert.equal(env.SWITCHBOT_TOKEN, '${SWITCHBOT_TOKEN}');
+    assert.equal(env.SWITCHBOT_SECRET, '${SWITCHBOT_SECRET}');
+  });
+
   it('settings declares SWITCHBOT_TOKEN and SWITCHBOT_SECRET as sensitive', () => {
     assert.ok(Array.isArray(manifest.settings), 'settings must be an array');
     const byEnvVar = Object.fromEntries(manifest.settings.map((s) => [s.envVar, s]));
