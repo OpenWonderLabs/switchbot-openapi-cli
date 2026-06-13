@@ -82,6 +82,17 @@ async function promptSecret(question: string): Promise<string> {
   });
 }
 
+function onCredentialChange(): void {
+  try {
+    clearCache();
+    clearStatusCache();
+  } catch {
+    // Non-fatal on Windows EBUSY; in-memory is already invalidated.
+  }
+  clearPrimedCredentials();
+  idempotencyCache.clear();
+}
+
 function readStdinFile(filePath: string): CredentialBundle {
   if (!fs.existsSync(filePath)) {
     exitWithError({
@@ -244,6 +255,7 @@ export function registerAuthCommand(program: Command): void {
         });
       }
 
+      onCredentialChange();
       if (isJsonMode()) {
         printJson({ profile, backend: store.name, written: true });
         return;
@@ -281,6 +293,7 @@ export function registerAuthCommand(program: Command): void {
         });
       }
 
+      onCredentialChange();
       if (isJsonMode()) {
         printJson({ profile, backend: store.name, deleted: true });
         return;
@@ -361,6 +374,7 @@ export function registerAuthCommand(program: Command): void {
         }
       }
 
+      onCredentialChange();
       if (isJsonMode()) {
         printJson({
           profile,
@@ -454,14 +468,7 @@ export function registerAuthCommand(program: Command): void {
       // Credentials changed — clear device/status cache so the next list
       // fetches fresh data for the new account instead of returning stale
       // results from the previous account's cache.
-      try {
-        clearCache();
-        clearStatusCache();
-      } catch {
-        // Non-fatal on Windows EBUSY; in-memory is already invalidated.
-      }
-      clearPrimedCredentials();
-      idempotencyCache.clear();
+      onCredentialChange();
 
       if (isJsonMode()) {
         printJson({
