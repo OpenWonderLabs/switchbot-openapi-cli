@@ -61,8 +61,12 @@ Examples:
           folderID: options.folder !== undefined ? Number(options.folder) : undefined,
         }).filter(([, v]) => v !== undefined),
       );
-      const data = await listRecordings(params);
-      printJson(data);
+      try {
+        const data = await listRecordings(params);
+        printJson(data);
+      } catch (err) {
+        handleError(err);
+      }
     });
 
   mindclip
@@ -143,8 +147,12 @@ Examples:
           category: options.category !== undefined ? Number(options.category) : undefined,
         }).filter(([, v]) => v !== undefined),
       );
-      const data = await listTodos(params);
-      printJson(data);
+      try {
+        const data = await listTodos(params);
+        printJson(data);
+      } catch (err) {
+        handleError(err);
+      }
     });
 
   mindclip
@@ -159,8 +167,12 @@ Examples:
   switchbot mindclip daily --date 2026-06-10`,
     )
     .action(async (options) => {
-      const data = await getDailyRecall(options.date);
-      printJson(data);
+      try {
+        const data = await getDailyRecall(options.date);
+        printJson(data);
+      } catch (err) {
+        handleError(err);
+      }
     });
 
   mindclip
@@ -175,8 +187,12 @@ Examples:
   switchbot mindclip weekly --week 2026-W23`,
     )
     .action(async (options) => {
-      const data = await getWeeklySummary(options.week);
-      printJson(data);
+      try {
+        const data = await getWeeklySummary(options.week);
+        printJson(data);
+      } catch (err) {
+        handleError(err);
+      }
     });
 
   mindclip
@@ -191,7 +207,11 @@ Examples:
   switchbot mindclip urgent-todos --date 2026-06-10`,
     )
     .action(async (options) => {
-      const data = await getUrgentTodos(options.date);
-      printJson(data);
+      try {
+        const data = await getUrgentTodos(options.date);
+        printJson(data);
+      } catch (err) {
+        handleError(err);
+      }
     });
 }
