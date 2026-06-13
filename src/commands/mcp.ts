@@ -575,8 +575,12 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
         'No API call — zero quota cost.',
       _meta: { agentSafetyTier: 'read', deprecated: true, replacement: 'device_history' },
       inputSchema: z.object({
-        deviceId: z.string().optional(),
-        limit: z.number().int().min(1).max(100).optional(),
+        deviceId: z.string().optional().describe(
+          'Device MAC address. Omit to list all devices with stored history.',
+        ),
+        limit: z.number().int().min(1).max(100).optional().describe(
+          'Max history entries to return (default 20, max 100).',
+        ),
       }).strict(),
       outputSchema: {
         deviceId: z.string().optional(),
@@ -615,12 +619,12 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
         'Return time-ranged records (since OR from/to) with optional field projection and limit. No API call.',
       _meta: { agentSafetyTier: 'read', deprecated: true, replacement: 'device_history' },
       inputSchema: z.object({
-        deviceId: z.string(),
-        since: z.string().optional(),
-        from: z.string().optional(),
-        to: z.string().optional(),
-        fields: z.array(z.string()).optional(),
-        limit: z.number().int().min(1).max(10000).optional(),
+        deviceId: z.string().describe('Device MAC address (required).'),
+        since: z.string().optional().describe('Relative window ending now, e.g. "30s","15m","1h","7d". Mutually exclusive with from/to.'),
+        from: z.string().optional().describe('Range start (ISO-8601). Mutually exclusive with since.'),
+        to: z.string().optional().describe('Range end (ISO-8601). Used together with from.'),
+        fields: z.array(z.string()).optional().describe('Project these payload fields; omit for full payload.'),
+        limit: z.number().int().min(1).max(10000).optional().describe('Max records to return (default 1000, max 10000).'),
       }).strict(),
       outputSchema: {
         deviceId: z.string(),
@@ -647,14 +651,19 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
         'Return bucketed statistics (count/min/max/avg/sum/p50/p95) over numeric metrics. No API call.',
       _meta: { agentSafetyTier: 'read', deprecated: true, replacement: 'device_history' },
       inputSchema: z.object({
-        deviceId: z.string(),
-        since: z.string().optional(),
-        from: z.string().optional(),
-        to: z.string().optional(),
-        metrics: z.array(z.string().min(1)),
-        aggs: z.array(z.enum(ALL_AGG_FNS as unknown as [AggFn, ...AggFn[]])).optional(),
-        bucket: z.string().optional(),
-        maxBucketSamples: z.number().int().positive().max(MAX_SAMPLE_CAP).optional(),
+        deviceId: z.string().describe('Device MAC address (required).'),
+        since: z.string().optional().describe('Relative window ending now, e.g. "30s","15m","1h","7d". Mutually exclusive with from/to.'),
+        from: z.string().optional().describe('Range start (ISO-8601). Mutually exclusive with since.'),
+        to: z.string().optional().describe('Range end (ISO-8601). Used together with from.'),
+        metrics: z.array(z.string().min(1)).describe(
+          'One or more numeric payload field names to aggregate (e.g. ["temperature","humidity"]).',
+        ),
+        aggs: z.array(z.enum(ALL_AGG_FNS as unknown as [AggFn, ...AggFn[]])).optional().describe(
+          'Aggregation functions per metric (default ["count","avg"]).',
+        ),
+        bucket: z.string().optional().describe('Bucket width like "5m","1h","1d". Omit for a single bucket spanning the full range.'),
+        maxBucketSamples: z.number().int().positive().max(MAX_SAMPLE_CAP).optional()
+          .describe(`Per-bucket sample cap (default 10000, max ${MAX_SAMPLE_CAP}). partial=true when any bucket was capped.`),
       }).strict(),
       outputSchema: {
         deviceId: z.string(),
