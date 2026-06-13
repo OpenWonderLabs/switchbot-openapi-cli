@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   primeCredentials,
   getPrimedCredentials,
+  clearPrimedCredentials,
   __resetPrimedCredentials,
 } from '../../src/credentials/prime.js';
 
@@ -89,6 +90,17 @@ describe('primeCredentials', () => {
     selectMock.mockResolvedValue({ name: 'keychain', get } as any);
 
     await expect(primeCredentials('default')).resolves.toBeUndefined();
+    expect(getPrimedCredentials('default')).toBeNull();
+  });
+
+  it('clearPrimedCredentials() clears the in-memory cache immediately', async () => {
+    const get = vi.fn().mockResolvedValue({ token: 'T', secret: 'S' });
+    selectMock.mockResolvedValue({ name: 'keychain', get } as any);
+
+    await primeCredentials('default');
+    expect(getPrimedCredentials('default')).not.toBeNull();
+
+    clearPrimedCredentials();
     expect(getPrimedCredentials('default')).toBeNull();
   });
 });

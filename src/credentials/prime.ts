@@ -70,3 +70,12 @@ export function getPrimedCredentials(profile: string): CredentialBundle | null {
 export function __resetPrimedCredentials(): void {
   cache = null;
 }
+
+/**
+ * Production helper — called by auth and config commands after saving new
+ * credentials to ensure the 5-second priming cache does not serve stale
+ * token/secret from the previous account.
+ */
+export function clearPrimedCredentials(): void {
+  cache = null;
+}
