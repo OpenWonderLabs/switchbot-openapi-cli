@@ -163,7 +163,7 @@ describe('mcp server', () => {
     delete process.env.SWITCHBOT_ALLOW_DIRECT_DESTRUCTIVE;
   });
 
-  it('exposes the twenty-five tools with titles and input schemas', async () => {
+  it('exposes the twenty-eight tools with titles and input schemas', async () => {
     const { client } = await pair();
     const { tools } = await client.listTools();
 
@@ -171,10 +171,12 @@ describe('mcp server', () => {
     expect(names).toEqual(
       [
         'account_overview',
+        'aggregate_device_history',
         'audit_query',
         'audit_stats',
         'describe_device',
         'device_history',
+        'get_device_history',
         'get_device_status',
         'list_devices',
         'list_scenes',
@@ -188,6 +190,7 @@ describe('mcp server', () => {
         'policy_migrate',
         'policy_new',
         'policy_validate',
+        'query_device_history',
         'rule_notifications',
         'rules_explain',
         'rules_simulate',

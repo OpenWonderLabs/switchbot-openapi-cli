@@ -257,6 +257,86 @@ function buildRiskProfile(
   };
 }
 
+// ---- device_history module-level helpers ------------------------------------
+// Extracted so deprecated alias tools can delegate without re-implementing
+// the same logic. Bodies are verbatim copies from the consolidated handler.
+
+async function runDeviceHistoryQuery(args: {
+  deviceId: string;
+  since?: string;
+  from?: string;
+  to?: string;
+  fields?: string[];
+  limit?: number;
+}) {
+  if (!args.deviceId) {
+    return mcpError('usage', 2, 'device_history: mode="query" requires `deviceId`.');
+  }
+  if (args.since && (args.from || args.to)) {
+    return mcpError('usage', 2, 'device_history: `since` is mutually exclusive with `from`/`to`.');
+  }
+  try {
+    const records = await queryDeviceHistory(args.deviceId, {
+      since: args.since,
+      from: args.from,
+      to: args.to,
+      fields: args.fields,
+      limit: args.limit,
+    });
+    const result = { deviceId: args.deviceId, count: records.length, records };
+    return {
+      content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+      structuredContent: result,
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'history query failed';
+    return mcpError('usage', 2, msg);
+  }
+}
+
+async function runDeviceHistoryAggregate(args: {
+  deviceId: string;
+  since?: string;
+  from?: string;
+  to?: string;
+  metrics: string[];
+  aggs?: AggFn[];
+  bucket?: string;
+  maxBucketSamples?: number;
+}) {
+  if (!args.deviceId) {
+    return mcpError('usage', 2, 'device_history: mode="aggregate" requires `deviceId`.');
+  }
+  if (!args.metrics || args.metrics.length === 0) {
+    return mcpError('usage', 2, 'device_history: mode="aggregate" requires at least one entry in `metrics`.');
+  }
+  const opts: AggOptions = {
+    since: args.since,
+    from: args.from,
+    to: args.to,
+    metrics: args.metrics,
+    aggs: args.aggs,
+    bucket: args.bucket,
+    maxBucketSamples: args.maxBucketSamples,
+  };
+  const res = await aggregateDeviceHistory(args.deviceId, opts);
+  const structured: Record<string, unknown> = {
+    deviceId: res.deviceId,
+    from: res.from,
+    to: res.to,
+    metrics: res.metrics,
+    aggs: res.aggs,
+    buckets: res.buckets,
+    partial: res.partial,
+    notes: res.notes,
+  };
+  if (res.bucket !== undefined) structured.bucket = res.bucket;
+  return {
+    content: [{ type: 'text' as const, text: JSON.stringify(res, null, 2) }],
+    structuredContent: structured,
+  };
+}
+
 export function createSwitchBotMcpServer(options?: { eventManager?: EventSubscriptionManager; toolProfile?: ToolProfile }): McpServer {
   const eventManager = options?.eventManager;
   const allowedTools = TOOL_PROFILES[options?.toolProfile ?? 'default'];
@@ -471,65 +551,132 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
       }
 
       // ---- query mode ----------------------------------------------------
-      if (args.mode === 'query') {
-        if (!args.deviceId) {
-          return mcpError('usage', 2, 'device_history: mode="query" requires `deviceId`.');
-        }
-        if (args.since && (args.from || args.to)) {
-          return mcpError('usage', 2, 'device_history: `since` is mutually exclusive with `from`/`to`.');
-        }
-        try {
-          const records = await queryDeviceHistory(args.deviceId, {
-            since: args.since,
-            from: args.from,
-            to: args.to,
-            fields: args.fields,
-            limit: args.limit,
-          });
-          const result = { deviceId: args.deviceId, count: records.length, records };
-          return {
-            content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-            structuredContent: result,
-          };
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : 'history query failed';
-          return mcpError('usage', 2, msg);
-        }
-      }
+      if (args.mode === 'query') return runDeviceHistoryQuery(args as Parameters<typeof runDeviceHistoryQuery>[0]);
 
       // ---- aggregate mode ------------------------------------------------
-      if (!args.deviceId) {
-        return mcpError('usage', 2, 'device_history: mode="aggregate" requires `deviceId`.');
+      return runDeviceHistoryAggregate(args as Parameters<typeof runDeviceHistoryAggregate>[0]);
+    }
+  );
+
+  // ---- deprecated aliases for device_history ------------------------------
+  // 3.x backward-compat — removed in 4.0.0. Each alias forwards to the
+  // consolidated handler with `mode` hardcoded. Schemas mirror the relevant
+  // subset of the device_history schema so old clients keep their shape.
+  if (!skip('get_device_history'))
+  server.registerTool(
+    'get_device_history',
+    {
+      title: '[Deprecated] Latest + recent device history',
+      description:
+        '[DEPRECATED — use device_history(mode="raw")]. ' +
+        'Read the latest entry plus the most recent N records for one device, or list devices with stored history when deviceId is omitted. ' +
+        'No API call — zero quota cost.',
+      _meta: { agentSafetyTier: 'read', deprecated: true, replacement: 'device_history' },
+      inputSchema: z.object({
+        deviceId: z.string().optional(),
+        limit: z.number().int().min(1).max(100).optional(),
+      }).strict(),
+      outputSchema: {
+        deviceId: z.string().optional(),
+        latest: z.unknown().optional(),
+        history: z.array(z.unknown()).optional(),
+        devices: z.array(z.object({ deviceId: z.string(), latest: z.unknown() })).optional(),
+      },
+    },
+    async (args) => {
+      if (args.deviceId) {
+        const latest = deviceHistoryStore.getLatest(args.deviceId);
+        const history = deviceHistoryStore.getHistory(args.deviceId, args.limit ?? 20);
+        const result = { deviceId: args.deviceId, latest, history };
+        return {
+          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+          structuredContent: result,
+        };
       }
-      if (!args.metrics || args.metrics.length === 0) {
-        return mcpError('usage', 2, 'device_history: mode="aggregate" requires at least one entry in `metrics`.');
-      }
-      const opts: AggOptions = {
-        since: args.since,
-        from: args.from,
-        to: args.to,
-        metrics: args.metrics,
-        aggs: args.aggs,
-        bucket: args.bucket,
-        maxBucketSamples: args.maxBucketSamples,
-      };
-      const res = await aggregateDeviceHistory(args.deviceId, opts);
-      const structured: Record<string, unknown> = {
-        deviceId: res.deviceId,
-        from: res.from,
-        to: res.to,
-        metrics: res.metrics,
-        aggs: res.aggs,
-        buckets: res.buckets,
-        partial: res.partial,
-        notes: res.notes,
-      };
-      if (res.bucket !== undefined) structured.bucket = res.bucket;
+      const ids = deviceHistoryStore.listDevices();
+      const devices = ids.map((id) => ({ deviceId: id, latest: deviceHistoryStore.getLatest(id) }));
+      const result = { devices };
       return {
-        content: [{ type: 'text', text: JSON.stringify(res, null, 2) }],
-        structuredContent: structured,
+        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+        structuredContent: result,
       };
     }
+  );
+
+  if (!skip('query_device_history'))
+  server.registerTool(
+    'query_device_history',
+    {
+      title: '[Deprecated] Time-ranged device history query',
+      description:
+        '[DEPRECATED — use device_history(mode="query")]. ' +
+        'Return time-ranged records (since OR from/to) with optional field projection and limit. No API call.',
+      _meta: { agentSafetyTier: 'read', deprecated: true, replacement: 'device_history' },
+      inputSchema: z.object({
+        deviceId: z.string(),
+        since: z.string().optional(),
+        from: z.string().optional(),
+        to: z.string().optional(),
+        fields: z.array(z.string()).optional(),
+        limit: z.number().int().min(1).max(10000).optional(),
+      }).strict(),
+      outputSchema: {
+        deviceId: z.string(),
+        count: z.number().int(),
+        records: z.array(z.object({
+          t: z.string(),
+          topic: z.string(),
+          deviceType: z.string().optional(),
+          payload: z.unknown(),
+        })),
+        notes: z.array(z.string()).optional(),
+      },
+    },
+    async (args) => runDeviceHistoryQuery(args)
+  );
+
+  if (!skip('aggregate_device_history'))
+  server.registerTool(
+    'aggregate_device_history',
+    {
+      title: '[Deprecated] Bucketed device-history aggregation',
+      description:
+        '[DEPRECATED — use device_history(mode="aggregate")]. ' +
+        'Return bucketed statistics (count/min/max/avg/sum/p50/p95) over numeric metrics. No API call.',
+      _meta: { agentSafetyTier: 'read', deprecated: true, replacement: 'device_history' },
+      inputSchema: z.object({
+        deviceId: z.string(),
+        since: z.string().optional(),
+        from: z.string().optional(),
+        to: z.string().optional(),
+        metrics: z.array(z.string().min(1)),
+        aggs: z.array(z.enum(ALL_AGG_FNS as unknown as [AggFn, ...AggFn[]])).optional(),
+        bucket: z.string().optional(),
+        maxBucketSamples: z.number().int().positive().max(MAX_SAMPLE_CAP).optional(),
+      }).strict(),
+      outputSchema: {
+        deviceId: z.string(),
+        bucket: z.string().optional(),
+        from: z.string().optional(),
+        to: z.string().optional(),
+        metrics: z.array(z.string()),
+        aggs: z.array(z.enum(ALL_AGG_FNS as unknown as [AggFn, ...AggFn[]])),
+        buckets: z.array(z.object({
+          t: z.string(),
+          metrics: z.record(z.string(), z.object({
+            count: z.number().optional(),
+            min: z.number().optional(),
+            max: z.number().optional(),
+            avg: z.number().optional(),
+            sum: z.number().optional(),
+            p50: z.number().optional(),
+            p95: z.number().optional(),
+          })),
+        })),
+        partial: z.boolean().optional(),
+      },
+    },
+    async (args) => runDeviceHistoryAggregate(args)
   );
 
   // ---- send_command ---------------------------------------------------------

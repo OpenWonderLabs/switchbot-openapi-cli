@@ -134,6 +134,7 @@ describe('legacy device_history aliases (3.8.0 backward-compat contract)', () =>
         | { name: string; _meta?: { deprecated?: boolean; replacement?: string } }
         | undefined;
       expect(t, `alias ${old} not found`).toBeDefined();
+      expect(t!._meta, `${old}: _meta not transmitted by SDK — check Tool type definition`).toBeDefined();
       expect(t!._meta?.deprecated).toBe(true);
       expect(t!._meta?.replacement).toBe('device_history');
     },
@@ -145,6 +146,33 @@ describe('legacy device_history aliases (3.8.0 backward-compat contract)', () =>
     const consolidatedResp = await client.callTool({ name: 'device_history', arguments: { mode: 'raw' } });
     expect(aliasResp.structuredContent).toEqual(consolidatedResp.structuredContent);
   });
+
+  it('query_device_history forwards equivalently to device_history({mode:"query"})', async () => {
+    const { client } = await pair('all');
+    // Query without setting up real device history; both calls should produce
+    // the same shape (likely an error envelope or empty-records envelope).
+    const args = { deviceId: 'NO-SUCH-DEVICE', since: '1h' };
+    const aliasResp = await client.callTool({ name: 'query_device_history', arguments: args });
+    const consolidatedResp = await client.callTool({ name: 'device_history', arguments: { mode: 'query', ...args } });
+    expect(aliasResp.structuredContent).toEqual(consolidatedResp.structuredContent);
+    expect(aliasResp.isError).toBe(consolidatedResp.isError);
+  });
+
+  it('aggregate_device_history forwards equivalently to device_history({mode:"aggregate"})', async () => {
+    const { client } = await pair('all');
+    const args = { deviceId: 'NO-SUCH-DEVICE', since: '1h', metrics: ['temperature'] };
+    const aliasResp = await client.callTool({ name: 'aggregate_device_history', arguments: args });
+    const consolidatedResp = await client.callTool({ name: 'device_history', arguments: { mode: 'aggregate', ...args } });
+    expect(aliasResp.isError).toBe(consolidatedResp.isError);
+    // Both responses should have the same structure. Timestamps (from/to) will
+    // differ by a few ms across two separate calls, so compare the stable fields.
+    const stable = (sc: unknown) => {
+      if (!sc || typeof sc !== 'object') return sc;
+      const { from: _f, to: _t, ...rest } = sc as Record<string, unknown>;
+      return rest;
+    };
+    expect(stable(aliasResp.structuredContent)).toEqual(stable(consolidatedResp.structuredContent));
+  });
 });
 
 describe('mindclip retired names (never shipped — must NOT be re-registered)', () => {
@@ -155,5 +183,22 @@ describe('mindclip retired names (never shipped — must NOT be re-registered)',
       tools,
       `${name} was never published — it must not be registered (would bloat schemas without compat benefit)`,
     ).not.toContain(name);
+  });
+
+  it('mindclip_list_recordings callTool returns method-not-found / -32601 (representative)', async () => {
+    const { client } = await pair('all');
+    let caught: unknown;
+    try {
+      const res = await client.callTool({ name: 'mindclip_list_recordings', arguments: {} });
+      // SDK may return error envelope rather than throwing — either is acceptable, both must say "not found".
+      expect(res.isError, 'mindclip_list_recordings should not be invokable').toBe(true);
+      const text = (res.content as Array<{ text: string }>)[0]?.text ?? '';
+      expect(text).toMatch(/-32601|not found|unknown tool|Method not found/i);
+      return;
+    } catch (err) {
+      caught = err;
+    }
+    const msg = caught instanceof Error ? caught.message : String(caught);
+    expect(msg).toMatch(/-32601|not found|unknown tool|Method not found/i);
   });
 });
