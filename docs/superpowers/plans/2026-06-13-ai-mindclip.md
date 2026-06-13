@@ -36,7 +36,7 @@
 - Modify: `src/credentials/prime.ts` (add one export after line 72)
 - Modify: `tests/credentials/prime.test.ts` (add one `it` block + import)
 
-- [ ] **Step 1: Add the failing test**
+- [x] **Step 1: Add the failing test**
 
 Open `tests/credentials/prime.test.ts`. Add `clearPrimedCredentials` to the import at line 6, then add this test inside the existing `describe('primeCredentials', ...)` block:
 
@@ -72,7 +72,7 @@ Add this test inside the `describe` block (after line 93):
   });
 ```
 
-- [ ] **Step 2: Run the failing test**
+- [x] **Step 2: Run the failing test**
 
 ```
 npx vitest run tests/credentials/prime.test.ts
@@ -80,7 +80,7 @@ npx vitest run tests/credentials/prime.test.ts
 
 Expected: FAIL — `clearPrimedCredentials is not exported`
 
-- [ ] **Step 3: Add the export to prime.ts**
+- [x] **Step 3: Add the export to prime.ts**
 
 Open `src/credentials/prime.ts`. After the `__resetPrimedCredentials` function (line 70), add:
 
@@ -95,7 +95,7 @@ export function clearPrimedCredentials(): void {
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 ```
 npx vitest run tests/credentials/prime.test.ts
@@ -103,7 +103,7 @@ npx vitest run tests/credentials/prime.test.ts
 
 Expected: PASS (7 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/credentials/prime.ts tests/credentials/prime.test.ts
@@ -118,7 +118,7 @@ git commit -m "feat: export clearPrimedCredentials for cache reset on account sw
 - Modify: `src/commands/auth.ts` (around line 455–456)
 - Modify: `src/commands/config.ts` (around line 257)
 
-- [ ] **Step 1: Update auth.ts**
+- [x] **Step 1: Update auth.ts**
 
 `src/commands/auth.ts` already imports `clearCache, clearStatusCache` at line 28. Add two more imports:
 
@@ -144,7 +144,7 @@ Replace with:
       idempotencyCache.clear();
 ```
 
-- [ ] **Step 2: Update config.ts**
+- [x] **Step 2: Update config.ts**
 
 `src/commands/config.ts` currently has no cache-clear imports. Add four imports after the existing imports at the top of the file (after line 10):
 
@@ -176,7 +176,7 @@ Find the `saveConfig(...)` call around line 257. After that call, add:
       idempotencyCache.clear();
 ```
 
-- [ ] **Step 3: Run the full test suite to confirm no regressions**
+- [x] **Step 3: Run the full test suite to confirm no regressions**
 
 ```
 npx vitest run tests/credentials/ tests/lib/idempotency.test.ts
@@ -184,7 +184,7 @@ npx vitest run tests/credentials/ tests/lib/idempotency.test.ts
 
 Expected: all pass
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/commands/auth.ts src/commands/config.ts
@@ -199,7 +199,7 @@ git commit -m "fix: clear priming and idempotency caches on account credential c
 - Modify: `src/utils/arg-parsers.ts` (add two exports at the end)
 - Modify: `tests/utils/arg-parsers.test.ts` (add two describe blocks)
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to the **end** of `tests/utils/arg-parsers.test.ts`:
 
@@ -272,7 +272,7 @@ Update the import at the top of `tests/utils/arg-parsers.test.ts` to include the
 import { intArg, durationArg, stringArg, enumArg, dateArg, weekArg } from '../../src/utils/arg-parsers.js';
 ```
 
-- [ ] **Step 2: Run the failing tests**
+- [x] **Step 2: Run the failing tests**
 
 ```
 npx vitest run tests/utils/arg-parsers.test.ts
@@ -280,7 +280,7 @@ npx vitest run tests/utils/arg-parsers.test.ts
 
 Expected: FAIL — `dateArg is not exported`, `weekArg is not exported`
 
-- [ ] **Step 3: Implement dateArg and weekArg in arg-parsers.ts**
+- [x] **Step 3: Implement dateArg and weekArg in arg-parsers.ts**
 
 Add to the **end** of `src/utils/arg-parsers.ts`:
 
@@ -308,7 +308,7 @@ export function weekArg(flagName: string): (value: string) => string {
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 ```
 npx vitest run tests/utils/arg-parsers.test.ts
@@ -316,7 +316,7 @@ npx vitest run tests/utils/arg-parsers.test.ts
 
 Expected: PASS (all describe blocks)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/utils/arg-parsers.ts tests/utils/arg-parsers.test.ts
@@ -331,7 +331,7 @@ git commit -m "feat: add dateArg and weekArg validators for YYYY-MM-DD and YYYY-
 - Create: `tests/devices/mindclip-catalog.test.ts`
 - Modify: `src/devices/catalog.ts` (add one entry to the `DEVICE_CATALOG` array)
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/devices/mindclip-catalog.test.ts`:
 
@@ -368,7 +368,7 @@ describe('AI MindClip catalog entry', () => {
 });
 ```
 
-- [ ] **Step 2: Run the failing test**
+- [x] **Step 2: Run the failing test**
 
 ```
 npx vitest run tests/devices/mindclip-catalog.test.ts
@@ -376,7 +376,7 @@ npx vitest run tests/devices/mindclip-catalog.test.ts
 
 Expected: FAIL — `entry` is `undefined`
 
-- [ ] **Step 3: Add AI MindClip to catalog.ts**
+- [x] **Step 3: Add AI MindClip to catalog.ts**
 
 Open `src/devices/catalog.ts` and find the `DEVICE_CATALOG` array. Locate the entry for `'AI Hub'` or similar read-only device (for reference). Add the following entry in alphabetical order (near the top of the array or with other `A` entries):
 
@@ -392,7 +392,7 @@ Open `src/devices/catalog.ts` and find the `DEVICE_CATALOG` array. Locate the en
   },
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 ```
 npx vitest run tests/devices/mindclip-catalog.test.ts
@@ -400,7 +400,7 @@ npx vitest run tests/devices/mindclip-catalog.test.ts
 
 Expected: PASS (4 tests)
 
-- [ ] **Step 5: Run existing catalog tests to confirm no regressions**
+- [x] **Step 5: Run existing catalog tests to confirm no regressions**
 
 ```
 npx vitest run tests/devices/
@@ -408,7 +408,7 @@ npx vitest run tests/devices/
 
 Expected: all pass
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/devices/catalog.ts tests/devices/mindclip-catalog.test.ts
@@ -423,7 +423,7 @@ git commit -m "feat: add AI MindClip read-only device to catalog with 5 status f
 - Create: `src/lib/mindclip.ts`
 - Create: `tests/lib/mindclip.test.ts`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/lib/mindclip.test.ts`:
 
@@ -626,7 +626,7 @@ describe('getUrgentTodos', () => {
 });
 ```
 
-- [ ] **Step 2: Run the failing tests**
+- [x] **Step 2: Run the failing tests**
 
 ```
 npx vitest run tests/lib/mindclip.test.ts
@@ -634,7 +634,7 @@ npx vitest run tests/lib/mindclip.test.ts
 
 Expected: FAIL — `Cannot find module '../../src/lib/mindclip.js'`
 
-- [ ] **Step 3: Implement src/lib/mindclip.ts**
+- [x] **Step 3: Implement src/lib/mindclip.ts**
 
 Create `src/lib/mindclip.ts`:
 
@@ -720,7 +720,7 @@ export async function getUrgentTodos(date?: string): Promise<unknown> {
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 ```
 npx vitest run tests/lib/mindclip.test.ts
@@ -728,7 +728,7 @@ npx vitest run tests/lib/mindclip.test.ts
 
 Expected: PASS (all describe blocks, ~16 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/lib/mindclip.ts tests/lib/mindclip.test.ts
@@ -743,7 +743,7 @@ git commit -m "feat: add MindClip API helper functions for 7 custom endpoints"
 - Create: `src/commands/mindclip.ts`
 - Create: `tests/commands/mindclip.test.ts`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/commands/mindclip.test.ts`:
 
@@ -915,7 +915,7 @@ describe('mindclip action handlers', () => {
 });
 ```
 
-- [ ] **Step 2: Run the failing tests**
+- [x] **Step 2: Run the failing tests**
 
 ```
 npx vitest run tests/commands/mindclip.test.ts
@@ -923,7 +923,7 @@ npx vitest run tests/commands/mindclip.test.ts
 
 Expected: FAIL — `Cannot find module '../../src/commands/mindclip.js'`
 
-- [ ] **Step 3: Implement src/commands/mindclip.ts**
+- [x] **Step 3: Implement src/commands/mindclip.ts**
 
 Create `src/commands/mindclip.ts`:
 
@@ -1126,7 +1126,7 @@ Examples:
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 ```
 npx vitest run tests/commands/mindclip.test.ts
@@ -1134,7 +1134,7 @@ npx vitest run tests/commands/mindclip.test.ts
 
 Expected: PASS (all describe blocks, ~22 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/commands/mindclip.ts tests/commands/mindclip.test.ts
@@ -1148,7 +1148,7 @@ git commit -m "feat: add mindclip command group with 7 subcommands and option va
 **Files:**
 - Modify: `src/program-builder.ts` (add import + registration + constant entry)
 
-- [ ] **Step 1: Update program-builder.ts**
+- [x] **Step 1: Update program-builder.ts**
 
 Add the import after the `registerCodexCommand` import (line 33):
 
@@ -1173,7 +1173,7 @@ Find the `buildProgram` function and add the registration call alongside the oth
 registerMindclipCommand(program);
 ```
 
-- [ ] **Step 2: Verify help output**
+- [x] **Step 2: Verify help output**
 
 ```
 npx ts-node --esm src/main.ts mindclip --help
@@ -1196,7 +1196,7 @@ Commands:
   urgent-todos    Get urgent to-dos for a date (omit --date to use yesterday's)
 ```
 
-- [ ] **Step 3: Run the full test suite**
+- [x] **Step 3: Run the full test suite**
 
 ```
 npx vitest run
@@ -1204,7 +1204,7 @@ npx vitest run
 
 Expected: all tests pass, no regressions
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/program-builder.ts
@@ -1240,6 +1240,6 @@ git commit -m "feat: register mindclip command group in program builder"
 
 ### Type consistency
 
-- `listTodos` receives `fileID` as `string | undefined` (the API field is a string ID). In the command handler, `options.file` is an integer string validated by `intArg('--file', {min:0})`, then converted to a string via `String(options.file)` before passing to `listTodos`. This matches `ListTodosParams.fileID?: string`.
-- All numeric options use `Number(options.x)` conversion in action handlers since Commander's `argParser` returns a `string`.
-- `compact` in `lib/mindclip.ts` correctly removes `undefined` keys before the request is built.
+- `listTodos` 接收 `fileID` 为 `string | undefined`（API 字段是字符串 ID）。命令层使用 `stringArg('--file')` 直接把字符串透传给 `listTodos`，不做整数→字符串转换 —— 这与 spec 中 `ListTodosParams.fileID?: string` 的语义一致。
+- 其他数值型选项在 action handler 中通过 `Number(options.x)` 转换，因为 Commander 的 `argParser` 返回 `string`。
+- `lib/mindclip.ts` 中的 `compact` 在请求构造前正确剔除 `undefined` 字段。
