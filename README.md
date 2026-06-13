@@ -61,7 +61,7 @@ Run `switchbot catalog list` to see the full list including aliases and per-comm
 | **Sensors** _(read-only)_ | Meter · MeterPlus · WoIOSensor · MeterPro · MeterPro(CO2) · WeatherStation · Motion Sensor · Presence Sensor · Contact Sensor · Water Detector · Wallet Finder Card |
 | **Hubs** _(read-only)_ | Hub · Hub Plus · Hub Mini · Hub 2 · Hub 3 · AI Hub |
 | **Cameras** _(status only)_ | Indoor Cam · Pan/Tilt Cam · Pan/Tilt Cam 2K · Pan/Tilt Cam Plus 2K · Pan/Tilt Cam Plus 3K · Outdoor Spotlight Cam |
-| **Other** | Bot · AI Art Frame · Home Climate Panel · Remote |
+| **Other** | Bot · AI Art Frame · AI MindClip · Home Climate Panel · Remote |
 | **IR virtual remotes** _(via Hub)_ | Air Conditioner · TV · Streamer · Set Top Box · DVD · Speaker · Fan · Light · Others |
 
 ---
@@ -150,7 +150,7 @@ The optional skill package [`@switchbot/claude-code-plugin`](https://www.npmjs.c
 
 ## Gemini CLI integration
 
-The Gemini extension is in [`packages/gemini-extension/`](./packages/gemini-extension/) — it provides 24 MCP tools, a GEMINI.md context file, and 23 slash commands.
+The Gemini extension is in [`packages/gemini-extension/`](./packages/gemini-extension/) — it provides up to 28 MCP tools (14 readonly, 17 default, 28 with `--tools all`; see [docs/agent-guide.md](./docs/agent-guide.md) for the deprecated-aliases breakdown), a GEMINI.md context file, and 23 slash commands.
 
 **Recommended — paste into Gemini CLI chat:**
 
@@ -249,6 +249,18 @@ switchbot scenes list
 switchbot scenes execute <sceneId>
 ```
 
+### `mindclip`
+
+```bash
+switchbot mindclip recordings [--device <id>] [--page <n>] [--size <n>]
+switchbot mindclip recording <id> [--language en|zh]
+switchbot mindclip summary <id>
+switchbot mindclip todos [--completed 0|1|2] [--category 0..5]
+switchbot mindclip daily [--date YYYY-MM-DD]
+switchbot mindclip weekly [--week YYYY-Www]
+switchbot mindclip urgent-todos [--date YYYY-MM-DD]
+```
+
 ### `codex`
 
 ```bash
@@ -282,7 +294,7 @@ switchbot config list-profiles
 ### `mcp`
 
 ```bash
-switchbot mcp serve    # stdio MCP server — 24 tools
+switchbot mcp serve    # stdio MCP server — default 17 tools (use --tools all for 28)
 ```
 
 ### `webhook`

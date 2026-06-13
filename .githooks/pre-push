@@ -4,5 +4,8 @@ set -eu
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
+# shellcheck source=common.sh
+. "$REPO_ROOT/.githooks/common.sh"
+
 echo "[pre-push] release gate"
 npm run verify:release-gate

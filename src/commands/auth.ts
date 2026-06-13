@@ -33,6 +33,8 @@ import {
 import { browserLogin } from '../auth/browser-login.js';
 import type { ExchangeResult } from '../auth/token-exchange.js';
 import { verifyCredentials } from '../auth/verify.js';
+import { clearPrimedCredentials } from '../credentials/prime.js';
+import { idempotencyCache } from '../lib/idempotency.js';
 
 function activeProfile(): string {
   return getActiveProfile() ?? 'default';
@@ -78,6 +80,13 @@ async function promptSecret(question: string): Promise<string> {
     stdin.resume();
     stdin.on('data', onData);
   });
+}
+
+export function onCredentialChange(): void {
+  clearCache();
+  clearStatusCache();
+  clearPrimedCredentials(activeProfile());
+  idempotencyCache.clearForProfile(activeProfile());
 }
 
 function readStdinFile(filePath: string): CredentialBundle {
@@ -242,6 +251,7 @@ export function registerAuthCommand(program: Command): void {
         });
       }
 
+      onCredentialChange();
       if (isJsonMode()) {
         printJson({ profile, backend: store.name, written: true });
         return;
@@ -279,6 +289,7 @@ export function registerAuthCommand(program: Command): void {
         });
       }
 
+      onCredentialChange();
       if (isJsonMode()) {
         printJson({ profile, backend: store.name, deleted: true });
         return;
@@ -359,6 +370,7 @@ export function registerAuthCommand(program: Command): void {
         }
       }
 
+      onCredentialChange();
       if (isJsonMode()) {
         printJson({
           profile,
@@ -452,8 +464,7 @@ export function registerAuthCommand(program: Command): void {
       // Credentials changed — clear device/status cache so the next list
       // fetches fresh data for the new account instead of returning stale
       // results from the previous account's cache.
-      clearCache();
-      clearStatusCache();
+      onCredentialChange();
 
       if (isJsonMode()) {
         printJson({

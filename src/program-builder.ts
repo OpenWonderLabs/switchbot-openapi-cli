@@ -33,6 +33,7 @@ import { registerDaemonCommand } from './commands/daemon.js';
 import { registerCodexCommand } from './commands/codex.js';
 import { registerClaudeCodeCommand } from './commands/claude-code.js';
 import { registerGeminiCommand } from './commands/gemini.js';
+import { registerMindclipCommand } from './commands/mindclip.js';
 
 const require = createRequire(import.meta.url);
 
@@ -40,7 +41,7 @@ export const TOP_LEVEL_COMMANDS = [
   'config', 'devices', 'scenes', 'webhook', 'completion', 'mcp',
   'quota', 'catalog', 'cache', 'events', 'doctor', 'schema',
   'history', 'plan', 'capabilities', 'agent-bootstrap', 'install', 'uninstall', 'status-sync',
-  'health', 'upgrade-check', 'daemon', 'reset', 'codex', 'claude-code', 'gemini',
+  'health', 'upgrade-check', 'daemon', 'reset', 'codex', 'claude-code', 'gemini', 'mindclip',
 ] as const;
 
 const cacheModeArg = (value: string): string => {
@@ -127,6 +128,7 @@ export function buildProgram(): Command {
   registerCodexCommand(program);
   registerClaudeCodeCommand(program);
   registerGeminiCommand(program);
+  registerMindclipCommand(program);
 
   return program;
 }

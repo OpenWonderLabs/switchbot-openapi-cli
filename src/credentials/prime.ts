@@ -28,12 +28,17 @@ interface CacheEntry {
   timestamp: number;
 }
 
-let cache: CacheEntry | null = null;
+const caches = new Map<string, CacheEntry>();
+const generations = new Map<string, number>();
 
 function isCacheValid(profile: string): boolean {
-  if (!cache) return false;
-  if (cache.profile !== profile) return false;
-  return (Date.now() - cache.timestamp) < CACHE_TTL_MS;
+  const entry = caches.get(profile);
+  if (!entry) return false;
+  return (Date.now() - entry.timestamp) < CACHE_TTL_MS;
+}
+
+function genFor(profile: string): number {
+  return generations.get(profile) ?? 0;
 }
 
 /**
@@ -41,15 +46,27 @@ function isCacheValid(profile: string): boolean {
  * the result. Subsequent calls within CACHE_TTL_MS short-circuit.
  * After TTL expires, credentials are re-read from the keychain.
  * Swallows all errors.
+ *
+ * A per-profile generation counter guards against the race where
+ * clearPrimedCredentials(profile) fires while store.get() is still in
+ * flight — if the generation changed, we discard the stale result instead
+ * of overwriting the now-empty cache.
  */
 export async function primeCredentials(profile: string): Promise<void> {
   if (isCacheValid(profile)) return;
+  // Pre-register in generations before any await so the no-arg
+  // clearPrimedCredentials() iterating generations.keys() can always find this
+  // profile even while store.get() is still in-flight.
+  if (!generations.has(profile)) generations.set(profile, 0);
+  const gen = genFor(profile);
   try {
     const store = await selectCredentialStore();
     const creds = await store.get(profile);
-    cache = { profile, creds, timestamp: Date.now() };
+    if (genFor(profile) !== gen) return;
+    caches.set(profile, { profile, creds, timestamp: Date.now() });
   } catch {
-    cache = { profile, creds: null, timestamp: Date.now() };
+    if (genFor(profile) !== gen) return;
+    caches.set(profile, { profile, creds: null, timestamp: Date.now() });
   }
 }
 
@@ -59,14 +76,39 @@ export async function primeCredentials(profile: string): Promise<void> {
  * so existing file-based fallback stays the authoritative source.
  */
 export function getPrimedCredentials(profile: string): CredentialBundle | null {
-  if (!cache) return null;
-  if (cache.profile !== profile) return null;
-  return cache.creds;
+  return caches.get(profile)?.creds ?? null;
 }
 
 /**
  * Test helper. Not used by production code.
  */
 export function __resetPrimedCredentials(): void {
-  cache = null;
+  for (const p of generations.keys()) {
+    generations.set(p, (generations.get(p) ?? 0) + 1);
+  }
+  caches.clear();
+  generations.clear();
+}
+
+/**
+ * Production helper — called by auth and config commands after saving new
+ * credentials to ensure the 5-second priming cache does not serve stale
+ * token/secret from the previous account.
+ *
+ * Pass a specific `profile` to evict only that profile's entry (preferred
+ * for auth operations on a single profile). Omit to clear all profiles.
+ */
+export function clearPrimedCredentials(profile?: string): void {
+  if (profile !== undefined) {
+    generations.set(profile, (generations.get(profile) ?? 0) + 1);
+    caches.delete(profile);
+  } else {
+    // Iterate generations.keys() rather than caches.keys() so profiles that
+    // are currently in-flight (primeCredentials awaiting store.get()) also
+    // get their generation bumped, preventing the stale-write race.
+    for (const p of generations.keys()) {
+      generations.set(p, (generations.get(p) ?? 0) + 1);
+    }
+    caches.clear();
+  }
 }

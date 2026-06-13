@@ -150,14 +150,13 @@ describe('capabilities', () => {
     expect(cat.safetyTiersInUse).toBeUndefined();
   });
 
-  it('surfaces.mcp.tools includes send_command, account_overview, get_device_history and query_device_history', async () => {
+  it('surfaces.mcp.tools includes send_command, account_overview and device_history', async () => {
     const out = await runCapabilities();
     const mcp = (out.surfaces as Record<string, { tools: string[]; resources: string[] }>).mcp;
     expect(mcp.tools.length).toBeGreaterThanOrEqual(9);
     expect(mcp.tools).toContain('send_command');
     expect(mcp.tools).toContain('account_overview');
-    expect(mcp.tools).toContain('get_device_history');
-    expect(mcp.tools).toContain('query_device_history');
+    expect(mcp.tools).toContain('device_history');
     expect(mcp.resources).toEqual(['switchbot://events']);
   });
 
@@ -269,10 +268,10 @@ describe('capabilities B3/B4', () => {
     expect(agg!.mutating).toBe(false);
   });
 
-  it('surfaces.mcp.tools includes aggregate_device_history', async () => {
+  it('surfaces.mcp.tools includes device_history (consolidated raw/query/aggregate)', async () => {
     const out = await runCapabilitiesWith([]);
     const mcp = (out.surfaces as Record<string, { tools: string[] }>).mcp;
-    expect(mcp.tools).toContain('aggregate_device_history');
+    expect(mcp.tools).toContain('device_history');
   });
 
   it('devices meta set appears in compact capabilities output (bug #40)', async () => {

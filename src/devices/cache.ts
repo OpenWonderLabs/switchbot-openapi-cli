@@ -197,9 +197,11 @@ export function updateCacheFromDeviceList(body: DeviceListBodyShape): void {
 }
 
 export function clearCache(): void {
-  const file = cacheFilePath();
-  if (fs.existsSync(file)) fs.unlinkSync(file);
   _listCacheByProfile.set(cacheKey(), null);
+  const file = cacheFilePath();
+  if (fs.existsSync(file)) {
+    try { fs.unlinkSync(file); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'EBUSY') throw e; }
+  }
 }
 
 // ---- Device list freshness -------------------------------------------------
@@ -343,9 +345,11 @@ export function setCachedStatus(
 }
 
 export function clearStatusCache(): void {
-  const file = statusCacheFilePath();
-  if (fs.existsSync(file)) fs.unlinkSync(file);
   _statusCacheByProfile.set(cacheKey(), { entries: {} });
+  const file = statusCacheFilePath();
+  if (fs.existsSync(file)) {
+    try { fs.unlinkSync(file); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'EBUSY') throw e; }
+  }
 }
 
 /** Summary for `switchbot cache show`. */

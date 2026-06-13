@@ -213,6 +213,16 @@ const rgbOnlyLightControls0To100: CommandSpec[] = [
 export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   // ---------- Physical devices ----------
   {
+    type: 'AI MindClip',
+    aliases: ['AIMindClip', 'MindClip', 'Mind Clip'],
+    category: 'physical',
+    description: 'AI-powered voice recorder with transcription and meeting summaries.',
+    role: 'other',
+    readOnly: true,
+    commands: [],
+    statusFields: ['battery', 'chargingStatus', 'recordingStatus', 'uploadStatus', 'hasUntransferredFiles'],
+  },
+  {
     type: 'Bot',
     category: 'physical',
     description: 'Mechanical arm robot that physically presses a button or toggles a switch on demand.',

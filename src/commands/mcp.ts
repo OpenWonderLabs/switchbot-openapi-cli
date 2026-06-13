@@ -3,7 +3,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
-import { intArg, stringArg } from '../utils/arg-parsers.js';
+import { intArg, stringArg, DATE_REGEX, WEEK_REGEX, isCalendarValidDate, isLongISOYear } from '../utils/arg-parsers.js';
 import { handleError, isJsonMode, printJson, buildErrorPayload, exitWithError, type ErrorPayload, type ErrorSubKind } from '../utils/output.js';
 import { VERSION } from '../version.js';
 import {
@@ -21,6 +21,15 @@ import {
   toMcpIrDeviceShape,
 } from '../lib/devices.js';
 import { fetchScenes, executeScene } from '../lib/scenes.js';
+import {
+  listRecordings,
+  getRecording,
+  getSummary,
+  listTodos,
+  getDailyRecall,
+  getWeeklySummary,
+  getUrgentTodos,
+} from '../lib/mindclip.js';
 import {
   findCatalogEntry,
   deriveSafetyTier,
@@ -42,6 +51,7 @@ import {
 import { todayUsage } from '../utils/quota.js';
 import { describeCache } from '../devices/cache.js';
 import { withRequestContext } from '../lib/request-context.js';
+import { primeCredentials } from '../credentials/prime.js';
 import { profileFilePath, tryLoadConfig } from '../config.js';
 import {
   loadPolicyFile,
@@ -248,6 +258,91 @@ function buildRiskProfile(
   };
 }
 
+// ---- device_history module-level helpers ------------------------------------
+// Extracted so deprecated alias tools can delegate without re-implementing
+// the same logic. Bodies are verbatim copies from the consolidated handler.
+
+async function runDeviceHistoryQuery(args: {
+  deviceId: string;
+  since?: string;
+  from?: string;
+  to?: string;
+  fields?: string[];
+  limit?: number;
+}) {
+  if (!args.deviceId) {
+    return mcpError('usage', 2, 'device_history: mode="query" requires `deviceId`.');
+  }
+  if (args.since && (args.from || args.to)) {
+    return mcpError('usage', 2, 'device_history: `since` is mutually exclusive with `from`/`to`.');
+  }
+  try {
+    const records = await queryDeviceHistory(args.deviceId, {
+      since: args.since,
+      from: args.from,
+      to: args.to,
+      fields: args.fields,
+      limit: args.limit,
+    });
+    const result = { deviceId: args.deviceId, count: records.length, records };
+    return {
+      content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+      structuredContent: result,
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'history query failed';
+    return mcpError('runtime', 1, msg);
+  }
+}
+
+async function runDeviceHistoryAggregate(args: {
+  deviceId: string;
+  since?: string;
+  from?: string;
+  to?: string;
+  metrics: string[];
+  aggs?: AggFn[];
+  bucket?: string;
+  maxBucketSamples?: number;
+}) {
+  if (!args.deviceId) {
+    return mcpError('usage', 2, 'device_history: mode="aggregate" requires `deviceId`.');
+  }
+  if (!args.metrics || args.metrics.length === 0) {
+    return mcpError('usage', 2, 'device_history: mode="aggregate" requires at least one entry in `metrics`.');
+  }
+  const opts: AggOptions = {
+    since: args.since,
+    from: args.from,
+    to: args.to,
+    metrics: args.metrics,
+    aggs: args.aggs,
+    bucket: args.bucket,
+    maxBucketSamples: args.maxBucketSamples,
+  };
+  try {
+    const res = await aggregateDeviceHistory(args.deviceId, opts);
+    const structured: Record<string, unknown> = {
+      deviceId: res.deviceId,
+      from: res.from,
+      to: res.to,
+      metrics: res.metrics,
+      aggs: res.aggs,
+      buckets: res.buckets,
+      partial: res.partial,
+      notes: res.notes,
+    };
+    if (res.bucket !== undefined) structured.bucket = res.bucket;
+    return {
+      content: [{ type: 'text' as const, text: JSON.stringify(res, null, 2) }],
+      structuredContent: structured,
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'history aggregation failed';
+    return mcpError('runtime', 1, msg);
+  }
+}
+
 export function createSwitchBotMcpServer(options?: { eventManager?: EventSubscriptionManager; toolProfile?: ToolProfile }): McpServer {
   const eventManager = options?.eventManager;
   const allowedTools = TOOL_PROFILES[options?.toolProfile ?? 'default'];
@@ -359,20 +454,150 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
     }
   );
 
-  // ---- get_device_history ----------------------------------------------------
+  function deprecatedAlias(replacement: string, mode: string, baseDescription: string) {
+    return {
+      description: `[DEPRECATED — use ${replacement}(mode="${mode}")]. ${baseDescription}`,
+      _meta: { agentSafetyTier: 'read' as const, deprecated: true, replacement },
+    };
+  }
+
+  // ---- device_history ----------------------------------------------------
+  // Consolidates the previous get_device_history / query_device_history /
+  // aggregate_device_history trio. The `mode` discriminator selects which
+  // shape of result is returned. All modes are read-only and zero quota cost
+  // (data comes from the local ~/.switchbot/device-history/ store).
+  if (!skip('device_history'))
+  server.registerTool(
+    'device_history',
+    {
+      title: 'Local device history (raw / query / aggregate)',
+      description:
+        'Read locally-persisted device state history captured from MQTT events. ' +
+        'No API call — zero quota cost. Pick `mode`: ' +
+        '"raw" returns the latest entry plus the most recent N records (or, if deviceId is omitted, a list of devices with stored history); ' +
+        '"query" returns time-ranged records (since OR from/to) with optional field projection and limit; ' +
+        '"aggregate" returns bucketed statistics (count/min/max/avg/sum/p50/p95) over numeric metrics.',
+      _meta: { agentSafetyTier: 'read' },
+      inputSchema: z.object({
+        mode: z.enum(['raw', 'query', 'aggregate']).describe(
+          '"raw": latest entry + recent N records (limit, default 20); "query": time-ranged record list; "aggregate": bucketed stats.',
+        ),
+        deviceId: z.string().min(1).optional().describe(
+          'Device MAC address. Required for query/aggregate. For raw, omit to list all devices with stored history.',
+        ),
+        // raw mode
+        limit: z.number().int().min(1).max(10000).optional().describe(
+          'raw: max history entries (default 20, max 100). query: max records (default 1000, max 10000).',
+        ),
+        // query / aggregate mode (time range)
+        since: z.string().optional().describe('Relative window ending now, e.g. "30s","15m","1h","7d". Mutually exclusive with from/to.'),
+        from: z.string().optional().describe('Range start (ISO-8601). Used by query/aggregate.'),
+        to: z.string().optional().describe('Range end (ISO-8601). Used by query/aggregate.'),
+        // query mode
+        fields: z.array(z.string()).optional().describe('query: project these payload fields; omit for full payload.'),
+        // aggregate mode
+        metrics: z.array(z.string().min(1)).min(1).optional().describe(
+          'aggregate (required): one or more numeric payload field names (e.g. ["temperature","humidity"]).',
+        ),
+        aggs: z.array(z.enum(ALL_AGG_FNS as unknown as [AggFn, ...AggFn[]])).optional()
+          .describe('aggregate: aggregation functions per metric (default ["count","avg"]).'),
+        bucket: z.string().optional().describe('aggregate: bucket width like "5m","1h","1d". Omit for a single bucket spanning the full range.'),
+        maxBucketSamples: z.number().int().positive().max(MAX_SAMPLE_CAP).optional()
+          .describe(`aggregate: per-bucket sample cap (default 10000, max ${MAX_SAMPLE_CAP}). partial=true when any bucket was capped.`),
+      }).strict().superRefine((val, ctx) => {
+        if (val.mode === 'raw' && val.limit !== undefined && val.limit > 100) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['limit'], message: 'limit for mode="raw" cannot exceed 100' });
+        }
+      }),
+      outputSchema: {
+        // raw mode (deviceId set)
+        deviceId: z.string().optional(),
+        latest: z.unknown().optional(),
+        history: z.array(z.unknown()).optional(),
+        // raw mode (deviceId omitted)
+        devices: z.array(z.object({ deviceId: z.string(), latest: z.unknown() })).optional(),
+        // query mode
+        count: z.number().int().optional(),
+        records: z.array(z.object({
+          t: z.string(),
+          topic: z.string(),
+          deviceType: z.string().optional(),
+          payload: z.unknown(),
+        })).optional(),
+        // aggregate mode
+        bucket: z.string().optional(),
+        from: z.string().optional(),
+        to: z.string().optional(),
+        metrics: z.array(z.string()).optional(),
+        aggs: z.array(z.enum(ALL_AGG_FNS as unknown as [AggFn, ...AggFn[]])).optional(),
+        buckets: z.array(z.object({
+          t: z.string(),
+          metrics: z.record(z.string(), z.object({
+            count: z.number().optional(),
+            min: z.number().optional(),
+            max: z.number().optional(),
+            avg: z.number().optional(),
+            sum: z.number().optional(),
+            p50: z.number().optional(),
+            p95: z.number().optional(),
+          })),
+        })).optional(),
+        partial: z.boolean().optional(),
+        notes: z.array(z.string()).optional(),
+      },
+    },
+    async (args) => {
+      // ---- raw mode ------------------------------------------------------
+      if (args.mode === 'raw') {
+        if (args.deviceId !== undefined) {
+          const latest = deviceHistoryStore.getLatest(args.deviceId);
+          const rawLimit = Math.min(args.limit ?? 20, 100);
+          const history = deviceHistoryStore.getHistory(args.deviceId, rawLimit);
+          const result = { deviceId: args.deviceId, latest, history };
+          return {
+            content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+            structuredContent: result,
+          };
+        }
+        const ids = deviceHistoryStore.listDevices();
+        const devices = ids.map((id) => ({ deviceId: id, latest: deviceHistoryStore.getLatest(id) }));
+        const result = { devices };
+        return {
+          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+          structuredContent: result,
+        };
+      }
+
+      // ---- query mode ----------------------------------------------------
+      if (args.mode === 'query') return runDeviceHistoryQuery(args as Parameters<typeof runDeviceHistoryQuery>[0]); // cast strips mode
+
+      // ---- aggregate mode ------------------------------------------------
+      // Zod enum guarantees mode === 'aggregate' here
+      return runDeviceHistoryAggregate(args as Parameters<typeof runDeviceHistoryAggregate>[0]);
+    }
+  );
+
+  // ---- deprecated aliases for device_history ------------------------------
+  // 3.x backward-compat — removed in 4.0.0. query/aggregate aliases delegate
+  // to module-level helpers; raw (get_device_history) inlines the logic since
+  // it's short. Schemas mirror the relevant subset of the device_history schema
+  // so old clients keep their shape.
   if (!skip('get_device_history'))
   server.registerTool(
     'get_device_history',
     {
-      title: 'Get locally-persisted device state history',
-      description:
-        'Return device state history recorded from MQTT events (persisted to ~/.switchbot/device-history/). ' +
-        'No API call — zero quota cost. Use when you need recent historical readings or want to avoid a live API call. ' +
-        'Omit deviceId to list all devices with stored history.',
-      _meta: { agentSafetyTier: 'read' },
+      title: '[Deprecated] Latest + recent device history',
+      ...deprecatedAlias('device_history', 'raw',
+        'Read the latest entry plus the most recent N records for one device, or list devices with stored history when deviceId is omitted. No API call — zero quota cost.',
+      ),
       inputSchema: z.object({
-        deviceId: z.string().optional().describe('Device MAC address (deviceId). Omit to list all devices with history.'),
-        limit: z.number().int().min(1).max(100).optional().describe('Max history entries to return (default 20, max 100)'),
+        deviceId: z.string().min(1).optional().describe(
+          'Device MAC address. Omit to list all devices with stored history.',
+        ),
+        // raw-mode only: hard-capped at 100 here; the consolidated `device_history` schema uses max 10000 across all modes (raw enforces 100 at runtime).
+        limit: z.number().int().min(1).max(100).optional().describe(
+          'Max history entries to return (default 20, max 100).',
+        ),
       }).strict(),
       outputSchema: {
         deviceId: z.string().optional(),
@@ -381,11 +606,11 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
         devices: z.array(z.object({ deviceId: z.string(), latest: z.unknown() })).optional(),
       },
     },
-    async ({ deviceId, limit }) => {
-      if (deviceId) {
-        const latest = deviceHistoryStore.getLatest(deviceId);
-        const history = deviceHistoryStore.getHistory(deviceId, limit ?? 20);
-        const result = { deviceId, latest, history };
+    async (args) => {
+      if (args.deviceId !== undefined) {
+        const latest = deviceHistoryStore.getLatest(args.deviceId);
+        const history = deviceHistoryStore.getHistory(args.deviceId, args.limit ?? 20);
+        const result = { deviceId: args.deviceId, latest, history };
         return {
           content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
           structuredContent: result,
@@ -401,24 +626,21 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
     }
   );
 
-  // ---- query_device_history --------------------------------------------------
   if (!skip('query_device_history'))
   server.registerTool(
     'query_device_history',
     {
-      title: 'Query time-ranged device history',
-      description:
-        'Return records from the append-only JSONL history (~/.switchbot/device-history/<deviceId>.jsonl) ' +
-        'filtered by a relative duration (since) or absolute ISO-8601 range (from/to). ' +
-        'No API call — zero quota cost. Use for trend questions like "how many times did this switch turn on last week".',
-      _meta: { agentSafetyTier: 'read' },
+      title: '[Deprecated] Time-ranged device history query',
+      ...deprecatedAlias('device_history', 'query',
+        'Return time-ranged records (since OR from/to) with optional field projection and limit. No API call.',
+      ),
       inputSchema: z.object({
-        deviceId: z.string().describe('Device ID to query'),
-        since: z.string().optional().describe('Relative window ending now, e.g. "30s", "15m", "1h", "7d". Mutually exclusive with from/to.'),
-        from: z.string().optional().describe('Range start (ISO-8601).'),
-        to: z.string().optional().describe('Range end (ISO-8601).'),
-        fields: z.array(z.string()).optional().describe('Project these payload fields; omit for the full payload.'),
-        limit: z.number().int().min(1).max(10000).optional().describe('Max records to return (default 1000).'),
+        deviceId: z.string().describe('Device MAC address (required).'),
+        since: z.string().optional().describe('Relative window ending now, e.g. "30s","15m","1h","7d". Mutually exclusive with from/to.'),
+        from: z.string().optional().describe('Range start (ISO-8601). Mutually exclusive with since.'),
+        to: z.string().optional().describe('Range end (ISO-8601). Used together with from.'),
+        fields: z.array(z.string()).optional().describe('Project these payload fields; omit for full payload.'),
+        limit: z.number().int().min(1).max(10000).optional().describe('Max records to return (default 1000, max 10000).'),
       }).strict(),
       outputSchema: {
         deviceId: z.string(),
@@ -429,24 +651,59 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
           deviceType: z.string().optional(),
           payload: z.unknown(),
         })),
+        notes: z.array(z.string()).optional(),
       },
     },
-    async ({ deviceId, since, from, to, fields, limit }) => {
-      if (since && (from || to)) {
-        return mcpError('usage', 2, '--since is mutually exclusive with --from/--to.');
-      }
-      try {
-        const records = await queryDeviceHistory(deviceId, { since, from, to, fields, limit });
-        const result = { deviceId, count: records.length, records };
-        return {
-          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-          structuredContent: result,
-        };
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'history query failed';
-        return mcpError('usage', 2, msg);
-      }
-    }
+    async (args) => runDeviceHistoryQuery(args)
+  );
+
+  if (!skip('aggregate_device_history'))
+  server.registerTool(
+    'aggregate_device_history',
+    {
+      title: '[Deprecated] Bucketed device-history aggregation',
+      ...deprecatedAlias('device_history', 'aggregate',
+        'Return bucketed statistics (count/min/max/avg/sum/p50/p95) over numeric metrics. No API call.',
+      ),
+      inputSchema: z.object({
+        deviceId: z.string().describe('Device MAC address (required).'),
+        since: z.string().optional().describe('Relative window ending now, e.g. "30s","15m","1h","7d". Mutually exclusive with from/to.'),
+        from: z.string().optional().describe('Range start (ISO-8601). Mutually exclusive with since.'),
+        to: z.string().optional().describe('Range end (ISO-8601). Used together with from.'),
+        metrics: z.array(z.string().min(1)).min(1).describe(
+          'One or more numeric payload field names to aggregate (e.g. ["temperature","humidity"]).',
+        ),
+        aggs: z.array(z.enum(ALL_AGG_FNS as unknown as [AggFn, ...AggFn[]])).optional().describe(
+          'Aggregation functions per metric (default ["count","avg"]).',
+        ),
+        bucket: z.string().optional().describe('Bucket width like "5m","1h","1d". Omit for a single bucket spanning the full range.'),
+        maxBucketSamples: z.number().int().positive().max(MAX_SAMPLE_CAP).optional()
+          .describe(`Per-bucket sample cap (default 10000, max ${MAX_SAMPLE_CAP}). partial=true when any bucket was capped.`),
+      }).strict(),
+      outputSchema: {
+        deviceId: z.string(),
+        bucket: z.string().optional(),
+        from: z.string().optional(),
+        to: z.string().optional(),
+        metrics: z.array(z.string()),
+        aggs: z.array(z.enum(ALL_AGG_FNS as unknown as [AggFn, ...AggFn[]])),
+        buckets: z.array(z.object({
+          t: z.string(),
+          metrics: z.record(z.string(), z.object({
+            count: z.number().optional(),
+            min: z.number().optional(),
+            max: z.number().optional(),
+            avg: z.number().optional(),
+            sum: z.number().optional(),
+            p50: z.number().optional(),
+            p95: z.number().optional(),
+          })),
+        })),
+        partial: z.boolean().optional(),
+        notes: z.array(z.string()).optional(),
+      },
+    },
+    async (args) => runDeviceHistoryAggregate(args)
   );
 
   // ---- send_command ---------------------------------------------------------
@@ -932,110 +1189,6 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
     }
   );
 
-  // ---- aggregate_device_history --------------------------------------------
-  if (!skip('aggregate_device_history'))
-  server.registerTool(
-    'aggregate_device_history',
-    {
-      title: 'Aggregate device history',
-      description:
-        'Bucketed statistics (count/min/max/avg/sum/p50/p95) over JSONL-recorded device history. Read-only; no network calls.',
-      _meta: { agentSafetyTier: 'read' },
-      inputSchema: z
-        .object({
-          deviceId: z.string().min(1).describe('Device ID to aggregate over (must exist in ~/.switchbot/device-history/).'),
-          since: z
-            .string()
-            .optional()
-            .describe('Relative window ending now, e.g. "30s", "15m", "1h", "7d". Mutually exclusive with from/to.'),
-          from: z.string().optional().describe('Range start (ISO-8601). Requires `to`.'),
-          to: z.string().optional().describe('Range end (ISO-8601). Requires `from`.'),
-          metrics: z
-            .array(z.string().min(1))
-            .min(1)
-            .describe('One or more numeric payload field names to aggregate (e.g. ["temperature","humidity"]).'),
-          aggs: z
-            .array(z.enum(ALL_AGG_FNS as unknown as [AggFn, ...AggFn[]]))
-            .optional()
-            .describe('Aggregation functions to apply per metric (default: ["count","avg"]).'),
-          bucket: z
-            .string()
-            .optional()
-            .describe('Bucket width like "5m", "1h", "1d". Omit for a single bucket spanning the full range.'),
-          maxBucketSamples: z
-            .number()
-            .int()
-            .positive()
-            .max(MAX_SAMPLE_CAP)
-            .optional()
-            .describe(`Sample cap per bucket to bound memory (default ${10_000}, max ${MAX_SAMPLE_CAP}). partial=true in the result when any bucket was capped.`),
-        })
-        .strict(),
-      outputSchema: {
-        deviceId: z.string(),
-        bucket: z.string().optional().describe('Bucket width echoed back when specified; omitted for single-bucket results.'),
-        from: z.string().describe('Effective range start (ISO-8601).'),
-        to: z.string().describe('Effective range end (ISO-8601).'),
-        metrics: z.array(z.string()).describe('Metrics that were requested.'),
-        aggs: z
-          .array(z.enum(ALL_AGG_FNS as unknown as [AggFn, ...AggFn[]]))
-          .describe('Aggregation functions that were applied.'),
-        buckets: z
-          .array(
-            z.object({
-              t: z.string().describe('Bucket start timestamp (ISO-8601).'),
-              metrics: z
-                .record(
-                  z.string(),
-                  z
-                    .object({
-                      count: z.number().optional(),
-                      min: z.number().optional(),
-                      max: z.number().optional(),
-                      avg: z.number().optional(),
-                      sum: z.number().optional(),
-                      p50: z.number().optional(),
-                      p95: z.number().optional(),
-                    })
-                    .describe('Per-aggregate function result for this metric in this bucket.'),
-                )
-                .describe('Per-metric result keyed by metric name.'),
-            }),
-          )
-          .describe('Time-ordered buckets; empty when no records match.'),
-        partial: z.boolean().describe('True if any bucket was sample-capped; retry with a higher maxBucketSamples or a narrower range for exact values.'),
-        notes: z.array(z.string()).describe('Human-readable notes about the aggregation (e.g. "metric X is non-numeric").'),
-      },
-    },
-    async (args) => {
-      const opts: AggOptions = {
-        since: args.since,
-        from: args.from,
-        to: args.to,
-        metrics: args.metrics,
-        aggs: args.aggs,
-        bucket: args.bucket,
-        maxBucketSamples: args.maxBucketSamples,
-      };
-      const res = await aggregateDeviceHistory(args.deviceId, opts);
-      const structured: Record<string, unknown> = {
-        deviceId: res.deviceId,
-        from: res.from,
-        to: res.to,
-        metrics: res.metrics,
-        aggs: res.aggs,
-        buckets: res.buckets,
-        partial: res.partial,
-        notes: res.notes,
-      };
-      if (res.bucket !== undefined) structured.bucket = res.bucket;
-      return {
-        content: [{ type: 'text', text: JSON.stringify(res, null, 2) }],
-        structuredContent: structured,
-      };
-    },
-  );
-
   // ---- account_overview ---------------------------------------------------
   if (!skip('account_overview'))
   server.registerTool(
@@ -1131,6 +1284,169 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
         }],
         structuredContent: overview,
       };
+    }
+  );
+
+  // ---- mindclip_recordings -----------------------------------------------
+  // Consolidates the previous mindclip_list_recordings / mindclip_get_recording /
+  // mindclip_get_summary trio. The `action` discriminator selects the operation;
+  // each branch validates its own required params at handler time.
+  if (!skip('mindclip_recordings'))
+  server.registerTool(
+    'mindclip_recordings',
+    {
+      title: 'AI MindClip recordings (list / get / summary)',
+      description:
+        'Read recordings captured by AI MindClip devices. Pick `action`: ' +
+        '"list" returns a paginated page (filters: deviceID, time range, folderID, paging); ' +
+        '"get" fetches metadata + transcript for one recording (requires `id`; optional `language`); ' +
+        '"summary" returns the AI-generated summary (key points, action items) for a recording (requires `id`).',
+      _meta: { agentSafetyTier: 'read' },
+      inputSchema: z.object({
+        action: z.enum(['list', 'get', 'summary']).describe(
+          '"list": browse recordings page; "get": fetch one by id; "summary": fetch AI summary by id.',
+        ),
+        // get / summary
+        id: z.string().min(1).optional().describe('Recording ID — required when action="get" or "summary".'),
+        language: z.string().min(1).optional().describe('Language code (e.g. "en", "zh") — only honored when action="get".'),
+        // list filters
+        deviceID: z.string().min(1).optional().describe('Filter by SwitchBot device ID — list only.'),
+        pageNum: z.number().int().min(1).optional().describe('Page number (>= 1) — list only.'),
+        pageSize: z.number().int().min(1).max(100).optional().describe('Results per page (1-100) — list only.'),
+        startTime: z.number().int().min(0).optional().describe('Start timestamp in ms since epoch — list only.'),
+        endTime: z.number().int().min(0).optional().describe('End timestamp in ms since epoch — list only.'),
+        folderID: z.number().int().min(0).optional().describe('Filter by folder ID — list only.'),
+      }).strict(),
+      outputSchema: {
+        data: z.unknown().describe('Operation-shaped envelope: list -> recordings page, get -> single recording, summary -> AI summary body.'),
+      },
+    },
+    async (args) => {
+      try {
+        let data: unknown;
+        if (args.action === 'list') {
+          data = await listRecordings({
+            deviceID: args.deviceID,
+            pageNum: args.pageNum,
+            pageSize: args.pageSize,
+            startTime: args.startTime,
+            endTime: args.endTime,
+            folderID: args.folderID,
+          });
+        } else if (args.action === 'get') {
+          if (!args.id) return mcpError('usage', 2, 'mindclip_recordings: action="get" requires `id`.');
+          data = await getRecording(args.id, args.language);
+        } else {
+          if (!args.id) return mcpError('usage', 2, 'mindclip_recordings: action="summary" requires `id`.');
+          data = await getSummary(args.id);
+        }
+        return {
+          content: [{ type: 'text', text: JSON.stringify(data, null, 2) }],
+          structuredContent: { data: data as Record<string, unknown> },
+        };
+      } catch (err) {
+        return apiErrorToMcpError(err);
+      }
+    }
+  );
+
+  // ---- mindclip_list_todos ------------------------------------------------
+  if (!skip('mindclip_list_todos'))
+  server.registerTool(
+    'mindclip_list_todos',
+    {
+      title: 'List AI MindClip to-do items',
+      description:
+        'List AI-extracted to-dos pulled from voice recordings. Filters: completedNum (0=all/1=incomplete/2=completed), category (0=any/1=work/2=life/3=hobby/4=holiday/5=other), pagination, deviceID, fileID, time range.',
+      _meta: { agentSafetyTier: 'read' },
+      inputSchema: z.object({
+        completedNum: z.number().int().min(0).max(2).optional()
+          .describe('0=all (default), 1=incomplete, 2=completed'),
+        category: z.number().int().min(0).max(5).optional()
+          .describe('0=any, 1=work, 2=life, 3=hobby, 4=holiday, 5=other'),
+        pageNum: z.number().int().min(1).optional().describe('Page number (>= 1)'),
+        pageSize: z.number().int().min(1).max(100).optional().describe('Results per page (1-100)'),
+        deviceID: z.string().min(1).optional().describe('Filter by SwitchBot device ID'),
+        fileID: z.string().min(1).optional().describe('Filter by source recording file ID'),
+        startTime: z.number().int().min(0).optional().describe('Start timestamp in ms since epoch'),
+        endTime: z.number().int().min(0).optional().describe('End timestamp in ms since epoch'),
+      }).strict(),
+      outputSchema: {
+        data: z.unknown().describe('Todos page envelope as returned by /v1.1/mindclip/todos (opaque body)'),
+      },
+    },
+    async (args) => {
+      try {
+        const data = await listTodos(args);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(data, null, 2) }],
+          structuredContent: { data: data as Record<string, unknown> },
+        };
+      } catch (err) {
+        return apiErrorToMcpError(err);
+      }
+    }
+  );
+
+  // ---- mindclip_recall ----------------------------------------------------
+  // Consolidates mindclip_daily_recall / mindclip_weekly_summary /
+  // mindclip_urgent_todos. The `period` discriminator selects which AI-curated
+  // assistant view to fetch.
+  if (!skip('mindclip_recall'))
+  server.registerTool(
+    'mindclip_recall',
+    {
+      title: 'AI MindClip recall (daily / weekly / urgent)',
+      description:
+        'Fetch AI-curated assistant views over MindClip recordings. Pick `period`: ' +
+        '"daily" returns the daily recall (key moments, decisions, action items) for a date; ' +
+        '"weekly" returns the weekly summary across recordings in an ISO week; ' +
+        '"urgent_todos" returns the AI-surfaced urgent to-dos for a date (deadlines, follow-ups). ' +
+        'Daily/urgent_todos accept optional `date` (YYYY-MM-DD); weekly accepts optional `week` (YYYY-Www). ' +
+        'Omit the time arg to get the server default (most recent for daily/weekly; yesterday for urgent_todos).',
+      _meta: { agentSafetyTier: 'read' },
+      inputSchema: z.object({
+        period: z.enum(['daily', 'weekly', 'urgent_todos']).describe(
+          '"daily": daily recall by date; "weekly": weekly summary by ISO week; "urgent_todos": urgent to-dos by date.',
+        ),
+        date: z.string().regex(DATE_REGEX).refine(isCalendarValidDate, {
+          message: 'Invalid calendar date — month/day are out of range or otherwise impossible.',
+        }).optional()
+          .describe('YYYY-MM-DD — used by period="daily" or "urgent_todos"; omit for server default.'),
+        week: z.string().regex(WEEK_REGEX).refine(
+          (v) => Number(v.slice(6)) < 53 || isLongISOYear(Number(v.slice(0, 4))),
+          { message: 'W53 does not exist for this year — only long ISO years (Jan 1 on Thursday, or leap year starting Wednesday) have 53 ISO weeks.' },
+        ).optional()
+          .describe('YYYY-Www (weeks 01-53) — used by period="weekly"; omit for server default.'),
+      }).strict().superRefine((val, ctx) => {
+        if (val.period !== 'weekly' && val.week !== undefined) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['week'], message: '`week` is only valid when period="weekly"' });
+        }
+        if (val.period === 'weekly' && val.date !== undefined) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['date'], message: '`date` is only valid when period="daily" or "urgent_todos"' });
+        }
+      }),
+      outputSchema: {
+        data: z.unknown().describe('Period-shaped envelope: daily -> daily recall, weekly -> weekly summary, urgent_todos -> urgent todos list.'),
+      },
+    },
+    async (args) => {
+      try {
+        let data: unknown;
+        if (args.period === 'daily') {
+          data = await getDailyRecall(args.date);
+        } else if (args.period === 'weekly') {
+          data = await getWeeklySummary(args.week);
+        } else {
+          data = await getUrgentTodos(args.date);
+        }
+        return {
+          content: [{ type: 'text', text: JSON.stringify(data, null, 2) }],
+          structuredContent: { data: data as Record<string, unknown> },
+        };
+      } catch (err) {
+        return apiErrorToMcpError(err);
+      }
     }
   );
 
@@ -2299,7 +2615,7 @@ export function registerMcpCommand(program: Command): void {
     .command('mcp')
     .description('Run as a Model Context Protocol server so AI agents can call SwitchBot tools')
     .addHelpText('after', `
-  The MCP server exposes twenty-four tools:
+  The MCP server exposes twenty-eight tools:
   - list_devices            fetch all physical + IR devices
   - get_device_status       live status for a physical device
   - send_command            control a device (destructive commands need confirm:true)
@@ -2308,9 +2624,10 @@ export function registerMcpCommand(program: Command): void {
   - search_catalog          offline catalog search by type/alias
   - describe_device         metadata + commands + (optionally) live status for one device
   - account_overview        single cold-start snapshot: devices + scenes + quota + cache + MQTT state
-  - get_device_history      fetch raw JSONL history records for a device
-  - query_device_history    filter + page history records with field/time predicates
-  - aggregate_device_history compute count/min/max/avg/sum/p50/p95 over history records
+  - device_history          read locally-persisted device history (mode: "raw" | "query" | "aggregate")
+  - mindclip_recordings     AI MindClip recordings (action: "list" | "get" | "summary")
+  - mindclip_list_todos     list AI-extracted to-dos (filters: completion, category, source recording, time range)
+  - mindclip_recall         AI-curated assistant views (period: "daily" | "weekly" | "urgent_todos")
   - policy_validate         check policy.yaml against the embedded schema + offline semantics
                             (set live=true to resolve aliases and rule targets against current inventory)
   - policy_new              scaffold a starter policy.yaml (action — confirm first)
@@ -2353,7 +2670,7 @@ Inspect locally:
   mcp
     .command('tools')
     .description('Print the registered MCP tools in human or JSON form')
-    .option('--tools <profile>', 'Tool profile: "default" (13 tools), "readonly" (10), or "all" (24). Lists all when omitted', stringArg('--tools'), 'all')
+    .option('--tools <profile>', `Tool profile: "default" (${TOOL_PROFILES.default.size} tools), "readonly" (${TOOL_PROFILES.readonly.size}), or "all" (${TOOL_PROFILES.all.size}). Lists all when omitted`, stringArg('--tools'), 'all')
     .action((opts: { tools?: string }) => {
       try { printMcpToolDirectory(resolveToolProfile(opts.tools)); }
       catch (e) { handleError(e); }
@@ -2362,7 +2679,7 @@ Inspect locally:
   mcp
     .command('list-tools')
     .description('Alias of `mcp tools`')
-    .option('--tools <profile>', 'Tool profile: "default" (13 tools), "readonly" (10), or "all" (24). Lists all when omitted', stringArg('--tools'), 'all')
+    .option('--tools <profile>', `Tool profile: "default" (${TOOL_PROFILES.default.size} tools), "readonly" (${TOOL_PROFILES.readonly.size}), or "all" (${TOOL_PROFILES.all.size}). Lists all when omitted`, stringArg('--tools'), 'all')
     .action((opts: { tools?: string }) => {
       try { printMcpToolDirectory(resolveToolProfile(opts.tools)); }
       catch (e) { handleError(e); }
@@ -2376,7 +2693,7 @@ Inspect locally:
     .option('--auth-token <token>', 'Bearer token for HTTP requests (required for --bind 0.0.0.0; falls back to SWITCHBOT_MCP_TOKEN env var)', stringArg('--auth-token'))
     .option('--cors-origin <url>', 'Allowed CORS origin(s) for HTTP (repeatable)', stringArg('--cors-origin'))
     .option('--rate-limit <n>', 'Max requests per minute per profile (default 60)', intArg('--rate-limit', { min: 1 }), '60')
-    .option('--tools <profile>', 'Tool profile: "default" (13 tools), "readonly" (10), or "all" (24)', stringArg('--tools'), 'default')
+    .option('--tools <profile>', `Tool profile: "default" (${TOOL_PROFILES.default.size} tools), "readonly" (${TOOL_PROFILES.readonly.size}), or "all" (${TOOL_PROFILES.all.size})`, stringArg('--tools'), 'default')
     .addHelpText('after', `
 Examples:
   $ switchbot mcp serve
@@ -2575,6 +2892,9 @@ process_uptime_seconds ${Math.floor(process.uptime())}
             });
             // Route per-request credentials via AsyncLocalStorage so loadConfig()
             // picks up this request's profile instead of the process-global flag.
+            // Prime keychain credentials for this profile before entering context
+            // so loadConfig()'s synchronous getPrimedCredentials() can find them.
+            if (profile) await primeCredentials(profile);
             await withRequestContext({ profile: profile ?? undefined }, async () => {
               try {
                 await reqServer.connect(reqTransport);

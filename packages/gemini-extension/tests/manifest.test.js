@@ -22,11 +22,11 @@ describe('gemini-extension.json manifest', () => {
     assert.equal(manifest.contextFileName, 'GEMINI.md');
   });
 
-  it('mcpServers.switchbot uses switchbot mcp serve --tools all', () => {
+  it('mcpServers.switchbot uses switchbot mcp serve (default profile)', () => {
     const server = manifest.mcpServers?.switchbot;
     assert.ok(server, 'mcpServers.switchbot must be defined');
     assert.equal(server.command, 'switchbot');
-    assert.deepEqual(server.args, ['mcp', 'serve', '--tools', 'all']);
+    assert.deepEqual(server.args, ['mcp', 'serve']);
   });
 
   it('mcpServers.switchbot has no unsupported fields', () => {
