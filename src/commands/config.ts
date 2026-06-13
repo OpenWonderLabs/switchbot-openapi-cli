@@ -270,8 +270,12 @@ Files are written with mode 0600. Profiles live under ~/.switchbot/profiles/<nam
             }
           : undefined,
       });
-      clearCache();
-      clearStatusCache();
+      try {
+        clearCache();
+        clearStatusCache();
+      } catch {
+        // Non-fatal on Windows EBUSY; in-memory is already invalidated.
+      }
       clearPrimedCredentials();
       idempotencyCache.clear();
       if (isJsonMode()) {

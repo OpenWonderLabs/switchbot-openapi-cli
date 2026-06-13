@@ -454,8 +454,12 @@ export function registerAuthCommand(program: Command): void {
       // Credentials changed — clear device/status cache so the next list
       // fetches fresh data for the new account instead of returning stale
       // results from the previous account's cache.
-      clearCache();
-      clearStatusCache();
+      try {
+        clearCache();
+        clearStatusCache();
+      } catch {
+        // Non-fatal on Windows EBUSY; in-memory is already invalidated.
+      }
       clearPrimedCredentials();
       idempotencyCache.clear();
 
