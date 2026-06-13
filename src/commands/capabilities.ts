@@ -11,7 +11,7 @@ import { loadCache } from '../devices/cache.js';
 import { printJson } from '../utils/output.js';
 import { enumArg, stringArg } from '../utils/arg-parsers.js';
 import { IDENTITY } from './identity.js';
-import { TOOL_PROFILES } from '../mcp/tool-profiles.js';
+import { TOOL_PROFILES, DEPRECATED_MCP_TOOLS } from '../mcp/tool-profiles.js';
 
 /** Collect the distinct catalog safety tiers actually used across the given entries. Sorted. */
 function collectSafetyTiersInUse(entries: DeviceCatalogEntry[]): SafetyTier[] {
@@ -243,8 +243,12 @@ function metaFor(command: string): CommandMeta | null {
 
 // Derived from the single source of truth in src/mcp/tool-profiles.ts so that
 // `capabilities --surface mcp` never drifts behind the actual MCP server tool
-// registration. Sorted for stable output.
-export const MCP_TOOLS = [...TOOL_PROFILES.all].sort();
+// registration. Sorted for stable output. Deprecated aliases are excluded —
+// they remain registered in the MCP server for backward compat but are not
+// advertised as part of the current API surface.
+export const MCP_TOOLS = [...TOOL_PROFILES.all]
+  .filter((t) => !DEPRECATED_MCP_TOOLS.has(t))
+  .sort();
 
 const IDEMPOTENCY_CONTRACT = {
   flag: '--idempotency-key <key>',

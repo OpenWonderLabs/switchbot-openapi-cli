@@ -40,6 +40,13 @@ export const TOOL_PROFILES: Record<ToolProfile, ReadonlySet<string>> = {
   all: new Set([...CORE_READ, ...CORE_ACTION, ...ADMIN]),
 };
 
+/** 3.x backward-compat aliases registered in the MCP server but removed in 4.0. */
+export const DEPRECATED_MCP_TOOLS: ReadonlySet<string> = new Set([
+  'get_device_history',
+  'query_device_history',
+  'aggregate_device_history',
+]);
+
 export const VALID_PROFILES = Object.keys(TOOL_PROFILES) as readonly ToolProfile[];
 
 export function resolveToolProfile(name?: string): ToolProfile {
