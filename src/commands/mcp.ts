@@ -319,22 +319,27 @@ async function runDeviceHistoryAggregate(args: {
     bucket: args.bucket,
     maxBucketSamples: args.maxBucketSamples,
   };
-  const res = await aggregateDeviceHistory(args.deviceId, opts);
-  const structured: Record<string, unknown> = {
-    deviceId: res.deviceId,
-    from: res.from,
-    to: res.to,
-    metrics: res.metrics,
-    aggs: res.aggs,
-    buckets: res.buckets,
-    partial: res.partial,
-    notes: res.notes,
-  };
-  if (res.bucket !== undefined) structured.bucket = res.bucket;
-  return {
-    content: [{ type: 'text' as const, text: JSON.stringify(res, null, 2) }],
-    structuredContent: structured,
-  };
+  try {
+    const res = await aggregateDeviceHistory(args.deviceId, opts);
+    const structured: Record<string, unknown> = {
+      deviceId: res.deviceId,
+      from: res.from,
+      to: res.to,
+      metrics: res.metrics,
+      aggs: res.aggs,
+      buckets: res.buckets,
+      partial: res.partial,
+      notes: res.notes,
+    };
+    if (res.bucket !== undefined) structured.bucket = res.bucket;
+    return {
+      content: [{ type: 'text' as const, text: JSON.stringify(res, null, 2) }],
+      structuredContent: structured,
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'history aggregation failed';
+    return mcpError('usage', 2, msg);
+  }
 }
 
 export function createSwitchBotMcpServer(options?: { eventManager?: EventSubscriptionManager; toolProfile?: ToolProfile }): McpServer {

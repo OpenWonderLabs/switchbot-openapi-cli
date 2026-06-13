@@ -134,7 +134,9 @@ describe('legacy device_history aliases (3.8.0 backward-compat contract)', () =>
         | { name: string; _meta?: { deprecated?: boolean; replacement?: string } }
         | undefined;
       expect(t, `alias ${old} not found`).toBeDefined();
-      expect(t!._meta, `${old}: _meta not transmitted by SDK — check Tool type definition`).toBeDefined();
+      // MCP SDK 1.29+ serializes _meta in tools/list; this assertion guards
+      // against a future SDK regression that strips it.
+      expect(t!._meta, `${old}: _meta missing — SDK regression dropped it from tools/list?`).toBeDefined();
       expect(t!._meta?.deprecated).toBe(true);
       expect(t!._meta?.replacement).toBe('device_history');
     },
@@ -156,6 +158,8 @@ describe('legacy device_history aliases (3.8.0 backward-compat contract)', () =>
     const { client } = await pair('all');
     // Query without setting up real device history; both calls should produce
     // the same shape (likely an error envelope or empty-records envelope).
+    // Unlike aggregate, query results carry no Date.now()-derived `from`/`to`
+    // boundaries, so a direct deep-equal is safe — no stable() helper needed.
     const args = { deviceId: 'NO-SUCH-DEVICE', since: '1h' };
     const aliasResp = await client.callTool({ name: 'query_device_history', arguments: args });
     const consolidatedResp = await client.callTool({ name: 'device_history', arguments: { mode: 'query', ...args } });
