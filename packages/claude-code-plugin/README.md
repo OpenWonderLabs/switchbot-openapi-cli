@@ -1,6 +1,6 @@
 # @switchbot/claude-code-plugin
 
-SwitchBot plugin for [Claude Code](https://claude.ai/claude-code) — wires Claude Code to the SwitchBot OpenAPI CLI MCP server, exposing 24 smart-home tools with policy-based safety gates.
+SwitchBot plugin for [Claude Code](https://claude.ai/claude-code) — wires Claude Code to the SwitchBot OpenAPI CLI MCP server, exposing 31 smart-home tools with policy-based safety gates.
 
 ## Installation
 

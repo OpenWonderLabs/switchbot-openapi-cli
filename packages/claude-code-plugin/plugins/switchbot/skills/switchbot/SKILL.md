@@ -20,6 +20,7 @@ Drive the user's SwitchBot smart home through the `switchbot` CLI. Always query 
 | What's this device doing right now? | `switchbot devices status <id> --json` |
 | What can I do with this specific device type? | `switchbot devices describe <id> --json` |
 | What scenes are configured? | `switchbot scenes list --json` |
+| What's on the user's AI MindClip (recordings, todos, daily/weekly summaries)? | `mindclip_list_recordings`, `mindclip_get_summary`, `mindclip_list_todos`, `mindclip_daily_recall`, `mindclip_weekly_summary`, `mindclip_urgent_todos` MCP tools |
 | What's in the user's `policy.yaml`? | `cat ~/.config/openclaw/switchbot/policy.yaml` |
 | Is my quota OK? | `switchbot quota status --json` |
 | Is the setup healthy? | `switchbot doctor --json` |
