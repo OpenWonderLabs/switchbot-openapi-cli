@@ -29,6 +29,24 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`reset` no longer aborts before printing the result summary** — the in-memory cache cleanup (`clearCache` / `clearStatusCache`) was rerunning `unlinkSync` on a file the data-file loop had already attempted to delete. On a permission-denied path that re-throw skipped both the in-memory clear and the result table. The reset command now uses the pure in-memory `resetListCache` / `resetStatusCache` helpers; disk deletion stays the sole responsibility of the data-file loop, where errors are reported into `results`.
 - **`capabilities --surface mcp` lists every registered MCP tool** — `MCP_TOOLS` was a hand-maintained array that had drifted. The list is now derived from the `TOOL_PROFILES.all` single source of truth, and a new test in `tool-profiles.test.ts` asserts the advertised set matches what `createSwitchBotMcpServer({ toolProfile: 'all' })` actually registers, so any future drift fails CI.
 
+## [3.8.1]
+
+### Fixed
+
+- **MindClip URL path injection** — `getRecording` and `getSummary` now call `encodeURIComponent()` on the id before interpolating into the URL path; slashes, `?`, `#`, and `..` traversal segments can no longer escape the path prefix or smuggle query parameters.
+- **MindClip MCP Zod schema tightening** — `mindclip_recordings` and `mindclip_list_todos` optional string inputs (`language`, `deviceID`, `fileID`) now use `.min(1)` to reject empty strings that previously bypassed validation. `mindclip_recall` date field gains a `.refine()` check against impossible calendar dates (e.g. `2026-02-30`, `2026-13-01`).
+- **ISO W53 validation** — `weekArg` (CLI) and the `mindclip_recall` MCP `week` field now reject W53 for short ISO years; only years whose January 1 falls on a Thursday (or leap years starting on Wednesday) have a 53rd ISO week.
+- **MindClip MCP error envelope** — three mindclip handlers (`mindclip_recordings`, `mindclip_list_todos`, `mindclip_recall`) were using a bare `mcpError('api', 1, err.message)` that discarded `subKind`, `retryable`, `retryAfterMs`, and `hint`. Switched to `apiErrorToMcpError()` so all structured error fields are preserved.
+- **History-store catch kind** — `runDeviceHistoryQuery` and `runDeviceHistoryAggregate` catch blocks changed from `kind='usage'` to `kind='runtime'`; all user-input validation happens before the try block, so any thrown error is a storage-layer fault, not a caller mistake.
+- **`clearCache` / `clearStatusCache` EBUSY on Windows** — `auth login` and `config set-token` called `fs.unlinkSync` directly; on Windows a concurrent reader can cause `EBUSY` which skipped the success output. Disk-only calls are now wrapped in try/catch; the in-memory portion always clears.
+- **`auth keychain set/delete/migrate` missing cache invalidation** — the three keychain subcommands wrote new credentials but left the device-list cache, status cache, primed-credentials cache, and idempotency cache untouched. All three now call `onCredentialChange()`, the same helper used by `auth login`.
+- **`device_history` raw-mode limit cap** — Zod schema allowed `max(10000)` for the shared `limit` field, but the description and deprecated `get_device_history` both said max 100 for raw mode. `device_history(mode="raw")` now applies `Math.min(limit ?? 20, 100)` at runtime and the description is updated to say "max 100 enforced at runtime".
+- **Stale tool-count labels** — `readonly`/`default`/`all` profile sizes were hardcoded as 11/14/25 in `mcp tools` help text, `gemini-checks.ts`, and all plugin manifests; the true values are 14/17/28. All labels now derive from `TOOL_PROFILES.*.size`.
+- **`capabilities --surface mcp` advertising deprecated aliases** — `MCP_TOOLS` now filters out the 3 deprecated `*_device_history` aliases via the new `DEPRECATED_MCP_TOOLS` export from `tool-profiles.ts`. The aliases remain registered in the MCP server for backward compat.
+- **AI MindClip catalog aliases missing** — the `AI MindClip` entry in `DEVICE_CATALOG` had no `aliases` array; `search_catalog` and `describe_device` queries for `"MindClip"` or `"Mind Clip"` returned no results. Aliases `['AIMindClip', 'MindClip', 'Mind Clip']` added.
+- **Idempotency cache not scoped per profile** — `idempotencyCache.clear()` on credential change wiped all profiles' dedup windows. A new optional `profile` parameter on `IdempotencyCache.run()` tags each entry; the new `clearForProfile(profile)` method evicts only that profile's entries. `sendDeviceCommand` now passes `getActiveProfile()` and `auth`/`config` call `clearForProfile` instead of `clear`.
+- **`primeCredentials` stale-write race** — when `clearPrimedCredentials()` fired while `store.get()` was still in flight, the resolved value could overwrite the freshly-cleared cache. A generation counter prevents this: `primeCredentials` captures the counter before awaiting and discards the result if it has changed.
+
 ## [3.7.9]
 
 ### Added
