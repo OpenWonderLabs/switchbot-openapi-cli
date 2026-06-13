@@ -214,6 +214,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   // ---------- Physical devices ----------
   {
     type: 'AI MindClip',
+    aliases: ['AIMindClip', 'MindClip', 'Mind Clip'],
     category: 'physical',
     description: 'AI-powered voice recorder with transcription and meeting summaries.',
     role: 'other',
