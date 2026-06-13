@@ -91,11 +91,21 @@ describe('tool-profiles', () => {
   });
 
   describe('capabilities MCP_TOOLS stays in sync with registered tools', () => {
-    it('MCP_TOOLS matches the names registered under toolProfile=all', () => {
+    it('MCP_TOOLS matches registered tools under toolProfile=all, minus deprecated aliases', () => {
       const server = createSwitchBotMcpServer({ toolProfile: 'all' });
-      const registered = [...listRegisteredTools(server)].sort();
-      const advertised = [...MCP_TOOLS].sort();
-      expect(advertised).toEqual(registered);
+      const registered = new Set(listRegisteredTools(server));
+      // MCP_TOOLS excludes deprecated aliases; all other registered tools must be present.
+      for (const tool of MCP_TOOLS) {
+        expect(registered).toContain(tool);
+      }
+      // Deprecated aliases are registered for backward compat but not advertised.
+      const deprecated = ['get_device_history', 'query_device_history', 'aggregate_device_history'];
+      for (const alias of deprecated) {
+        expect(registered).toContain(alias);
+        expect(MCP_TOOLS).not.toContain(alias);
+      }
+      // Total: MCP_TOOLS.length + 3 deprecated = registered.size
+      expect(MCP_TOOLS.length + deprecated.length).toBe(registered.size);
     });
   });
 });
