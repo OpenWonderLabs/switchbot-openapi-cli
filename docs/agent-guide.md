@@ -89,6 +89,9 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 | `describe_device` | Catalog-derived capabilities + optional live status | read |
 | `account_overview` | Cold-start snapshot (devices/scenes/quota/cache/MQTT) | read |
 | `device_history` | Read locally-persisted history. mode: "raw" (latest + ring) / "query" (time-range JSONL) / "aggregate" (bucketed stats) | read |
+| `mindclip_recordings` | Browse/fetch AI MindClip recordings. action: `"list"` paginated browse / `"get"` single recording by id / `"summary"` AI-generated summary | read |
+| `mindclip_list_todos` | List AI-extracted to-dos pulled from voice recordings | read |
+| `mindclip_recall` | AI-curated recall views. period: `"daily"` daily recall / `"weekly"` weekly summary / `"urgent_todos"` urgent to-dos | read |
 | `policy_validate` | Validate policy.yaml | read |
 | `policy_new` | Scaffold a starter policy file | action |
 | `policy_migrate` | Upgrade policy schema in-place | action |
