@@ -211,6 +211,25 @@ describe('auth keychain set', () => {
     const data = expectJsonEnvelopeShape(parsed, ['profile', 'backend', 'written']);
     expect(data.written).toBe(true);
   });
+
+  it('clears all four caches after writing credentials', async () => {
+    clearCacheMock.mockReset();
+    clearStatusCacheMock.mockReset();
+    clearPrimedCredsMock.mockReset();
+    idempotencyClearForProfileMock.mockReset();
+
+    const store = makeStore({ writable: true });
+    selectMock.mockResolvedValue(store);
+    const file = path.join(tmpDir, 'creds.json');
+    fs.writeFileSync(file, JSON.stringify({ token: 'tk', secret: 'sk' }));
+
+    const res = await runCli(['auth', 'keychain', 'set', '--stdin-file', file]);
+    expect(res.exitCode).toBe(0);
+    expect(clearCacheMock).toHaveBeenCalledOnce();
+    expect(clearStatusCacheMock).toHaveBeenCalledOnce();
+    expect(clearPrimedCredsMock).toHaveBeenCalledOnce();
+    expect(idempotencyClearForProfileMock).toHaveBeenCalledOnce();
+  });
 });
 
 describe('auth keychain delete', () => {
@@ -232,6 +251,23 @@ describe('auth keychain delete', () => {
     const parsed = JSON.parse(res.stdout[0]) as Record<string, unknown>;
     const data = expectJsonEnvelopeShape(parsed, ['profile', 'backend', 'deleted']);
     expect(data.deleted).toBe(true);
+  });
+
+  it('clears all four caches after deleting credentials', async () => {
+    clearCacheMock.mockReset();
+    clearStatusCacheMock.mockReset();
+    clearPrimedCredsMock.mockReset();
+    idempotencyClearForProfileMock.mockReset();
+
+    const store = makeStore({ writable: true });
+    selectMock.mockResolvedValue(store);
+
+    const res = await runCli(['auth', 'keychain', 'delete', '--yes']);
+    expect(res.exitCode).toBe(0);
+    expect(clearCacheMock).toHaveBeenCalledOnce();
+    expect(clearStatusCacheMock).toHaveBeenCalledOnce();
+    expect(clearPrimedCredsMock).toHaveBeenCalledOnce();
+    expect(idempotencyClearForProfileMock).toHaveBeenCalledOnce();
   });
 });
 
@@ -400,6 +436,26 @@ describe('auth keychain migrate', () => {
       unlinkSpy.mockRestore();
     }
   });
+
+  it('clears all four caches after a successful migrate', async () => {
+    clearCacheMock.mockReset();
+    clearStatusCacheMock.mockReset();
+    clearPrimedCredsMock.mockReset();
+    idempotencyClearForProfileMock.mockReset();
+
+    const store = makeStore({ writable: true });
+    selectMock.mockResolvedValue(store);
+    const file = path.join(tmpHome, '.switchbot', 'config.json');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ token: 't-mig', secret: 's-mig' }));
+
+    const res = await runCli(['auth', 'keychain', 'migrate']);
+    expect(res.exitCode).toBe(0);
+    expect(clearCacheMock).toHaveBeenCalledOnce();
+    expect(clearStatusCacheMock).toHaveBeenCalledOnce();
+    expect(clearPrimedCredsMock).toHaveBeenCalledOnce();
+    expect(idempotencyClearForProfileMock).toHaveBeenCalledOnce();
+  });
 });
 
 // ── auth login ────────────────────────────────────────────────────────────────
@@ -429,12 +485,43 @@ vi.mock('../../src/devices/cache.js', async () => {
   };
 });
 
+const clearPrimedCredsMock = vi.fn();
+
+vi.mock('../../src/credentials/prime.js', async () => {
+  const actual = await vi.importActual<typeof import('../../src/credentials/prime.js')>(
+    '../../src/credentials/prime.js',
+  );
+  return {
+    ...actual,
+    clearPrimedCredentials: (...args: unknown[]) => clearPrimedCredsMock(...args),
+  };
+});
+
+const idempotencyClearForProfileMock = vi.fn();
+
+vi.mock('../../src/lib/idempotency.js', async () => {
+  const actual = await vi.importActual<typeof import('../../src/lib/idempotency.js')>(
+    '../../src/lib/idempotency.js',
+  );
+  return {
+    ...actual,
+    idempotencyCache: {
+      clearForProfile: (...args: unknown[]) => idempotencyClearForProfileMock(...args),
+      clear: vi.fn(),
+      run: vi.fn(),
+      size: vi.fn(() => 0),
+    },
+  };
+});
+
 describe('auth login', () => {
   beforeEach(() => {
     browserLoginMock.mockReset();
     verifyCredsMock.mockReset();
     clearCacheMock.mockReset();
     clearStatusCacheMock.mockReset();
+    clearPrimedCredsMock.mockReset();
+    idempotencyClearForProfileMock.mockReset();
   });
 
   it('saves credentials and exits 0 on success', async () => {
@@ -501,7 +588,7 @@ describe('auth login', () => {
     }
   });
 
-  it('clears device and status cache after successful login', async () => {
+  it('clears all four caches after successful login', async () => {
     browserLoginMock.mockResolvedValue({ token: 'tok-new', secret: 'sec-new' });
     verifyCredsMock.mockResolvedValue({ ok: true });
     const store = makeStore({ writable: true });
@@ -511,14 +598,18 @@ describe('auth login', () => {
     expect(res.exitCode).toBe(0);
     expect(clearCacheMock).toHaveBeenCalledOnce();
     expect(clearStatusCacheMock).toHaveBeenCalledOnce();
+    expect(clearPrimedCredsMock).toHaveBeenCalledOnce();
+    expect(idempotencyClearForProfileMock).toHaveBeenCalledOnce();
   });
 
-  it('does not clear cache when login fails', async () => {
+  it('does not clear any cache when login fails', async () => {
     browserLoginMock.mockRejectedValue(new Error('user cancelled'));
 
     const res = await runCli(['auth', 'login', '--no-open']);
     expect(res.exitCode).toBe(1);
     expect(clearCacheMock).not.toHaveBeenCalled();
     expect(clearStatusCacheMock).not.toHaveBeenCalled();
+    expect(clearPrimedCredsMock).not.toHaveBeenCalled();
+    expect(idempotencyClearForProfileMock).not.toHaveBeenCalled();
   });
 });

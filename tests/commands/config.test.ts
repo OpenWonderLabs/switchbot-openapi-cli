@@ -19,6 +19,51 @@ const configMock = vi.hoisted(() => ({
 
 vi.mock('../../src/config.js', () => configMock);
 
+// Mocks for onCredentialChange side-effects so we can assert all four
+// cache-clear functions are called on credential mutations.
+const clearCacheMock = vi.hoisted(() => vi.fn());
+const clearStatusCacheMock = vi.hoisted(() => vi.fn());
+
+vi.mock('../../src/devices/cache.js', async () => {
+  const actual = await vi.importActual<typeof import('../../src/devices/cache.js')>(
+    '../../src/devices/cache.js',
+  );
+  return {
+    ...actual,
+    clearCache: (...args: unknown[]) => clearCacheMock(...args),
+    clearStatusCache: (...args: unknown[]) => clearStatusCacheMock(...args),
+  };
+});
+
+const clearPrimedCredsMock = vi.hoisted(() => vi.fn());
+
+vi.mock('../../src/credentials/prime.js', async () => {
+  const actual = await vi.importActual<typeof import('../../src/credentials/prime.js')>(
+    '../../src/credentials/prime.js',
+  );
+  return {
+    ...actual,
+    clearPrimedCredentials: (...args: unknown[]) => clearPrimedCredsMock(...args),
+  };
+});
+
+const idempotencyClearForProfileMock = vi.hoisted(() => vi.fn());
+
+vi.mock('../../src/lib/idempotency.js', async () => {
+  const actual = await vi.importActual<typeof import('../../src/lib/idempotency.js')>(
+    '../../src/lib/idempotency.js',
+  );
+  return {
+    ...actual,
+    idempotencyCache: {
+      clearForProfile: (...args: unknown[]) => idempotencyClearForProfileMock(...args),
+      clear: vi.fn(),
+      run: vi.fn(),
+      size: vi.fn(() => 0),
+    },
+  };
+});
+
 import { registerConfigCommand } from '../../src/commands/config.js';
 import { runCli } from '../helpers/cli.js';
 import { expectJsonEnvelopeShape } from '../helpers/contracts.js';
@@ -31,6 +76,10 @@ describe('config command', () => {
     configMock.getConfigSummary.mockReturnValue({ source: 'none' });
     configMock.listProfiles.mockReset();
     configMock.listProfiles.mockReturnValue([]);
+    clearCacheMock.mockReset();
+    clearStatusCacheMock.mockReset();
+    clearPrimedCredsMock.mockReset();
+    idempotencyClearForProfileMock.mockReset();
   });
 
   describe('set-token', () => {
@@ -101,6 +150,23 @@ describe('config command', () => {
         expect.objectContaining({ defaults: { flags: ['audit-log', 'verbose'] } }),
       );
       expect(res.exitCode).toBeNull();
+    });
+
+    it('clears all four caches after saving credentials', async () => {
+      const res = await runCli(registerConfigCommand, ['config', 'set-token', 'T', 'S']);
+      expect(res.exitCode).toBeNull();
+      expect(clearCacheMock).toHaveBeenCalledOnce();
+      expect(clearStatusCacheMock).toHaveBeenCalledOnce();
+      expect(clearPrimedCredsMock).toHaveBeenCalledOnce();
+      expect(idempotencyClearForProfileMock).toHaveBeenCalledOnce();
+    });
+
+    it('does not clear caches when set-token fails (missing token)', async () => {
+      await runCli(registerConfigCommand, ['config', 'set-token']);
+      expect(clearCacheMock).not.toHaveBeenCalled();
+      expect(clearStatusCacheMock).not.toHaveBeenCalled();
+      expect(clearPrimedCredsMock).not.toHaveBeenCalled();
+      expect(idempotencyClearForProfileMock).not.toHaveBeenCalled();
     });
   });
 
