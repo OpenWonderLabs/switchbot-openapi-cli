@@ -140,11 +140,16 @@ describe('legacy device_history aliases (3.8.0 backward-compat contract)', () =>
     },
   );
 
-  it('get_device_history with no args produces the same shape as device_history({mode:"raw"})', async () => {
+  it('get_device_history forwards equivalently to device_history({mode:"raw"})', async () => {
     const { client } = await pair('all');
-    const aliasResp = await client.callTool({ name: 'get_device_history', arguments: {} });
-    const consolidatedResp = await client.callTool({ name: 'device_history', arguments: { mode: 'raw' } });
+    // Use a no-such-device arg so neither call snapshots live MQTT real-time
+    // data — both should produce the same empty-history envelope. Calling with
+    // empty `arguments` would race on `latest.t` timestamps.
+    const args = { deviceId: 'NO-SUCH-DEVICE' };
+    const aliasResp = await client.callTool({ name: 'get_device_history', arguments: args });
+    const consolidatedResp = await client.callTool({ name: 'device_history', arguments: { mode: 'raw', ...args } });
     expect(aliasResp.structuredContent).toEqual(consolidatedResp.structuredContent);
+    expect(aliasResp.isError).toBe(consolidatedResp.isError);
   });
 
   it('query_device_history forwards equivalently to device_history({mode:"query"})', async () => {
