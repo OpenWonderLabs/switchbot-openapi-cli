@@ -1336,7 +1336,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
           structuredContent: { data: data as Record<string, unknown> },
         };
       } catch (err) {
-        return mcpError('api', 1, err instanceof Error ? err.message : String(err));
+        return apiErrorToMcpError(err);
       }
     }
   );
@@ -1374,7 +1374,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
           structuredContent: { data: data as Record<string, unknown> },
         };
       } catch (err) {
-        return mcpError('api', 1, err instanceof Error ? err.message : String(err));
+        return apiErrorToMcpError(err);
       }
     }
   );
@@ -1429,7 +1429,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
           structuredContent: { data: data as Record<string, unknown> },
         };
       } catch (err) {
-        return mcpError('api', 1, err instanceof Error ? err.message : String(err));
+        return apiErrorToMcpError(err);
       }
     }
   );
