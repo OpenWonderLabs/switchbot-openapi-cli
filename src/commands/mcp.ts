@@ -290,7 +290,7 @@ async function runDeviceHistoryQuery(args: {
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'history query failed';
-    return mcpError('usage', 2, msg);
+    return mcpError('runtime', 1, msg);
   }
 }
 
@@ -338,7 +338,7 @@ async function runDeviceHistoryAggregate(args: {
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'history aggregation failed';
-    return mcpError('usage', 2, msg);
+    return mcpError('runtime', 1, msg);
   }
 }
 
