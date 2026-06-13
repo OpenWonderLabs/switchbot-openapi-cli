@@ -29,6 +29,7 @@ interface CacheEntry {
 }
 
 let cache: CacheEntry | null = null;
+let generation = 0;
 
 function isCacheValid(profile: string): boolean {
   if (!cache) return false;
@@ -41,14 +42,21 @@ function isCacheValid(profile: string): boolean {
  * the result. Subsequent calls within CACHE_TTL_MS short-circuit.
  * After TTL expires, credentials are re-read from the keychain.
  * Swallows all errors.
+ *
+ * A generation counter guards against the race where clearPrimedCredentials()
+ * fires while store.get() is still in flight — if the generation changed, we
+ * discard the stale result instead of overwriting the now-empty cache.
  */
 export async function primeCredentials(profile: string): Promise<void> {
   if (isCacheValid(profile)) return;
+  const gen = generation;
   try {
     const store = await selectCredentialStore();
     const creds = await store.get(profile);
+    if (generation !== gen) return;
     cache = { profile, creds, timestamp: Date.now() };
   } catch {
+    if (generation !== gen) return;
     cache = { profile, creds: null, timestamp: Date.now() };
   }
 }
@@ -68,6 +76,7 @@ export function getPrimedCredentials(profile: string): CredentialBundle | null {
  * Test helper. Not used by production code.
  */
 export function __resetPrimedCredentials(): void {
+  generation++;
   cache = null;
 }
 
@@ -77,5 +86,6 @@ export function __resetPrimedCredentials(): void {
  * token/secret from the previous account.
  */
 export function clearPrimedCredentials(): void {
+  generation++;
   cache = null;
 }
