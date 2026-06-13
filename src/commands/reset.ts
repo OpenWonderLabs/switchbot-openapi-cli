@@ -9,6 +9,9 @@ import { isDryRun, getConfigPath } from '../utils/flags.js';
 import { selectCredentialStore } from '../credentials/keychain.js';
 import { listProfiles } from '../config.js';
 import { getActiveProfile } from '../lib/request-context.js';
+import { clearCache, clearStatusCache } from '../devices/cache.js';
+import { clearPrimedCredentials } from '../credentials/prime.js';
+import { idempotencyCache } from '../lib/idempotency.js';
 
 const BASE = path.join(os.homedir(), '.switchbot');
 
@@ -166,6 +169,12 @@ export function registerResetCommand(program: Command): void {
         const result = removeItem(item.path, item.type);
         results.push({ key: item.key, label: item.label, ...result });
       }
+
+      // ── In-memory caches (matters for long-running processes: MCP, daemon) ──
+      clearCache();
+      clearStatusCache();
+      clearPrimedCredentials();
+      idempotencyCache.clear();
 
       if (isJsonMode()) {
         const failed = results.filter(r => r.status === 'failed').length;
