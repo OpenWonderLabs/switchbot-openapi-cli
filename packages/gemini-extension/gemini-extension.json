@@ -1,6 +1,6 @@
 {
   "name": "switchbot",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Control SwitchBot smart-home devices from Gemini CLI via MCP (31 tools, policy-based safety gates)",
   "contextFileName": "GEMINI.md",
   "mcpServers": {

@@ -1,6 +1,6 @@
 {
   "name": "@switchbot/gemini-extension",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "SwitchBot Gemini CLI extension — wires Gemini CLI to the SwitchBot MCP server (24 tools) via the native Extension system",
   "homepage": "https://github.com/OpenWonderLabs/switchbot-openapi-cli/tree/main/packages/gemini-extension",
