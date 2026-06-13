@@ -551,17 +551,19 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
       }
 
       // ---- query mode ----------------------------------------------------
-      if (args.mode === 'query') return runDeviceHistoryQuery(args as Parameters<typeof runDeviceHistoryQuery>[0]);
+      if (args.mode === 'query') return runDeviceHistoryQuery(args as Parameters<typeof runDeviceHistoryQuery>[0]); // cast strips mode
 
       // ---- aggregate mode ------------------------------------------------
+      // Zod enum guarantees mode === 'aggregate' here
       return runDeviceHistoryAggregate(args as Parameters<typeof runDeviceHistoryAggregate>[0]);
     }
   );
 
   // ---- deprecated aliases for device_history ------------------------------
-  // 3.x backward-compat — removed in 4.0.0. Each alias forwards to the
-  // consolidated handler with `mode` hardcoded. Schemas mirror the relevant
-  // subset of the device_history schema so old clients keep their shape.
+  // 3.x backward-compat — removed in 4.0.0. query/aggregate aliases delegate
+  // to module-level helpers; raw (get_device_history) inlines the logic since
+  // it's short. Schemas mirror the relevant subset of the device_history schema
+  // so old clients keep their shape.
   if (!skip('get_device_history'))
   server.registerTool(
     'get_device_history',
@@ -674,6 +676,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
           })),
         })),
         partial: z.boolean().optional(),
+        notes: z.array(z.string()).optional(),
       },
     },
     async (args) => runDeviceHistoryAggregate(args)
