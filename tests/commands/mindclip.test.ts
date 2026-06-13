@@ -19,6 +19,9 @@ vi.mock('../../src/utils/output.js', () => ({
   exitWithError: vi.fn((opts) => {
     throw new Error(typeof opts === 'string' ? opts : opts.message);
   }),
+  handleError: vi.fn((error: unknown) => {
+    throw error instanceof Error ? error : new Error(String(error));
+  }),
 }));
 
 function buildProgram(): Command {
