@@ -9,15 +9,20 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### BREAKING
+### Added
 
-- **MCP tool consolidation: 31 → 25 tools** — the seven MindClip read tools collapse into three (`mindclip_recordings` with `action: "list" | "get" | "summary"`, `mindclip_list_todos` (unchanged), and `mindclip_recall` with `period: "daily" | "weekly" | "urgent_todos"`); the three device-history tools collapse into one (`device_history` with `mode: "raw" | "query" | "aggregate"`). MCP clients that called the old names (`mindclip_list_recordings` / `mindclip_get_recording` / `mindclip_get_summary` / `mindclip_daily_recall` / `mindclip_weekly_summary` / `mindclip_urgent_todos` / `get_device_history` / `query_device_history` / `aggregate_device_history`) must move to the new tool name and pass the discriminator. The CLI commands (`switchbot mindclip recordings/recording/summary/...`, `switchbot history show/range/aggregate`) are unchanged. Rationale: the old layout sent ~10 highly-redundant tool descriptions and JSON schemas in every model session; consolidating cuts the per-session token cost and the agent's tool-picking overhead by ~20%.
-- **Plugins switch to the `default` tool profile** — `@switchbot/claude-code-plugin`, `@switchbot/codex-plugin`, and `@switchbot/gemini-extension` now register the MCP server as `switchbot mcp serve` (without `--tools all`). The default profile exposes 14 tools (read + action). To get the 11 admin tools (policy / audit / automation rules), users opt in by adding `--tools all` to their MCP config — the same flag the CLI has always supported. Existing installations keep working: `registerMcp` / `claude mcp add` / `codex plugin` re-registration writes the new args; manual configs need a one-line edit. Rationale: most agents never invoke admin tools, but every session paid for their schemas.
+- **AI MindClip MCP tools** — three new read tools for AI MindClip recordings: `mindclip_recordings` (action: `"list" | "get" | "summary"`), `mindclip_list_todos`, and `mindclip_recall` (period: `"daily" | "weekly" | "urgent_todos"`). Plus the underlying CLI command group (`switchbot mindclip recordings/recording/summary/todos/daily/weekly/urgent-todos`). Read-only; counts toward the same SwitchBot daily quota as other API reads.
 
 ### Changed
 
-- **Profile counts**: `readonly` 17 → 11, `default` 20 → 14, `all` 31 → 25.
-- **`mcp tools --tools <profile>` help text**, `mcp serve` help bullet list, README/SKILL.md/GEMINI.md tables, and all package descriptions updated to reflect the new counts.
+- **`device_history` MCP consolidation** — the previous `get_device_history` / `query_device_history` / `aggregate_device_history` trio collapses into a single `device_history` tool that takes a `mode: "raw" | "query" | "aggregate"` discriminator. The consolidated tool is recommended — it cuts per-session token cost (one schema instead of three). The 3 old names continue to work as deprecated aliases that delegate to the consolidated handler; no client action is required. CLI commands (`switchbot history show/range/aggregate`) are unchanged.
+- **Plugins switch to the `default` tool profile** — `@switchbot/claude-code-plugin`, `@switchbot/codex-plugin`, and `@switchbot/gemini-extension` now register the MCP server as `switchbot mcp serve` (without `--tools all`). The default profile exposes 17 tools (read + action; includes the 3 deprecated device_history aliases for 3.x compat). To get the 11 admin tools (policy / audit / automation rules), users opt in by adding `--tools all` to their MCP config — the same flag the CLI has always supported. Existing installations keep working: `registerCodexPluginAuto` / `claude mcp add` / `codex plugin` re-registration writes the new args; manual configs need a one-line edit. Rationale: most agents never invoke admin tools, but every session paid for their schemas.
+- **Profile counts**: `readonly` 11 → 14, `default` 14 → 17, `all` 25 → 28 (each total = 25 canonical + 3 deprecated device_history aliases).
+- **`mcp tools --tools <profile>` help text**, `mcp serve` help bullet list, README/SKILL.md/GEMINI.md tables, and all package descriptions updated to reflect the new counts and the deprecation note.
+
+### Deprecated
+
+- **3 device_history MCP tool names** are retained as aliases in 3.x and **scheduled for removal in 4.0.0**: `get_device_history`, `query_device_history`, `aggregate_device_history`. Each alias's description is prefixed with `[DEPRECATED — use device_history(mode="…")]` and its `_meta` carries `deprecated: true, replacement: 'device_history'`. Migrate before the 4.0.0 release.
 
 ### Fixed
 
