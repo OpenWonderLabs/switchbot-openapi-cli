@@ -191,6 +191,21 @@ describe('MCP strict schemas — all tools reject unknown keys', () => {
     const { client } = await pair();
     await assertRejectsUnknownKey(client, 'audit_stats', {});
   });
+
+  it('mindclip_recordings rejects unknown keys', async () => {
+    const { client } = await pair();
+    await assertRejectsUnknownKey(client, 'mindclip_recordings', { action: 'list' });
+  });
+
+  it('mindclip_list_todos rejects unknown keys', async () => {
+    const { client } = await pair();
+    await assertRejectsUnknownKey(client, 'mindclip_list_todos', {});
+  });
+
+  it('mindclip_recall rejects unknown keys', async () => {
+    const { client } = await pair();
+    await assertRejectsUnknownKey(client, 'mindclip_recall', { period: 'daily' });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -334,5 +349,65 @@ describe('G7: boundary values on consolidated tool filters', () => {
       const res = await client.callTool({ name: 'mindclip_recall', arguments: { period: 'weekly', week: w } });
       expect(res.isError, `week=${w}`).toBeFalsy();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// G8: aggregate metrics array must have ≥1 element; empty array [] must be
+// rejected at the schema layer (-32602), not silently routed to a runtime error.
+// get_device_history alias: empty-string deviceId must be rejected (-32602).
+// ---------------------------------------------------------------------------
+
+describe('G8: aggregate metrics min(1) + get_device_history empty deviceId', () => {
+  beforeEach(() => {
+    apiMock.__instance.get.mockReset();
+    apiMock.__instance.post.mockReset();
+  });
+
+  it('device_history (aggregate) rejects metrics=[] at schema level', async () => {
+    const { client } = await pair();
+    await assertSchemaReject(client, 'device_history', {
+      mode: 'aggregate',
+      deviceId: 'D1',
+      metrics: [],
+    });
+  });
+
+  it('aggregate_device_history (deprecated alias) rejects metrics=[] at schema level', async () => {
+    const { client } = await pair();
+    await assertSchemaReject(client, 'aggregate_device_history', {
+      deviceId: 'D1',
+      metrics: [],
+    });
+  });
+
+  it('device_history (aggregate) accepts metrics with ≥1 valid string', async () => {
+    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {} } });
+    const { client } = await pair();
+    const res = await client.callTool({ name: 'device_history', arguments: {
+      mode: 'aggregate',
+      deviceId: 'D1',
+      metrics: ['temperature'],
+    }});
+    // Schema passes — runtime result may vary (empty history store); isError
+    // is still acceptable here as long as it's a runtime error, not a -32602.
+    const text = (res.content as Array<{ type: string; text: string }>)[0].text;
+    expect(text).not.toMatch(/-32602|Array must contain at least/);
+  });
+
+  it('get_device_history (deprecated alias) rejects deviceId="" at schema level', async () => {
+    const { client } = await pair();
+    await assertSchemaReject(client, 'get_device_history', {
+      deviceId: '',
+    });
+  });
+
+  it('get_device_history with valid deviceId is accepted by the schema', async () => {
+    const { client } = await pair();
+    const res = await client.callTool({ name: 'get_device_history', arguments: {
+      deviceId: 'D1',
+    }});
+    // Schema passes; runtime result from empty store is valid non-error JSON
+    expect(res.isError).toBeFalsy();
   });
 });

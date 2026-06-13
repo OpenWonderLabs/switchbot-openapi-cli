@@ -200,7 +200,7 @@ export function clearCache(): void {
   _listCacheByProfile.set(cacheKey(), null);
   const file = cacheFilePath();
   if (fs.existsSync(file)) {
-    try { fs.unlinkSync(file); } catch { /* EBUSY on Windows — in-memory already cleared above */ }
+    try { fs.unlinkSync(file); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'EBUSY') throw e; }
   }
 }
 
@@ -348,7 +348,7 @@ export function clearStatusCache(): void {
   _statusCacheByProfile.set(cacheKey(), { entries: {} });
   const file = statusCacheFilePath();
   if (fs.existsSync(file)) {
-    try { fs.unlinkSync(file); } catch { /* EBUSY on Windows — in-memory already cleared above */ }
+    try { fs.unlinkSync(file); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'EBUSY') throw e; }
   }
 }
 

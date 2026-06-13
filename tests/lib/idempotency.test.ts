@@ -42,14 +42,44 @@ describe('IdempotencyCache', () => {
     expect(fn).toHaveBeenCalledTimes(2);
   });
 
-  it('evicts oldest entry when capacity is exceeded', async () => {
+  it('always executes fn when key is null', async () => {
+    const cache = new IdempotencyCache();
+    const fn = vi.fn().mockResolvedValue('x');
+    await cache.run(null as unknown as undefined, fn);
+    await cache.run(null as unknown as undefined, fn);
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it('empty-string key IS a valid key and deduplicates within TTL', async () => {
+    const cache = new IdempotencyCache(60000);
+    const fn = vi.fn().mockResolvedValue('v');
+    const r1 = await cache.run('', fn);
+    const r2 = await cache.run('', fn);
+    expect(r1.replayed).toBe(false);
+    expect(r2.replayed).toBe(true);
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it('evicts LRU entry (least-recently-used) when capacity is exceeded', async () => {
     const cache = new IdempotencyCache(60000, 3);
     await cache.run('a', async () => 1);
     await cache.run('b', async () => 2);
     await cache.run('c', async () => 3);
     expect(cache.size()).toBe(3);
+    // Touch 'a' to make it recently used; 'b' becomes LRU victim
+    await cache.run('a', async () => 99); // replayed — moves a to back
+    // Adding 'd' should evict 'b' (LRU), not 'a'
     await cache.run('d', async () => 4);
-    expect(cache.size()).toBeLessThanOrEqual(3);
+    expect(cache.size()).toBe(3);
+    // 'a' should still be cached
+    const ra = await cache.run('a', async () => 999);
+    expect(ra.replayed).toBe(true);
+    expect(ra.result).toBe(1);
+    // 'b' should have been evicted — fn re-runs
+    const fnB = vi.fn().mockResolvedValue(22);
+    const rb = await cache.run('b', fnB);
+    expect(rb.replayed).toBe(false);
+    expect(fnB).toHaveBeenCalledTimes(1);
   });
 
   it('concurrent same-key calls do not deduplicate (cache misses run concurrently)', async () => {
@@ -123,5 +153,66 @@ describe('IdempotencyCache', () => {
     await cache.run('plaintext-secret-token', async () => 1);
     await cache.run('plaintext-secret-token', async () => 2);
     expect(cache.size()).toBe(1);
+  });
+});
+
+describe('IdempotencyCache — shapeSignature distinguishes undefined from "default"', () => {
+  it('treats parameter=undefined differently from parameter="default"', async () => {
+    const cache = new IdempotencyCache(60000);
+    // Seed with undefined parameter
+    await cache.run('k', async () => 'ok', { command: 'press', parameter: undefined });
+    // Same key, different parameter ('default' literal) should conflict
+    await expect(
+      cache.run('k', async () => 'ok', { command: 'press', parameter: 'default' }),
+    ).rejects.toBeInstanceOf(IdempotencyConflictError);
+  });
+
+  it('treats parameter=undefined differently from parameter=null', async () => {
+    const cache = new IdempotencyCache(60000);
+    await cache.run('k', async () => 'ok', { command: 'cmd', parameter: undefined });
+    await expect(
+      cache.run('k', async () => 'ok', { command: 'cmd', parameter: null }),
+    ).rejects.toBeInstanceOf(IdempotencyConflictError);
+  });
+
+  it('two undefined parameters produce the same shape (no conflict)', async () => {
+    const cache = new IdempotencyCache(60000);
+    const fn = vi.fn().mockResolvedValue('v');
+    await cache.run('k', fn, { command: 'cmd', parameter: undefined });
+    const r = await cache.run('k', fn, { command: 'cmd', parameter: undefined });
+    expect(r.replayed).toBe(true);
+  });
+
+  it('object parameter with different key order produces same shape (canonical JSON)', async () => {
+    const cache = new IdempotencyCache(60000);
+    const fn = vi.fn().mockResolvedValue('v');
+    await cache.run('k', fn, { command: 'setColor', parameter: { hue: 120, saturation: 100 } });
+    // Same object but different insertion order — should NOT conflict (same canonical form)
+    const r = await cache.run('k', fn, { command: 'setColor', parameter: { saturation: 100, hue: 120 } });
+    expect(r.replayed).toBe(true);
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('IdempotencyCache — profile scoping prevents cross-profile collision', () => {
+  it('profile "abc:123" + key "def" does not collide with profile "abc" + key "123:def"', async () => {
+    const cache = new IdempotencyCache(60000);
+    const fn1 = vi.fn().mockResolvedValue('first');
+    const fn2 = vi.fn().mockResolvedValue('second');
+
+    await cache.run('def', fn1, undefined, 'abc:123');
+    // Different (profile, key) pair must be an independent slot, not a replay
+    const r2 = await cache.run('123:def', fn2, undefined, 'abc');
+    expect(r2.replayed).toBe(false);
+    expect(fn2).toHaveBeenCalledTimes(1);
+  });
+
+  it('same key under different profiles are independent entries', async () => {
+    const cache = new IdempotencyCache(60000);
+    const fn = vi.fn().mockResolvedValue('v');
+    await cache.run('k', fn, undefined, 'profileA');
+    const r = await cache.run('k', fn, undefined, 'profileB');
+    expect(r.replayed).toBe(false);
+    expect(fn).toHaveBeenCalledTimes(2);
   });
 });

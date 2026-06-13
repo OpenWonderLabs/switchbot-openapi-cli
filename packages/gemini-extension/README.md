@@ -36,7 +36,7 @@ This writes the MCP server entry directly to `~/.gemini/settings.json`.
 
 ## What the extension provides
 
-- Up to 25 MCP tools for device control, scene execution, automation rules, and diagnostics (14 in the default profile; the rest are admin tools — policy/audit/rules — gated behind `--tools all`)
+- Up to 28 MCP tools for device control, scene execution, automation rules, and diagnostics (17 in the default profile; the rest are admin tools — policy/audit/rules — gated behind `--tools all`)
 - `GEMINI.md` context file (auto-loaded) with safety tiers, name resolution, authority chain
 - 23 slash commands:
 

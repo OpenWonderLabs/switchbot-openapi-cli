@@ -51,6 +51,7 @@ import {
 import { todayUsage } from '../utils/quota.js';
 import { describeCache } from '../devices/cache.js';
 import { withRequestContext } from '../lib/request-context.js';
+import { primeCredentials } from '../credentials/prime.js';
 import { profileFilePath, tryLoadConfig } from '../config.js';
 import {
   loadPolicyFile,
@@ -495,7 +496,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
         // query mode
         fields: z.array(z.string()).optional().describe('query: project these payload fields; omit for full payload.'),
         // aggregate mode
-        metrics: z.array(z.string().min(1)).optional().describe(
+        metrics: z.array(z.string().min(1)).min(1).optional().describe(
           'aggregate (required): one or more numeric payload field names (e.g. ["temperature","humidity"]).',
         ),
         aggs: z.array(z.enum(ALL_AGG_FNS as unknown as [AggFn, ...AggFn[]])).optional()
@@ -590,7 +591,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
         'Read the latest entry plus the most recent N records for one device, or list devices with stored history when deviceId is omitted. No API call — zero quota cost.',
       ),
       inputSchema: z.object({
-        deviceId: z.string().optional().describe(
+        deviceId: z.string().min(1).optional().describe(
           'Device MAC address. Omit to list all devices with stored history.',
         ),
         // raw-mode only: hard-capped at 100 here; the consolidated `device_history` schema uses max 10000 across all modes (raw enforces 100 at runtime).
@@ -606,7 +607,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
       },
     },
     async (args) => {
-      if (args.deviceId) {
+      if (args.deviceId !== undefined) {
         const latest = deviceHistoryStore.getLatest(args.deviceId);
         const history = deviceHistoryStore.getHistory(args.deviceId, args.limit ?? 20);
         const result = { deviceId: args.deviceId, latest, history };
@@ -669,7 +670,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
         since: z.string().optional().describe('Relative window ending now, e.g. "30s","15m","1h","7d". Mutually exclusive with from/to.'),
         from: z.string().optional().describe('Range start (ISO-8601). Mutually exclusive with since.'),
         to: z.string().optional().describe('Range end (ISO-8601). Used together with from.'),
-        metrics: z.array(z.string().min(1)).describe(
+        metrics: z.array(z.string().min(1)).min(1).describe(
           'One or more numeric payload field names to aggregate (e.g. ["temperature","humidity"]).',
         ),
         aggs: z.array(z.enum(ALL_AGG_FNS as unknown as [AggFn, ...AggFn[]])).optional().describe(
@@ -2614,7 +2615,7 @@ export function registerMcpCommand(program: Command): void {
     .command('mcp')
     .description('Run as a Model Context Protocol server so AI agents can call SwitchBot tools')
     .addHelpText('after', `
-  The MCP server exposes twenty-five tools:
+  The MCP server exposes twenty-eight tools:
   - list_devices            fetch all physical + IR devices
   - get_device_status       live status for a physical device
   - send_command            control a device (destructive commands need confirm:true)
@@ -2891,6 +2892,9 @@ process_uptime_seconds ${Math.floor(process.uptime())}
             });
             // Route per-request credentials via AsyncLocalStorage so loadConfig()
             // picks up this request's profile instead of the process-global flag.
+            // Prime keychain credentials for this profile before entering context
+            // so loadConfig()'s synchronous getPrimedCredentials() can find them.
+            if (profile) await primeCredentials(profile);
             await withRequestContext({ profile: profile ?? undefined }, async () => {
               try {
                 await reqServer.connect(reqTransport);

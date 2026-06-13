@@ -9,6 +9,9 @@
  * key — the original string never touches the Map keys, so a later heap dump
  * or inadvertent log capture does not leak the raw token.
  *
+ * Eviction is true LRU: each cache hit moves the entry to the back of the
+ * Map's insertion-order so the oldest-unused entry is always at the front.
+ *
  * Process-local only — not shared across replicas.
  */
 
@@ -37,14 +40,32 @@ export function fingerprintIdempotencyKey(key: string): string {
   return hashKey(key).slice(0, 12);
 }
 
+// Sentinel for undefined — JSON.stringify never emits a raw NUL byte, so this
+// string cannot be confused with any serialised value.
+const UNDEFINED_SENTINEL = '\x00undefined\x00';
+
+function sortedJsonStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return JSON.stringify(value);
+  }
+  // Sort top-level keys for canonical representation. Parameters passed to
+  // SwitchBot commands are shallow objects, so one level is sufficient.
+  const sorted = Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b))
+  );
+  return JSON.stringify(sorted);
+}
+
 function shapeSignature(command: string, parameter: unknown): string {
-  // Canonical-ish JSON — stable enough for object equality with no nested sort
-  // (callers can pass primitives or small objects).
   let parm: string;
-  try {
-    parm = JSON.stringify(parameter ?? 'default');
-  } catch {
-    parm = String(parameter);
+  if (parameter === undefined) {
+    parm = UNDEFINED_SENTINEL;
+  } else {
+    try {
+      parm = sortedJsonStringify(parameter);
+    } catch {
+      parm = String(parameter);
+    }
   }
   return `${command}::${parm}`;
 }
@@ -82,12 +103,15 @@ export class IdempotencyCache {
     shape?: { command: string; parameter: unknown },
     profile?: string,
   ): Promise<{ result: T; replayed: boolean }> {
-    if (!key) {
+    if (key === undefined || key === null) {
       const result = await fn();
       return { result, replayed: false };
     }
 
-    const hashed = hashKey(profile ? `${profile}:${key}` : key);
+    // Use NUL-separated encoding to prevent collisions when a profile name
+    // contains ':' (e.g. profile="abc:123", key="def" must not hash the same
+    // as profile="abc", key="123:def").
+    const hashed = hashKey(profile ? `${profile}\x00${key}` : key);
     const now = Date.now();
     const cached = this.cache.get(hashed);
     const currentShape = shape ? shapeSignature(shape.command, shape.parameter) : '*';
@@ -101,6 +125,9 @@ export class IdempotencyCache {
           currentShape,
         );
       }
+      // Move to back of Map insertion order so the front stays the LRU victim.
+      this.cache.delete(hashed);
+      this.cache.set(hashed, cached);
       return { result: cached.result as T, replayed: true };
     }
 
@@ -117,8 +144,8 @@ export class IdempotencyCache {
         }
       }
       if (this.cache.size >= this.maxEntries) {
-        const firstKey = this.cache.keys().next().value;
-        if (firstKey) this.cache.delete(firstKey);
+        const lruKey = this.cache.keys().next().value;
+        if (lruKey) this.cache.delete(lruKey);
       }
     }
 

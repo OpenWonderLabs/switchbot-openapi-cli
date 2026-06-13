@@ -54,6 +54,10 @@ function genFor(profile: string): number {
  */
 export async function primeCredentials(profile: string): Promise<void> {
   if (isCacheValid(profile)) return;
+  // Pre-register in generations before any await so the no-arg
+  // clearPrimedCredentials() iterating generations.keys() can always find this
+  // profile even while store.get() is still in-flight.
+  if (!generations.has(profile)) generations.set(profile, 0);
   const gen = genFor(profile);
   try {
     const store = await selectCredentialStore();
@@ -79,10 +83,11 @@ export function getPrimedCredentials(profile: string): CredentialBundle | null {
  * Test helper. Not used by production code.
  */
 export function __resetPrimedCredentials(): void {
-  for (const p of caches.keys()) {
+  for (const p of generations.keys()) {
     generations.set(p, (generations.get(p) ?? 0) + 1);
   }
   caches.clear();
+  generations.clear();
 }
 
 /**
@@ -98,7 +103,10 @@ export function clearPrimedCredentials(profile?: string): void {
     generations.set(profile, (generations.get(profile) ?? 0) + 1);
     caches.delete(profile);
   } else {
-    for (const p of caches.keys()) {
+    // Iterate generations.keys() rather than caches.keys() so profiles that
+    // are currently in-flight (primeCredentials awaiting store.get()) also
+    // get their generation bumped, preventing the stale-write race.
+    for (const p of generations.keys()) {
       generations.set(p, (generations.get(p) ?? 0) + 1);
     }
     caches.clear();
