@@ -8,6 +8,9 @@ import { stringArg } from '../utils/arg-parsers.js';
 import { intArg } from '../utils/arg-parsers.js';
 import { saveConfig, showConfig, getConfigSummary, listProfiles, readProfileMeta } from '../config.js';
 import { isJsonMode, printJson, exitWithError } from '../utils/output.js';
+import { clearCache, clearStatusCache } from '../devices/cache.js';
+import { clearPrimedCredentials } from '../credentials/prime.js';
+import { idempotencyCache } from '../lib/idempotency.js';
 import chalk from 'chalk';
 
 function parseEnvFile(file: string): { token?: string; secret?: string } {
@@ -267,6 +270,10 @@ Files are written with mode 0600. Profiles live under ~/.switchbot/profiles/<nam
             }
           : undefined,
       });
+      clearCache();
+      clearStatusCache();
+      clearPrimedCredentials();
+      idempotencyCache.clear();
       if (isJsonMode()) {
         printJson({ ok: true, message: 'credentials saved' });
       } else {

@@ -33,6 +33,8 @@ import {
 import { browserLogin } from '../auth/browser-login.js';
 import type { ExchangeResult } from '../auth/token-exchange.js';
 import { verifyCredentials } from '../auth/verify.js';
+import { clearPrimedCredentials } from '../credentials/prime.js';
+import { idempotencyCache } from '../lib/idempotency.js';
 
 function activeProfile(): string {
   return getActiveProfile() ?? 'default';
@@ -454,6 +456,8 @@ export function registerAuthCommand(program: Command): void {
       // results from the previous account's cache.
       clearCache();
       clearStatusCache();
+      clearPrimedCredentials();
+      idempotencyCache.clear();
 
       if (isJsonMode()) {
         printJson({
