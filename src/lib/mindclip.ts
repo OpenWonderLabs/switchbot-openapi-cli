@@ -34,17 +34,23 @@ export async function listRecordings(params: ListRecordingsParams): Promise<unkn
 
 export async function getRecording(id: string, language?: string): Promise<unknown> {
   const c = createClient();
-  const res = await c.get<{ body: unknown }>(`/v1.1/mindclip/recordings/${id}`, {
-    params: compact({ language }),
-  });
+  const res = await c.get<{ body: unknown }>(
+    `/v1.1/mindclip/recordings/${encodeURIComponent(id)}`,
+    {
+      params: compact({ language }),
+    },
+  );
   return res.data.body;
 }
 
 export async function getSummary(id: string): Promise<unknown> {
   const c = createClient();
-  const res = await c.get<{ body: unknown }>(`/v1.1/mindclip/summaries/${id}`, {
-    params: {},
-  });
+  const res = await c.get<{ body: unknown }>(
+    `/v1.1/mindclip/summaries/${encodeURIComponent(id)}`,
+    {
+      params: {},
+    },
+  );
   return res.data.body;
 }
 

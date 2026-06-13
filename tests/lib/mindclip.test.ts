@@ -84,6 +84,20 @@ describe('getRecording', () => {
     const params = apiMock.__instance.get.mock.calls[0][1].params;
     expect(params).not.toHaveProperty('language');
   });
+
+  it('URL-encodes id with special characters so query/path separators do not leak', async () => {
+    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {} } });
+    await getRecording('a/b?secret=x#frag');
+    const url = apiMock.__instance.get.mock.calls[0][0];
+    expect(url).toBe('/v1.1/mindclip/recordings/a%2Fb%3Fsecret%3Dx%23frag');
+  });
+
+  it('URL-encodes id traversal segments so they cannot escape the recordings prefix', async () => {
+    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {} } });
+    await getRecording('../summaries/abc');
+    const url = apiMock.__instance.get.mock.calls[0][0];
+    expect(url).toBe('/v1.1/mindclip/recordings/..%2Fsummaries%2Fabc');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -95,6 +109,13 @@ describe('getSummary', () => {
     const result = await getSummary('s1');
     expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/summaries/s1', { params: {} });
     expect(result).toEqual({ summary: 'ok' });
+  });
+
+  it('URL-encodes id with special characters', async () => {
+    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {} } });
+    await getSummary('a/b?x=1');
+    const url = apiMock.__instance.get.mock.calls[0][0];
+    expect(url).toBe('/v1.1/mindclip/summaries/a%2Fb%3Fx%3D1');
   });
 });
 
