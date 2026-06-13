@@ -667,6 +667,39 @@ describe('mcp server', () => {
     });
   });
 
+  it('mindclip_daily_recall calls /v1.1/mindclip/assistant/daily with date param', async () => {
+    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {} } });
+    const { client } = await pair();
+    await client.callTool({
+      name: 'mindclip_daily_recall',
+      arguments: { date: '2026-06-13' },
+    });
+    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/assistant/daily', {
+      params: { date: '2026-06-13' },
+    });
+  });
+
+  it('mindclip_weekly_summary calls /v1.1/mindclip/assistant/weekly with week param', async () => {
+    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {} } });
+    const { client } = await pair();
+    await client.callTool({
+      name: 'mindclip_weekly_summary',
+      arguments: { week: '2026-W23' },
+    });
+    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/assistant/weekly', {
+      params: { week: '2026-W23' },
+    });
+  });
+
+  it('mindclip_urgent_todos calls /v1.1/mindclip/assistant/urgent-todos and omits date when not provided', async () => {
+    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {} } });
+    const { client } = await pair();
+    await client.callTool({ name: 'mindclip_urgent_todos', arguments: {} });
+    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/assistant/urgent-todos', {
+      params: {},
+    });
+  });
+
   it('run_scene POSTs the scene execute endpoint', async () => {
     apiMock.__instance.post.mockResolvedValueOnce({ data: { statusCode: 100, body: {} } });
     const { client } = await pair();

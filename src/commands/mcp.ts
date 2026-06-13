@@ -1262,6 +1262,87 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
     }
   );
 
+  // ---- mindclip_daily_recall ----------------------------------------------
+  if (!skip('mindclip_daily_recall'))
+  server.registerTool(
+    'mindclip_daily_recall',
+    {
+      title: 'Get the daily recall summary',
+      description:
+        "Fetch the AI-curated daily recall (key moments, decisions, action items extracted from the day's recordings). Omit `date` to get the most recent day available on the server.",
+      _meta: { agentSafetyTier: 'read' },
+      inputSchema: z.object({
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()
+          .describe('Date in YYYY-MM-DD format (e.g. "2026-06-13"). Omit for server default (most recent).'),
+      }).strict(),
+    },
+    async ({ date }) => {
+      try {
+        const data = await getDailyRecall(date);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(data, null, 2) }],
+          structuredContent: { data: data as Record<string, unknown> },
+        };
+      } catch (err) {
+        return mcpError('api', 1, err instanceof Error ? err.message : String(err));
+      }
+    }
+  );
+
+  // ---- mindclip_weekly_summary --------------------------------------------
+  if (!skip('mindclip_weekly_summary'))
+  server.registerTool(
+    'mindclip_weekly_summary',
+    {
+      title: 'Get the weekly summary',
+      description:
+        'Fetch the AI-curated weekly summary across all recordings in an ISO week. Omit `week` to get the most recent week available on the server.',
+      _meta: { agentSafetyTier: 'read' },
+      inputSchema: z.object({
+        week: z.string().regex(/^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$/).optional()
+          .describe('ISO week in YYYY-Www format, weeks 01-53 (e.g. "2026-W23"). Omit for server default (most recent).'),
+      }).strict(),
+    },
+    async ({ week }) => {
+      try {
+        const data = await getWeeklySummary(week);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(data, null, 2) }],
+          structuredContent: { data: data as Record<string, unknown> },
+        };
+      } catch (err) {
+        return mcpError('api', 1, err instanceof Error ? err.message : String(err));
+      }
+    }
+  );
+
+  // ---- mindclip_urgent_todos ----------------------------------------------
+  if (!skip('mindclip_urgent_todos'))
+  server.registerTool(
+    'mindclip_urgent_todos',
+    {
+      title: 'Get urgent to-dos for a date',
+      description:
+        "Fetch the AI-curated list of urgent to-dos surfaced for a date (deadlines, follow-ups, time-sensitive actions). Omit `date` and the server defaults to yesterday's items.",
+      _meta: { agentSafetyTier: 'read' },
+      inputSchema: z.object({
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()
+          .describe('Date in YYYY-MM-DD format. Omit for server default (yesterday).'),
+      }).strict(),
+    },
+    async ({ date }) => {
+      try {
+        const data = await getUrgentTodos(date);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(data, null, 2) }],
+          structuredContent: { data: data as Record<string, unknown> },
+        };
+      } catch (err) {
+        return mcpError('api', 1, err instanceof Error ? err.message : String(err));
+      }
+    }
+  );
+
   // ---- policy_validate -----------------------------------------------------
   if (!skip('policy_validate'))
   server.registerTool(
