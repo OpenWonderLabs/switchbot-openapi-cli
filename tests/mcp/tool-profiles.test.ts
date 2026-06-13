@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { TOOL_PROFILES, resolveToolProfile, type ToolProfile } from '../../src/mcp/tool-profiles.js';
 import { createSwitchBotMcpServer, listRegisteredTools } from '../../src/commands/mcp.js';
+import { MCP_TOOLS } from '../../src/commands/capabilities.js';
 
 describe('tool-profiles', () => {
   describe('TOOL_PROFILES sets', () => {
@@ -86,6 +87,15 @@ describe('tool-profiles', () => {
       expect(tools).not.toContain('send_command');
       expect(tools).not.toContain('run_scene');
       expect(tools).not.toContain('plan_run');
+    });
+  });
+
+  describe('capabilities MCP_TOOLS stays in sync with registered tools', () => {
+    it('MCP_TOOLS matches the names registered under toolProfile=all', () => {
+      const server = createSwitchBotMcpServer({ toolProfile: 'all' });
+      const registered = [...listRegisteredTools(server)].sort();
+      const advertised = [...MCP_TOOLS].sort();
+      expect(advertised).toEqual(registered);
     });
   });
 });

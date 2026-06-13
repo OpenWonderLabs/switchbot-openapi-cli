@@ -9,6 +9,11 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`reset` no longer aborts before printing the result summary** — the in-memory cache cleanup (`clearCache` / `clearStatusCache`) was rerunning `unlinkSync` on a file the data-file loop had already attempted to delete. On a permission-denied path that re-throw skipped both the in-memory clear and the result table. The reset command now uses the pure in-memory `resetListCache` / `resetStatusCache` helpers; disk deletion stays the sole responsibility of the data-file loop, where errors are reported into `results`.
+- **`capabilities --surface mcp` lists every registered MCP tool** — `MCP_TOOLS` was a hand-maintained array that had drifted: it advertised 11 tools while `mcp serve` registered 31 (7 mindclip, 7 policy/plan, 4 audit/rules, plus 13 others). The list is now derived from the `TOOL_PROFILES.all` single source of truth, and a new test in `tool-profiles.test.ts` asserts the advertised set matches what `createSwitchBotMcpServer({ toolProfile: 'all' })` actually registers.
+
 ## [3.7.9]
 
 ### Added

@@ -9,7 +9,7 @@ import { isDryRun, getConfigPath } from '../utils/flags.js';
 import { selectCredentialStore } from '../credentials/keychain.js';
 import { listProfiles } from '../config.js';
 import { getActiveProfile } from '../lib/request-context.js';
-import { clearCache, clearStatusCache } from '../devices/cache.js';
+import { resetListCache, resetStatusCache } from '../devices/cache.js';
 import { clearPrimedCredentials } from '../credentials/prime.js';
 import { idempotencyCache } from '../lib/idempotency.js';
 
@@ -171,8 +171,12 @@ export function registerResetCommand(program: Command): void {
       }
 
       // ── In-memory caches (matters for long-running processes: MCP, daemon) ──
-      clearCache();
-      clearStatusCache();
+      // Use the pure in-memory resetters: the data-files loop above has already
+      // attempted disk deletion and recorded any failures into `results`. Calling
+      // disk-deleting variants here would re-throw on permission errors and
+      // abort before the reset summary is printed.
+      resetListCache();
+      resetStatusCache();
       clearPrimedCredentials();
       idempotencyCache.clear();
 
