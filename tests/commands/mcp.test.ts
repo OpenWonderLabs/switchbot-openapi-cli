@@ -628,6 +628,45 @@ describe('mcp server', () => {
     expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/summaries/s1', { params: {} });
   });
 
+  it('mindclip_list_todos calls /v1.1/mindclip/todos and returns body', async () => {
+    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: { items: [{ id: 't1' }] } } });
+    const { client } = await pair();
+    const res = await client.callTool({ name: 'mindclip_list_todos', arguments: {} });
+    const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    expect(parsed).toEqual({ items: [{ id: 't1' }] });
+    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/todos', { params: {} });
+  });
+
+  it('mindclip_list_todos forwards completed/category/device/file/time filters', async () => {
+    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {} } });
+    const { client } = await pair();
+    await client.callTool({
+      name: 'mindclip_list_todos',
+      arguments: {
+        completedNum: 1,
+        category: 2,
+        pageNum: 1,
+        pageSize: 20,
+        deviceID: 'D1',
+        fileID: 'F1',
+        startTime: 100,
+        endTime: 200,
+      },
+    });
+    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/todos', {
+      params: {
+        completedNum: 1,
+        category: 2,
+        pageNum: 1,
+        pageSize: 20,
+        deviceID: 'D1',
+        fileID: 'F1',
+        startTime: 100,
+        endTime: 200,
+      },
+    });
+  });
+
   it('run_scene POSTs the scene execute endpoint', async () => {
     apiMock.__instance.post.mockResolvedValueOnce({ data: { statusCode: 100, body: {} } });
     const { client } = await pair();

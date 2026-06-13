@@ -1227,6 +1227,41 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
     }
   );
 
+  // ---- mindclip_list_todos ------------------------------------------------
+  if (!skip('mindclip_list_todos'))
+  server.registerTool(
+    'mindclip_list_todos',
+    {
+      title: 'List AI MindClip to-do items',
+      description:
+        'List AI-extracted to-dos pulled from voice recordings. Filters: completedNum (0=all/1=incomplete/2=completed), category (0=any/1=work/2=life/3=hobby/4=holiday/5=other), pagination, deviceID, fileID, time range.',
+      _meta: { agentSafetyTier: 'read' },
+      inputSchema: z.object({
+        completedNum: z.number().int().min(0).max(2).optional()
+          .describe('0=all (default), 1=incomplete, 2=completed'),
+        category: z.number().int().min(0).max(5).optional()
+          .describe('0=any, 1=work, 2=life, 3=hobby, 4=holiday, 5=other'),
+        pageNum: z.number().int().min(1).optional().describe('Page number (>= 1)'),
+        pageSize: z.number().int().min(1).max(100).optional().describe('Results per page (1-100)'),
+        deviceID: z.string().optional().describe('Filter by SwitchBot device ID'),
+        fileID: z.string().optional().describe('Filter by source recording file ID'),
+        startTime: z.number().int().min(0).optional().describe('Start timestamp in ms since epoch'),
+        endTime: z.number().int().min(0).optional().describe('End timestamp in ms since epoch'),
+      }).strict(),
+    },
+    async (args) => {
+      try {
+        const data = await listTodos(args);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(data, null, 2) }],
+          structuredContent: { data: data as Record<string, unknown> },
+        };
+      } catch (err) {
+        return mcpError('api', 1, err instanceof Error ? err.message : String(err));
+      }
+    }
+  );
+
   // ---- policy_validate -----------------------------------------------------
   if (!skip('policy_validate'))
   server.registerTool(
