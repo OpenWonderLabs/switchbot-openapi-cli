@@ -90,3 +90,31 @@ export function enumArg(
     return value;
   };
 }
+
+export function dateArg(flagName: string): (value: string) => string {
+  return (value: string) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      throw new InvalidArgumentError(
+        `${flagName} must be in YYYY-MM-DD format (got "${value}")`,
+      );
+    }
+    const d = new Date(value);
+    if (isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== value) {
+      throw new InvalidArgumentError(
+        `${flagName} must be in YYYY-MM-DD format (got "${value}")`,
+      );
+    }
+    return value;
+  };
+}
+
+export function weekArg(flagName: string): (value: string) => string {
+  return (value: string) => {
+    if (!/^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$/.test(value)) {
+      throw new InvalidArgumentError(
+        `${flagName} must be in YYYY-Www format, weeks 01–53 (e.g. 2026-W23 — got "${value}")`,
+      );
+    }
+    return value;
+  };
+}
