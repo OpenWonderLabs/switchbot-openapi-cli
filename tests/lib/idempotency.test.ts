@@ -75,6 +75,31 @@ describe('IdempotencyCache', () => {
     expect(fn).toHaveBeenCalledTimes(2);
   });
 
+  it('clearForProfile() removes only entries tagged with the given profile', async () => {
+    const cache = new IdempotencyCache(60000);
+    const fn = vi.fn().mockResolvedValue('v');
+    await cache.run('k-a', fn, undefined, 'profileA');
+    await cache.run('k-b', fn, undefined, 'profileB');
+    expect(cache.size()).toBe(2);
+    cache.clearForProfile('profileA');
+    expect(cache.size()).toBe(1);
+    // profileA entry gone — next run re-executes
+    const r = await cache.run('k-a', fn, undefined, 'profileA');
+    expect(r.replayed).toBe(false);
+    // profileB entry still cached
+    const r2 = await cache.run('k-b', fn, undefined, 'profileB');
+    expect(r2.replayed).toBe(true);
+  });
+
+  it('clearForProfile() leaves entries with no profile untouched', async () => {
+    const cache = new IdempotencyCache(60000);
+    const fn = vi.fn().mockResolvedValue(1);
+    await cache.run('k', fn); // no profile
+    cache.clearForProfile('work');
+    const r = await cache.run('k', fn); // still cached
+    expect(r.replayed).toBe(true);
+  });
+
   it('C4: raises IdempotencyConflictError when same key is used with different shape within TTL', async () => {
     const cache = new IdempotencyCache(60000);
     await cache.run('k', async () => 'ok', { command: 'turnOn', parameter: undefined });

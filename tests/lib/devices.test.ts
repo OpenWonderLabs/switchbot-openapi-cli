@@ -56,6 +56,10 @@ vi.mock('../../src/devices/catalog.js', () => ({
   getCommandSafetyReason: vi.fn(() => null),
 }));
 
+vi.mock('../../src/lib/request-context.js', () => ({
+  getActiveProfile: vi.fn(() => 'default'),
+}));
+
 describe('executeCommand audit semantics', () => {
   let tmp: string;
   let auditFile: string;

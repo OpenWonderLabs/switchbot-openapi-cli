@@ -50,7 +50,7 @@ function shapeSignature(command: string, parameter: unknown): string {
 }
 
 export class IdempotencyCache {
-  private cache = new Map<string, { result: unknown; expiresAt: number; shape: string }>();
+  private cache = new Map<string, { result: unknown; expiresAt: number; shape: string; profile?: string }>();
   private readonly ttlMs: number;
   private readonly maxEntries: number;
 
@@ -67,6 +67,9 @@ export class IdempotencyCache {
    * (command, parameter) fingerprint; mismatched shape raises
    * {@link IdempotencyConflictError}.
    *
+   * `profile` tags the entry so {@link clearForProfile} can evict only the
+   * entries belonging to a specific credential profile.
+   *
    * Returns a tuple-esque object with `replayed: true` when the cached
    * result is served. The `result` field is the original cached value.
    */
@@ -74,6 +77,7 @@ export class IdempotencyCache {
     key: string | undefined,
     fn: () => Promise<T>,
     shape?: { command: string; parameter: unknown },
+    profile?: string,
   ): Promise<{ result: T; replayed: boolean }> {
     if (!key) {
       const result = await fn();
@@ -115,8 +119,15 @@ export class IdempotencyCache {
       }
     }
 
-    this.cache.set(hashed, { result, expiresAt: now + this.ttlMs, shape: currentShape });
+    this.cache.set(hashed, { result, expiresAt: now + this.ttlMs, shape: currentShape, profile });
     return { result, replayed: false };
+  }
+
+  /** Remove all cached entries that were stored under the given profile. */
+  clearForProfile(profile: string): void {
+    for (const [k, v] of this.cache.entries()) {
+      if (v.profile === profile) this.cache.delete(k);
+    }
   }
 
   clear(): void {

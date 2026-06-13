@@ -90,7 +90,7 @@ function onCredentialChange(): void {
     // Non-fatal on Windows EBUSY; in-memory is already invalidated.
   }
   clearPrimedCredentials();
-  idempotencyCache.clear();
+  idempotencyCache.clearForProfile(activeProfile());
 }
 
 function readStdinFile(filePath: string): CredentialBundle {

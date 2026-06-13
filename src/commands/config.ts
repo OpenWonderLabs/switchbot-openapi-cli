@@ -11,6 +11,7 @@ import { isJsonMode, printJson, exitWithError } from '../utils/output.js';
 import { clearCache, clearStatusCache } from '../devices/cache.js';
 import { clearPrimedCredentials } from '../credentials/prime.js';
 import { idempotencyCache } from '../lib/idempotency.js';
+import { getActiveProfile } from '../lib/request-context.js';
 import chalk from 'chalk';
 
 function parseEnvFile(file: string): { token?: string; secret?: string } {
@@ -277,7 +278,7 @@ Files are written with mode 0600. Profiles live under ~/.switchbot/profiles/<nam
         // Non-fatal on Windows EBUSY; in-memory is already invalidated.
       }
       clearPrimedCredentials();
-      idempotencyCache.clear();
+      idempotencyCache.clearForProfile(getActiveProfile() ?? 'default');
       if (isJsonMode()) {
         printJson({ ok: true, message: 'credentials saved' });
       } else {
