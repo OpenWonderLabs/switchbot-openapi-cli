@@ -2,7 +2,7 @@
   "name": "@switchbot/codex-plugin",
   "version": "0.1.6",
   "type": "module",
-  "description": "SwitchBot Codex plugin — wires Codex to the SwitchBot CLI MCP server (24 tools, zero Node.js dependencies)",
+  "description": "SwitchBot Codex plugin — wires Codex to the SwitchBot CLI MCP server (31 tools, zero Node.js dependencies)",
   "homepage": "https://github.com/OpenWonderLabs/switchbot-openapi-cli/tree/main/packages/codex-plugin",
   "repository": {
     "type": "git",

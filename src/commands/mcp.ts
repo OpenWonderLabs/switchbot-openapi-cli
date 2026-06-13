@@ -2529,7 +2529,7 @@ export function registerMcpCommand(program: Command): void {
     .command('mcp')
     .description('Run as a Model Context Protocol server so AI agents can call SwitchBot tools')
     .addHelpText('after', `
-  The MCP server exposes twenty-four tools:
+  The MCP server exposes thirty-one tools:
   - list_devices            fetch all physical + IR devices
   - get_device_status       live status for a physical device
   - send_command            control a device (destructive commands need confirm:true)
@@ -2541,6 +2541,13 @@ export function registerMcpCommand(program: Command): void {
   - get_device_history      fetch raw JSONL history records for a device
   - query_device_history    filter + page history records with field/time predicates
   - aggregate_device_history compute count/min/max/avg/sum/p50/p95 over history records
+  - mindclip_list_recordings   list AI MindClip voice recordings (filters: device, time range, folder, paging)
+  - mindclip_get_recording     fetch metadata + transcript for one recording
+  - mindclip_get_summary       AI summary (key points, action items, transcript highlights) for a recording
+  - mindclip_list_todos        list AI-extracted to-dos (filters: completion, category, source recording, time range)
+  - mindclip_daily_recall      AI-curated daily recall (key moments, decisions, action items)
+  - mindclip_weekly_summary    AI-curated weekly summary across recordings in an ISO week
+  - mindclip_urgent_todos      AI-curated list of urgent to-dos for a date (deadlines, follow-ups)
   - policy_validate         check policy.yaml against the embedded schema + offline semantics
                             (set live=true to resolve aliases and rule targets against current inventory)
   - policy_new              scaffold a starter policy.yaml (action — confirm first)
@@ -2583,7 +2590,7 @@ Inspect locally:
   mcp
     .command('tools')
     .description('Print the registered MCP tools in human or JSON form')
-    .option('--tools <profile>', 'Tool profile: "default" (13 tools), "readonly" (10), or "all" (24). Lists all when omitted', stringArg('--tools'), 'all')
+    .option('--tools <profile>', 'Tool profile: "default" (20 tools), "readonly" (17), or "all" (31). Lists all when omitted', stringArg('--tools'), 'all')
     .action((opts: { tools?: string }) => {
       try { printMcpToolDirectory(resolveToolProfile(opts.tools)); }
       catch (e) { handleError(e); }
@@ -2592,7 +2599,7 @@ Inspect locally:
   mcp
     .command('list-tools')
     .description('Alias of `mcp tools`')
-    .option('--tools <profile>', 'Tool profile: "default" (13 tools), "readonly" (10), or "all" (24). Lists all when omitted', stringArg('--tools'), 'all')
+    .option('--tools <profile>', 'Tool profile: "default" (20 tools), "readonly" (17), or "all" (31). Lists all when omitted', stringArg('--tools'), 'all')
     .action((opts: { tools?: string }) => {
       try { printMcpToolDirectory(resolveToolProfile(opts.tools)); }
       catch (e) { handleError(e); }

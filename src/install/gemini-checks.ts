@@ -95,7 +95,7 @@ export function registerMcp(): RegisterMcpResult {
     [MCP_SERVER_NAME]: {
       command: 'switchbot',
       args: ['mcp', 'serve', '--tools', 'all'],
-      description: 'SwitchBot smart-home MCP server (24 tools)',
+      description: 'SwitchBot smart-home MCP server (31 tools)',
     },
   };
   fs.mkdirSync(path.dirname(GEMINI_SETTINGS_PATH), { recursive: true });
