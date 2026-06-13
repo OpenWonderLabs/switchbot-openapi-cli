@@ -76,7 +76,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 }
 ```
 
-### Available tools (24)
+### Available tools (28)
 
 | Tool | Purpose | Safety tier |
 | --- | --- | --- |
@@ -104,6 +104,14 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 | `policy_add_rule` | Inject rule YAML into `automation.rules[]` with diff | action |
 
 The MCP server refuses destructive commands (Smart Lock `unlock`, Garage Door `open`, etc.) unless the tool call includes `confirm: true`, and the default safety profile still blocks direct destructive execution in favor of the reviewed CLI flow (`plan save` → `plan review` → `plan approve` → `plan execute`). The allowed list is the `destructive: true` commands in the catalog — `switchbot schema export | jq '[.data.types[].commands[] | select(.destructive)]'` shows every one.
+
+### Deprecated aliases (slated for removal in 4.0.0)
+
+These names continue to work in 3.x but are thin wrappers over `device_history`. Migrate to the consolidated tool — it emits a single schema per session instead of three.
+
+- `get_device_history` → `device_history(mode="raw")`
+- `query_device_history` → `device_history(mode="query")`
+- `aggregate_device_history` → `device_history(mode="aggregate")`
 
 ### `device_history` — zero-cost state lookup
 

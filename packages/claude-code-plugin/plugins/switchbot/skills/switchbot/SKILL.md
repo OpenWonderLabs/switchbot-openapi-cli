@@ -35,7 +35,7 @@ Drive the user's SwitchBot smart home through the `switchbot` CLI. Always query 
 
 ## Network requirements
 
-Claude Code registers the SwitchBot MCP server via `claude mcp add switchbot -- switchbot mcp serve` — or via `.mcp.json` in managed environments. The default profile exposes 14 tools (read + action); add `--tools all` to also expose admin tools (policy, audit, rules — 25 total). No manual setup is required once the MCP server is registered. The MCP server needs outbound HTTPS to `api.switch-bot.com`. If connection errors appear, see `references/claude-code-network.md`.
+Claude Code registers the SwitchBot MCP server via `claude mcp add switchbot -- switchbot mcp serve` — or via `.mcp.json` in managed environments. The default profile exposes 17 tools (read + action); add `--tools all` to also expose admin tools (policy, audit, rules — 28 total, including 25 canonical tools + 3 deprecated `device_history` aliases). No manual setup is required once the MCP server is registered. The MCP server needs outbound HTTPS to `api.switch-bot.com`. If connection errors appear, see `references/claude-code-network.md`.
 
 ---
 

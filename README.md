@@ -150,7 +150,7 @@ The optional skill package [`@switchbot/claude-code-plugin`](https://www.npmjs.c
 
 ## Gemini CLI integration
 
-The Gemini extension is in [`packages/gemini-extension/`](./packages/gemini-extension/) — it provides up to 25 MCP tools (14 in the default profile, 25 with `--tools all`), a GEMINI.md context file, and 23 slash commands.
+The Gemini extension is in [`packages/gemini-extension/`](./packages/gemini-extension/) — it provides up to 28 MCP tools (14 readonly, 17 default, 28 with `--tools all`; includes 25 canonical tools + 3 deprecated `device_history` aliases retained for 3.x backward compat; see [docs/agent-guide.md](./docs/agent-guide.md)), a GEMINI.md context file, and 23 slash commands.
 
 **Recommended — paste into Gemini CLI chat:**
 
@@ -294,7 +294,7 @@ switchbot config list-profiles
 ### `mcp`
 
 ```bash
-switchbot mcp serve    # stdio MCP server — default 14 tools (use --tools all for 25)
+switchbot mcp serve    # stdio MCP server — default 17 tools (use --tools all for 28)
 ```
 
 ### `webhook`
