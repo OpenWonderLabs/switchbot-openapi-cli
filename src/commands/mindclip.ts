@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { intArg, enumArg, stringArg, dateArg, weekArg } from '../utils/arg-parsers.js';
-import { printJson } from '../utils/output.js';
+import { printJson, handleError } from '../utils/output.js';
 import {
   listRecordings,
   getRecording,
@@ -77,8 +77,12 @@ Examples:
   switchbot mindclip recording 5f3a1c2e9b7d --language en`,
     )
     .action(async (id: string, options) => {
-      const data = await getRecording(id, options.language);
-      printJson(data);
+      try {
+        const data = await getRecording(id, options.language);
+        printJson(data);
+      } catch (err) {
+        handleError(err);
+      }
     });
 
   mindclip
@@ -91,8 +95,12 @@ Examples:
   switchbot mindclip summary 5f3a1c2e9b7d`,
     )
     .action(async (id: string) => {
-      const data = await getSummary(id);
-      printJson(data);
+      try {
+        const data = await getSummary(id);
+        printJson(data);
+      } catch (err) {
+        handleError(err);
+      }
     });
 
   mindclip
