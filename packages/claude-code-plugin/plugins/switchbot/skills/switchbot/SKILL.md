@@ -20,7 +20,7 @@ Drive the user's SwitchBot smart home through the `switchbot` CLI. Always query 
 | What's this device doing right now? | `switchbot devices status <id> --json` |
 | What can I do with this specific device type? | `switchbot devices describe <id> --json` |
 | What scenes are configured? | `switchbot scenes list --json` |
-| What's on the user's AI MindClip (recordings, todos, daily/weekly summaries)? | `mindclip_list_recordings`, `mindclip_get_summary`, `mindclip_list_todos`, `mindclip_daily_recall`, `mindclip_weekly_summary`, `mindclip_urgent_todos` MCP tools |
+| What's on the user's AI MindClip (recordings, todos, daily/weekly summaries)? | `mindclip_recordings` (action: list/get/summary), `mindclip_list_todos`, `mindclip_recall` (period: daily/weekly/urgent_todos) MCP tools |
 | What's in the user's `policy.yaml`? | `cat ~/.config/openclaw/switchbot/policy.yaml` |
 | Is my quota OK? | `switchbot quota status --json` |
 | Is the setup healthy? | `switchbot doctor --json` |
@@ -35,7 +35,7 @@ Drive the user's SwitchBot smart home through the `switchbot` CLI. Always query 
 
 ## Network requirements
 
-Claude Code registers the SwitchBot MCP server via `claude mcp add switchbot -- switchbot mcp serve --tools all` — or via `.mcp.json` in managed environments. No manual setup is required once the MCP server is registered. The MCP server needs outbound HTTPS to `api.switch-bot.com`. If connection errors appear, see `references/claude-code-network.md`.
+Claude Code registers the SwitchBot MCP server via `claude mcp add switchbot -- switchbot mcp serve` — or via `.mcp.json` in managed environments. The default profile exposes 14 tools (read + action); add `--tools all` to also expose admin tools (policy, audit, rules — 25 total). No manual setup is required once the MCP server is registered. The MCP server needs outbound HTTPS to `api.switch-bot.com`. If connection errors appear, see `references/claude-code-network.md`.
 
 ---
 

@@ -2,7 +2,7 @@
   "name": "@switchbot/claude-code-plugin",
   "version": "0.1.4",
   "type": "module",
-  "description": "SwitchBot Claude Code plugin — wires Claude Code to the SwitchBot CLI MCP server (31 tools, zero Node.js dependencies)",
+  "description": "SwitchBot Claude Code plugin — wires Claude Code to the SwitchBot CLI MCP server (default 14 tools; `--tools all` for 25)",
   "homepage": "https://github.com/OpenWonderLabs/switchbot-openapi-cli/tree/main/packages/claude-code-plugin",
   "repository": {
     "type": "git",

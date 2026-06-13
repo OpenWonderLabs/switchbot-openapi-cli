@@ -14,7 +14,7 @@ export interface RegisterMcpResult {
 
 const CLAUDE_CMD = 'claude';
 const MCP_SERVER_NAME = 'switchbot';
-const MCP_ADD_ARGS = ['switchbot', 'mcp', 'serve', '--tools', 'all'];
+const MCP_ADD_ARGS = ['switchbot', 'mcp', 'serve'];
 
 function spawnStr(cmd: string, args: string[], timeout = 10_000) {
   const r = spawnSync(cmd, args, {

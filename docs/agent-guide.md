@@ -88,9 +88,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 | `search_catalog` | Look up device type by name/alias | read |
 | `describe_device` | Catalog-derived capabilities + optional live status | read |
 | `account_overview` | Cold-start snapshot (devices/scenes/quota/cache/MQTT) | read |
-| `get_device_history` | Latest state + ring history from disk | read |
-| `query_device_history` | Time-range query over JSONL history | read |
-| `aggregate_device_history` | Bucketed statistics over history | read |
+| `device_history` | Read locally-persisted history. mode: "raw" (latest + ring) / "query" (time-range JSONL) / "aggregate" (bucketed stats) | read |
 | `policy_validate` | Validate policy.yaml | read |
 | `policy_new` | Scaffold a starter policy file | action |
 | `policy_migrate` | Upgrade policy schema in-place | action |
@@ -107,21 +105,30 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 
 The MCP server refuses destructive commands (Smart Lock `unlock`, Garage Door `open`, etc.) unless the tool call includes `confirm: true`, and the default safety profile still blocks direct destructive execution in favor of the reviewed CLI flow (`plan save` → `plan review` → `plan approve` → `plan execute`). The allowed list is the `destructive: true` commands in the catalog — `switchbot schema export | jq '[.data.types[].commands[] | select(.destructive)]'` shows every one.
 
-### `get_device_history` — zero-cost state lookup
+### `device_history` — zero-cost state lookup
 
-Reads `~/.switchbot/device-history/<deviceId>.json` written by `events mqtt-tail`. Requires no API call and costs zero quota.
+Reads `~/.switchbot/device-history/<deviceId>.json` (mode="raw") or `<deviceId>.jsonl` (mode="query"/"aggregate") written by `events mqtt-tail`. Requires no API call and costs zero quota.
 
 ```json
-// Without deviceId — list all devices with stored history
-{ "tool": "get_device_history" }
+// mode=raw, no deviceId — list all devices with stored history
+{ "tool": "device_history", "mode": "raw" }
 // → { "devices": [{ "deviceId": "ABC123", "latest": { "t": "...", "payload": {...} } }] }
 
-// With deviceId — latest + rolling history (default 20, max 100 entries)
-{ "tool": "get_device_history", "deviceId": "ABC123", "limit": 5 }
+// mode=raw, with deviceId — latest + rolling history (default 20, max 100 entries)
+{ "tool": "device_history", "mode": "raw", "deviceId": "ABC123", "limit": 5 }
 // → { "deviceId": "ABC123", "latest": {...}, "history": [{...}, ...] }
+
+// mode=query — time-range filtered JSONL records
+{ "tool": "device_history", "mode": "query", "deviceId": "ABC123", "since": "1h" }
+// → { "deviceId": "ABC123", "count": 42, "records": [{...}, ...] }
+
+// mode=aggregate — bucketed numeric statistics
+{ "tool": "device_history", "mode": "aggregate", "deviceId": "ABC123",
+  "metrics": ["temperature","humidity"], "since": "24h", "bucket": "1h" }
+// → { "deviceId": "ABC123", "buckets": [{ "t": "...", "metrics": { "temperature": {"count":12,"avg":21.4} } }, ...], ... }
 ```
 
-**Workflow**: run `switchbot events mqtt-tail` in the background (e.g. with pm2) to keep the history files fresh; then call `get_device_history` from any MCP session without consuming REST quota.
+**Workflow**: run `switchbot events mqtt-tail` in the background (e.g. with pm2) to keep the history files fresh; then call `device_history` from any MCP session without consuming REST quota.
 
 #### Device-history directory layout
 
@@ -131,7 +138,7 @@ After `events mqtt-tail` runs on a device, `~/.switchbot/device-history/` contai
   Source of truth for `history range` and `history aggregate`.
   Rotated at ~50 MB (up to 3 segments).
 - `<deviceId>.json`: latest 100-entry ring buffer.
-  Written on every MQTT event. Read by MCP `get_device_history`
+  Written on every MQTT event. Read by MCP `device_history` (mode="raw")
   for fast, zero-quota retrieval.
 - `__control.jsonl`: MQTT connection lifecycle events
   (heartbeat, connect, disconnect). Not a device log; used for diagnostics.

@@ -118,7 +118,7 @@ describe('registerMcp', () => {
     const written = writeFileSyncMock.mock.calls[0]?.[1] as string;
     const parsed = JSON.parse(written);
     expect(parsed.mcpServers.switchbot.command).toBe('switchbot');
-    expect(parsed.mcpServers.switchbot.args).toEqual(['mcp', 'serve', '--tools', 'all']);
+    expect(parsed.mcpServers.switchbot.args).toEqual(['mcp', 'serve']);
   });
 
   it('preserves existing top-level keys and other mcpServers entries', () => {

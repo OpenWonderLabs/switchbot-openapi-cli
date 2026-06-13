@@ -2,7 +2,7 @@
   "mcpServers": {
     "switchbot": {
       "command": "switchbot",
-      "args": ["mcp", "serve", "--tools", "all"]
+      "args": ["mcp", "serve"]
     }
   }
 }

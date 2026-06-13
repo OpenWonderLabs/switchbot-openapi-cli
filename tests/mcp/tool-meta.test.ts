@@ -116,10 +116,10 @@ describe('MCP tool _meta.agentSafetyTier', () => {
     expect((tool as any)._meta.agentSafetyTier).toBe('read');
   });
 
-  it('aggregate_device_history is marked as read tier', async () => {
+  it('device_history is marked as read tier', async () => {
     const { client } = await pair();
     const toolsList = await client.listTools();
-    const tool = toolsList.tools.find((t) => t.name === 'aggregate_device_history');
+    const tool = toolsList.tools.find((t) => t.name === 'device_history');
     expect(tool).toBeDefined();
     expect((tool as any)._meta.agentSafetyTier).toBe('read');
   });

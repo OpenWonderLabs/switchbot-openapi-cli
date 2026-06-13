@@ -9,10 +9,20 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### BREAKING
+
+- **MCP tool consolidation: 31 → 25 tools** — the seven MindClip read tools collapse into three (`mindclip_recordings` with `action: "list" | "get" | "summary"`, `mindclip_list_todos` (unchanged), and `mindclip_recall` with `period: "daily" | "weekly" | "urgent_todos"`); the three device-history tools collapse into one (`device_history` with `mode: "raw" | "query" | "aggregate"`). MCP clients that called the old names (`mindclip_list_recordings` / `mindclip_get_recording` / `mindclip_get_summary` / `mindclip_daily_recall` / `mindclip_weekly_summary` / `mindclip_urgent_todos` / `get_device_history` / `query_device_history` / `aggregate_device_history`) must move to the new tool name and pass the discriminator. The CLI commands (`switchbot mindclip recordings/recording/summary/...`, `switchbot history show/range/aggregate`) are unchanged. Rationale: the old layout sent ~10 highly-redundant tool descriptions and JSON schemas in every model session; consolidating cuts the per-session token cost and the agent's tool-picking overhead by ~20%.
+- **Plugins switch to the `default` tool profile** — `@switchbot/claude-code-plugin`, `@switchbot/codex-plugin`, and `@switchbot/gemini-extension` now register the MCP server as `switchbot mcp serve` (without `--tools all`). The default profile exposes 14 tools (read + action). To get the 11 admin tools (policy / audit / automation rules), users opt in by adding `--tools all` to their MCP config — the same flag the CLI has always supported. Existing installations keep working: `registerMcp` / `claude mcp add` / `codex plugin` re-registration writes the new args; manual configs need a one-line edit. Rationale: most agents never invoke admin tools, but every session paid for their schemas.
+
+### Changed
+
+- **Profile counts**: `readonly` 17 → 11, `default` 20 → 14, `all` 31 → 25.
+- **`mcp tools --tools <profile>` help text**, `mcp serve` help bullet list, README/SKILL.md/GEMINI.md tables, and all package descriptions updated to reflect the new counts.
+
 ### Fixed
 
 - **`reset` no longer aborts before printing the result summary** — the in-memory cache cleanup (`clearCache` / `clearStatusCache`) was rerunning `unlinkSync` on a file the data-file loop had already attempted to delete. On a permission-denied path that re-throw skipped both the in-memory clear and the result table. The reset command now uses the pure in-memory `resetListCache` / `resetStatusCache` helpers; disk deletion stays the sole responsibility of the data-file loop, where errors are reported into `results`.
-- **`capabilities --surface mcp` lists every registered MCP tool** — `MCP_TOOLS` was a hand-maintained array that had drifted: it advertised 11 tools while `mcp serve` registered 31 (7 mindclip, 7 policy/plan, 4 audit/rules, plus 13 others). The list is now derived from the `TOOL_PROFILES.all` single source of truth, and a new test in `tool-profiles.test.ts` asserts the advertised set matches what `createSwitchBotMcpServer({ toolProfile: 'all' })` actually registers.
+- **`capabilities --surface mcp` lists every registered MCP tool** — `MCP_TOOLS` was a hand-maintained array that had drifted. The list is now derived from the `TOOL_PROFILES.all` single source of truth, and a new test in `tool-profiles.test.ts` asserts the advertised set matches what `createSwitchBotMcpServer({ toolProfile: 'all' })` actually registers, so any future drift fails CI.
 
 ## [3.7.9]
 

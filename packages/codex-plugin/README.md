@@ -6,7 +6,7 @@ Codex plugin for SwitchBot smart-home control through the authoritative
 ## What it installs
 
 - A Codex skill at `skills/switchbot/SKILL.md`
-- An MCP server definition that runs `switchbot mcp serve --tools all`
+- An MCP server definition that runs `switchbot mcp serve` (default profile, 14 tools; pass `--tools all` to add the policy/audit/rules tools for 25 total)
 - A best-effort `onInstall` hook that runs non-interactive setup when the CLI is present
 - Legacy helper binaries: `switchbot-codex-auth` and `switchbot-codex-install`
 

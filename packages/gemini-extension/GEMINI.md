@@ -15,7 +15,7 @@ Drive the user's SwitchBot smart home through the `switchbot` CLI and MCP tools.
 | What's this device doing right now? | `get_device_status` MCP tool |
 | What can I do with this specific device type? | `describe_device` MCP tool |
 | What scenes are configured? | `list_scenes` MCP tool |
-| What's on the user's AI MindClip (recordings, todos, daily/weekly summaries)? | `mindclip_list_recordings`, `mindclip_get_summary`, `mindclip_list_todos`, `mindclip_daily_recall`, `mindclip_weekly_summary`, `mindclip_urgent_todos` MCP tools |
+| What's on the user's AI MindClip (recordings, todos, daily/weekly summaries)? | `mindclip_recordings` (action: list/get/summary), `mindclip_list_todos`, `mindclip_recall` (period: daily/weekly/urgent_todos) MCP tools |
 | What's in the user's policy? | `switchbot policy validate --live --json` |
 | Is my quota OK? | `switchbot quota status --json` |
 | Is the setup healthy? | `switchbot doctor --json` |

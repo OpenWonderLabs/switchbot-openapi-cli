@@ -101,14 +101,14 @@ describe('MCP strict schemas — all tools reject unknown keys', () => {
     await assertRejectsUnknownKey(client, 'get_device_status', { deviceId: 'D1' });
   });
 
-  it('get_device_history rejects unknown keys', async () => {
+  it('device_history (mode=raw) rejects unknown keys', async () => {
     const { client } = await pair();
-    await assertRejectsUnknownKey(client, 'get_device_history', {});
+    await assertRejectsUnknownKey(client, 'device_history', { mode: 'raw' });
   });
 
-  it('query_device_history rejects unknown keys', async () => {
+  it('device_history (mode=query) rejects unknown keys', async () => {
     const { client } = await pair();
-    await assertRejectsUnknownKey(client, 'query_device_history', { deviceId: 'D1' });
+    await assertRejectsUnknownKey(client, 'device_history', { mode: 'query', deviceId: 'D1' });
   });
 
   it('send_command rejects unknown keys', async () => {
@@ -140,9 +140,10 @@ describe('MCP strict schemas — all tools reject unknown keys', () => {
     await assertRejectsUnknownKey(client, 'describe_device', { deviceId: 'D1' });
   });
 
-  it('aggregate_device_history rejects unknown keys', async () => {
+  it('device_history (mode=aggregate) rejects unknown keys', async () => {
     const { client } = await pair();
-    await assertRejectsUnknownKey(client, 'aggregate_device_history', {
+    await assertRejectsUnknownKey(client, 'device_history', {
+      mode: 'aggregate',
       deviceId: 'D1',
       metrics: ['temperature'],
     });

@@ -3,21 +3,15 @@ export type ToolProfile = 'default' | 'readonly' | 'all';
 const CORE_READ = [
   'list_devices',
   'get_device_status',
-  'get_device_history',
-  'query_device_history',
+  'device_history',
   'list_scenes',
   'search_catalog',
   'describe_device',
-  'aggregate_device_history',
   'account_overview',
   'plan_suggest',
-  'mindclip_list_recordings',
-  'mindclip_get_recording',
-  'mindclip_get_summary',
+  'mindclip_recordings',
   'mindclip_list_todos',
-  'mindclip_daily_recall',
-  'mindclip_weekly_summary',
-  'mindclip_urgent_todos',
+  'mindclip_recall',
 ] as const;
 
 const CORE_ACTION = ['send_command', 'run_scene', 'plan_run'] as const;

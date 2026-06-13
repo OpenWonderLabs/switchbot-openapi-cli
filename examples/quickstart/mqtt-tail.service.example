@@ -4,7 +4,7 @@
 #
 #  Keeps the MQTT subscriber alive in the background so device shadow
 #  updates land in a JSONL stream even when your shell is closed.
-#  Output is consumed by `switchbot mcp` (for the `get_device_history`
+#  Output is consumed by `switchbot mcp` (for the `device_history`
 #  tool) and by the rules engine.
 #
 #  Install:

@@ -1,6 +1,6 @@
 # @switchbot/claude-code-plugin
 
-SwitchBot plugin for [Claude Code](https://claude.ai/claude-code) — wires Claude Code to the SwitchBot OpenAPI CLI MCP server, exposing 31 smart-home tools with policy-based safety gates.
+SwitchBot plugin for [Claude Code](https://claude.ai/claude-code) — wires Claude Code to the SwitchBot OpenAPI CLI MCP server, exposing up to 25 smart-home tools (14 in the default profile, 25 with `--tools all`) with policy-based safety gates.
 
 ## Installation
 
@@ -9,6 +9,12 @@ npm install -g @switchbot/claude-code-plugin
 ```
 
 Then register the MCP server with Claude Code:
+
+```bash
+claude mcp add switchbot -- switchbot mcp serve
+```
+
+To also expose the admin tools (policy / audit / automation rules), add `--tools all`:
 
 ```bash
 claude mcp add switchbot -- switchbot mcp serve --tools all
@@ -34,7 +40,7 @@ switchbot-claude-auth
 
 ## What it does
 
-Registers the `switchbot` MCP server (`switchbot mcp serve --tools all`) with Claude Code. The skill document (`plugins/switchbot/skills/switchbot/SKILL.md`) guides Claude Code in safely controlling devices, reading sensors, running scenes, and respecting policy-based safety tiers.
+Registers the `switchbot` MCP server (`switchbot mcp serve` — default profile) with Claude Code. Add `--tools all` to expose the policy/audit/rules tools alongside the core 14. The skill document (`plugins/switchbot/skills/switchbot/SKILL.md`) guides Claude Code in safely controlling devices, reading sensors, running scenes, and respecting policy-based safety tiers.
 
 ## Related packages
 

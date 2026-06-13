@@ -138,13 +138,13 @@ describe('MCP tool schema completeness', () => {
     ).toEqual([]);
   });
 
-  it('aggregate_device_history describes every input argument (P4 regression guard)', () => {
-    const agg = tools.find((t) => t.name === 'aggregate_device_history');
-    expect(agg, 'aggregate_device_history must be registered').toBeDefined();
-    const props = agg!.inputSchema?.properties ?? {};
-    const expected = ['deviceId', 'since', 'from', 'to', 'metrics', 'aggs', 'bucket', 'maxBucketSamples'];
+  it('device_history describes every input argument (P4 regression guard)', () => {
+    const dh = tools.find((t) => t.name === 'device_history');
+    expect(dh, 'device_history must be registered').toBeDefined();
+    const props = dh!.inputSchema?.properties ?? {};
+    const expected = ['mode', 'deviceId', 'limit', 'since', 'from', 'to', 'fields', 'metrics', 'aggs', 'bucket', 'maxBucketSamples'];
     for (const prop of expected) {
-      expect(props[prop], `${prop} should appear in aggregate_device_history inputSchema`).toBeDefined();
+      expect(props[prop], `${prop} should appear in device_history inputSchema`).toBeDefined();
       expect(
         props[prop].description,
         `${prop}.description should be a non-empty string`,
