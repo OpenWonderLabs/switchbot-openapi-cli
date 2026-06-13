@@ -1160,6 +1160,9 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
         endTime: z.number().int().min(0).optional().describe('End timestamp in ms since epoch'),
         folderID: z.number().int().min(0).optional().describe('Filter by folder ID'),
       }).strict(),
+      outputSchema: {
+        data: z.unknown().describe('Recordings page envelope as returned by /v1.1/mindclip/recordings (opaque body)'),
+      },
     },
     async (args) => {
       try {
@@ -1187,6 +1190,9 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
         id: z.string().min(1).describe('Recording ID (from mindclip_list_recordings)'),
         language: z.string().optional().describe('Language code, e.g. "en" or "zh"'),
       }).strict(),
+      outputSchema: {
+        data: z.unknown().describe('Single recording envelope as returned by /v1.1/mindclip/recordings/{id} (opaque body)'),
+      },
     },
     async ({ id, language }) => {
       try {
@@ -1213,6 +1219,9 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
       inputSchema: z.object({
         id: z.string().min(1).describe('Recording ID (from mindclip_list_recordings)'),
       }).strict(),
+      outputSchema: {
+        data: z.unknown().describe('AI summary envelope as returned by /v1.1/mindclip/summaries/{id} (opaque body)'),
+      },
     },
     async ({ id }) => {
       try {
@@ -1248,6 +1257,9 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
         startTime: z.number().int().min(0).optional().describe('Start timestamp in ms since epoch'),
         endTime: z.number().int().min(0).optional().describe('End timestamp in ms since epoch'),
       }).strict(),
+      outputSchema: {
+        data: z.unknown().describe('Todos page envelope as returned by /v1.1/mindclip/todos (opaque body)'),
+      },
     },
     async (args) => {
       try {
@@ -1275,6 +1287,9 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
         date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()
           .describe('Date in YYYY-MM-DD format (e.g. "2026-06-13"). Omit for server default (most recent).'),
       }).strict(),
+      outputSchema: {
+        data: z.unknown().describe('Daily recall envelope as returned by /v1.1/mindclip/assistant/daily (opaque body)'),
+      },
     },
     async ({ date }) => {
       try {
@@ -1302,6 +1317,9 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
         week: z.string().regex(/^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$/).optional()
           .describe('ISO week in YYYY-Www format, weeks 01-53 (e.g. "2026-W23"). Omit for server default (most recent).'),
       }).strict(),
+      outputSchema: {
+        data: z.unknown().describe('Weekly summary envelope as returned by /v1.1/mindclip/assistant/weekly (opaque body)'),
+      },
     },
     async ({ week }) => {
       try {
@@ -1329,6 +1347,9 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
         date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()
           .describe('Date in YYYY-MM-DD format. Omit for server default (yesterday).'),
       }).strict(),
+      outputSchema: {
+        data: z.unknown().describe('Urgent todos envelope as returned by /v1.1/mindclip/assistant/urgent-todos (opaque body)'),
+      },
     },
     async ({ date }) => {
       try {

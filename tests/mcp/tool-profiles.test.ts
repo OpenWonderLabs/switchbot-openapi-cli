@@ -4,16 +4,16 @@ import { createSwitchBotMcpServer, listRegisteredTools } from '../../src/command
 
 describe('tool-profiles', () => {
   describe('TOOL_PROFILES sets', () => {
-    it('readonly has 10 tools (core read only)', () => {
-      expect(TOOL_PROFILES.readonly.size).toBe(10);
+    it('readonly has 17 tools (core read only)', () => {
+      expect(TOOL_PROFILES.readonly.size).toBe(17);
     });
 
-    it('default has 13 tools (core read + action)', () => {
-      expect(TOOL_PROFILES.default.size).toBe(13);
+    it('default has 20 tools (core read + action)', () => {
+      expect(TOOL_PROFILES.default.size).toBe(20);
     });
 
-    it('all has 24 tools', () => {
-      expect(TOOL_PROFILES.all.size).toBe(24);
+    it('all has 31 tools', () => {
+      expect(TOOL_PROFILES.all.size).toBe(31);
     });
 
     it('readonly is a subset of default', () => {
@@ -65,9 +65,9 @@ describe('tool-profiles', () => {
 
   describe('createSwitchBotMcpServer respects toolProfile', () => {
     it.each<[ToolProfile, number]>([
-      ['readonly', 10],
-      ['default', 13],
-      ['all', 24],
+      ['readonly', 17],
+      ['default', 20],
+      ['all', 31],
     ])('profile "%s" registers %d tools', (profile, expected) => {
       const server = createSwitchBotMcpServer({ toolProfile: profile });
       expect(listRegisteredTools(server)).toHaveLength(expected);
