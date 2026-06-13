@@ -12,6 +12,10 @@ const CORE_READ = [
   'mindclip_recordings',
   'mindclip_list_todos',
   'mindclip_recall',
+  // ---- deprecated aliases (3.x backward-compat; removed in 4.0.0) ----
+  'get_device_history',
+  'query_device_history',
+  'aggregate_device_history',
 ] as const;
 
 const CORE_ACTION = ['send_command', 'run_scene', 'plan_run'] as const;
