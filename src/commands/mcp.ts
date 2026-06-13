@@ -22,6 +22,15 @@ import {
 } from '../lib/devices.js';
 import { fetchScenes, executeScene } from '../lib/scenes.js';
 import {
+  listRecordings,
+  getRecording,
+  getSummary,
+  listTodos,
+  getDailyRecall,
+  getWeeklySummary,
+  getUrgentTodos,
+} from '../lib/mindclip.js';
+import {
   findCatalogEntry,
   deriveSafetyTier,
   getCommandSafetyReason,
@@ -1131,6 +1140,90 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
         }],
         structuredContent: overview,
       };
+    }
+  );
+
+  // ---- mindclip_list_recordings -------------------------------------------
+  if (!skip('mindclip_list_recordings'))
+  server.registerTool(
+    'mindclip_list_recordings',
+    {
+      title: 'List AI MindClip recordings',
+      description:
+        'List voice recordings captured by AI MindClip devices. Optional filters: deviceID, time range (startTime/endTime in ms epoch), folderID, plus pagination.',
+      _meta: { agentSafetyTier: 'read' },
+      inputSchema: z.object({
+        deviceID: z.string().optional().describe('Filter by SwitchBot device ID'),
+        pageNum: z.number().int().min(1).optional().describe('Page number (>= 1)'),
+        pageSize: z.number().int().min(1).max(100).optional().describe('Results per page (1-100)'),
+        startTime: z.number().int().min(0).optional().describe('Start timestamp in ms since epoch'),
+        endTime: z.number().int().min(0).optional().describe('End timestamp in ms since epoch'),
+        folderID: z.number().int().min(0).optional().describe('Filter by folder ID'),
+      }).strict(),
+    },
+    async (args) => {
+      try {
+        const data = await listRecordings(args);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(data, null, 2) }],
+          structuredContent: { data: data as Record<string, unknown> },
+        };
+      } catch (err) {
+        return mcpError('api', 1, err instanceof Error ? err.message : String(err));
+      }
+    }
+  );
+
+  // ---- mindclip_get_recording ---------------------------------------------
+  if (!skip('mindclip_get_recording'))
+  server.registerTool(
+    'mindclip_get_recording',
+    {
+      title: 'Get one AI MindClip recording',
+      description:
+        'Fetch metadata and transcript for a single recording by its ID. Pass an optional language code (e.g. "en", "zh") to override transcription locale.',
+      _meta: { agentSafetyTier: 'read' },
+      inputSchema: z.object({
+        id: z.string().min(1).describe('Recording ID (from mindclip_list_recordings)'),
+        language: z.string().optional().describe('Language code, e.g. "en" or "zh"'),
+      }).strict(),
+    },
+    async ({ id, language }) => {
+      try {
+        const data = await getRecording(id, language);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(data, null, 2) }],
+          structuredContent: { data: data as Record<string, unknown> },
+        };
+      } catch (err) {
+        return mcpError('api', 1, err instanceof Error ? err.message : String(err));
+      }
+    }
+  );
+
+  // ---- mindclip_get_summary -----------------------------------------------
+  if (!skip('mindclip_get_summary'))
+  server.registerTool(
+    'mindclip_get_summary',
+    {
+      title: 'Get AI summary for a MindClip recording',
+      description:
+        'Fetch the AI-generated summary (key points, action items, transcript highlights) for a recording.',
+      _meta: { agentSafetyTier: 'read' },
+      inputSchema: z.object({
+        id: z.string().min(1).describe('Recording ID (from mindclip_list_recordings)'),
+      }).strict(),
+    },
+    async ({ id }) => {
+      try {
+        const data = await getSummary(id);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(data, null, 2) }],
+          structuredContent: { data: data as Record<string, unknown> },
+        };
+      } catch (err) {
+        return mcpError('api', 1, err instanceof Error ? err.message : String(err));
+      }
     }
   );
 

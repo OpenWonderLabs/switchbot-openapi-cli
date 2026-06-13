@@ -583,6 +583,51 @@ describe('mcp server', () => {
     expect(res.isError).toBe(true);
   });
 
+  it('mindclip_list_recordings calls /v1.1/mindclip/recordings and returns body', async () => {
+    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: { list: [{ id: 'r1' }] } } });
+    const { client } = await pair();
+    const res = await client.callTool({ name: 'mindclip_list_recordings', arguments: {} });
+    expect(res.isError).toBeFalsy();
+    const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    expect(parsed).toEqual({ list: [{ id: 'r1' }] });
+    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/recordings', {
+      params: {},
+    });
+  });
+
+  it('mindclip_list_recordings forwards device, page, size, and time-range params', async () => {
+    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {} } });
+    const { client } = await pair();
+    await client.callTool({
+      name: 'mindclip_list_recordings',
+      arguments: { deviceID: 'AABBCC', pageNum: 2, pageSize: 10, startTime: 1000, endTime: 2000, folderID: 3 },
+    });
+    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/recordings', {
+      params: { deviceID: 'AABBCC', pageNum: 2, pageSize: 10, startTime: 1000, endTime: 2000, folderID: 3 },
+    });
+  });
+
+  it('mindclip_get_recording calls /v1.1/mindclip/recordings/{id} with optional language', async () => {
+    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: { id: 'r1' } } });
+    const { client } = await pair();
+    await client.callTool({
+      name: 'mindclip_get_recording',
+      arguments: { id: 'r1', language: 'en' },
+    });
+    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/recordings/r1', {
+      params: { language: 'en' },
+    });
+  });
+
+  it('mindclip_get_summary calls /v1.1/mindclip/summaries/{id}', async () => {
+    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: { summary: 'ok' } } });
+    const { client } = await pair();
+    const res = await client.callTool({ name: 'mindclip_get_summary', arguments: { id: 's1' } });
+    const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    expect(parsed).toEqual({ summary: 'ok' });
+    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/summaries/s1', { params: {} });
+  });
+
   it('run_scene POSTs the scene execute endpoint', async () => {
     apiMock.__instance.post.mockResolvedValueOnce({ data: { statusCode: 100, body: {} } });
     const { client } = await pair();
