@@ -11,6 +11,13 @@ const CORE_READ = [
   'aggregate_device_history',
   'account_overview',
   'plan_suggest',
+  'mindclip_list_recordings',
+  'mindclip_get_recording',
+  'mindclip_get_summary',
+  'mindclip_list_todos',
+  'mindclip_daily_recall',
+  'mindclip_weekly_summary',
+  'mindclip_urgent_todos',
 ] as const;
 
 const CORE_ACTION = ['send_command', 'run_scene', 'plan_run'] as const;

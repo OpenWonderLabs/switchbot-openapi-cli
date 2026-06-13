@@ -163,7 +163,7 @@ describe('mcp server', () => {
     delete process.env.SWITCHBOT_ALLOW_DIRECT_DESTRUCTIVE;
   });
 
-  it('exposes the twenty-four tools with titles and input schemas', async () => {
+  it('exposes the thirty-one tools with titles and input schemas', async () => {
     const { client } = await pair();
     const { tools } = await client.listTools();
 
@@ -179,6 +179,13 @@ describe('mcp server', () => {
         'get_device_status',
         'list_devices',
         'list_scenes',
+        'mindclip_daily_recall',
+        'mindclip_get_recording',
+        'mindclip_get_summary',
+        'mindclip_list_recordings',
+        'mindclip_list_todos',
+        'mindclip_urgent_todos',
+        'mindclip_weekly_summary',
         'plan_run',
         'plan_suggest',
         'policy_add_rule',
