@@ -710,6 +710,142 @@ describe('mcp server', () => {
     });
   });
 
+  // ---------------------------------------------------------------------------
+  // G2/G3: branch-routing + parameter-forwarding completeness for the
+  // consolidated mindclip tools. Covers default branches the basic tests
+  // skipped (period=daily/weekly without date/week, action=get without
+  // language) and partial-filter combinations.
+  // ---------------------------------------------------------------------------
+
+  it('mindclip_recall period=daily without date hits /v1.1/mindclip/assistant/daily with empty params', async () => {
+    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {} } });
+    const { client } = await pair();
+    await client.callTool({ name: 'mindclip_recall', arguments: { period: 'daily' } });
+    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/assistant/daily', { params: {} });
+  });
+
+  it('mindclip_recall period=weekly without week hits /v1.1/mindclip/assistant/weekly with empty params', async () => {
+    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {} } });
+    const { client } = await pair();
+    await client.callTool({ name: 'mindclip_recall', arguments: { period: 'weekly' } });
+    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/assistant/weekly', { params: {} });
+  });
+
+  it('mindclip_recall period=urgent_todos with explicit date passes the date through', async () => {
+    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {} } });
+    const { client } = await pair();
+    await client.callTool({ name: 'mindclip_recall', arguments: { period: 'urgent_todos', date: '2026-06-12' } });
+    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/assistant/urgent-todos', {
+      params: { date: '2026-06-12' },
+    });
+  });
+
+  it('mindclip_recordings action=get omits language when caller did not pass one', async () => {
+    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: { id: 'r1' } } });
+    const { client } = await pair();
+    await client.callTool({ name: 'mindclip_recordings', arguments: { action: 'get', id: 'r1' } });
+    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/recordings/r1', { params: {} });
+  });
+
+  it('mindclip_recordings action=list with only deviceID forwards just that filter', async () => {
+    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {} } });
+    const { client } = await pair();
+    await client.callTool({ name: 'mindclip_recordings', arguments: { action: 'list', deviceID: 'AB' } });
+    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/recordings', {
+      params: { deviceID: 'AB' },
+    });
+  });
+
+  it('mindclip_recordings action=list with only paging forwards just paging', async () => {
+    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {} } });
+    const { client } = await pair();
+    await client.callTool({
+      name: 'mindclip_recordings',
+      arguments: { action: 'list', pageNum: 4, pageSize: 25 },
+    });
+    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/recordings', {
+      params: { pageNum: 4, pageSize: 25 },
+    });
+  });
+
+  it('mindclip_list_todos with only deviceID forwards just that filter', async () => {
+    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {} } });
+    const { client } = await pair();
+    await client.callTool({ name: 'mindclip_list_todos', arguments: { deviceID: 'D9' } });
+    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/todos', {
+      params: { deviceID: 'D9' },
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // G8: cross-branch field leakage — mindclip side. Extra fields belonging to
+  // other branches are accepted by the (intentionally permissive) input
+  // schema but must be ignored at handler time, NOT forwarded to the API.
+  // ---------------------------------------------------------------------------
+
+  it('mindclip_recordings action=list ignores stray `id` field (no leakage to params)', async () => {
+    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {} } });
+    const { client } = await pair();
+    await client.callTool({
+      name: 'mindclip_recordings',
+      arguments: { action: 'list', id: 'should-be-ignored', deviceID: 'AB' },
+    });
+    // The list endpoint must be called (NOT /v1.1/mindclip/recordings/should-be-ignored)
+    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/recordings', {
+      params: { deviceID: 'AB' },
+    });
+    // params must not carry id
+    const params = apiMock.__instance.get.mock.calls[0]?.[1]?.params ?? {};
+    expect(params).not.toHaveProperty('id');
+  });
+
+  it('mindclip_recordings action=get ignores stray list-only filters', async () => {
+    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: { id: 'r1' } } });
+    const { client } = await pair();
+    await client.callTool({
+      name: 'mindclip_recordings',
+      arguments: {
+        action: 'get',
+        id: 'r1',
+        // these are list-only and must not affect the get request
+        deviceID: 'AB',
+        pageSize: 50,
+        startTime: 1000,
+      },
+    });
+    // get hits /recordings/{id} with empty params (no language, no list filters)
+    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/recordings/r1', { params: {} });
+  });
+
+  it('mindclip_recall period=daily ignores stray `week` field', async () => {
+    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {} } });
+    const { client } = await pair();
+    await client.callTool({
+      name: 'mindclip_recall',
+      arguments: { period: 'daily', date: '2026-06-01', week: '2026-W23' },
+    });
+    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/assistant/daily', {
+      params: { date: '2026-06-01' },
+    });
+    // Must NOT have called the weekly endpoint
+    const calls = apiMock.__instance.get.mock.calls.map((c) => c[0]);
+    expect(calls).not.toContain('/v1.1/mindclip/assistant/weekly');
+  });
+
+  it('mindclip_recall period=weekly ignores stray `date` field', async () => {
+    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {} } });
+    const { client } = await pair();
+    await client.callTool({
+      name: 'mindclip_recall',
+      arguments: { period: 'weekly', week: '2026-W23', date: '2026-06-01' },
+    });
+    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/assistant/weekly', {
+      params: { week: '2026-W23' },
+    });
+    const calls = apiMock.__instance.get.mock.calls.map((c) => c[0]);
+    expect(calls).not.toContain('/v1.1/mindclip/assistant/daily');
+  });
+
   it('run_scene POSTs the scene execute endpoint', async () => {
     apiMock.__instance.post.mockResolvedValueOnce({ data: { statusCode: 100, body: {} } });
     const { client } = await pair();
@@ -872,6 +1008,197 @@ describe('mcp server', () => {
     expect(res.isError).toBe(true);
     const text = (res.content as Array<{ text: string }>)[0].text;
     expect(text).toContain('requires at least one entry in `metrics`');
+  });
+
+  // ---------------------------------------------------------------------------
+  // G2/G3: device_history routing + handler-level validation
+  // ---------------------------------------------------------------------------
+
+  it('device_history mode=raw without deviceId returns the devices listing shape', async () => {
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-raw-list-'));
+    vi.spyOn(os, 'homedir').mockReturnValue(tmpHome);
+    try {
+      const { client } = await pair();
+      const res = await client.callTool({ name: 'device_history', arguments: { mode: 'raw' } });
+      expect(res.isError).toBeFalsy();
+      const sc = (res as { structuredContent?: { devices?: unknown[]; deviceId?: string } })
+        .structuredContent;
+      expect(Array.isArray(sc?.devices)).toBe(true);
+      expect(sc?.deviceId, 'should NOT carry a single-device shape').toBeUndefined();
+    } finally {
+      vi.restoreAllMocks();
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    }
+  });
+
+  it('device_history mode=raw forwards `limit` to the per-device branch', async () => {
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-raw-limit-'));
+    vi.spyOn(os, 'homedir').mockReturnValue(tmpHome);
+    try {
+      const histDir = path.join(tmpHome, '.switchbot', 'device-history');
+      fs.mkdirSync(histDir, { recursive: true });
+      const lines: string[] = [];
+      for (let i = 0; i < 10; i++) {
+        lines.push(JSON.stringify({ t: `2026-05-01T0${i}:00:00.000Z`, topic: 't/DEV', payload: { i } }));
+      }
+      fs.writeFileSync(path.join(histDir, 'DEV.jsonl'), lines.join('\n') + '\n');
+      // Also write the ring-buffer .json that mode=raw reads
+      fs.writeFileSync(
+        path.join(histDir, 'DEV.json'),
+        JSON.stringify({ deviceId: 'DEV', latest: null, history: lines.map((l) => JSON.parse(l)) }),
+      );
+
+      const { client } = await pair();
+      const res = await client.callTool({
+        name: 'device_history',
+        arguments: { mode: 'raw', deviceId: 'DEV', limit: 3 },
+      });
+      expect(res.isError).toBeFalsy();
+      const sc = (res as { structuredContent?: { history?: unknown[] } }).structuredContent;
+      expect(Array.isArray(sc?.history)).toBe(true);
+      expect(sc?.history?.length, 'limit=3 should bound history length').toBeLessThanOrEqual(3);
+    } finally {
+      vi.restoreAllMocks();
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    }
+  });
+
+  it('device_history mode=query rejects since combined with from/to', async () => {
+    const { client } = await pair();
+    const res = await client.callTool({
+      name: 'device_history',
+      arguments: {
+        mode: 'query',
+        deviceId: 'DEV1',
+        since: '1h',
+        from: '2026-01-01T00:00:00.000Z',
+      },
+    });
+    expect(res.isError).toBe(true);
+    const text = (res.content as Array<{ text: string }>)[0].text;
+    expect(text).toContain('mutually exclusive');
+  });
+
+  it('device_history mode=aggregate rejects missing deviceId with a usage error', async () => {
+    const { client } = await pair();
+    const res = await client.callTool({
+      name: 'device_history',
+      arguments: { mode: 'aggregate', metrics: ['temperature'] },
+    });
+    expect(res.isError).toBe(true);
+    const text = (res.content as Array<{ text: string }>)[0].text;
+    expect(text).toContain('mode="aggregate" requires `deviceId`');
+  });
+
+  it('device_history mode=query happy path returns count + records', async () => {
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-query-'));
+    vi.spyOn(os, 'homedir').mockReturnValue(tmpHome);
+    try {
+      const histDir = path.join(tmpHome, '.switchbot', 'device-history');
+      fs.mkdirSync(histDir, { recursive: true });
+      const lines = [
+        JSON.stringify({ t: '2026-04-19T10:00:00.000Z', topic: 't/Q1', payload: { temperature: 20 } }),
+        JSON.stringify({ t: '2026-04-19T10:30:00.000Z', topic: 't/Q1', payload: { temperature: 24 } }),
+      ];
+      fs.writeFileSync(path.join(histDir, 'Q1.jsonl'), lines.join('\n') + '\n');
+
+      const { client } = await pair();
+      const res = await client.callTool({
+        name: 'device_history',
+        arguments: {
+          mode: 'query',
+          deviceId: 'Q1',
+          from: '2026-04-19T00:00:00.000Z',
+          to: '2026-04-20T00:00:00.000Z',
+        },
+      });
+      expect(res.isError).toBeFalsy();
+      const sc = (res as { structuredContent?: { count?: number; records?: unknown[] } })
+        .structuredContent;
+      expect(sc?.count).toBe(2);
+      expect(Array.isArray(sc?.records)).toBe(true);
+    } finally {
+      vi.restoreAllMocks();
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    }
+  });
+
+  it('device_history mode=aggregate forwards `bucket` and `maxBucketSamples` to the underlying helper', async () => {
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-agg-bucket-'));
+    vi.spyOn(os, 'homedir').mockReturnValue(tmpHome);
+    try {
+      const histDir = path.join(tmpHome, '.switchbot', 'device-history');
+      fs.mkdirSync(histDir, { recursive: true });
+      // Need at least a few samples to populate buckets
+      const lines: string[] = [];
+      for (let i = 0; i < 4; i++) {
+        lines.push(JSON.stringify({
+          t: `2026-04-19T10:0${i}:00.000Z`, topic: 't/AB', payload: { temperature: 20 + i },
+        }));
+      }
+      fs.writeFileSync(path.join(histDir, 'AB.jsonl'), lines.join('\n') + '\n');
+
+      const { client } = await pair();
+      const res = await client.callTool({
+        name: 'device_history',
+        arguments: {
+          mode: 'aggregate',
+          deviceId: 'AB',
+          metrics: ['temperature'],
+          bucket: '1m',
+          maxBucketSamples: 50,
+          from: '2026-04-19T00:00:00.000Z',
+          to: '2026-04-20T00:00:00.000Z',
+        },
+      });
+      expect(res.isError).toBeFalsy();
+      const sc = (res as { structuredContent?: { bucket?: string; buckets?: unknown[] } })
+        .structuredContent;
+      expect(sc?.bucket, 'bucket should echo back when specified').toBe('1m');
+      expect(Array.isArray(sc?.buckets)).toBe(true);
+    } finally {
+      vi.restoreAllMocks();
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // G8: device_history cross-branch field leakage. mode=raw with stray
+  // aggregate-only fields should still take the raw branch and not crash;
+  // mode=query / mode=aggregate similarly ignore mode-mismatched fields.
+  // ---------------------------------------------------------------------------
+
+  it('device_history mode=raw silently ignores stray `metrics`/`aggs` (no aggregate branch taken)', async () => {
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-raw-leak-'));
+    vi.spyOn(os, 'homedir').mockReturnValue(tmpHome);
+    try {
+      const histDir = path.join(tmpHome, '.switchbot', 'device-history');
+      fs.mkdirSync(histDir, { recursive: true });
+      fs.writeFileSync(path.join(histDir, 'L1.json'),
+        JSON.stringify({ deviceId: 'L1', latest: null, history: [] }));
+
+      const { client } = await pair();
+      const res = await client.callTool({
+        name: 'device_history',
+        arguments: {
+          mode: 'raw',
+          deviceId: 'L1',
+          // these belong to mode=aggregate but should be ignored
+          metrics: ['temperature'],
+          aggs: ['avg'],
+          bucket: '1h',
+        },
+      });
+      expect(res.isError).toBeFalsy();
+      const sc = (res as { structuredContent?: { deviceId?: string; buckets?: unknown[] } })
+        .structuredContent;
+      // raw shape: deviceId set, no buckets array
+      expect(sc?.deviceId).toBe('L1');
+      expect(sc?.buckets, 'mode=raw must NOT produce aggregate buckets').toBeUndefined();
+    } finally {
+      vi.restoreAllMocks();
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    }
   });
 
   // ---------------------------------------------------------------------------

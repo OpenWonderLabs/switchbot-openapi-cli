@@ -192,3 +192,147 @@ describe('MCP strict schemas — all tools reject unknown keys', () => {
     await assertRejectsUnknownKey(client, 'audit_stats', {});
   });
 });
+
+// ---------------------------------------------------------------------------
+// G1: Discriminator schema validation for the consolidated tools.
+// Each new tool requires `action`/`period`/`mode`. Both "missing" and
+// "invalid value" must be rejected by the input schema layer (-32602), not
+// silently routed to a default branch.
+// ---------------------------------------------------------------------------
+
+/** Assert that a tool call returns a schema validation error (-32602 family). */
+async function assertSchemaReject(
+  client: Client,
+  toolName: string,
+  args: Record<string, unknown>,
+  pattern: RegExp = /-32602|invalid|Invalid|Required|enum|Expected/i,
+) {
+  const res = await client.callTool({ name: toolName, arguments: args });
+  expect(res.isError, `${toolName} ${JSON.stringify(args)}: expected isError to be true`).toBe(true);
+  const text = (res.content as Array<{ type: string; text: string }>)[0].text;
+  expect(text, `${toolName} ${JSON.stringify(args)}: expected schema-level error`).toMatch(pattern);
+}
+
+describe('G1: discriminator schema validation for consolidated tools', () => {
+  beforeEach(() => {
+    apiMock.__instance.get.mockReset();
+    apiMock.__instance.post.mockReset();
+  });
+
+  it('mindclip_recordings rejects missing action', async () => {
+    const { client } = await pair();
+    await assertSchemaReject(client, 'mindclip_recordings', {});
+  });
+
+  it('mindclip_recordings rejects invalid action value', async () => {
+    const { client } = await pair();
+    await assertSchemaReject(client, 'mindclip_recordings', { action: 'bogus' });
+  });
+
+  it('mindclip_recall rejects missing period', async () => {
+    const { client } = await pair();
+    await assertSchemaReject(client, 'mindclip_recall', {});
+  });
+
+  it('mindclip_recall rejects invalid period value', async () => {
+    const { client } = await pair();
+    await assertSchemaReject(client, 'mindclip_recall', { period: 'monthly' });
+  });
+
+  it('device_history rejects missing mode', async () => {
+    const { client } = await pair();
+    await assertSchemaReject(client, 'device_history', {});
+  });
+
+  it('device_history rejects invalid mode value', async () => {
+    const { client } = await pair();
+    await assertSchemaReject(client, 'device_history', { mode: 'firehose' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// G7: Boundary tests for filter ranges and regex patterns. These guard
+// against accidentally relaxing min/max bounds or regex anchors during
+// future refactors of the consolidated input schemas.
+// ---------------------------------------------------------------------------
+
+describe('G7: boundary values on consolidated tool filters', () => {
+  beforeEach(() => {
+    apiMock.__instance.get.mockReset();
+    apiMock.__instance.post.mockReset();
+  });
+
+  // ── pageSize / pageNum on mindclip_recordings (action=list) and mindclip_list_todos
+  it('mindclip_list_todos rejects pageSize=0', async () => {
+    const { client } = await pair();
+    await assertSchemaReject(client, 'mindclip_list_todos', { pageSize: 0 });
+  });
+
+  it('mindclip_list_todos rejects pageSize=101', async () => {
+    const { client } = await pair();
+    await assertSchemaReject(client, 'mindclip_list_todos', { pageSize: 101 });
+  });
+
+  it('mindclip_list_todos accepts pageSize=1 (min boundary)', async () => {
+    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {} } });
+    const { client } = await pair();
+    const res = await client.callTool({ name: 'mindclip_list_todos', arguments: { pageSize: 1 } });
+    expect(res.isError).toBeFalsy();
+  });
+
+  it('mindclip_list_todos accepts pageSize=100 (max boundary)', async () => {
+    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {} } });
+    const { client } = await pair();
+    const res = await client.callTool({ name: 'mindclip_list_todos', arguments: { pageSize: 100 } });
+    expect(res.isError).toBeFalsy();
+  });
+
+  it('mindclip_list_todos rejects pageNum=0', async () => {
+    const { client } = await pair();
+    await assertSchemaReject(client, 'mindclip_list_todos', { pageNum: 0 });
+  });
+
+  it('mindclip_list_todos rejects completedNum=3', async () => {
+    const { client } = await pair();
+    await assertSchemaReject(client, 'mindclip_list_todos', { completedNum: 3 });
+  });
+
+  it('mindclip_list_todos accepts completedNum=0..2', async () => {
+    apiMock.__instance.get.mockResolvedValue({ data: { body: {} } });
+    const { client } = await pair();
+    for (const v of [0, 1, 2]) {
+      const res = await client.callTool({ name: 'mindclip_list_todos', arguments: { completedNum: v } });
+      expect(res.isError, `completedNum=${v}`).toBeFalsy();
+    }
+  });
+
+  it('mindclip_list_todos rejects category=6', async () => {
+    const { client } = await pair();
+    await assertSchemaReject(client, 'mindclip_list_todos', { category: 6 });
+  });
+
+  // ── date / week regex on mindclip_recall
+  it('mindclip_recall rejects malformed date (slashes)', async () => {
+    const { client } = await pair();
+    await assertSchemaReject(client, 'mindclip_recall', { period: 'daily', date: '2026/06/13' });
+  });
+
+  it('mindclip_recall rejects week=2026-W00 (out of regex range)', async () => {
+    const { client } = await pair();
+    await assertSchemaReject(client, 'mindclip_recall', { period: 'weekly', week: '2026-W00' });
+  });
+
+  it('mindclip_recall rejects week=2026-W54 (out of regex range)', async () => {
+    const { client } = await pair();
+    await assertSchemaReject(client, 'mindclip_recall', { period: 'weekly', week: '2026-W54' });
+  });
+
+  it('mindclip_recall accepts week=2026-W01 and week=2026-W53 (regex boundaries)', async () => {
+    apiMock.__instance.get.mockResolvedValue({ data: { body: {} } });
+    const { client } = await pair();
+    for (const w of ['2026-W01', '2026-W53']) {
+      const res = await client.callTool({ name: 'mindclip_recall', arguments: { period: 'weekly', week: w } });
+      expect(res.isError, `week=${w}`).toBeFalsy();
+    }
+  });
+});

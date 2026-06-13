@@ -72,7 +72,8 @@ export function registerMcp(): RegisterMcpResult {
     return { ok: true, alreadyRegistered: true };
   }
 
-  // Register via `claude mcp add --scope user switchbot -- switchbot mcp serve --tools all`
+  // Register via `claude mcp add --scope user switchbot -- switchbot mcp serve`
+  // (default profile; users who want admin tools can re-register with `--tools all` themselves).
   const addR = spawnStr(
     CLAUDE_CMD,
     ['mcp', 'add', '--scope', 'user', MCP_SERVER_NAME, '--', ...MCP_ADD_ARGS],
