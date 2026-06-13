@@ -1,8 +1,12 @@
 /**
  * Asserts `claude-code-checks.registerMcp` invokes `claude mcp add` with the
- * default-profile args (`mcp serve`, no `--tools all`). The v3.8.0
- * consolidation moved admin tools (policy / audit / rules) behind opt-in;
- * this test guards against accidentally re-adding `--tools all` to the
+ * default-profile args (`mcp serve`, no `--tools all`).
+ * v3.8.0 consolidation switched defaults so admin tools are opt-in. The
+ * device_history trio (get_/query_/aggregate_) collapses into a single
+ * device_history tool with a mode discriminator; the 3 old names remain
+ * registered as deprecated aliases for 3.x backward compat (removal in 4.0.0).
+ * The mindclip MCP tools ship for the first time in 3.8.0 — no aliases needed.
+ * This test guards against accidentally re-adding `--tools all` to the
  * `claude mcp add ...` command line.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';

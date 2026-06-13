@@ -1,8 +1,12 @@
 /**
  * Asserts the `.mcp.json` shipped by the Claude Code plugin registers the
- * SwitchBot MCP server using the default profile (no `--tools all`). The
- * v3.8.0 consolidation switched defaults so admin tools are opt-in; this
- * test guards against an accidental revert.
+ * SwitchBot MCP server using the default profile (no `--tools all`).
+ * v3.8.0 consolidation switched defaults so admin tools are opt-in. The
+ * device_history trio (get_/query_/aggregate_) collapses into a single
+ * device_history tool with a mode discriminator; the 3 old names remain
+ * registered as deprecated aliases for 3.x backward compat (removal in 4.0.0).
+ * The mindclip MCP tools ship for the first time in 3.8.0 — no aliases needed.
+ * This test guards against an accidental revert.
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
