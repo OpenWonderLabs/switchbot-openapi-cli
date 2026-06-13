@@ -114,6 +114,11 @@ export function weekArg(flagName: string): (value: string) => string {
         `${flagName} must be in YYYY-Www format, weeks 01–53 (e.g. 2026-W23 — got "${value}")`,
       );
     }
+    if (Number(value.slice(6)) === 53 && !isLongISOYear(Number(value.slice(0, 4)))) {
+      throw new InvalidArgumentError(
+        `${flagName}: ${value.slice(0, 4)} only has 52 ISO weeks; W53 does not exist for this year`,
+      );
+    }
     return value;
   };
 }
@@ -132,4 +137,15 @@ export const WEEK_REGEX = /^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$/;
 export function isCalendarValidDate(value: string): boolean {
   const d = new Date(value);
   return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
+}
+
+/**
+ * Returns true for ISO "long years" — years that have 53 ISO weeks.
+ * A year is long when Jan 1 falls on Thursday, or it is a leap year
+ * whose Jan 1 falls on Wednesday.
+ */
+export function isLongISOYear(year: number): boolean {
+  const jan1Day = new Date(year, 0, 1).getDay(); // 0=Sun … 6=Sat
+  const isLeap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+  return jan1Day === 4 || (isLeap && jan1Day === 3);
 }

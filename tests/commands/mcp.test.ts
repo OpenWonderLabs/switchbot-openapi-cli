@@ -889,6 +889,26 @@ describe('mcp server', () => {
     expect(apiMock.__instance.get).not.toHaveBeenCalled();
   });
 
+  it('mindclip_recall rejects W53 for a short ISO year (2027)', async () => {
+    const { client } = await pair();
+    const res = await client.callTool({
+      name: 'mindclip_recall',
+      arguments: { period: 'weekly', week: '2027-W53' },
+    });
+    expect(res.isError).toBeTruthy();
+    expect(apiMock.__instance.get).not.toHaveBeenCalled();
+  });
+
+  it('mindclip_recall accepts W53 for a long ISO year (2026)', async () => {
+    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {} } });
+    const { client } = await pair();
+    const res = await client.callTool({
+      name: 'mindclip_recall',
+      arguments: { period: 'weekly', week: '2026-W53' },
+    });
+    expect(res.isError).toBeFalsy();
+  });
+
   it('run_scene POSTs the scene execute endpoint', async () => {
     apiMock.__instance.post.mockResolvedValueOnce({ data: { statusCode: 100, body: {} } });
     const { client } = await pair();

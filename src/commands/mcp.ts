@@ -3,7 +3,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
-import { intArg, stringArg, DATE_REGEX, WEEK_REGEX, isCalendarValidDate } from '../utils/arg-parsers.js';
+import { intArg, stringArg, DATE_REGEX, WEEK_REGEX, isCalendarValidDate, isLongISOYear } from '../utils/arg-parsers.js';
 import { handleError, isJsonMode, printJson, buildErrorPayload, exitWithError, type ErrorPayload, type ErrorSubKind } from '../utils/output.js';
 import { VERSION } from '../version.js';
 import {
@@ -1404,7 +1404,10 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
           message: 'Invalid calendar date — month/day are out of range or otherwise impossible.',
         }).optional()
           .describe('YYYY-MM-DD — used by period="daily" or "urgent_todos"; omit for server default.'),
-        week: z.string().regex(WEEK_REGEX).optional()
+        week: z.string().regex(WEEK_REGEX).refine(
+          (v) => Number(v.slice(6)) < 53 || isLongISOYear(Number(v.slice(0, 4))),
+          { message: 'W53 does not exist for this year — only long ISO years (Jan 1 on Thursday, or leap year starting Wednesday) have 53 ISO weeks.' },
+        ).optional()
           .describe('YYYY-Www (weeks 01-53) — used by period="weekly"; omit for server default.'),
       }).strict(),
       outputSchema: {
