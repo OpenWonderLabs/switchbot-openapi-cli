@@ -100,7 +100,7 @@ export function dateArg(flagName: string): (value: string) => string {
     }
     if (!isCalendarValidDate(value)) {
       throw new InvalidArgumentError(
-        `${flagName} must be in YYYY-MM-DD format (got "${value}")`,
+        `${flagName} is not a valid calendar date — month/day out of range (got "${value}")`,
       );
     }
     return value;
@@ -145,7 +145,7 @@ export function isCalendarValidDate(value: string): boolean {
  * whose Jan 1 falls on Wednesday.
  */
 export function isLongISOYear(year: number): boolean {
-  const jan1Day = new Date(year, 0, 1).getDay(); // 0=Sun … 6=Sat
+  const jan1Day = new Date(Date.UTC(year, 0, 1)).getUTCDay(); // 0=Sun … 6=Sat
   const isLeap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
   return jan1Day === 4 || (isLeap && jan1Day === 3);
 }

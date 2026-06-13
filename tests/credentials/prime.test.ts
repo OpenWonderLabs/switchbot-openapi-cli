@@ -64,7 +64,7 @@ describe('primeCredentials', () => {
     expect(selectMock).toHaveBeenCalledTimes(1);
   });
 
-  it('repriming a different profile invalidates the previous entry', async () => {
+  it('priming a different profile keeps both entries independently cached', async () => {
     const getA = vi.fn().mockResolvedValue({ token: 'TA', secret: 'SA' });
     const getB = vi.fn().mockResolvedValue({ token: 'TB', secret: 'SB' });
     selectMock
@@ -76,7 +76,7 @@ describe('primeCredentials', () => {
 
     await primeCredentials('b');
     expect(getPrimedCredentials('b')).toEqual({ token: 'TB', secret: 'SB' });
-    expect(getPrimedCredentials('a')).toBeNull();
+    expect(getPrimedCredentials('a')).toEqual({ token: 'TA', secret: 'SA' });
   });
 
   it('swallows errors from selectCredentialStore', async () => {

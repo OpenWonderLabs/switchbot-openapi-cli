@@ -82,14 +82,10 @@ async function promptSecret(question: string): Promise<string> {
   });
 }
 
-function onCredentialChange(): void {
-  try {
-    clearCache();
-    clearStatusCache();
-  } catch {
-    // Non-fatal on Windows EBUSY; in-memory is already invalidated.
-  }
-  clearPrimedCredentials();
+export function onCredentialChange(): void {
+  clearCache();
+  clearStatusCache();
+  clearPrimedCredentials(activeProfile());
   idempotencyCache.clearForProfile(activeProfile());
 }
 

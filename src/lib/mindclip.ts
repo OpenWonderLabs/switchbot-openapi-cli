@@ -21,7 +21,9 @@ export interface ListTodosParams {
 }
 
 function compact(obj: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined));
+  return Object.fromEntries(
+    Object.entries(obj).filter(([, v]) => v !== undefined && v !== null && v !== '' && !Number.isNaN(v)),
+  );
 }
 
 export async function listRecordings(params: ListRecordingsParams): Promise<unknown> {

@@ -137,8 +137,8 @@ describe('dateArg', () => {
   });
 
   it('rejects impossible calendar dates', () => {
-    expect(() => parse('2026-02-30')).toThrow(/YYYY-MM-DD/);
-    expect(() => parse('2026-13-01')).toThrow(/YYYY-MM-DD/);
+    expect(() => parse('2026-02-30')).toThrow(/calendar date/);
+    expect(() => parse('2026-13-01')).toThrow(/calendar date/);
   });
 
   it('rejects flag-like tokens', () => {

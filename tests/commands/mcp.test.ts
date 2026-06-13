@@ -820,33 +820,24 @@ describe('mcp server', () => {
     expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/recordings/r1', { params: {} });
   });
 
-  it('mindclip_recall period=daily ignores stray `week` field', async () => {
-    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {} } });
+  it('mindclip_recall period=daily rejects stray `week` field', async () => {
     const { client } = await pair();
-    await client.callTool({
+    const res = await client.callTool({
       name: 'mindclip_recall',
       arguments: { period: 'daily', date: '2026-06-01', week: '2026-W23' },
     });
-    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/assistant/daily', {
-      params: { date: '2026-06-01' },
-    });
-    // Must NOT have called the weekly endpoint
-    const calls = apiMock.__instance.get.mock.calls.map((c) => c[0]);
-    expect(calls).not.toContain('/v1.1/mindclip/assistant/weekly');
+    expect(res.isError).toBeTruthy();
+    expect(apiMock.__instance.get).not.toHaveBeenCalled();
   });
 
-  it('mindclip_recall period=weekly ignores stray `date` field', async () => {
-    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {} } });
+  it('mindclip_recall period=weekly rejects stray `date` field', async () => {
     const { client } = await pair();
-    await client.callTool({
+    const res = await client.callTool({
       name: 'mindclip_recall',
       arguments: { period: 'weekly', week: '2026-W23', date: '2026-06-01' },
     });
-    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/assistant/weekly', {
-      params: { week: '2026-W23' },
-    });
-    const calls = apiMock.__instance.get.mock.calls.map((c) => c[0]);
-    expect(calls).not.toContain('/v1.1/mindclip/assistant/daily');
+    expect(res.isError).toBeTruthy();
+    expect(apiMock.__instance.get).not.toHaveBeenCalled();
   });
 
   it('mindclip_recordings rejects empty deviceID/language strings rather than forwarding `?deviceID=`', async () => {

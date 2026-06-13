@@ -453,6 +453,13 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
     }
   );
 
+  function deprecatedAlias(replacement: string, mode: string, baseDescription: string) {
+    return {
+      description: `[DEPRECATED — use ${replacement}(mode="${mode}")]. ${baseDescription}`,
+      _meta: { agentSafetyTier: 'read' as const, deprecated: true, replacement },
+    };
+  }
+
   // ---- device_history ----------------------------------------------------
   // Consolidates the previous get_device_history / query_device_history /
   // aggregate_device_history trio. The `mode` discriminator selects which
@@ -474,12 +481,12 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
         mode: z.enum(['raw', 'query', 'aggregate']).describe(
           '"raw": latest entry + recent N records (limit, default 20); "query": time-ranged record list; "aggregate": bucketed stats.',
         ),
-        deviceId: z.string().optional().describe(
+        deviceId: z.string().min(1).optional().describe(
           'Device MAC address. Required for query/aggregate. For raw, omit to list all devices with stored history.',
         ),
         // raw mode
         limit: z.number().int().min(1).max(10000).optional().describe(
-          'raw: max history entries (default 20, max 100 enforced at runtime). query: max records (default 1000, max 10000).',
+          'raw: max history entries (default 20, max 100). query: max records (default 1000, max 10000).',
         ),
         // query / aggregate mode (time range)
         since: z.string().optional().describe('Relative window ending now, e.g. "30s","15m","1h","7d". Mutually exclusive with from/to.'),
@@ -496,7 +503,11 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
         bucket: z.string().optional().describe('aggregate: bucket width like "5m","1h","1d". Omit for a single bucket spanning the full range.'),
         maxBucketSamples: z.number().int().positive().max(MAX_SAMPLE_CAP).optional()
           .describe(`aggregate: per-bucket sample cap (default 10000, max ${MAX_SAMPLE_CAP}). partial=true when any bucket was capped.`),
-      }).strict(),
+      }).strict().superRefine((val, ctx) => {
+        if (val.mode === 'raw' && val.limit !== undefined && val.limit > 100) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['limit'], message: 'limit for mode="raw" cannot exceed 100' });
+        }
+      }),
       outputSchema: {
         // raw mode (deviceId set)
         deviceId: z.string().optional(),
@@ -537,7 +548,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
     async (args) => {
       // ---- raw mode ------------------------------------------------------
       if (args.mode === 'raw') {
-        if (args.deviceId) {
+        if (args.deviceId !== undefined) {
           const latest = deviceHistoryStore.getLatest(args.deviceId);
           const rawLimit = Math.min(args.limit ?? 20, 100);
           const history = deviceHistoryStore.getHistory(args.deviceId, rawLimit);
@@ -575,11 +586,9 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
     'get_device_history',
     {
       title: '[Deprecated] Latest + recent device history',
-      description:
-        '[DEPRECATED — use device_history(mode="raw")]. ' +
-        'Read the latest entry plus the most recent N records for one device, or list devices with stored history when deviceId is omitted. ' +
-        'No API call — zero quota cost.',
-      _meta: { agentSafetyTier: 'read', deprecated: true, replacement: 'device_history' },
+      ...deprecatedAlias('device_history', 'raw',
+        'Read the latest entry plus the most recent N records for one device, or list devices with stored history when deviceId is omitted. No API call — zero quota cost.',
+      ),
       inputSchema: z.object({
         deviceId: z.string().optional().describe(
           'Device MAC address. Omit to list all devices with stored history.',
@@ -621,10 +630,9 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
     'query_device_history',
     {
       title: '[Deprecated] Time-ranged device history query',
-      description:
-        '[DEPRECATED — use device_history(mode="query")]. ' +
+      ...deprecatedAlias('device_history', 'query',
         'Return time-ranged records (since OR from/to) with optional field projection and limit. No API call.',
-      _meta: { agentSafetyTier: 'read', deprecated: true, replacement: 'device_history' },
+      ),
       inputSchema: z.object({
         deviceId: z.string().describe('Device MAC address (required).'),
         since: z.string().optional().describe('Relative window ending now, e.g. "30s","15m","1h","7d". Mutually exclusive with from/to.'),
@@ -653,10 +661,9 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
     'aggregate_device_history',
     {
       title: '[Deprecated] Bucketed device-history aggregation',
-      description:
-        '[DEPRECATED — use device_history(mode="aggregate")]. ' +
+      ...deprecatedAlias('device_history', 'aggregate',
         'Return bucketed statistics (count/min/max/avg/sum/p50/p95) over numeric metrics. No API call.',
-      _meta: { agentSafetyTier: 'read', deprecated: true, replacement: 'device_history' },
+      ),
       inputSchema: z.object({
         deviceId: z.string().describe('Device MAC address (required).'),
         since: z.string().optional().describe('Relative window ending now, e.g. "30s","15m","1h","7d". Mutually exclusive with from/to.'),
@@ -1410,7 +1417,14 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
           { message: 'W53 does not exist for this year — only long ISO years (Jan 1 on Thursday, or leap year starting Wednesday) have 53 ISO weeks.' },
         ).optional()
           .describe('YYYY-Www (weeks 01-53) — used by period="weekly"; omit for server default.'),
-      }).strict(),
+      }).strict().superRefine((val, ctx) => {
+        if (val.period !== 'weekly' && val.week !== undefined) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['week'], message: '`week` is only valid when period="weekly"' });
+        }
+        if (val.period === 'weekly' && val.date !== undefined) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['date'], message: '`date` is only valid when period="daily" or "urgent_todos"' });
+        }
+      }),
       outputSchema: {
         data: z.unknown().describe('Period-shaped envelope: daily -> daily recall, weekly -> weekly summary, urgent_todos -> urgent todos list.'),
       },

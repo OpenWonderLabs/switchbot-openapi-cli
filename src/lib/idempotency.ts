@@ -68,7 +68,10 @@ export class IdempotencyCache {
    * {@link IdempotencyConflictError}.
    *
    * `profile` tags the entry so {@link clearForProfile} can evict only the
-   * entries belonging to a specific credential profile.
+   * entries belonging to a specific credential profile. Callers that omit
+   * `profile` store in an unscoped bucket — those entries survive
+   * {@link clearForProfile} by design; always pass the active profile for
+   * any call that should be evicted on credential rotation.
    *
    * Returns a tuple-esque object with `replayed: true` when the cached
    * result is served. The `result` field is the original cached value.
@@ -84,7 +87,7 @@ export class IdempotencyCache {
       return { result, replayed: false };
     }
 
-    const hashed = hashKey(key);
+    const hashed = hashKey(profile ? `${profile}:${key}` : key);
     const now = Date.now();
     const cached = this.cache.get(hashed);
     const currentShape = shape ? shapeSignature(shape.command, shape.parameter) : '*';
