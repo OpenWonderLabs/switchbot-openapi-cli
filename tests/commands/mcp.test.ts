@@ -849,6 +849,46 @@ describe('mcp server', () => {
     expect(calls).not.toContain('/v1.1/mindclip/assistant/daily');
   });
 
+  it('mindclip_recordings rejects empty deviceID/language strings rather than forwarding `?deviceID=`', async () => {
+    const { client } = await pair();
+    const res = await client.callTool({
+      name: 'mindclip_recordings',
+      arguments: { action: 'list', deviceID: '' },
+    });
+    expect(res.isError).toBeTruthy();
+    expect(apiMock.__instance.get).not.toHaveBeenCalled();
+  });
+
+  it('mindclip_list_todos rejects empty deviceID/fileID strings', async () => {
+    const { client } = await pair();
+    const res = await client.callTool({
+      name: 'mindclip_list_todos',
+      arguments: { fileID: '' },
+    });
+    expect(res.isError).toBeTruthy();
+    expect(apiMock.__instance.get).not.toHaveBeenCalled();
+  });
+
+  it('mindclip_recall rejects calendar-impossible dates (2026-02-30)', async () => {
+    const { client } = await pair();
+    const res = await client.callTool({
+      name: 'mindclip_recall',
+      arguments: { period: 'daily', date: '2026-02-30' },
+    });
+    expect(res.isError).toBeTruthy();
+    expect(apiMock.__instance.get).not.toHaveBeenCalled();
+  });
+
+  it('mindclip_recall rejects month-out-of-range dates (2026-13-01)', async () => {
+    const { client } = await pair();
+    const res = await client.callTool({
+      name: 'mindclip_recall',
+      arguments: { period: 'daily', date: '2026-13-01' },
+    });
+    expect(res.isError).toBeTruthy();
+    expect(apiMock.__instance.get).not.toHaveBeenCalled();
+  });
+
   it('run_scene POSTs the scene execute endpoint', async () => {
     apiMock.__instance.post.mockResolvedValueOnce({ data: { statusCode: 100, body: {} } });
     const { client } = await pair();

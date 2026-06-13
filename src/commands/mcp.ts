@@ -3,7 +3,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
-import { intArg, stringArg } from '../utils/arg-parsers.js';
+import { intArg, stringArg, DATE_REGEX, WEEK_REGEX, isCalendarValidDate } from '../utils/arg-parsers.js';
 import { handleError, isJsonMode, printJson, buildErrorPayload, exitWithError, type ErrorPayload, type ErrorSubKind } from '../utils/output.js';
 import { VERSION } from '../version.js';
 import {
@@ -1299,9 +1299,9 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
         ),
         // get / summary
         id: z.string().min(1).optional().describe('Recording ID — required when action="get" or "summary".'),
-        language: z.string().optional().describe('Language code (e.g. "en", "zh") — only honored when action="get".'),
+        language: z.string().min(1).optional().describe('Language code (e.g. "en", "zh") — only honored when action="get".'),
         // list filters
-        deviceID: z.string().optional().describe('Filter by SwitchBot device ID — list only.'),
+        deviceID: z.string().min(1).optional().describe('Filter by SwitchBot device ID — list only.'),
         pageNum: z.number().int().min(1).optional().describe('Page number (>= 1) — list only.'),
         pageSize: z.number().int().min(1).max(100).optional().describe('Results per page (1-100) — list only.'),
         startTime: z.number().int().min(0).optional().describe('Start timestamp in ms since epoch — list only.'),
@@ -1357,8 +1357,8 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
           .describe('0=any, 1=work, 2=life, 3=hobby, 4=holiday, 5=other'),
         pageNum: z.number().int().min(1).optional().describe('Page number (>= 1)'),
         pageSize: z.number().int().min(1).max(100).optional().describe('Results per page (1-100)'),
-        deviceID: z.string().optional().describe('Filter by SwitchBot device ID'),
-        fileID: z.string().optional().describe('Filter by source recording file ID'),
+        deviceID: z.string().min(1).optional().describe('Filter by SwitchBot device ID'),
+        fileID: z.string().min(1).optional().describe('Filter by source recording file ID'),
         startTime: z.number().int().min(0).optional().describe('Start timestamp in ms since epoch'),
         endTime: z.number().int().min(0).optional().describe('End timestamp in ms since epoch'),
       }).strict(),
@@ -1400,9 +1400,11 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
         period: z.enum(['daily', 'weekly', 'urgent_todos']).describe(
           '"daily": daily recall by date; "weekly": weekly summary by ISO week; "urgent_todos": urgent to-dos by date.',
         ),
-        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()
+        date: z.string().regex(DATE_REGEX).refine(isCalendarValidDate, {
+          message: 'Invalid calendar date — month/day are out of range or otherwise impossible.',
+        }).optional()
           .describe('YYYY-MM-DD — used by period="daily" or "urgent_todos"; omit for server default.'),
-        week: z.string().regex(/^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$/).optional()
+        week: z.string().regex(WEEK_REGEX).optional()
           .describe('YYYY-Www (weeks 01-53) — used by period="weekly"; omit for server default.'),
       }).strict(),
       outputSchema: {

@@ -93,13 +93,12 @@ export function enumArg(
 
 export function dateArg(flagName: string): (value: string) => string {
   return (value: string) => {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    if (!DATE_REGEX.test(value)) {
       throw new InvalidArgumentError(
         `${flagName} must be in YYYY-MM-DD format (got "${value}")`,
       );
     }
-    const d = new Date(value);
-    if (isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== value) {
+    if (!isCalendarValidDate(value)) {
       throw new InvalidArgumentError(
         `${flagName} must be in YYYY-MM-DD format (got "${value}")`,
       );
@@ -110,11 +109,27 @@ export function dateArg(flagName: string): (value: string) => string {
 
 export function weekArg(flagName: string): (value: string) => string {
   return (value: string) => {
-    if (!/^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$/.test(value)) {
+    if (!WEEK_REGEX.test(value)) {
       throw new InvalidArgumentError(
         `${flagName} must be in YYYY-Www format, weeks 01–53 (e.g. 2026-W23 — got "${value}")`,
       );
     }
     return value;
   };
+}
+
+/**
+ * Shared ISO date and ISO week regexes — also imported by the mindclip MCP
+ * tool zod schemas so CLI and MCP validation accept the exact same surface.
+ */
+export const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+export const WEEK_REGEX = /^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$/;
+
+/**
+ * Reject impossible calendar dates that match DATE_REGEX (e.g. 2026-13-50,
+ * 2026-02-30). Round-trips through Date so leap years stay correct.
+ */
+export function isCalendarValidDate(value: string): boolean {
+  const d = new Date(value);
+  return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
 }
