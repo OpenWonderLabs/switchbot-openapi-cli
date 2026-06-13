@@ -7,45 +7,36 @@ All notable changes to `@switchbot/openapi-cli` are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [3.8.0]
 
 ### Added
 
-- **AI MindClip MCP tools** — three new read tools for AI MindClip recordings: `mindclip_recordings` (action: `"list"` paginated browse / `"get"` single recording by id / `"summary"` AI-generated summary), `mindclip_list_todos`, and `mindclip_recall` (period: `"daily"` daily recall / `"weekly"` weekly summary / `"urgent_todos"` urgent to-dos). Plus the underlying CLI command group (`switchbot mindclip recordings/recording/summary/todos/daily/weekly/urgent-todos`). Read-only; counts toward the same SwitchBot daily quota as other API reads.
+- **AI MindClip support** — new device catalog entry, CLI command group (`switchbot mindclip recordings/recording/summary/todos/daily/weekly/urgent-todos`), and 3 MCP tools: `mindclip_recordings`, `mindclip_list_todos`, `mindclip_recall`.
 
 ### Changed
 
-- **`device_history` MCP consolidation** — the previous `get_device_history` / `query_device_history` / `aggregate_device_history` trio collapses into a single `device_history` tool that takes a `mode: "raw" | "query" | "aggregate"` discriminator. The consolidated tool is recommended — it cuts per-session token cost (one schema instead of three). The 3 old names continue to work as deprecated aliases that delegate to the consolidated handler; no client action is required. CLI commands (`switchbot history show/range/aggregate`) are unchanged.
-- **Plugins switch to the `default` tool profile** — `@switchbot/claude-code-plugin`, `@switchbot/codex-plugin`, and `@switchbot/gemini-extension` now register the MCP server as `switchbot mcp serve` (without `--tools all`). The default profile exposes 17 tools (read + action; includes the 3 deprecated device_history aliases for 3.x compat). To get the 11 admin tools (policy / audit / automation rules), users opt in by adding `--tools all` to their MCP config — the same flag the CLI has always supported. Existing installations keep working: `registerCodexPluginAuto` / `claude mcp add` / `codex plugin` re-registration writes the new args; manual configs need a one-line edit. Rationale: most agents never invoke admin tools, but every session paid for their schemas.
-- **Profile counts**: `readonly` 11 → 14, `default` 14 → 17, `all` 25 → 28 (each total = 25 canonical + 3 deprecated device_history aliases).
-- **`mcp tools --tools <profile>` help text**, `mcp serve` help bullet list, README/SKILL.md/GEMINI.md tables, and all package descriptions updated to reflect the new counts and the deprecation note.
+- **`device_history` MCP consolidation** — `get_device_history` / `query_device_history` / `aggregate_device_history` merged into a single `device_history` tool with a `mode: "raw" | "query" | "aggregate"` discriminator. Old names kept as deprecated aliases; CLI unchanged.
+- **Plugin default profile** — all three plugins now register `switchbot mcp serve` without `--tools all`; default profile exposes 17 tools. Add `--tools all` to your MCP config for all 28.
+- **Profile counts**: `readonly` 14, `default` 17, `all` 28.
 
 ### Deprecated
 
-- **3 device_history MCP tool names** are retained as aliases in 3.x and **scheduled for removal in 4.0.0**: `get_device_history`, `query_device_history`, `aggregate_device_history`. Each alias's description is prefixed with `[DEPRECATED — use device_history(mode="…")]` and its `_meta` carries `deprecated: true, replacement: 'device_history'`. Migrate before the 4.0.0 release.
+- `get_device_history`, `query_device_history`, `aggregate_device_history` — use `device_history(mode=...)` instead; aliases removed in 4.0.0.
 
 ### Fixed
 
-- **`reset` no longer aborts before printing the result summary** — the in-memory cache cleanup (`clearCache` / `clearStatusCache`) was rerunning `unlinkSync` on a file the data-file loop had already attempted to delete. On a permission-denied path that re-throw skipped both the in-memory clear and the result table. The reset command now uses the pure in-memory `resetListCache` / `resetStatusCache` helpers; disk deletion stays the sole responsibility of the data-file loop, where errors are reported into `results`.
-- **`capabilities --surface mcp` lists every registered MCP tool** — `MCP_TOOLS` was a hand-maintained array that had drifted. The list is now derived from the `TOOL_PROFILES.all` single source of truth, and a new test in `tool-profiles.test.ts` asserts the advertised set matches what `createSwitchBotMcpServer({ toolProfile: 'all' })` actually registers, so any future drift fails CI.
-
-## [3.8.1]
-
-### Fixed
-
-- **MindClip URL path injection** — `getRecording` and `getSummary` now call `encodeURIComponent()` on the id before interpolating into the URL path; slashes, `?`, `#`, and `..` traversal segments can no longer escape the path prefix or smuggle query parameters.
-- **MindClip MCP Zod schema tightening** — `mindclip_recordings` and `mindclip_list_todos` optional string inputs (`language`, `deviceID`, `fileID`) now use `.min(1)` to reject empty strings that previously bypassed validation. `mindclip_recall` date field gains a `.refine()` check against impossible calendar dates (e.g. `2026-02-30`, `2026-13-01`).
-- **ISO W53 validation** — `weekArg` (CLI) and the `mindclip_recall` MCP `week` field now reject W53 for short ISO years; only years whose January 1 falls on a Thursday (or leap years starting on Wednesday) have a 53rd ISO week.
-- **MindClip MCP error envelope** — three mindclip handlers (`mindclip_recordings`, `mindclip_list_todos`, `mindclip_recall`) were using a bare `mcpError('api', 1, err.message)` that discarded `subKind`, `retryable`, `retryAfterMs`, and `hint`. Switched to `apiErrorToMcpError()` so all structured error fields are preserved.
-- **History-store catch kind** — `runDeviceHistoryQuery` and `runDeviceHistoryAggregate` catch blocks changed from `kind='usage'` to `kind='runtime'`; all user-input validation happens before the try block, so any thrown error is a storage-layer fault, not a caller mistake.
-- **`clearCache` / `clearStatusCache` EBUSY on Windows** — `auth login` and `config set-token` called `fs.unlinkSync` directly; on Windows a concurrent reader can cause `EBUSY` which skipped the success output. Disk-only calls are now wrapped in try/catch; the in-memory portion always clears.
-- **`auth keychain set/delete/migrate` missing cache invalidation** — the three keychain subcommands wrote new credentials but left the device-list cache, status cache, primed-credentials cache, and idempotency cache untouched. All three now call `onCredentialChange()`, the same helper used by `auth login`.
-- **`device_history` raw-mode limit cap** — Zod schema allowed `max(10000)` for the shared `limit` field, but the description and deprecated `get_device_history` both said max 100 for raw mode. `device_history(mode="raw")` now applies `Math.min(limit ?? 20, 100)` at runtime and the description is updated to say "max 100 enforced at runtime".
-- **Stale tool-count labels** — `readonly`/`default`/`all` profile sizes were hardcoded as 11/14/25 in `mcp tools` help text, `gemini-checks.ts`, and all plugin manifests; the true values are 14/17/28. All labels now derive from `TOOL_PROFILES.*.size`.
-- **`capabilities --surface mcp` advertising deprecated aliases** — `MCP_TOOLS` now filters out the 3 deprecated `*_device_history` aliases via the new `DEPRECATED_MCP_TOOLS` export from `tool-profiles.ts`. The aliases remain registered in the MCP server for backward compat.
-- **AI MindClip catalog aliases missing** — the `AI MindClip` entry in `DEVICE_CATALOG` had no `aliases` array; `search_catalog` and `describe_device` queries for `"MindClip"` or `"Mind Clip"` returned no results. Aliases `['AIMindClip', 'MindClip', 'Mind Clip']` added.
-- **Idempotency cache not scoped per profile** — `idempotencyCache.clear()` on credential change wiped all profiles' dedup windows. A new optional `profile` parameter on `IdempotencyCache.run()` tags each entry; the new `clearForProfile(profile)` method evicts only that profile's entries. `sendDeviceCommand` now passes `getActiveProfile()` and `auth`/`config` call `clearForProfile` instead of `clear`.
-- **`primeCredentials` stale-write race** — when `clearPrimedCredentials()` fired while `store.get()` was still in flight, the resolved value could overwrite the freshly-cleared cache. A generation counter prevents this: `primeCredentials` captures the counter before awaiting and discards the result if it has changed.
+- `primeCredentials` stale-write race condition on account switch
+- Idempotency cache now scoped per profile; `clearForProfile` on credential change
+- `auth keychain set/delete/migrate` now invalidates all caches via `onCredentialChange()`
+- `clearCache` / `clearStatusCache` EBUSY crash on Windows
+- MindClip URL path injection (`encodeURIComponent` on recording id)
+- MindClip MCP Zod schemas: reject empty strings and impossible calendar dates
+- ISO W53 validation for short years in CLI and MCP
+- MindClip MCP error envelope now preserves all structured fields via `apiErrorToMcpError()`
+- `device_history(mode="raw")` limit capped at 100 at runtime
+- `capabilities --surface mcp` derived from `TOOL_PROFILES.all`; deprecated aliases excluded
+- `reset` in-memory cleanup no longer double-calls `unlinkSync`
+- AI MindClip catalog aliases added (`MindClip`, `Mind Clip`, `AIMindClip`)
 
 ## [3.7.9]
 
