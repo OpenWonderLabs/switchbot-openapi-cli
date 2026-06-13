@@ -11,7 +11,7 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- **AI MindClip MCP tools** — three new read tools for AI MindClip recordings: `mindclip_recordings` (action: `"list" | "get" | "summary"`), `mindclip_list_todos`, and `mindclip_recall` (period: `"daily" | "weekly" | "urgent_todos"`). Plus the underlying CLI command group (`switchbot mindclip recordings/recording/summary/todos/daily/weekly/urgent-todos`). Read-only; counts toward the same SwitchBot daily quota as other API reads.
+- **AI MindClip MCP tools** — three new read tools for AI MindClip recordings: `mindclip_recordings` (action: `"list"` paginated browse / `"get"` single recording by id / `"summary"` AI-generated summary), `mindclip_list_todos`, and `mindclip_recall` (period: `"daily"` daily recall / `"weekly"` weekly summary / `"urgent_todos"` urgent to-dos). Plus the underlying CLI command group (`switchbot mindclip recordings/recording/summary/todos/daily/weekly/urgent-todos`). Read-only; counts toward the same SwitchBot daily quota as other API reads.
 
 ### Changed
 

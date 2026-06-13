@@ -578,6 +578,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
         deviceId: z.string().optional().describe(
           'Device MAC address. Omit to list all devices with stored history.',
         ),
+        // raw-mode only: hard-capped at 100 here; the consolidated `device_history` schema uses max 10000 across all modes (raw enforces 100 at runtime).
         limit: z.number().int().min(1).max(100).optional().describe(
           'Max history entries to return (default 20, max 100).',
         ),
