@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { TOOL_PROFILES } from '../mcp/tool-profiles.js';
 
 export interface Check {
   name: string;
@@ -95,7 +96,7 @@ export function registerMcp(): RegisterMcpResult {
     [MCP_SERVER_NAME]: {
       command: 'switchbot',
       args: ['mcp', 'serve'],
-      description: 'SwitchBot smart-home MCP server (default: 14 tools; `--tools all` for 25)',
+      description: `SwitchBot smart-home MCP server (default: ${TOOL_PROFILES.default.size} tools; \`--tools all\` for ${TOOL_PROFILES.all.size})`,
     },
   };
   fs.mkdirSync(path.dirname(GEMINI_SETTINGS_PATH), { recursive: true });

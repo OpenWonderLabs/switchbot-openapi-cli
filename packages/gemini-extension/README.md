@@ -1,7 +1,7 @@
 # SwitchBot Gemini CLI Extension
 
 Gemini CLI native extension for SwitchBot smart-home control through the authoritative
-`switchbot` CLI MCP server (default 14 tools, `--tools all` for 25, policy-based safety gates).
+`switchbot` CLI MCP server (default 17 tools, `--tools all` for 28, policy-based safety gates).
 
 ## Install
 
