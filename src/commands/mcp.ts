@@ -479,7 +479,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
         ),
         // raw mode
         limit: z.number().int().min(1).max(10000).optional().describe(
-          'raw: max history entries (default 20, max 100). query: max records (default 1000, max 10000).',
+          'raw: max history entries (default 20, max 100 enforced at runtime). query: max records (default 1000, max 10000).',
         ),
         // query / aggregate mode (time range)
         since: z.string().optional().describe('Relative window ending now, e.g. "30s","15m","1h","7d". Mutually exclusive with from/to.'),
@@ -539,7 +539,8 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
       if (args.mode === 'raw') {
         if (args.deviceId) {
           const latest = deviceHistoryStore.getLatest(args.deviceId);
-          const history = deviceHistoryStore.getHistory(args.deviceId, args.limit ?? 20);
+          const rawLimit = Math.min(args.limit ?? 20, 100);
+          const history = deviceHistoryStore.getHistory(args.deviceId, rawLimit);
           const result = { deviceId: args.deviceId, latest, history };
           return {
             content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
