@@ -1,0 +1,25 @@
+src/devices/catalog.ts
+  s_9f908c2a5657b6::t_aa9c38a54bea97 489-505
+  s_9f908c2a5657b6::t_e57321bcce02b1 733-744
+  s_9f908c2a5657b6::t_0e25713124bb62 279-313
+  s_9f908c2a5657b6::t_a9785d5f5b15f1 580-591
+  s_9f908c2a5657b6::t_612adc57d09624 278,462,488,579,845-868
+  s_9f908c2a5657b6::t_d80f7116c7f987 463-469,471-474
+  s_9f908c2a5657b6::t_3113ff6880c155 470
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "ab804a4b762a8ebdddfb6b2f6694151f65d82fa4",
+  "prompts": {},
+  "sessions": {
+    "s_9f908c2a5657b6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "45b6fcbb-725e-4346-b8cd-9e2791236fef",
+        "model": "deepseek-v4-pro"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
