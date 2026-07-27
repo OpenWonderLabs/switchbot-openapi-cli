@@ -276,6 +276,42 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     statusFields: ['battery', 'version', 'lockState', 'doorState', 'calibrate'],
   },
   {
+    type: 'Smart Lock Pro Wifi',
+    category: 'physical',
+    description: 'Matter-enabled Wi-Fi electronic deadbolt with lock and unlock control.',
+    role: 'security',
+    aliases: ['Lock Pro Matter Enabled'],
+    commands: [
+      { command: 'lock', parameter: '—', description: 'Lock the door', idempotent: true },
+      { command: 'unlock', parameter: '—', description: 'Unlock the door', idempotent: true, safetyTier: 'destructive', safetyReason: 'Physically unlocks the door — anyone nearby can open it.' },
+    ],
+    statusFields: ['battery', 'version', 'lockState', 'doorState', 'calibrate'],
+  },
+  {
+    type: 'Lock Vision',
+    category: 'physical',
+    description: 'Smart lock with camera and passcode management.',
+    role: 'security',
+    commands: [
+      { command: 'lock', parameter: '—', description: 'Lock the door', idempotent: true },
+      { command: 'unlock', parameter: '—', description: 'Unlock the door', idempotent: true, safetyTier: 'destructive', safetyReason: 'Physically unlocks the door — anyone nearby can open it.' },
+      { command: 'deleteKey', parameter: '\'{"id":<passcode_id>}\'', description: 'Delete a passcode by id', idempotent: true, safetyTier: 'destructive', safetyReason: 'Permanently removes a passcode — the holder immediately loses door access.' },
+    ],
+    statusFields: ['battery', 'version', 'lockState', 'doorState', 'calibrate'],
+  },
+  {
+    type: 'Lock Vision Pro',
+    category: 'physical',
+    description: 'Premium smart lock with camera, passcode management, and advanced features.',
+    role: 'security',
+    commands: [
+      { command: 'lock', parameter: '—', description: 'Lock the door', idempotent: true },
+      { command: 'unlock', parameter: '—', description: 'Unlock the door', idempotent: true, safetyTier: 'destructive', safetyReason: 'Physically unlocks the door — anyone nearby can open it.' },
+      { command: 'deleteKey', parameter: '\'{"id":<passcode_id>}\'', description: 'Delete a passcode by id', idempotent: true, safetyTier: 'destructive', safetyReason: 'Permanently removes a passcode — the holder immediately loses door access.' },
+    ],
+    statusFields: ['battery', 'version', 'lockState', 'doorState', 'calibrate'],
+  },
+  {
     type: 'Plug',
     category: 'physical',
     description: 'Smart wall outlet plug with on/off control and basic power status.',
@@ -424,6 +460,19 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     statusFields: ['power', 'brightness', 'color', 'version'],
   },
   {
+    type: 'Permanent Outdoor Lights',
+    category: 'physical',
+    description: 'Weather-resistant outdoor RGBIC string lights with brightness and color temperature control.',
+    role: 'lighting',
+    commands: [
+      ...onOffToggle,
+      { command: 'setBrightness', parameter: '{0-100}', description: 'Set brightness (0-100)', idempotent: true, exampleParams: ['50'] },
+      { command: 'setColor', parameter: '\'{0-255}:{0-255}:{0-255}\'', description: 'Set RGB color', idempotent: true, exampleParams: ['255:0:0'] },
+      { command: 'setColorTemperature', parameter: '{2700-6500}', description: 'Set color temperature in Kelvin', idempotent: true, exampleParams: ['4000'] },
+    ],
+    statusFields: ['power', 'brightness', 'color', 'colorTemperature', 'version'],
+  },
+  {
     type: 'Ceiling Light',
     category: 'physical',
     description: 'Smart ceiling fixture with brightness and color-temperature adjustment (no RGB).',
@@ -435,6 +484,24 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
       { command: 'setColorTemperature', parameter: '2700-6500', description: 'Set color temperature (Kelvin)', idempotent: true, exampleParams: ['2700', '4000', '6500'] },
     ],
     statusFields: ['power', 'brightness', 'colorTemperature', 'version'],
+  },
+  {
+    type: 'RGBICWW Ceiling Light',
+    category: 'physical',
+    description: 'RGBICWW ceiling light with separate main light and color light controls.',
+    role: 'lighting',
+    commands: [
+      ...onOffToggle,
+      { command: 'turnOnMainLight', parameter: 'default', description: 'Turn on the main light only', idempotent: true },
+      { command: 'turnOffMainLight', parameter: 'default', description: 'Turn off the main light only', idempotent: true },
+      { command: 'turnOnColorLight', parameter: 'default', description: 'Turn on the ambient color light', idempotent: true },
+      { command: 'turnOffColorLight', parameter: 'default', description: 'Turn off the ambient color light', idempotent: true },
+      { command: 'setMainLightBrightness', parameter: '{1-100}', description: 'Set main light brightness', idempotent: true, exampleParams: ['50'] },
+      { command: 'setMainLightColorTemp', parameter: '{2700-6500}', description: 'Set main light color temperature (K)', idempotent: true, exampleParams: ['4000'] },
+      { command: 'setColorLightBrightness', parameter: '{1-100}', description: 'Set color light brightness', idempotent: true, exampleParams: ['50'] },
+      { command: 'setColorLightRGB', parameter: '\'{0-255}:{0-255}:{0-255}\'', description: 'Set color light RGB color', idempotent: true },
+    ],
+    statusFields: ['power', 'mainLightPower', 'mainLightBrightness', 'mainLightColorTemp', 'colorLightPower', 'colorLightBrightness', 'colorLightRGB', 'version'],
   },
   {
     type: 'Smart Radiator Thermostat',
@@ -508,6 +575,19 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
       { command: 'closeDelay', parameter: 'seconds', description: 'Auto-off timer in seconds', idempotent: true, exampleParams: ['1800', '3600'] },
     ],
     statusFields: ['mode', 'version', 'battery', 'power', 'nightStatus', 'oscillation', 'verticalOscillation', 'chargingStatus', 'fanSpeed'],
+  },
+  {
+    type: 'Battery Circulator Fan 2 Pro',
+    category: 'physical',
+    description: 'Battery-powered circulator fan with nightlight, wind modes, and USB-C charging.',
+    role: 'fan',
+    commands: [
+      ...onOff,
+      { command: 'setNightLightMode', parameter: 'off | 0 | 1', description: 'Night-light mode', idempotent: true, exampleParams: ['off', '1'] },
+      { command: 'setWindMode', parameter: 'direct | natural | sleep | hurricane', description: 'Wind mode', idempotent: true, exampleParams: ['natural', 'sleep'] },
+      { command: 'setWindSpeed', parameter: '1-100', description: 'Fan speed', idempotent: true, exampleParams: ['50', '100'] },
+    ],
+    statusFields: ['power', 'mode', 'version', 'battery', 'nightStatus', 'oscillation', 'verticalOscillation', 'chargingStatus', 'fanSpeed'],
   },
   {
     type: 'Blind Tilt',
@@ -650,6 +730,18 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     commands: [],
     statusFields: ['battery', 'version', 'status'],
   },
+  {
+    type: 'WeatherStation',
+    category: 'physical',
+    description: 'Indoor weather station display with customizable quote screen.',
+    role: 'sensor',
+    commands: [
+      { command: 'customQuote', parameter: 'custom text', description: 'Set a custom quote on the display', idempotent: true },
+      { command: 'cancelCustom', parameter: 'default', description: 'Revert to default quote display', idempotent: true },
+      { command: 'customPage', parameter: 'custom text', description: 'Set a custom page text', idempotent: true },
+    ],
+    statusFields: ['temperature', 'humidity', 'battery', 'version'],
+  },
   // Status-only hub-class devices (no control commands)
   {
     type: 'Hub 2',
@@ -749,6 +841,30 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     readOnly: true,
     aliases: ['SwitchBot Remote', 'Remote Button', 'Wireless Remote'],
     commands: [],
+  },
+  {
+    type: 'AI MindClip',
+    category: 'physical',
+    description: 'Wearable AI voice recorder with transcription, summaries, and calendar integration.',
+    role: 'other',
+    readOnly: true,
+    commands: [],
+    statusFields: ['version', 'battery', 'chargingStatus', 'recordingStatus', 'uploadStatus', 'hasUntransferredFiles'],
+  },
+  {
+    type: 'Kata Friends',
+    category: 'physical',
+    description: 'Interactive AI companion robot with comic diary generation and voice interaction.',
+    role: 'other',
+    commands: [
+      { command: 'mode', parameter: '"Normal", "Standby", or "Sleep"', description: 'Set the operating mode', idempotent: true },
+      { command: 'childLock', parameter: '"on" or "off"', description: 'Toggle child lock', idempotent: true },
+      { command: 'backHome', parameter: 'default', description: 'Command Kata to return home', idempotent: true },
+      { command: 'pictureTaking', parameter: '"on" or "off"', description: 'Toggle picture taking', idempotent: true },
+      { command: 'snapshots', parameter: '"on" or "off"', description: 'Toggle snapshot mode', idempotent: true },
+      { command: 'talk', parameter: '"on" or "off"', description: 'Toggle talk mode', idempotent: true },
+    ],
+    statusFields: ['version', 'onlineStatus', 'mode', 'status', 'childLock', 'hospitalized', 'battery'],
   },
 
   // ---------- Virtual IR remotes ----------
