@@ -230,8 +230,7 @@ automation:
 | `webhook` | `path`                 | **active** — bearer-token HTTP ingest |
 
 MQTT event names classified today: `motion.detected`,
-`motion.cleared`, `contact.opened`, `contact.closed`,
-`button.pressed`. Unmatched
+`motion.cleared`, `contact.opened`, `contact.closed`. Unmatched
 payloads classify as `device.shadow` — you can match that catch-all
 too.
 
