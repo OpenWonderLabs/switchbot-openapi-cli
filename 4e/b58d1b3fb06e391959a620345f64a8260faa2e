@@ -1,0 +1,23 @@
+CHANGELOG.md
+  s_9f908c2a5657b6::t_ce47291a4d8317 10-21
+package.json
+  s_9f908c2a5657b6::t_506bc13d2c94d1 3
+package-lock.json
+  s_9f908c2a5657b6::t_495beb617acaae 3,9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "4eb58d1b3fb06e391959a620345f64a8260faa2e",
+  "prompts": {},
+  "sessions": {
+    "s_9f908c2a5657b6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "45b6fcbb-725e-4346-b8cd-9e2791236fef",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
