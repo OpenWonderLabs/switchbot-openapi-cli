@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { getConfigPath } from './utils/flags.js';
 import { getActiveProfile } from './lib/request-context.js';
 import { emitJsonError, isJsonMode } from './utils/output.js';
-import { getPrimedCredentials } from './credentials/prime.js';
+import { getPrimedCredentials, clearPrimedCredentials } from './credentials/prime.js';
 
 export interface SwitchBotConfig {
   token: string;
@@ -198,6 +198,7 @@ export function saveConfig(token: string, secret: string, extras?: Partial<Switc
   }
 
   fs.writeFileSync(file, JSON.stringify(cfg, null, 2), { mode: 0o600 });
+  clearPrimedCredentials(getActiveProfile() ?? 'default');
 }
 
 /**

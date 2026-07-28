@@ -670,10 +670,50 @@ describe('validateParameter — documented lighting ranges', () => {
     expect(validateParameter('Floor Lamp', 'setBrightness', '0').ok).toBe(true);
     expect(validateParameter('RGBICWW Strip Light', 'setBrightness', '0').ok).toBe(true);
     expect(validateParameter('Candle Warmer Lamp', 'setBrightness', '0').ok).toBe(true);
+    expect(validateParameter('Permanent Outdoor Lights', 'setBrightness', '0').ok).toBe(true);
   });
 
   it('keeps Color Bulb brightness at 1-100', () => {
     expect(validateParameter('Color Bulb', 'setBrightness', '0').ok).toBe(false);
+  });
+});
+
+describe('validateParameter — Permanent Outdoor Lights', () => {
+  it('rejects out-of-range brightness', () => {
+    expect(validateParameter('Permanent Outdoor Lights', 'setBrightness', '101').ok).toBe(false);
+  });
+
+  it('validates setColor RGB format', () => {
+    expect(validateParameter('Permanent Outdoor Lights', 'setColor', '255:0:0').ok).toBe(true);
+    expect(validateParameter('Permanent Outdoor Lights', 'setColor', '256:0:0').ok).toBe(false);
+  });
+
+  it('validates setColorTemperature 2700-6500', () => {
+    expect(validateParameter('Permanent Outdoor Lights', 'setColorTemperature', '4000').ok).toBe(true);
+    expect(validateParameter('Permanent Outdoor Lights', 'setColorTemperature', '2699').ok).toBe(false);
+    expect(validateParameter('Permanent Outdoor Lights', 'setColorTemperature', '6501').ok).toBe(false);
+  });
+});
+
+describe('validateParameter — Battery Circulator Fan 2 Pro', () => {
+  it('validates setNightLightMode against the 2 Pro enum (off | 0 | 1)', () => {
+    expect(validateParameter('Battery Circulator Fan 2 Pro', 'setNightLightMode', 'off').ok).toBe(true);
+    expect(validateParameter('Battery Circulator Fan 2 Pro', 'setNightLightMode', '0').ok).toBe(true);
+    expect(validateParameter('Battery Circulator Fan 2 Pro', 'setNightLightMode', '1').ok).toBe(true);
+    expect(validateParameter('Battery Circulator Fan 2 Pro', 'setNightLightMode', '2').ok).toBe(false);
+  });
+
+  it('validates setWindMode against the 2 Pro enum (includes hurricane, not baby)', () => {
+    for (const v of ['direct', 'natural', 'sleep', 'hurricane']) {
+      expect(validateParameter('Battery Circulator Fan 2 Pro', 'setWindMode', v).ok).toBe(true);
+    }
+    expect(validateParameter('Battery Circulator Fan 2 Pro', 'setWindMode', 'baby').ok).toBe(false);
+  });
+
+  it('validates setWindSpeed 1-100', () => {
+    expect(validateParameter('Battery Circulator Fan 2 Pro', 'setWindSpeed', '1').ok).toBe(true);
+    expect(validateParameter('Battery Circulator Fan 2 Pro', 'setWindSpeed', '0').ok).toBe(false);
+    expect(validateParameter('Battery Circulator Fan 2 Pro', 'setWindSpeed', '101').ok).toBe(false);
   });
 });
 
@@ -726,6 +766,26 @@ describe('validateParameter — Keypad', () => {
 
   it('rejects deleteKey without id', () => {
     expect(validateParameter('Keypad', 'deleteKey', '{}').ok).toBe(false);
+  });
+});
+
+describe('validateParameter — Lock Vision / Lock Vision Pro (same passcode shape as Keypad)', () => {
+  it('validates createKey', () => {
+    const valid = '{"name":"test","type":"permanent","password":"123456"}';
+    expect(validateParameter('Lock Vision', 'createKey', valid).ok).toBe(true);
+    expect(validateParameter('Lock Vision Pro', 'createKey', valid).ok).toBe(true);
+  });
+
+  it('rejects createKey with invalid password length', () => {
+    expect(validateParameter('Lock Vision', 'createKey', '{"name":"test","type":"permanent","password":"123"}').ok).toBe(false);
+  });
+
+  it('validates deleteKey', () => {
+    expect(validateParameter('Lock Vision', 'deleteKey', '{"id":12345}').ok).toBe(true);
+  });
+
+  it('rejects deleteKey without id', () => {
+    expect(validateParameter('Lock Vision Pro', 'deleteKey', '{}').ok).toBe(false);
   });
 });
 

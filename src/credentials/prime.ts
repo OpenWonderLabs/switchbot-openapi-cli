@@ -80,7 +80,7 @@ export function getPrimedCredentials(profile: string): CredentialBundle | null {
 }
 
 /**
- * Test helper. Not used by production code.
+ * Test helper. Clears all cached and in-flight credential generations.
  */
 export function __resetPrimedCredentials(): void {
   for (const p of generations.keys()) {

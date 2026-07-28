@@ -240,6 +240,15 @@ export function validateParameter(
   if (isCirculatorFan(dt) && command === 'closeDelay') {
     return validateIntRange(raw, 'closeDelay', 1, 36000, 'auto-off delay in seconds');
   }
+  if (dt === 'Battery Circulator Fan 2 Pro' && command === 'setNightLightMode') {
+    return validateEnum(raw, 'setNightLightMode', ['off', '0', '1']);
+  }
+  if (dt === 'Battery Circulator Fan 2 Pro' && command === 'setWindMode') {
+    return validateEnum(raw, 'setWindMode', ['direct', 'natural', 'sleep', 'hurricane']);
+  }
+  if (dt === 'Battery Circulator Fan 2 Pro' && command === 'setWindSpeed') {
+    return validateIntRange(raw, 'setWindSpeed', 1, 100, 'fan speed percentage');
+  }
 
   // --- Smart Radiator Thermostat ---
   if (dt === 'Smart Radiator Thermostat' && command === 'setMode') {
@@ -249,11 +258,11 @@ export function validateParameter(
     return validateIntRange(raw, 'setManualModeTemperature', 4, 35, 'temperature in °C');
   }
 
-  // --- Keypad ---
-  if (dt.startsWith('Keypad') && command === 'createKey') {
+  // --- Keypad / Lock Vision (same passcode command shape) ---
+  if ((dt.startsWith('Keypad') || dt.startsWith('Lock Vision')) && command === 'createKey') {
     return validateKeypadCreateKey(raw);
   }
-  if (dt.startsWith('Keypad') && command === 'deleteKey') {
+  if ((dt.startsWith('Keypad') || dt.startsWith('Lock Vision')) && command === 'deleteKey') {
     return validateKeypadDeleteKey(raw);
   }
 
@@ -290,7 +299,8 @@ export function brightnessRange(deviceType: string): [number, number] | null {
     deviceType === 'RGBICWW Floor Lamp' ||
     deviceType === 'RGBIC Neon Wire Rope Light' ||
     deviceType === 'RGBIC Neon Rope Light' ||
-    deviceType === 'Candle Warmer Lamp'
+    deviceType === 'Candle Warmer Lamp' ||
+    deviceType === 'Permanent Outdoor Lights'
   ) {
     return [0, 100];
   }
@@ -315,7 +325,8 @@ function isColorDevice(deviceType: string): boolean {
     deviceType === 'RGBIC Neon Wire Rope Light' ||
     deviceType === 'RGBIC Neon Rope Light' ||
     deviceType === 'Light Strip' ||
-    deviceType === 'Fill Light'
+    deviceType === 'Fill Light' ||
+    deviceType === 'Permanent Outdoor Lights'
   );
 }
 
@@ -330,7 +341,8 @@ function isColorTemperatureDevice(deviceType: string): boolean {
     deviceType === 'RGBICWW Floor Lamp' ||
     deviceType === 'Light Strip' ||
     deviceType === 'Dimmer' ||
-    deviceType === 'Fill Light'
+    deviceType === 'Fill Light' ||
+    deviceType === 'Permanent Outdoor Lights'
   );
 }
 

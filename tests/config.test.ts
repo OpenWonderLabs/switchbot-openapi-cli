@@ -446,5 +446,16 @@ describe('config', () => {
       fsMock.existsSync.mockReturnValue(false);
       expect(tryLoadConfig()).toBeNull();
     });
+
+    it('saveConfig clears the primed credential cache so loadConfig picks up the new values (#69)', async () => {
+      await primeWith('default', { token: 'stale-token', secret: 'stale-secret' });
+      expect(loadConfig()).toEqual({ token: 'stale-token', secret: 'stale-secret' });
+
+      fsMock.existsSync.mockReturnValue(true);
+      fsMock.readFileSync.mockReturnValue(JSON.stringify({ token: 'fresh-token', secret: 'fresh-secret' }));
+      saveConfig('fresh-token', 'fresh-secret');
+
+      expect(loadConfig()).toEqual({ token: 'fresh-token', secret: 'fresh-secret' });
+    });
   });
 });

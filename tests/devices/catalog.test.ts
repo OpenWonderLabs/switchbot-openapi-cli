@@ -17,11 +17,13 @@ import {
 const OFFICIAL_API_DEVICE_TYPES = [
   'AI Art Frame',
   'AI Hub',
+  'AI MindClip',
   'Air Purifier PM2.5',
   'Air Purifier Table PM2.5',
   'Air Purifier Table VOC',
   'Air Purifier VOC',
   'Battery Circulator Fan',
+  'Battery Circulator Fan 2 Pro',
   'Blind Tilt',
   'Bot',
   'Candle Warmer Lamp',
@@ -45,6 +47,7 @@ const OFFICIAL_API_DEVICE_TYPES = [
   'Indoor Cam',
   'K10+',
   'K10+ Pro',
+  'Kata Friends',
   'Keypad',
   'Keypad Touch',
   'Keypad Vision',
@@ -62,6 +65,7 @@ const OFFICIAL_API_DEVICE_TYPES = [
   'Pan/Tilt Cam 2K',
   'Pan/Tilt Cam Plus 2K',
   'Pan/Tilt Cam Plus 3K',
+  'Permanent Outdoor Lights',
   'Plug',
   'Plug Mini (EU)',
   'Plug Mini (JP)',
@@ -69,6 +73,7 @@ const OFFICIAL_API_DEVICE_TYPES = [
   'Presence Sensor',
   'RGBIC Neon Rope Light',
   'RGBIC Neon Wire Rope Light',
+  'RGBICWW Ceiling Light',
   'RGBICWW Floor Lamp',
   'RGBICWW Strip Light',
   'Relay Switch 1',
@@ -176,6 +181,12 @@ const OFFICIAL_SUPPORTED_DEVICE_LIST_NAMES = [
   'Smart Radiator Thermostat',
   'Weather Station',
   'AI Art Frame',
+  'Lock Pro Matter Enabled',
+  'Permanent Outdoor Lights',
+  'RGBICWW Ceiling Light',
+  'Battery Circulator Fan 2 Pro',
+  'Kata Friends',
+  'AI MindClip',
 ] as const;
 
 describe('devices/catalog', () => {
@@ -307,19 +318,21 @@ describe('devices/catalog', () => {
       expect(cmd?.exampleParams?.[0]).toMatch(/^https:\/\//);
     });
 
-    it('Smart Lock entry resolves the Matter alias "Smart Lock Pro Wifi"', () => {
+    it('Smart Lock Pro Wifi is a distinct Matter-enabled entry, not merely an alias of Smart Lock', () => {
       const match = findCatalogEntry('Smart Lock Pro Wifi');
       expect(match).not.toBeNull();
       expect(Array.isArray(match)).toBe(false);
-      expect((match as { type: string } | null)?.type).toBe('Smart Lock');
+      const entry = match as { type: string; commands: { command: string }[] } | null;
+      expect(entry?.type).toBe('Smart Lock Pro Wifi');
+      expect(entry?.commands.some((c) => c.command === 'nightLatchUnlock')).toBe(true);
     });
 
-    it('Weather Station resolves and reports atmosphericPressure', () => {
+    it('Weather Station resolves to the WeatherStation entry with documented status fields', () => {
       const match = findCatalogEntry('Weather Station');
       expect(match).not.toBeNull();
       const entry = match as { type: string; statusFields: string[] } | null;
       expect(entry?.type).toBe('WeatherStation');
-      expect(entry?.statusFields).toContain('atmosphericPressure');
+      expect(entry?.statusFields).toEqual(['temperature', 'humidity', 'battery', 'version']);
     });
 
     it('Garage Door Opener turnOn and turnOff are safetyTier: destructive', () => {
