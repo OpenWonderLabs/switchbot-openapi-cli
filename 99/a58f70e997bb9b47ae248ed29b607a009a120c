@@ -1,0 +1,30 @@
+src/devices/catalog.ts
+  s_9f908c2a5657b6::t_1b52f2837e8518 1
+src/credentials/prime.ts
+  s_9f908c2a5657b6::t_3feaf08fdd57b2 54-56,58
+src/config.ts
+  s_9f908c2a5657b6::t_423d12d7a7d52b 181
+  s_9f908c2a5657b6::t_076dff304c167f 8
+tests/credentials/prime.test.ts
+  s_9f908c2a5657b6::t_4e9b4317fac33f 5
+  s_9f908c2a5657b6::t_4473f9feab4255 22,26
+tests/config.test.ts
+  s_9f908c2a5657b6::t_45c4b99ff07e11 48
+  s_9f908c2a5657b6::t_af9ceb7e9aec89 24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "99a58f70e997bb9b47ae248ed29b607a009a120c",
+  "prompts": {},
+  "sessions": {
+    "s_9f908c2a5657b6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "45b6fcbb-725e-4346-b8cd-9e2791236fef",
+        "model": "deepseek-v4-pro"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
