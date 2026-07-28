@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   primeCredentials,
   getPrimedCredentials,
-  __resetPrimedCredentials,
+  resetPrimedCredentials,
 } from '../../src/credentials/prime.js';
 
 const selectMock = vi.fn();
@@ -19,11 +19,11 @@ vi.mock('../../src/credentials/keychain.js', async () => {
 
 beforeEach(() => {
   selectMock.mockReset();
-  __resetPrimedCredentials();
+  resetPrimedCredentials();
 });
 
 afterEach(() => {
-  __resetPrimedCredentials();
+  resetPrimedCredentials();
 });
 
 describe('primeCredentials', () => {

@@ -21,7 +21,7 @@ vi.mock('node:fs', () => ({ default: fsMock, ...fsMock }));
 vi.mock('node:os', () => ({ default: osMock, ...osMock }));
 
 import { loadConfig, saveConfig, showConfig, listProfiles, tryLoadConfig } from '../src/config.js';
-import { __resetPrimedCredentials, primeCredentials } from '../src/credentials/prime.js';
+import { resetPrimedCredentials, primeCredentials } from '../src/credentials/prime.js';
 
 const selectMock = vi.fn();
 vi.mock('../src/credentials/keychain.js', async () => {
@@ -45,7 +45,7 @@ describe('config', () => {
     fsMock.readdirSync.mockReset();
     fsMock.readdirSync.mockReturnValue([]);
     selectMock.mockReset();
-    __resetPrimedCredentials();
+    resetPrimedCredentials();
   });
 
   describe('loadConfig', () => {

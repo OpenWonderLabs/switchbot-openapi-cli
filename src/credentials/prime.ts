@@ -51,8 +51,10 @@ export function getPrimedCredentials(profile: string): CredentialBundle | null {
 }
 
 /**
- * Test helper. Not used by production code.
+ * Clear the in-memory credential cache. Called by saveConfig() when
+ * credentials are written to disk so the next loadConfig() picks up
+ * the new values instead of a stale primed entry.
  */
-export function __resetPrimedCredentials(): void {
+export function resetPrimedCredentials(): void {
   cache = null;
 }
