@@ -1,0 +1,560 @@
+.gitattributes
+  s_9f908c2a5657b6::t_5a8d489582955b 1-19
+tests/auth/constants.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-23
+packages/codex-plugin/tests/mcp-config.test.js
+  s_9f908c2a5657b6::t_5a8d489582955b 1-45
+tests/install/claude-code-checks.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-59
+packages/codex-plugin/plugins/switchbot/skills/switchbot/references/codex-network.md
+  s_9f908c2a5657b6::t_5a8d489582955b 1-34
+.github/workflows/publish.yml
+  s_9f908c2a5657b6::t_5a8d489582955b 6-11,27-30,35-36,39-170,173-216
+packages/codex-plugin/plugins/switchbot/.codex-plugin/hooks.json
+  s_9f908c2a5657b6::t_5a8d489582955b 1-6
+tests/commands/devices-constants.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-22
+tests/credentials/prime-ttl.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-66
+tests/commands/capabilities.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 153,159,271,274
+package.json
+  s_9f908c2a5657b6::t_5a8d489582955b 3,38-40,43-44,54-59,61-62,66-68,70,75-76,79,84-89,91,95-98
+tests/credentials/prime.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 5-6,67,79,95-157
+  s_9f908c2a5657b6::t_8387acfbfc0a2b 23,27
+src/commands/plan.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 462-467,469-481,483-490
+src/index.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1,5,15
+tests/commands/auth.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 31,214-232,255-271,378-614
+src/auth.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 3,22
+README.md
+  s_9f908c2a5657b6::t_5a8d489582955b 9,11-12,17-19,21,31,33,35-38,40,43,46,48-65,67,69,72-76,79,81,83,85,87-90,93,95,98-99,102,105-107,110,112,114,117,120,122,125-126,129,131,134-135,138,140,143-144,147,149,151,153,155,157-160,163,165,168-170,173,175,178-179,182,185,188,190,192,194,196,199-201,204,207-209,212,214,216,218,220,223-226,229,231,233,236-242,245,248-249,252,255-261,264,267-269,272,275-276,279,282-283,286,289-291,294,297,300,303-306,309,312-313,316,319-321,324,326,329-333,336-338,341-343,346,349,352,355-357,360,363-371,374,376,378-391,393,395,397-401,403,407-412,414,419-421,428,430
+tests/commands/mindclip.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-169
+CONTRIBUTING.md
+  s_9f908c2a5657b6::t_5a8d489582955b 31-41
+src/commands/rules.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 276-277,287-289,303,346-376,1088,1109-1110
+tests/auth/browser-login.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-107
+packages/gemini-extension/README.md
+  s_9f908c2a5657b6::t_5a8d489582955b 1-124
+packages/codex-plugin/tests/install.test.js
+  s_9f908c2a5657b6::t_5a8d489582955b 1-392
+tests/commands/doctor.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 16-32,34,54-55,344,346,348-350,426-439,864-904
+scripts/smoke-codex-temp-prefix-route-a.mjs
+  s_9f908c2a5657b6::t_5a8d489582955b 1-122
+packages/codex-plugin/.codex-plugin/hooks.json
+  s_9f908c2a5657b6::t_5a8d489582955b 1-6
+tests/commands/device-meta.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 107-162
+tests/llm/pricing.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-72
+packages/codex-plugin/tests/error-messages.test.js
+  s_9f908c2a5657b6::t_5a8d489582955b 1-43
+src/commands/codex.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-785
+packages/claude-code-plugin/setup/check-cli.js
+  s_9f908c2a5657b6::t_5a8d489582955b 1-59
+packages/claude-code-plugin/plugins/switchbot/.claude-plugin/plugin.json
+  s_9f908c2a5657b6::t_5a8d489582955b 1-14
+packages/gemini-extension/commands/switchbot/press.toml
+  s_9f908c2a5657b6::t_5a8d489582955b 1-8
+src/devices/cache.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 169,177-179,201-204,306-321,349-352
+packages/openclaw-skill/index.js
+  s_9f908c2a5657b6::t_5a8d489582955b 1-23
+marketplace.json
+  s_9f908c2a5657b6::t_5a8d489582955b 1-17
+packages/openclaw-skill/bin/policy-edit.js
+  s_9f908c2a5657b6::t_5a8d489582955b 1-8
+packages/openclaw-skill/policy-editor/server.js
+  s_9f908c2a5657b6::t_5a8d489582955b 1-70
+packages/claude-code-plugin/tests/setup.test.js
+  s_9f908c2a5657b6::t_5a8d489582955b 1-175
+packages/codex-plugin/skills/switchbot/references/codex-network.md
+  s_9f908c2a5657b6::t_5a8d489582955b 1-34
+packages/codex-plugin/tests/marketplace-schema.test.js
+  s_9f908c2a5657b6::t_5a8d489582955b 1-46
+tests/install/preflight.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 144-191
+packages/gemini-extension/commands/switchbot/lock.toml
+  s_9f908c2a5657b6::t_5a8d489582955b 1-10
+src/rules/types.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 72-91,98-102,108,170-171,225-228
+tests/lib/idempotency.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 45-63,69-71,73-82,108-132,158-218
+tests/commands/rules.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 674-693,730-748,756-775,812-838
+tests/auth/oauth-callback.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-170
+tests/lib/daemon-socket-path.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-100
+tests/mcp/tool-meta.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 119,122
+packages/openclaw-skill/policy-editor/style.css
+  s_9f908c2a5657b6::t_5a8d489582955b 1-10
+packages/codex-plugin/setup/check-cli.js
+  s_9f908c2a5657b6::t_5a8d489582955b 1-57
+src/auth/token-exchange.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-153
+tests/commands/claude-code.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-276
+tests/helpers/cli.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 67-68,126-130
+src/commands/devices-columns.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-12
+tests/bundle-self-contained.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-29
+.githooks/pre-push
+  s_9f908c2a5657b6::t_5a8d489582955b 7-11
+src/auth/utils.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-14
+src/commands/claude-code.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-329
+src/llm/providers/openai.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 3-4,9,142,148-153
+tests/lib/plan-store.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-4,21-79
+  s_9f908c2a5657b6::t_01b885f4e8bacf 80
+docs/agent-guide.md
+  s_9f908c2a5657b6::t_5a8d489582955b 79,91-94,111,113-121,124-125,128-129,131-139,142,152
+packages/gemini-extension/commands/switchbot/turn-on.toml
+  s_9f908c2a5657b6::t_5a8d489582955b 1-8
+packages/gemini-extension/commands/switchbot/doctor.toml
+  s_9f908c2a5657b6::t_5a8d489582955b 1-7
+packages/codex-plugin/package.json
+  s_9f908c2a5657b6::t_5a8d489582955b 1-56
+src/llm/providers/anthropic.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 2-3,8,127,133-138
+packages/claude-code-plugin/bin/auth.js
+  s_9f908c2a5657b6::t_5a8d489582955b 1-62
+src/install/default-steps.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 27,29,56-57,333-356
+  s_9f908c2a5657b6::t_5663af14940802 357-358
+tests/commands/capabilities-meta.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 3,8,14-15,27-32,38
+packages/gemini-extension/commands/switchbot/status.toml
+  s_9f908c2a5657b6::t_5a8d489582955b 1-7
+tests/commands/strict-schemas.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 104,106,109,111,143,145-146,194-412
+packages/codex-plugin/bin/auth.js
+  s_9f908c2a5657b6::t_5a8d489582955b 1-94
+tests/devices/mindclip-catalog.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-30
+src/commands/gemini.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-277
+src/llm/pricing.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-50
+src/daemon/socket-path.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-61
+src/daemon/server.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-175
+src/devices/history-agg.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 76-86,109-111
+tests/mcp/output-schema-boundary.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-164
+vitest.config.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 11-28,30-39
+tests/commands/scenes.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 407-417
+src/policy/validate.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 3-6
+packages/gemini-extension/commands/switchbot/list-devices.toml
+  s_9f908c2a5657b6::t_5a8d489582955b 1-7
+packages/gemini-extension/commands/switchbot/set-color.toml
+  s_9f908c2a5657b6::t_5a8d489582955b 1-14
+scripts/smoke-codex-git-sparse.mjs
+  s_9f908c2a5657b6::t_5a8d489582955b 1-90
+packages/gemini-extension/package.json
+  s_9f908c2a5657b6::t_5a8d489582955b 1-24
+packages/codex-plugin/scripts/sync-skill.mjs
+  s_9f908c2a5657b6::t_5a8d489582955b 1-9
+src/program-builder.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-134
+packages/codex-plugin/marketplace.json
+  s_9f908c2a5657b6::t_5a8d489582955b 1-18
+packages/openclaw-skill/setup/check-credentials.js
+  s_9f908c2a5657b6::t_5a8d489582955b 1-51
+src/commands/devices.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 12,34,38,110,141-145,209-249,258-262,264-268,273,323,347,366-370,372,416,426-438
+packages/gemini-extension/tests/manifest.test.js
+  s_9f908c2a5657b6::t_5a8d489582955b 1-71
+packages/openclaw-skill/tests/error-messages.test.js
+  s_9f908c2a5657b6::t_5a8d489582955b 1-51
+src/lib/command-keywords.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 2-5
+src/auth/browser-login.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-114
+packages/openclaw-skill/setup/check-daemon.js
+  s_9f908c2a5657b6::t_5a8d489582955b 1-59
+src/llm/provider.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-7,11-13,20-26,30,40-42
+tests/auth/utils.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-19
+packages/openclaw-skill/.mcp.json
+  s_9f908c2a5657b6::t_5a8d489582955b 1-9
+packages/claude-code-plugin/tests/auth.test.js
+  s_9f908c2a5657b6::t_5a8d489582955b 1-121
+packages/claude-code-plugin/lib/error-messages.js
+  s_9f908c2a5657b6::t_5a8d489582955b 1-47
+packages/gemini-extension/commands/switchbot/set-position.toml
+  s_9f908c2a5657b6::t_5a8d489582955b 1-13
+scripts/smoke-gemini-extension-lint.mjs
+  s_9f908c2a5657b6::t_5a8d489582955b 1-44
+packages/gemini-extension/commands/switchbot/history.toml
+  s_9f908c2a5657b6::t_5a8d489582955b 1-13
+src/commands/history.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 31-35
+src/llm/providers/structured-output-fallback.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-213
+tests/commands/quota.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 47-54,104-123
+src/commands/completion.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 3-92,107-126,133-149,160,210-236,252,269-278,281,296,305,307-315,320,322,327,330,363-367,373-374,391,393,398,401,426-435,439,442-443,446,449,454,457,460,463,466,469,472-488,501-527,535-548,553-556,566,569-576
+tests/commands/devices.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 41,135,376-414,828-922,1102-1144,2997-3029
+  s_9f908c2a5657b6::t_87bfc3843c8166 3030
+.githooks/common.sh
+  s_9f908c2a5657b6::t_5a8d489582955b 1-7
+src/auth/constants.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-76
+.github/workflows/npm-published-smoke.yml
+  s_9f908c2a5657b6::t_5a8d489582955b 9-11,25-37,48,50,52-53,57-58,60-61,63-64,70-74,76-83,85,88-89,92,94-95,97,102,106,110,115-123,125,130,134,138,142,148,150-151,164-165,176-210,212,215,218-219,225,228-229,234,237-243
+src/lib/idempotency.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 12-14,43-58,61-68,74,91-96,104,106,111-114,128-130,147-148,152,156-161
+  s_9f908c2a5657b6::t_e4b9ea08aedb85 162
+tests/mcp/tool-profiles.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 4,8-9,12-13,16-17,69-71,92-108
+  s_9f908c2a5657b6::t_bdd0bf9511f600 109-110
+packages/gemini-extension/commands/switchbot/audit.toml
+  s_9f908c2a5657b6::t_5a8d489582955b 1-14
+packages/gemini-extension/commands/switchbot/turn-off.toml
+  s_9f908c2a5657b6::t_5a8d489582955b 1-8
+packages/claude-code-plugin/plugins/switchbot/skills/switchbot/references/claude-code-network.md
+  s_9f908c2a5657b6::t_5a8d489582955b 1-21
+src/auth/oauth-callback.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-137
+src/config.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 13,25,87-105,183,192,195,251,283
+  s_9f908c2a5657b6::t_4213e515a4fae2 8
+  s_9f908c2a5657b6::t_8713e2ba4112d3 201
+packages/claude-code-plugin/.claude-plugin/hooks.json
+  s_9f908c2a5657b6::t_5a8d489582955b 1-6
+src/commands/config.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 11,271
+src/commands/reset.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-217
+src/llm/providers/local.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-198
+packages/gemini-extension/GEMINI.md
+  s_9f908c2a5657b6::t_5a8d489582955b 1-148
+src/rules/engine.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 48,53-56,319-343,355-380,434-439,482-483,873-877,1075-1100
+  s_9f908c2a5657b6::t_bf9311cf98b4e1 1101
+.claude-plugin/marketplace.json
+  s_9f908c2a5657b6::t_5a8d489582955b 1-21
+docs/policy-reference.md
+  s_9f908c2a5657b6::t_5a8d489582955b 244,250-267,274,277-278,280-282,286-314
+src/install/claude-code-checks.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-89
+src/commands/doctor.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 2,15,27-28,30,904,913,985-1098,1110,1135-1136,1198-1231
+  s_9f908c2a5657b6::t_f2d67c1c81f0a8 1232
+src/commands/quota.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 3,29-33,36,95-99
+tests/devices/history-window.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-143
+packages/codex-plugin/skills/switchbot/SKILL.md
+  s_9f908c2a5657b6::t_5a8d489582955b 1-206
+.env.example
+  s_9f908c2a5657b6::t_5a8d489582955b 1-14
+src/commands/mcp.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 6,24-32,54,123-125,128,261-345,400-401,404,410-411,457-469,471,473,475-479,482-600,609-613,633-636,638-643,654,657-706,716,1290-1452,1938-1960,2618,2627-2630,2673,2682,2696,2895-2897
+tests/lib/daemon-state.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-75
+tests/mcp/error-format-contract.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-139
+packages/gemini-extension/commands/switchbot/pause.toml
+  s_9f908c2a5657b6::t_5a8d489582955b 1-8
+packages/gemini-extension/commands/switchbot/plan.toml
+  s_9f908c2a5657b6::t_5a8d489582955b 1-15
+packages/gemini-extension/commands/switchbot/open.toml
+  s_9f908c2a5657b6::t_5a8d489582955b 1-9
+tests/install/gemini-checks.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-158
+tests/commands/completion.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 32-47,56-65,77-86,98-107,132-185
+examples/quickstart/mqtt-tail.service.example
+  s_9f908c2a5657b6::t_5a8d489582955b 7
+tests/mcp/legacy-aliases.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-213
+src/rules/webhook-listener.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 97-102,200-202,249,251,254-258,264
+scripts/smoke-codex-route-b-live.mjs
+  s_9f908c2a5657b6::t_5a8d489582955b 1-119
+packages/claude-code-plugin/README.md
+  s_9f908c2a5657b6::t_5a8d489582955b 1-49
+packages/codex-plugin/tests/setup.test.js
+  s_9f908c2a5657b6::t_5a8d489582955b 1-175
+packages/gemini-extension/tests/commands.test.js
+  s_9f908c2a5657b6::t_5a8d489582955b 1-44
+packages/gemini-extension/commands/switchbot/unlock.toml
+  s_9f908c2a5657b6::t_5a8d489582955b 1-10
+tests/commands/codex.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-1196
+packages/openclaw-skill/setup/check-cli.js
+  s_9f908c2a5657b6::t_5a8d489582955b 1-68
+packages/codex-plugin/.agents/plugins/marketplace.json
+  s_9f908c2a5657b6::t_5a8d489582955b 1-18
+packages/codex-plugin/.codex-plugin/plugin.json
+  s_9f908c2a5657b6::t_5a8d489582955b 1-37
+packages/openclaw-skill/tests/policy-editor.test.js
+  s_9f908c2a5657b6::t_5a8d489582955b 1-38
+tests/devices/catalog.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 173-174,183,308-320,322-324,328-329,331-334,336
+  s_9f908c2a5657b6::t_eb22a26eeb46f3 321,325-327,330,335
+  s_9f908c2a5657b6::t_f04419ed1f8939 337
+tests/install/codex-checks.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-1230
+packages/openclaw-skill/bin/start.js
+  s_9f908c2a5657b6::t_5a8d489582955b 1-74
+TESTING.md
+  s_9f908c2a5657b6::t_5a8d489582955b 1-48
+packages/claude-code-plugin/package.json
+  s_9f908c2a5657b6::t_5a8d489582955b 1-50
+tests/rules/event-count-condition.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-233
+docs/coverage-annotations.md
+  s_9f908c2a5657b6::t_5a8d489582955b 1-29
+src/install/codex-checks.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-529
+tests/auth.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 29,33
+tests/devices/cache.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 15,168-229,362-384
+  s_9f908c2a5657b6::t_4f049be6583f67 385-386
+packages/codex-plugin/setup/check-credentials.js
+  s_9f908c2a5657b6::t_5a8d489582955b 1-132
+packages/openclaw-skill/tests/server.test.js
+  s_9f908c2a5657b6::t_5a8d489582955b 1-21
+.agents/plugins/marketplace.json
+  s_9f908c2a5657b6::t_5a8d489582955b 1-18
+packages/openclaw-skill/README.md
+  s_9f908c2a5657b6::t_5a8d489582955b 1-79
+src/utils/arg-parsers.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 93-151
+CHANGELOG.md
+  s_9f908c2a5657b6::t_5a8d489582955b 10-107,111-167,171-189,193-218
+tests/devices/history-agg.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 214-236,249-297,337-355
+packages/codex-plugin/plugins/switchbot/.codex-plugin/plugin.json
+  s_9f908c2a5657b6::t_5a8d489582955b 1-37
+tests/lib/devices.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 59-62
+packages/gemini-extension/commands/switchbot/overview.toml
+  s_9f908c2a5657b6::t_5a8d489582955b 1-7
+tests/status-sync/manager.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 43,45,356-800
+packages/codex-plugin/tests/auth.test.js
+  s_9f908c2a5657b6::t_5a8d489582955b 1-177
+src/llm/index.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 3,14,16
+packages/codex-plugin/lib/error-messages.js
+  s_9f908c2a5657b6::t_5a8d489582955b 1-48
+packages/gemini-extension/commands/switchbot/close.toml
+  s_9f908c2a5657b6::t_5a8d489582955b 1-9
+packages/openclaw-skill/policy-editor/index.html
+  s_9f908c2a5657b6::t_5a8d489582955b 1-37
+packages/gemini-extension/commands/switchbot/set-color-temp.toml
+  s_9f908c2a5657b6::t_5a8d489582955b 1-14
+tests/commands/devices-json-fields.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-89
+.github/workflows/ci.yml
+  s_9f908c2a5657b6::t_5a8d489582955b 46,150-152,154-157,160-203
+tests/commands/plan.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 54-69,100-103,389-629
+packages/openclaw-skill/tests/check-credentials.test.js
+  s_9f908c2a5657b6::t_5a8d489582955b 1-72
+tests/config.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 97-147
+  s_9f908c2a5657b6::t_3f08f124a0d847 48
+  s_9f908c2a5657b6::t_f7a651412848eb 24
+packages/openclaw-skill/policy-editor/editor.js
+  s_9f908c2a5657b6::t_5a8d489582955b 1-136
+packages/claude-code-plugin/plugins/switchbot/.mcp.json
+  s_9f908c2a5657b6::t_5a8d489582955b 1-8
+src/auth/verify.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-24
+packages/claude-code-plugin/tests/manifest.test.js
+  s_9f908c2a5657b6::t_5a8d489582955b 1-43
+packages/gemini-extension/commands/switchbot/set-brightness.toml
+  s_9f908c2a5657b6::t_5a8d489582955b 1-9
+src/lib/mindclip.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-89
+src/auth/csrf.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-6
+src/rules/simulate.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 10,126
+packages/codex-plugin/bin/install.js
+  s_9f908c2a5657b6::t_5a8d489582955b 1-250
+packages/codex-plugin/tests/hooks.test.js
+  s_9f908c2a5657b6::t_5a8d489582955b 1-32
+.gitignore
+  s_9f908c2a5657b6::t_5a8d489582955b 17,37-41
+packages/openclaw-skill/bin/setup-flow.js
+  s_9f908c2a5657b6::t_5a8d489582955b 1-132
+packages/codex-plugin/.mcp.json
+  s_9f908c2a5657b6::t_5a8d489582955b 1-9
+src/commands/install.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 31,40,93-99,206-209,214
+src/commands/mindclip.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-217
+src/devices/history-window.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-90
+tests/commands/dry-run.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 7,162,208,223,276
+tests/daemon/ipc.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-183
+tests/readme-route-b.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-52
+tests/rules/webhook-listener.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 3,144-284
+tests/mcp/tool-schema-completeness.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 141-145,147,155-207
+src/install/preflight.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 18,58,247-289,302-305
+packages/codex-plugin/plugins/switchbot/.mcp.json
+  s_9f908c2a5657b6::t_5a8d489582955b 1-9
+scripts/smoke-claude-code-pack-install.mjs
+  s_9f908c2a5657b6::t_5a8d489582955b 1-149
+tests/llm/providers/local.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-146
+packages/gemini-extension/commands/switchbot/toggle.toml
+  s_9f908c2a5657b6::t_5a8d489582955b 1-9
+tests/commands/config.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 6-11,22-66,79-82,121-170,282,365-428
+src/commands/device-meta.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 111,113-114,118-129,135-140
+packages/claude-code-plugin/setup/check-credentials.js
+  s_9f908c2a5657b6::t_5a8d489582955b 1-120
+src/devices/catalog.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 216-224,679,684
+  s_9f908c2a5657b6::t_fbddb0a01d76c4 215
+scripts/bundle.mjs
+  s_9f908c2a5657b6::t_5a8d489582955b 4,22
+src/install/gemini-checks.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-105
+tests/commands/reset.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-237
+packages/openclaw-skill/lib/error-messages.js
+  s_9f908c2a5657b6::t_5a8d489582955b 1-37
+src/lib/devices.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 24,250
+src/rules/llm-condition.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 6,22-24,28-35,37-47,50-51,57,59-70,91-101,116-126,128-133,145,152-207
+packages/gemini-extension/gemini-extension.json
+  s_9f908c2a5657b6::t_5a8d489582955b 1-30
+src/commands/auth.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 26-28,33-37,85-91,152,254,292,373,396-484
+  s_9f908c2a5657b6::t_c3cb66692ed001 485
+tests/auth/token-exchange.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-195
+src/utils/audit.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 80-87
+tests/helpers/mcp-test-utils.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-22
+src/mcp/tool-profiles.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 6,12-18,43-48
+  s_9f908c2a5657b6::t_8c88bc37179c25 49
+.githooks/pre-commit
+  s_9f908c2a5657b6::t_5a8d489582955b 7-9
+src/policy/schema/v0.2.json
+  s_9f908c2a5657b6::t_5a8d489582955b 110-119,344-363,383-385
+packages/gemini-extension/commands/switchbot/describe.toml
+  s_9f908c2a5657b6::t_5a8d489582955b 1-9
+packages/openclaw-skill/package.json
+  s_9f908c2a5657b6::t_5a8d489582955b 1-54
+packages/claude-code-plugin/plugins/switchbot/.claude-plugin/hooks.json
+  s_9f908c2a5657b6::t_5a8d489582955b 1-6
+src/rules/matcher.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 27,107-112,115-125,245,248,261-299,383,391,402-433
+packages/codex-plugin/plugins/switchbot/skills/switchbot/SKILL.md
+  s_9f908c2a5657b6::t_5a8d489582955b 1-206
+tests/utils/arg-parsers.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 3,120-211
+src/daemon/client.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-125
+scripts/smoke-codex-pack-install.mjs
+  s_9f908c2a5657b6::t_5a8d489582955b 1-209
+packages/claude-code-plugin/plugins/switchbot/skills/switchbot/SKILL.md
+  s_9f908c2a5657b6::t_5a8d489582955b 1-212
+packages/claude-code-plugin/tests/hooks.test.js
+  s_9f908c2a5657b6::t_5a8d489582955b 1-58
+packages/codex-plugin/README.md
+  s_9f908c2a5657b6::t_5a8d489582955b 1-152
+tests/commands/mcp.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 2,166,178,183-185,222,244,277,294,583-902,960,964-965,969,973-974,981,996,998,1024-1257,1283,1285-1286,1328-1350,1390,1849-1910
+tests/commands/gemini.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-82
+packages/codex-plugin/tests/skill-sync.test.js
+  s_9f908c2a5657b6::t_5a8d489582955b 1-58
+src/commands/capabilities.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 14,126,218-231,244-251,278
+tests/lib/mindclip.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-217
+tests/commands/plan-suggest.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 98-117
+packages/gemini-extension/commands/switchbot/rule.toml
+  s_9f908c2a5657b6::t_5a8d489582955b 1-16
+tests/llm/structured-output-fallback.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 1-63
+packages/claude-code-plugin/.claude-plugin/marketplace.json
+  s_9f908c2a5657b6::t_5a8d489582955b 1-22
+packages/gemini-extension/commands/switchbot/run-scene.toml
+  s_9f908c2a5657b6::t_5a8d489582955b 1-8
+packages/codex-plugin/tests/resolve-marketplace-source-root.test.js
+  s_9f908c2a5657b6::t_5a8d489582955b 1-124
+src/credentials/prime.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 2,9-12,23-24,28,31-42,46-53,56-61,65-66,68-69,79,87-115
+tests/rules/llm-condition.test.ts
+  s_9f908c2a5657b6::t_5a8d489582955b 34-43,225-297,417-495
+  s_9f908c2a5657b6::t_7e01bccb5c7e45 496
+docs/superpowers/plans/2026-05-28-test-fixes.md
+  s_9f908c2a5657b6::t_13225e42e38065 1-405
+docs/superpowers/plans/2026-06-13-ai-mindclip.md
+  s_9f908c2a5657b6::t_fc344e805f8336 1-1245
+docs/superpowers/specs/2026-05-23-codex-commands-design.md
+  s_9f908c2a5657b6::t_2d895dcff1886d 1-369
+docs/superpowers/specs/2026-05-23-codex-install-paths-design.md
+  s_9f908c2a5657b6::t_944d8d9ae5b5de 1-273
+docs/superpowers/specs/2026-05-23-monorepo-migration-design.md
+  s_9f908c2a5657b6::t_df2fc07a550bd4 1-333
+docs/superpowers/specs/2026-05-28-test-fixes-design.md
+  s_9f908c2a5657b6::t_112c1523056b2b 1-6,10-19,23,25,27-28,30-31,35-44,48-130
+docs/superpowers/specs/2026-06-13-ai-mindclip-design.md
+  s_9f908c2a5657b6::t_e24f40ac3bff07 1-165
+package-lock.json
+  s_9f908c2a5657b6::t_2534fa6f39ccff 3,9,11-13,17-18,24,29-34,36,40-43,133,586,720,1124-1158,1400,1414,1424,1441,1458,1476,1499,1584,1660-1674,1679,1712,1746,1802,1850,1895,1909,1919,1929,1939,1957,1977,2039-2078,2092,2147,2154,2161,2278,2295,2323,2336,2356,2400,2419,2429,2446,2466,2501,2576,2586,2805,2822,2843,2915,2958-2972,2977,2994-3011,3016,3019-3033,3038,3115,3135,3148,3155,3408,3418,4091,4111,4121,4143,4156,4162-4179,4211,4221,4248,4333,4403,4436,4458,4468,4509,4580,4593-4604,4654,4674,4701,4711,4728,4748,4755,4768,4778,4798,4815,4834,4946,4972,5003,5141,5661,5676,5686,5736,5752,5766,6355,6542,6566-6580,6585,6601,6611,6616-6683
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "4f8319c516b9125ca64725f67037fd0ba48dc6d2",
+  "prompts": {},
+  "sessions": {
+    "s_9f908c2a5657b6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "45b6fcbb-725e-4346-b8cd-9e2791236fef",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
