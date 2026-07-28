@@ -1,0 +1,14 @@
+description = "Set color temperature of a SwitchBot light (pass device name and 2700-6500K)"
+prompt = """
+Set the color temperature of the SwitchBot light the user names. Resolve the device name to a
+deviceId (alias → exact → prefix → substring → fuzzy). Verify the device supports
+"setColorTemperature" via describe_device (Color Bulb, Ceiling Light, etc.). This is a
+mutation-tier command.
+
+Parameter is Kelvin value (2700-6500). Convert natural language:
+- "warm" / "warm white" → 2700, "neutral" → 4000, "cool" / "daylight" → 6500
+
+Use the send_command MCP tool with command "setColorTemperature" and the numeric parameter.
+Report the result.
+User input: {{args}}
+"""

@@ -8,6 +8,7 @@ import { stringArg } from '../utils/arg-parsers.js';
 import { intArg } from '../utils/arg-parsers.js';
 import { saveConfig, showConfig, getConfigSummary, listProfiles, readProfileMeta } from '../config.js';
 import { isJsonMode, printJson, exitWithError } from '../utils/output.js';
+import { onCredentialChange } from './auth.js';
 import chalk from 'chalk';
 
 function parseEnvFile(file: string): { token?: string; secret?: string } {
@@ -267,6 +268,7 @@ Files are written with mode 0600. Profiles live under ~/.switchbot/profiles/<nam
             }
           : undefined,
       });
+      onCredentialChange();
       if (isJsonMode()) {
         printJson({ ok: true, message: 'credentials saved' });
       } else {

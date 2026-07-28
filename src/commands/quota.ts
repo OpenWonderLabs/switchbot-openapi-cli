@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { printJson, isJsonMode } from '../utils/output.js';
+import { isDryRun } from '../utils/flags.js';
 import {
   DAILY_QUOTA,
   loadQuota,
@@ -25,9 +26,14 @@ function runQuotaStatus(): void {
     return;
   }
 
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setHours(0, 0, 0, 0);
+  const resetAt = tomorrow.toLocaleDateString('en-CA') + ' 00:00 local';
+
   console.log(`Today (${usage.date}):`);
   console.log(`  Requests used:      ${usage.total} / ${DAILY_QUOTA}`);
-  console.log(`  Remaining budget:   ${usage.remaining}`);
+  console.log(`  Remaining budget:   ${usage.remaining}  (resets at ${resetAt})`);
   if (Object.keys(usage.endpoints).length === 0) {
     console.log('  (no requests recorded yet)');
   } else {
@@ -86,6 +92,11 @@ Examples:
     .command('reset')
     .description('Delete the local quota counter file')
     .action(() => {
+      if (isDryRun()) {
+        if (isJsonMode()) printJson({ dryRun: true, reset: false });
+        else console.log('[dry-run] quota reset skipped — no files changed');
+        return;
+      }
       resetQuota();
       if (isJsonMode()) {
         printJson({ reset: true });

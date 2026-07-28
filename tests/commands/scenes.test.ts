@@ -404,4 +404,15 @@ describe('scenes command', () => {
       expect((out.error as Record<string, unknown>).message).toMatch(/scene not found/i);
     });
   });
+
+  // =====================================================================
+  // E-1: validation failures must exit 2
+  // =====================================================================
+  describe('E-1 exit code — scenes validation', () => {
+    it('scenes run with empty scene name/id exits 2', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: [] } });
+      const result = await runCli(registerScenesCommand, ['scenes', 'run', '']);
+      expect(result.exitCode).toBe(2);
+    });
+  });
 });

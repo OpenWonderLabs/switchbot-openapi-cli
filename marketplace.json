@@ -1,0 +1,17 @@
+{
+  "name": "switchbot",
+  "interface": {
+    "displayName": "SwitchBot"
+  },
+  "plugins": [
+    {
+      "name": "switchbot",
+      "source": "./packages/codex-plugin/plugins/switchbot",
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

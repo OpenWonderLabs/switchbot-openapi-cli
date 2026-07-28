@@ -44,6 +44,14 @@ describe('quota command', () => {
     expect(out).toMatch(/POST \/v1\.1\/devices\/:id\/commands\s+1/);
   });
 
+  it('status human output includes Remaining budget line with reset time', async () => {
+    const result = await runCli(registerQuotaCommand, ['quota', 'status']);
+    expect(result.exitCode).toBeNull();
+    const out = result.stdout.join('\n');
+    expect(out).toContain('Remaining budget:');
+    expect(out).toContain('resets at');
+  });
+
   it('status --json returns structured payload', async () => {
     await seedQuota();
     const result = await runCli(registerQuotaCommand, ['--json', 'quota', 'status']);
@@ -92,5 +100,25 @@ describe('quota command', () => {
     const result = await runCli(registerQuotaCommand, ['--json', 'quota', 'reset']);
     expect(result.exitCode).toBeNull();
     expect(JSON.parse(result.stdout[0])).toEqual({ schemaVersion: '1.2', data: { reset: true } });
+  });
+
+  it('reset --dry-run prints dry-run message and does NOT execute reset', async () => {
+    await seedQuota();
+    const file = path.join(tmpRoot, '.switchbot', 'quota.json');
+    expect(fs.existsSync(file)).toBe(true);
+    const result = await runCli(registerQuotaCommand, ['--dry-run', 'quota', 'reset']);
+    expect(result.exitCode).toBeNull();
+    expect(result.stdout.join('\n')).toContain('dry-run');
+    // File must still exist — dry-run must NOT have deleted it
+    expect(fs.existsSync(file)).toBe(true);
+  });
+
+  it('reset --dry-run --json returns { dryRun: true, reset: false }', async () => {
+    const result = await runCli(registerQuotaCommand, ['--dry-run', '--json', 'quota', 'reset']);
+    expect(result.exitCode).toBeNull();
+    const parsed = JSON.parse(result.stdout[0]) as Record<string, unknown>;
+    const data = (parsed.data ?? parsed) as Record<string, unknown>;
+    expect(data.dryRun).toBe(true);
+    expect(data.reset).toBe(false);
   });
 });

@@ -1,19 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import { TOOL_PROFILES, resolveToolProfile, type ToolProfile } from '../../src/mcp/tool-profiles.js';
 import { createSwitchBotMcpServer, listRegisteredTools } from '../../src/commands/mcp.js';
+import { MCP_TOOLS } from '../../src/commands/capabilities.js';
 
 describe('tool-profiles', () => {
   describe('TOOL_PROFILES sets', () => {
-    it('readonly has 10 tools (core read only)', () => {
-      expect(TOOL_PROFILES.readonly.size).toBe(10);
+    it('readonly has 14 tools (core read only)', () => {
+      expect(TOOL_PROFILES.readonly.size).toBe(14);
     });
 
-    it('default has 13 tools (core read + action)', () => {
-      expect(TOOL_PROFILES.default.size).toBe(13);
+    it('default has 17 tools (core read + action)', () => {
+      expect(TOOL_PROFILES.default.size).toBe(17);
     });
 
-    it('all has 24 tools', () => {
-      expect(TOOL_PROFILES.all.size).toBe(24);
+    it('all has 28 tools', () => {
+      expect(TOOL_PROFILES.all.size).toBe(28);
     });
 
     it('readonly is a subset of default', () => {
@@ -65,9 +66,9 @@ describe('tool-profiles', () => {
 
   describe('createSwitchBotMcpServer respects toolProfile', () => {
     it.each<[ToolProfile, number]>([
-      ['readonly', 10],
-      ['default', 13],
-      ['all', 24],
+      ['readonly', 14],
+      ['default', 17],
+      ['all', 28], // 25 canonical + 3 deprecated device_history aliases
     ])('profile "%s" registers %d tools', (profile, expected) => {
       const server = createSwitchBotMcpServer({ toolProfile: profile });
       expect(listRegisteredTools(server)).toHaveLength(expected);
@@ -86,6 +87,25 @@ describe('tool-profiles', () => {
       expect(tools).not.toContain('send_command');
       expect(tools).not.toContain('run_scene');
       expect(tools).not.toContain('plan_run');
+    });
+  });
+
+  describe('capabilities MCP_TOOLS stays in sync with registered tools', () => {
+    it('MCP_TOOLS matches registered tools under toolProfile=all, minus deprecated aliases', () => {
+      const server = createSwitchBotMcpServer({ toolProfile: 'all' });
+      const registered = new Set(listRegisteredTools(server));
+      // MCP_TOOLS excludes deprecated aliases; all other registered tools must be present.
+      for (const tool of MCP_TOOLS) {
+        expect(registered).toContain(tool);
+      }
+      // Deprecated aliases are registered for backward compat but not advertised.
+      const deprecated = ['get_device_history', 'query_device_history', 'aggregate_device_history'];
+      for (const alias of deprecated) {
+        expect(registered).toContain(alias);
+        expect(MCP_TOOLS).not.toContain(alias);
+      }
+      // Total: MCP_TOOLS.length + 3 deprecated = registered.size
+      expect(MCP_TOOLS.length + deprecated.length).toBe(registered.size);
     });
   });
 });

@@ -1,9 +1,11 @@
 import https from 'node:https';
-import type { LLMProvider, LLMProviderOptions, DecideResult, DecideOptions } from '../provider.js';
+import type { LLMProvider, LLMProviderOptions, DecideResult, DecideOptions, ProviderCapabilities } from '../provider.js';
+import { calculateCostUsd } from '../pricing.js';
 
 export class AnthropicProvider implements LLMProvider {
   readonly name = 'anthropic';
   readonly model: string;
+  readonly capabilities: ProviderCapabilities = { toolUse: true };
   private readonly apiKey: string;
   private readonly timeoutMs: number;
   private readonly maxTokens: number;
@@ -122,12 +124,18 @@ export class AnthropicProvider implements LLMProvider {
 
     const json = JSON.parse(responseBody) as {
       content: Array<{ type: string; name?: string; input?: { pass: boolean; reason: string } }>;
+      usage?: { input_tokens?: number; output_tokens?: number };
     };
     const toolUse = json.content?.find(c => c.type === 'tool_use' && c.name === 'decide');
     if (!toolUse?.input || typeof toolUse.input.pass !== 'boolean') {
       throw new Error('Anthropic decide: malformed tool-use response');
     }
-    return { pass: toolUse.input.pass, reason: String(toolUse.input.reason ?? '').slice(0, 200) };
+    const tokensIn = json.usage?.input_tokens ?? 0;
+    const tokensOut = json.usage?.output_tokens ?? 0;
+    const usage = json.usage
+      ? { tokensIn, tokensOut, costUsd: calculateCostUsd(this.model, tokensIn, tokensOut) }
+      : undefined;
+    return { pass: toolUse.input.pass, reason: String(toolUse.input.reason ?? '').slice(0, 200), usage };
   }
 }
 

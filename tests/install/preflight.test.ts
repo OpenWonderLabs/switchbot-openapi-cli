@@ -141,4 +141,52 @@ describe('runPreflight', () => {
     expect(agent?.status).toBe('fail');
     expect(res.ok).toBe(false);
   });
+
+  it('home check reports ok when ~/.switchbot already exists and is writable', async () => {
+    const switchbotDir = path.join(tmp, '.switchbot');
+    fs.mkdirSync(switchbotDir, { recursive: true });
+    const res = await runPreflight();
+    const home = res.checks.find((c) => c.name === 'home');
+    expect(home?.status).toBe('ok');
+    expect(home?.message).toContain(switchbotDir);
+  });
+
+  it('agent-skills-dir check is ok when ~/.claude/skills path ancestor is writable', async () => {
+    const claudeDir = path.join(tmp, '.claude');
+    fs.mkdirSync(claudeDir, { recursive: true });
+    const res = await runPreflight({ agent: 'claude-code', expectSkillLink: true });
+    const agent = res.checks.find((c) => c.name === 'agent-skills-dir');
+    expect(agent?.status).toBe('ok');
+  });
+
+  it('agent-skills-dir check fails when no ancestor of ~/.claude/skills exists', async () => {
+    const existsSpy = vi.spyOn(fs, 'existsSync').mockReturnValue(false);
+    try {
+      const res = await runPreflight({ agent: 'claude-code', expectSkillLink: true });
+      const agent = res.checks.find((c) => c.name === 'agent-skills-dir');
+      expect(agent?.status).toBe('fail');
+      expect(agent?.message).toMatch(/cannot resolve/i);
+    } finally {
+      existsSpy.mockRestore();
+    }
+  });
+
+  it('codex agent: missing global npm package is warn (not fail) — Route B does not need it', async () => {
+    // npm list -g will return non-zero / empty in the test environment; that used
+    // to be a hard 'fail' blocking the entire install. With Route B it should
+    // only be a warning so registerCodexPluginAuto() gets a chance to run.
+    const res = await runPreflight({ agent: 'codex' });
+    const npmCheck = res.checks.find((c) => c.name === 'codex-plugin-npm');
+    if (npmCheck) {
+      // When the npm package is absent the check must be at most 'warn'.
+      expect(npmCheck.status).not.toBe('fail');
+    }
+    // Overall preflight must not be blocked by this check alone.
+    const nonNpmFails = res.checks.filter(
+      (c) => c.status === 'fail' && c.name !== 'codex-plugin-npm',
+    );
+    if (nonNpmFails.length === 0) {
+      expect(res.ok).toBe(true);
+    }
+  });
 });

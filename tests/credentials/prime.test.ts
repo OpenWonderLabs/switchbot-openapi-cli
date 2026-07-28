@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   primeCredentials,
   getPrimedCredentials,
-  resetPrimedCredentials,
+  clearPrimedCredentials,
+  __resetPrimedCredentials,
 } from '../../src/credentials/prime.js';
 
 const selectMock = vi.fn();
@@ -19,11 +20,11 @@ vi.mock('../../src/credentials/keychain.js', async () => {
 
 beforeEach(() => {
   selectMock.mockReset();
-  resetPrimedCredentials();
+  __resetPrimedCredentials();
 });
 
 afterEach(() => {
-  resetPrimedCredentials();
+  __resetPrimedCredentials();
 });
 
 describe('primeCredentials', () => {
@@ -63,7 +64,7 @@ describe('primeCredentials', () => {
     expect(selectMock).toHaveBeenCalledTimes(1);
   });
 
-  it('repriming a different profile invalidates the previous entry', async () => {
+  it('priming a different profile keeps both entries independently cached', async () => {
     const getA = vi.fn().mockResolvedValue({ token: 'TA', secret: 'SA' });
     const getB = vi.fn().mockResolvedValue({ token: 'TB', secret: 'SB' });
     selectMock
@@ -75,7 +76,7 @@ describe('primeCredentials', () => {
 
     await primeCredentials('b');
     expect(getPrimedCredentials('b')).toEqual({ token: 'TB', secret: 'SB' });
-    expect(getPrimedCredentials('a')).toBeNull();
+    expect(getPrimedCredentials('a')).toEqual({ token: 'TA', secret: 'SA' });
   });
 
   it('swallows errors from selectCredentialStore', async () => {
@@ -90,5 +91,68 @@ describe('primeCredentials', () => {
 
     await expect(primeCredentials('default')).resolves.toBeUndefined();
     expect(getPrimedCredentials('default')).toBeNull();
+  });
+
+  it('clearPrimedCredentials() clears the in-memory cache immediately', async () => {
+    const get = vi.fn().mockResolvedValue({ token: 'T', secret: 'S' });
+    selectMock.mockResolvedValue({ name: 'keychain', get } as any);
+
+    await primeCredentials('default');
+    expect(getPrimedCredentials('default')).not.toBeNull();
+
+    clearPrimedCredentials();
+    expect(getPrimedCredentials('default')).toBeNull();
+  });
+});
+
+describe('clearPrimedCredentials() race — no-arg path vs in-flight prime', () => {
+  it('discards in-flight result when no-arg clear fires before store.get() resolves', async () => {
+    // Set up a deferred resolve so we can fire clearPrimedCredentials()
+    // while primeCredentials() is suspended at `await store.get()`.
+    let resolveGet!: (v: { token: string; secret: string } | null) => void;
+    const getDeferred = new Promise<{ token: string; secret: string } | null>(
+      (res) => { resolveGet = res; }
+    );
+    const get = vi.fn().mockReturnValue(getDeferred);
+    selectMock.mockResolvedValue({ name: 'keychain', get } as any);
+
+    // Start prime without await — it suspends at store.get()
+    const primePromise = primeCredentials('p1');
+
+    // Fire the no-arg clear while p1 is NOT yet in `caches`
+    clearPrimedCredentials();
+
+    // Now let store.get() resolve with fresh credentials
+    resolveGet({ token: 'STALE', secret: 'STALE' });
+    await primePromise;
+
+    // The generation was bumped, so the resolve must have been discarded
+    expect(getPrimedCredentials('p1')).toBeNull();
+  });
+
+  it('no-arg clear after prime completes evicts the cached entry', async () => {
+    const get = vi.fn().mockResolvedValue({ token: 'T', secret: 'S' });
+    selectMock.mockResolvedValue({ name: 'keychain', get } as any);
+
+    await primeCredentials('p2');
+    expect(getPrimedCredentials('p2')).not.toBeNull();
+
+    clearPrimedCredentials(); // no arg — should evict p2
+    expect(getPrimedCredentials('p2')).toBeNull();
+  });
+
+  it('profile-specific clear does not evict other profiles', async () => {
+    const getA = vi.fn().mockResolvedValue({ token: 'TA', secret: 'SA' });
+    const getB = vi.fn().mockResolvedValue({ token: 'TB', secret: 'SB' });
+    selectMock
+      .mockResolvedValueOnce({ name: 'keychain', get: getA } as any)
+      .mockResolvedValueOnce({ name: 'keychain', get: getB } as any);
+
+    await primeCredentials('a');
+    await primeCredentials('b');
+
+    clearPrimedCredentials('a');
+    expect(getPrimedCredentials('a')).toBeNull();
+    expect(getPrimedCredentials('b')).toEqual({ token: 'TB', secret: 'SB' });
   });
 });

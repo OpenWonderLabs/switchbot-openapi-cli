@@ -12,6 +12,7 @@ import {
   isListCacheFresh,
   loadStatusCache,
   getCachedStatus,
+  getCachedStatusEntry,
   setCachedStatus,
   clearStatusCache,
   describeCache,
@@ -164,6 +165,68 @@ describe('device cache', () => {
     // Default path should NOT have been created.
     expect(fs.existsSync(path.join(tmpDir, '.switchbot', 'devices.json'))).toBe(false);
   });
+
+  it('IR device inherits familyName/roomID/roomName from its hub', () => {
+    updateCacheFromDeviceList({
+      deviceList: [{
+        deviceId: 'HUB-1',
+        deviceName: 'Mini Hub',
+        deviceType: 'Hub Mini',
+        familyName: '公司',
+        roomID: 'ROOM-42',
+        roomName: 'Office',
+      }],
+      infraredRemoteList: [{
+        deviceId: 'IR-A',
+        deviceName: 'Office TV',
+        remoteType: 'TV',
+        hubDeviceId: 'HUB-1',
+      }],
+    });
+    const ir = getCachedDevice('IR-A');
+    expect(ir).not.toBeNull();
+    expect(ir!.familyName).toBe('公司');
+    expect(ir!.roomID).toBe('ROOM-42');
+    expect(ir!.roomName).toBe('Office');
+    expect(ir!.category).toBe('ir');
+  });
+
+  it('IR device with hubDeviceId not in the device list gets no room/family metadata', () => {
+    updateCacheFromDeviceList({
+      deviceList: [],
+      infraredRemoteList: [{
+        deviceId: 'IR-ORPHAN',
+        deviceName: 'Orphan AC',
+        remoteType: 'Air Conditioner',
+        hubDeviceId: 'HUB-MISSING',
+      }],
+    });
+    const ir = getCachedDevice('IR-ORPHAN');
+    expect(ir).not.toBeNull();
+    expect(ir!.familyName).toBeUndefined();
+    expect(ir!.roomID).toBeUndefined();
+    expect(ir!.roomName).toBeUndefined();
+  });
+
+  it('IR device inherits undefined room/family when hub itself has no metadata', () => {
+    updateCacheFromDeviceList({
+      deviceList: [{
+        deviceId: 'HUB-BARE',
+        deviceName: 'Bare Hub',
+        deviceType: 'Hub Mini',
+      }],
+      infraredRemoteList: [{
+        deviceId: 'IR-B',
+        deviceName: 'Bedroom Fan',
+        remoteType: 'Fan',
+        hubDeviceId: 'HUB-BARE',
+      }],
+    });
+    const ir = getCachedDevice('IR-B');
+    expect(ir!.familyName).toBeUndefined();
+    expect(ir!.roomID).toBeUndefined();
+    expect(ir!.roomName).toBeUndefined();
+  });
 });
 
 describe('list cache TTL', () => {
@@ -293,6 +356,31 @@ describe('status cache', () => {
     expect(loadStatusCache().entries.BOT1?.body).toEqual({ power: 'on' });
     resetStatusCache();
     expect(loadStatusCache().entries.BOT1?.body).toEqual({ power: 'off' });
+  });
+});
+
+describe('getCachedStatusEntry', () => {
+  it('returns null when ttl is 0 (cache disabled)', () => {
+    setCachedStatus('BOT1', { power: 'on' });
+    expect(getCachedStatusEntry('BOT1', 0)).toBeNull();
+  });
+
+  it('returns { body, fetchedAt } when entry is fresh', () => {
+    const storedDate = new Date();
+    setCachedStatus('BOT1', { power: 'on', battery: 82 }, storedDate);
+    const entry = getCachedStatusEntry('BOT1', 60_000);
+    expect(entry).not.toBeNull();
+    expect(entry!.body).toEqual({ power: 'on', battery: 82 });
+    expect(entry!.fetchedAt).toBe(storedDate.toISOString());
+  });
+
+  it('returns null when entry is older than ttl', () => {
+    setCachedStatus('BOT1', { power: 'on' }, new Date(Date.now() - 10 * 60_000));
+    expect(getCachedStatusEntry('BOT1', 60_000)).toBeNull();
+  });
+
+  it('returns null for unknown deviceId', () => {
+    expect(getCachedStatusEntry('UNKNOWN', 60_000)).toBeNull();
   });
 });
 

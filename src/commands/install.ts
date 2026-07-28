@@ -28,6 +28,7 @@ import {
   stepWriteKeychain,
   stepScaffoldPolicy,
   stepSymlinkSkill,
+  stepRegisterCodexPlugin,
   stepDoctorVerify,
   type AgentName,
   type InstallContext,
@@ -36,7 +37,7 @@ import { isJsonMode, printJson } from '../utils/output.js';
 import { getActiveProfile } from '../lib/request-context.js';
 import chalk from 'chalk';
 
-const AGENT_VALUES: readonly AgentName[] = ['claude-code', 'cursor', 'copilot', 'none'] as const;
+const AGENT_VALUES: readonly AgentName[] = ['claude-code', 'cursor', 'copilot', 'codex', 'none'] as const;
 
 interface InstallCliOptions {
   agent?: string;
@@ -87,6 +88,13 @@ function printRecipe(ctx: InstallContext): void {
       lines.push(
         '  # Copilot merges instructions into .github/copilot-instructions.md. See:',
         '  #   openclaw-switchbot-skill/docs/agents/copilot.md',
+      );
+      break;
+    case 'codex':
+      lines.push(
+        '  # Recommended full bootstrap: npx @switchbot/openapi-cli codex setup',
+        '  # This command only re-registers an already-installed Codex plugin.',
+        '  # To repair an existing setup: switchbot codex repair',
       );
       break;
     case 'none':
@@ -195,11 +203,15 @@ Examples:
         nonInteractive: !process.stdin.isTTY && !tokenFile,
       };
 
+      const agentStep = ctx.agent === 'codex'
+        ? stepRegisterCodexPlugin()
+        : stepSymlinkSkill({ force });
+
       const allSteps: InstallStep<InstallContext>[] = [
         stepPromptCredentials(),
         stepWriteKeychain(),
         stepScaffoldPolicy(),
-        stepSymlinkSkill({ force }),
+        agentStep,
       ];
       const steps = allSteps.filter((s) => !skip.has(s.name));
 

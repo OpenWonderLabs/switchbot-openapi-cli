@@ -1,0 +1,16 @@
+description = "Create an automation rule from natural language (e.g. 'turn off lights at 10pm')"
+prompt = """
+Create a SwitchBot automation rule from the user's intent. First resolve any device names to
+deviceIds using list_devices. Then call rules_suggest with the intent and device_ids.
+
+The generated rule always has dry_run:true — it must be reviewed before arming. Show the rule
+YAML to the user and explain what it does (trigger, conditions, actions, schedule). Ask if
+they want to:
+1. Add it to policy.yaml as dry-run (call policy_add_rule with dry_run:true)
+2. Simulate it against recent events (call rules_simulate)
+3. Modify it first
+4. Cancel
+
+NEVER set dry_run:false or enable_automation:true without explicit user approval.
+User input: {{args}}
+"""

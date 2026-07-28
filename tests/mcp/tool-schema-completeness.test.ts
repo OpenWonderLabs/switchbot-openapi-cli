@@ -138,18 +138,71 @@ describe('MCP tool schema completeness', () => {
     ).toEqual([]);
   });
 
-  it('aggregate_device_history describes every input argument (P4 regression guard)', () => {
-    const agg = tools.find((t) => t.name === 'aggregate_device_history');
-    expect(agg, 'aggregate_device_history must be registered').toBeDefined();
-    const props = agg!.inputSchema?.properties ?? {};
-    const expected = ['deviceId', 'since', 'from', 'to', 'metrics', 'aggs', 'bucket', 'maxBucketSamples'];
+  it('device_history describes every input argument (P4 regression guard)', () => {
+    const dh = tools.find((t) => t.name === 'device_history');
+    expect(dh, 'device_history must be registered').toBeDefined();
+    const props = dh!.inputSchema?.properties ?? {};
+    const expected = ['mode', 'deviceId', 'limit', 'since', 'from', 'to', 'fields', 'metrics', 'aggs', 'bucket', 'maxBucketSamples'];
     for (const prop of expected) {
-      expect(props[prop], `${prop} should appear in aggregate_device_history inputSchema`).toBeDefined();
+      expect(props[prop], `${prop} should appear in device_history inputSchema`).toBeDefined();
       expect(
         props[prop].description,
         `${prop}.description should be a non-empty string`,
       ).toBeTypeOf('string');
       expect((props[prop].description ?? '').length).toBeGreaterThan(0);
     }
+  });
+
+  it('mindclip_recordings describes every input argument (P4 regression guard)', () => {
+    const tool = tools.find((t) => t.name === 'mindclip_recordings');
+    expect(tool, 'mindclip_recordings must be registered').toBeDefined();
+    const props = tool!.inputSchema?.properties ?? {};
+    const expected = [
+      'action',
+      'id',
+      'language',
+      'deviceID',
+      'pageNum',
+      'pageSize',
+      'startTime',
+      'endTime',
+      'folderID',
+    ];
+    for (const prop of expected) {
+      expect(props[prop], `${prop} should appear in mindclip_recordings inputSchema`).toBeDefined();
+      expect(
+        props[prop].description,
+        `${prop}.description should be a non-empty string`,
+      ).toBeTypeOf('string');
+      expect((props[prop].description ?? '').length).toBeGreaterThan(0);
+    }
+    // action is the discriminator and must be required + an enum
+    expect(tool!.inputSchema?.required, 'action must be required').toContain('action');
+    expect(props.action.enum, 'action must be enum-typed').toEqual(['list', 'get', 'summary']);
+  });
+
+  it('mindclip_recall describes every input argument (P4 regression guard)', () => {
+    const tool = tools.find((t) => t.name === 'mindclip_recall');
+    expect(tool, 'mindclip_recall must be registered').toBeDefined();
+    const props = tool!.inputSchema?.properties ?? {};
+    const expected = ['period', 'date', 'week'];
+    for (const prop of expected) {
+      expect(props[prop], `${prop} should appear in mindclip_recall inputSchema`).toBeDefined();
+      expect(
+        props[prop].description,
+        `${prop}.description should be a non-empty string`,
+      ).toBeTypeOf('string');
+      expect((props[prop].description ?? '').length).toBeGreaterThan(0);
+    }
+    expect(tool!.inputSchema?.required, 'period must be required').toContain('period');
+    expect(props.period.enum, 'period must be enum-typed').toEqual(['daily', 'weekly', 'urgent_todos']);
+  });
+
+  it('device_history surfaces the mode discriminator as required enum', () => {
+    const dh = tools.find((t) => t.name === 'device_history');
+    expect(dh).toBeDefined();
+    const props = dh!.inputSchema?.properties ?? {};
+    expect(dh!.inputSchema?.required, 'mode must be required').toContain('mode');
+    expect(props.mode.enum, 'mode must be enum-typed').toEqual(['raw', 'query', 'aggregate']);
   });
 });

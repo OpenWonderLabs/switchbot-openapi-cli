@@ -1,0 +1,54 @@
+{
+  "name": "@switchbot/openclaw-skill",
+  "version": "0.1.2",
+  "type": "module",
+  "description": "OpenClaw plugin that bootstraps and delegates to `switchbot mcp serve`, exposing the full SwitchBot MCP tool surface through @switchbot/openapi-cli >= 3.7.1.",
+  "homepage": "https://github.com/OpenWonderLabs/switchbot-openapi-cli/tree/main/packages/openclaw-skill",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OpenWonderLabs/switchbot-openapi-cli.git",
+    "directory": "packages/openclaw-skill"
+  },
+  "bugs": "https://github.com/OpenWonderLabs/switchbot-openapi-cli/issues",
+  "main": "index.js",
+  "bin": {
+    "switchbot-openclaw": "./bin/start.js",
+    "switchbot-policy-edit": "./bin/policy-edit.js"
+  },
+  "keywords": [
+    "openclaw",
+    "clawhub",
+    "switchbot",
+    "mcp",
+    "smart-home",
+    "iot"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {},
+  "optionalDependencies": {
+    "open": "^10.0.0"
+  },
+  "peerDependencies": {
+    "@switchbot/openapi-cli": ">=3.7.1"
+  },
+  "files": [
+    "index.js",
+    ".mcp.json",
+    "bin/",
+    "lib/",
+    "setup/",
+    "policy-editor/",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "test": "node --test",
+    "start": "node bin/start.js",
+    "typecheck": "node --check bin/start.js && node --check bin/policy-edit.js && node --check index.js"
+  }
+}

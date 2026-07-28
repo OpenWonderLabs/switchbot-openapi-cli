@@ -3,6 +3,7 @@ import { deepSortedJson } from './trace.js';
 import { writeAudit } from '../utils/audit.js';
 import type { LlmCondition } from './types.js';
 import type { EngineEvent } from './types.js';
+import type { DecideUsage } from '../llm/provider.js';
 
 export interface LlmConditionContext {
   event: EngineEvent;
@@ -18,21 +19,55 @@ export interface LlmEvaluateResult {
     cacheHit: boolean;
     reason: string;
     promptDigest: string;
+    /** Token and cost figures from the underlying provider call. Absent on
+     * cache hits and on errors. */
+    usage?: DecideUsage;
   };
 }
 
+/** Effective budget caps applied to an LLM condition evaluation. */
+export interface LlmBudgetCaps {
+  /** Per-rule + global merged: per-rule wins when set, otherwise global applies. */
+  maxCallsPerHour?: number;
+  maxTokensPerHour?: number;
+  maxCostPerDayUsd?: number;
+}
+
 const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+
+interface BudgetCounter {
+  /** Calls + tokens use this hourly window. */
+  hourlyStart: number;
+  calls: number;
+  tokens: number;
+  /** Cost uses a separate daily window. */
+  dailyStart: number;
+  costUsd: number;
+}
 
 export class LlmConditionEvaluator {
-  private cache = new Map<string, { result: boolean; reason: string; expiresAt: number }>();
-  private callCounts = new Map<string, { count: number; windowStart: number }>();
+  private cache = new Map<string, { result: boolean; reason: string; expiresAt: number; usage?: DecideUsage }>();
+  private budgetCounters = new Map<string, BudgetCounter>();
 
   async evaluate(
     condition: LlmCondition['llm'],
     context: LlmConditionContext,
     ruleVersion: string,
-    globalMaxCallsPerHour?: number,
+    budgetCaps?: LlmBudgetCaps | number,
   ): Promise<LlmEvaluateResult> {
+    // Backward compatibility: callers in the existing engine pass a single
+    // number meaning "global max_calls_per_hour". New callers pass a full
+    // LlmBudgetCaps object.
+    const caps: LlmBudgetCaps = typeof budgetCaps === 'number'
+      ? { maxCallsPerHour: budgetCaps }
+      : { ...(budgetCaps ?? {}) };
+
+    // Per-rule budget overrides global on a dimension-by-dimension basis.
+    if (condition.budget?.max_calls_per_hour !== undefined) caps.maxCallsPerHour = condition.budget.max_calls_per_hour;
+    if (condition.budget?.max_tokens_per_hour !== undefined) caps.maxTokensPerHour = condition.budget.max_tokens_per_hour;
+    if (condition.budget?.max_cost_per_day_usd !== undefined) caps.maxCostPerDayUsd = condition.budget.max_cost_per_day_usd;
+
     const cacheKey = buildCacheKey(ruleVersion, condition.prompt, context);
     const ttlMs = parseCacheTtl(condition.cache_ttl ?? '5m');
 
@@ -53,31 +88,17 @@ export class LlmConditionEvaluator {
       }
     }
 
-    const perRuleMax = condition.budget?.max_calls_per_hour;
-    const effectiveMax = perRuleMax ?? globalMaxCallsPerHour;
-    if (effectiveMax !== undefined && effectiveMax > 0) {
-      const budgetKey = `${ruleVersion}:${condition.prompt.slice(0, 32)}`;
-      const now = Date.now();
-      const entry = this.callCounts.get(budgetKey) ?? { count: 0, windowStart: now };
-      if (now - entry.windowStart >= HOUR_MS) {
-        entry.count = 0;
-        entry.windowStart = now;
-      }
-      if (entry.count >= effectiveMax) {
-        writeAudit({
-          auditVersion: 2,
-          t: new Date().toISOString(),
-          kind: 'llm-budget-exceeded',
-          deviceId: context.event.deviceId ?? '',
-          command: 'llm-condition',
-          parameter: null,
-          commandType: 'command',
-          dryRun: false,
-        });
-        return onErrorResult(condition.on_error ?? 'fail', 'Budget exceeded');
-      }
-      entry.count++;
-      this.callCounts.set(budgetKey, entry);
+    const budgetKey = `${ruleVersion}:${condition.prompt.slice(0, 32)}`;
+    const counter = this.rollCounter(budgetKey);
+
+    // Pre-call: check call-count budget. Tokens and cost can only be checked
+    // after the call returns (we don't know how many tokens a call will use
+    // until it has run), but if a previous call already pushed us past the
+    // limit we short-circuit now.
+    const callViolation = this.checkPreCallBudget(counter, caps);
+    if (callViolation) {
+      this.emitBudgetExceeded(callViolation, context, condition);
+      return onErrorResult(condition.on_error ?? 'fail', `Budget exceeded (${callViolation.dimension})`);
     }
 
     const backend = resolveProvider(condition.provider ?? 'auto');
@@ -92,8 +113,24 @@ export class LlmConditionEvaluator {
       const result = await provider.decide(prompt, { timeoutMs: condition.timeout_ms ?? 5_000 });
       const latencyMs = Date.now() - start;
 
+      // Account for this call's usage AFTER the call completed; subsequent
+      // calls in the same window will see the updated counter and may hit
+      // the token/cost ceiling.
+      counter.calls += 1;
+      if (result.usage) {
+        counter.tokens += result.usage.tokensIn + result.usage.tokensOut;
+        if (result.usage.costUsd !== undefined) {
+          counter.costUsd += result.usage.costUsd;
+        }
+      }
+
       if (ttlMs > 0) {
-        this.cache.set(cacheKey, { result: result.pass, reason: result.reason, expiresAt: Date.now() + ttlMs });
+        this.cache.set(cacheKey, {
+          result: result.pass,
+          reason: result.reason,
+          expiresAt: Date.now() + ttlMs,
+          usage: result.usage,
+        });
       }
 
       return {
@@ -105,11 +142,68 @@ export class LlmConditionEvaluator {
           cacheHit: false,
           reason: String(result.reason ?? '').slice(0, 200),
           promptDigest: cacheKey.slice(0, 8),
+          usage: result.usage,
         },
       };
     } catch (err) {
       return onErrorResult(condition.on_error ?? 'fail', String(err));
     }
+  }
+
+  private rollCounter(key: string): BudgetCounter {
+    const now = Date.now();
+    const existing = this.budgetCounters.get(key);
+    if (!existing) {
+      const fresh: BudgetCounter = { hourlyStart: now, calls: 0, tokens: 0, dailyStart: now, costUsd: 0 };
+      this.budgetCounters.set(key, fresh);
+      return fresh;
+    }
+    if (now - existing.hourlyStart >= HOUR_MS) {
+      existing.hourlyStart = now;
+      existing.calls = 0;
+      existing.tokens = 0;
+    }
+    if (now - existing.dailyStart >= DAY_MS) {
+      existing.dailyStart = now;
+      existing.costUsd = 0;
+    }
+    return existing;
+  }
+
+  private checkPreCallBudget(
+    counter: BudgetCounter,
+    caps: LlmBudgetCaps,
+  ): { dimension: 'calls' | 'tokens' | 'cost'; limit: number; observed: number } | null {
+    if (caps.maxCallsPerHour !== undefined && caps.maxCallsPerHour >= 0 && counter.calls >= caps.maxCallsPerHour) {
+      return { dimension: 'calls', limit: caps.maxCallsPerHour, observed: counter.calls };
+    }
+    if (caps.maxTokensPerHour !== undefined && caps.maxTokensPerHour >= 0 && counter.tokens >= caps.maxTokensPerHour) {
+      return { dimension: 'tokens', limit: caps.maxTokensPerHour, observed: counter.tokens };
+    }
+    if (caps.maxCostPerDayUsd !== undefined && caps.maxCostPerDayUsd >= 0 && counter.costUsd >= caps.maxCostPerDayUsd) {
+      return { dimension: 'cost', limit: caps.maxCostPerDayUsd, observed: counter.costUsd };
+    }
+    return null;
+  }
+
+  private emitBudgetExceeded(
+    violation: { dimension: 'calls' | 'tokens' | 'cost'; limit: number; observed: number },
+    context: LlmConditionContext,
+    _condition: LlmCondition['llm'],
+  ): void {
+    writeAudit({
+      auditVersion: 2,
+      t: new Date().toISOString(),
+      kind: 'llm-budget-exceeded',
+      deviceId: context.event.deviceId ?? '',
+      command: 'llm-condition',
+      parameter: null,
+      commandType: 'command',
+      dryRun: false,
+      budgetDimension: violation.dimension,
+      budgetLimit: violation.limit,
+      budgetObserved: violation.observed,
+    });
   }
 }
 

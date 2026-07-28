@@ -213,6 +213,16 @@ const rgbOnlyLightControls0To100: CommandSpec[] = [
 export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   // ---------- Physical devices ----------
   {
+    type: 'AI MindClip',
+    aliases: ['AIMindClip', 'MindClip', 'Mind Clip'],
+    category: 'physical',
+    description: 'AI-powered voice recorder with transcription and meeting summaries.',
+    role: 'other',
+    readOnly: true,
+    commands: [],
+    statusFields: ['battery', 'chargingStatus', 'recordingStatus', 'uploadStatus', 'hasUntransferredFiles'],
+  },
+  {
     type: 'Bot',
     category: 'physical',
     description: 'Mechanical arm robot that physically presses a button or toggles a switch on demand.',
@@ -666,11 +676,12 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'AI Art Frame',
     category: 'physical',
-    description: 'Digital art frame that can switch to the next or previous image.',
+    description: 'Digital art frame that can switch images and accept new artwork uploads.',
     role: 'other',
     commands: [
       { command: 'next', parameter: '—', description: 'Switch to the next image', idempotent: false },
       { command: 'previous', parameter: '—', description: 'Switch to the previous image', idempotent: false },
+      { command: 'uploadImage', parameter: '<imageUrl>', description: 'Upload a new image from an https:// URL to display on the frame', idempotent: true, exampleParams: ['https://example.com/art.jpg'] },
     ],
     statusFields: ['version'],
   },
@@ -846,15 +857,6 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     readOnly: true,
     aliases: ['SwitchBot Remote', 'Remote Button', 'Wireless Remote'],
     commands: [],
-  },
-  {
-    type: 'AI MindClip',
-    category: 'physical',
-    description: 'Wearable AI voice recorder with transcription, summaries, and calendar integration.',
-    role: 'other',
-    readOnly: true,
-    commands: [],
-    statusFields: ['battery', 'chargingStatus', 'recordingStatus', 'uploadStatus', 'hasUntransferredFiles'],
   },
   {
     type: 'Kata Friends',

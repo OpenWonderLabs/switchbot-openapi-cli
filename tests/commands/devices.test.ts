@@ -38,7 +38,7 @@ vi.mock('../../src/api/client.js', () => ({
 import { registerDevicesCommand } from '../../src/commands/devices.js';
 import { ApiError } from '../../src/api/client.js';
 import { runCli } from '../helpers/cli.js';
-import { updateCacheFromDeviceList, resetListCache } from '../../src/devices/cache.js';
+import { updateCacheFromDeviceList, resetListCache, setCachedStatus, resetStatusCache } from '../../src/devices/cache.js';
 
 // ---- Helpers -----------------------------------------------------------
 const DID = 'DEV-ID';
@@ -132,6 +132,7 @@ describe('devices command', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     resetListCache();
+    resetStatusCache();
     try {
       fs.rmSync(tmpHome, { recursive: true, force: true });
     } catch {
@@ -370,6 +371,45 @@ describe('devices command', () => {
       expect(out).toContain('"deviceList"');
       expect(out).toContain('"infraredRemoteList"');
       expect(out).not.toContain('| deviceName');
+    });
+
+    it('applies --fields projection even when --json shorthand is used', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const result = await runCli(
+        registerDevicesCommand,
+        ['--json', '--fields', 'deviceId,deviceName', 'devices', 'list'],
+      );
+      expect(result.exitCode).toBeNull();
+      const parsed = JSON.parse(result.stdout.join('\n')) as Record<string, unknown>;
+      const data = (parsed.data ?? parsed) as Record<string, unknown>;
+      const deviceList = data.deviceList as Array<Record<string, unknown>>;
+      expect(deviceList).toHaveLength(3);
+      expect(deviceList[0]).toHaveProperty('deviceId');
+      expect(deviceList[0]).toHaveProperty('deviceName');
+      // Must NOT contain deviceType or hubDeviceId
+      expect(deviceList[0]).not.toHaveProperty('deviceType');
+      expect(deviceList[0]).not.toHaveProperty('hubDeviceId');
+    });
+
+    it('--json --fields id,name resolves alias inputs to canonical output keys', async () => {
+      // Stable schema: response keys must be canonical regardless of whether
+      // the user passed an alias (id/name) or the canonical name (deviceId/
+      // deviceName). Tools that consume --json should not have to know which
+      // form the caller used.
+      apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
+      const result = await runCli(
+        registerDevicesCommand,
+        ['--json', '--fields', 'id,name', 'devices', 'list'],
+      );
+      expect(result.exitCode).toBeNull();
+      const parsed = JSON.parse(result.stdout.join('\n')) as Record<string, unknown>;
+      const data = (parsed.data ?? parsed) as Record<string, unknown>;
+      const deviceList = data.deviceList as Array<Record<string, unknown>>;
+      expect(deviceList[0]).toHaveProperty('deviceId');
+      expect(deviceList[0]).toHaveProperty('deviceName');
+      // Aliases must NOT leak into the output schema.
+      expect(deviceList[0]).not.toHaveProperty('id');
+      expect(deviceList[0]).not.toHaveProperty('name');
     });
 
     it('prints "No devices found" when both lists are empty', async () => {
@@ -785,6 +825,101 @@ describe('devices command', () => {
       expect(res.stderr.join('\n')).toContain('device offline');
     });
 
+    describe('batch mode / --strict', () => {
+      it('keeps exit 0 on partial failures by default', async () => {
+        apiMock.__instance.get.mockImplementation((url: string) => {
+          if (url === '/v1.1/devices/BATCH-OK/status') {
+            return Promise.resolve({ data: { body: { power: 'on' } } });
+          }
+          if (url === '/v1.1/devices/BATCH-FAIL/status') {
+            return Promise.reject(new Error('device offline'));
+          }
+          throw new Error(`unexpected url: ${url}`);
+        });
+
+        const res = await runCli(registerDevicesCommand, [
+          '--json', 'devices', 'status', '--ids', 'BATCH-OK,BATCH-FAIL',
+        ]);
+
+        expect(res.exitCode).toBeNull();
+        const parsed = JSON.parse(res.stdout.find((line) => line.trim().startsWith('{')) ?? '');
+        expect(parsed.data).toHaveLength(2);
+        expect(parsed.data[0]).toMatchObject({ deviceId: 'BATCH-OK', ok: true, power: 'on' });
+        expect(parsed.data[1]).toMatchObject({ deviceId: 'BATCH-FAIL', ok: false, error: 'device offline' });
+      });
+
+      it('exits 1 on partial failures when --strict is set', async () => {
+        apiMock.__instance.get.mockImplementation((url: string) => {
+          if (url === '/v1.1/devices/BATCH-OK/status') {
+            return Promise.resolve({ data: { body: { battery: 80 } } });
+          }
+          if (url === '/v1.1/devices/BATCH-FAIL/status') {
+            return Promise.reject(new Error('timeout'));
+          }
+          throw new Error(`unexpected url: ${url}`);
+        });
+
+        const res = await runCli(registerDevicesCommand, [
+          '--json', 'devices', 'status', '--ids', 'BATCH-OK,BATCH-FAIL', '--strict',
+        ]);
+
+        expect(res.exitCode).toBe(1);
+        const parsed = JSON.parse(res.stdout.find((line) => line.trim().startsWith('{')) ?? '');
+        expect(parsed.data).toHaveLength(2);
+        expect(parsed.data[0]).toMatchObject({ deviceId: 'BATCH-OK', ok: true, battery: 80 });
+        expect(parsed.data[1]).toMatchObject({ deviceId: 'BATCH-FAIL', ok: false, error: 'timeout' });
+      });
+
+      it('exits 1 with --strict when every batch status fails', async () => {
+        apiMock.__instance.get.mockRejectedValue(new Error('offline'));
+
+        const res = await runCli(registerDevicesCommand, [
+          '--json', 'devices', 'status', '--ids', 'FAIL-1,FAIL-2', '--strict',
+        ]);
+
+        expect(res.exitCode).toBe(1);
+        const parsed = JSON.parse(res.stdout.find((line) => line.trim().startsWith('{')) ?? '');
+        expect(parsed.data).toHaveLength(2);
+        expect(parsed.data[0]).toMatchObject({ deviceId: 'FAIL-1', ok: false, error: 'offline' });
+        expect(parsed.data[1]).toMatchObject({ deviceId: 'FAIL-2', ok: false, error: 'offline' });
+      });
+
+      it('keeps exit 0 with --strict when every batch status succeeds', async () => {
+        apiMock.__instance.get.mockImplementation((url: string) => {
+          if (url === '/v1.1/devices/BATCH-1/status') {
+            return Promise.resolve({ data: { body: { power: 'on' } } });
+          }
+          if (url === '/v1.1/devices/BATCH-2/status') {
+            return Promise.resolve({ data: { body: { power: 'off' } } });
+          }
+          throw new Error(`unexpected url: ${url}`);
+        });
+
+        const res = await runCli(registerDevicesCommand, [
+          '--json', 'devices', 'status', '--ids', 'BATCH-1,BATCH-2', '--strict',
+        ]);
+
+        expect(res.exitCode).toBeNull();
+        const parsed = JSON.parse(res.stdout.find((line) => line.trim().startsWith('{')) ?? '');
+        expect(parsed.data).toHaveLength(2);
+        expect(parsed.data[0]).toMatchObject({ deviceId: 'BATCH-1', ok: true, power: 'on' });
+        expect(parsed.data[1]).toMatchObject({ deviceId: 'BATCH-2', ok: true, power: 'off' });
+      });
+
+      it('warns on stderr when --strict is used with a single device ID', async () => {
+        apiMock.__instance.get.mockResolvedValue({
+          data: { body: { power: 'on' } },
+        });
+
+        const res = await runCli(registerDevicesCommand, [
+          'devices', 'status', 'SINGLE-DEV', '--strict',
+        ]);
+
+        expect(res.exitCode).toBeNull();
+        expect(res.stderr.join('\n')).toMatch(/--strict.*(no effect|batch)/i);
+      });
+    });
+
     it('supports --format=tsv', async () => {
       apiMock.__instance.get.mockResolvedValue({
         data: { body: { power: 'on', battery: 87, temperature: 22 } },
@@ -962,6 +1097,49 @@ describe('devices command', () => {
           'devices', 'status', 'D1', '--format', 'tsv', '--fields', 'humid,power,batt',
         ]);
         expect(res.stdout.join('\n').split('\n')[0]).toBe('humidity\tpower\tbattery');
+      });
+    });
+
+    describe('fetchedAt from cache (C-1)', () => {
+      it('fetchedAt reflects stored cache timestamp, not render time', async () => {
+        // Use a timestamp in the past but within the 1h TTL window
+        const storedDate = new Date(Date.now() - 5 * 60 * 1000); // 5 minutes ago
+        const storedTime = storedDate.toISOString();
+        const cachedBody = { power: 'on', battery: 90 };
+        // Seed the in-memory status cache with a fixed past timestamp
+        setCachedStatus('CACHED-DEV', cachedBody, storedDate);
+
+        // No HTTP call should be needed; the cache should be used
+        const res = await runCli(registerDevicesCommand, [
+          '--cache', '1h',
+          'devices', 'status', 'CACHED-DEV', '--json',
+        ]);
+        expect(apiMock.__instance.get).not.toHaveBeenCalledWith(
+          '/v1.1/devices/CACHED-DEV/status'
+        );
+        const out = JSON.parse(res.stdout.join('\n'));
+        const data: Record<string, unknown> = out.data ?? out;
+        expect(data.fetchedAt).toBe(storedTime);
+      });
+
+      it('falls back to live API when cached entry is older than the TTL', async () => {
+        // Seed an entry that is 10 minutes old with a 5-minute TTL → stale
+        const staleDate = new Date(Date.now() - 10 * 60 * 1000);
+        setCachedStatus('STALE-DEV', { power: 'on' }, staleDate);
+
+        apiMock.__instance.get.mockResolvedValue({
+          data: { statusCode: 100, body: { power: 'off', battery: 70 } },
+        });
+
+        const res = await runCli(registerDevicesCommand, [
+          '--cache', '5m',
+          'devices', 'status', 'STALE-DEV', '--json',
+        ]);
+
+        expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/devices/STALE-DEV/status');
+        const out = JSON.parse(res.stdout.join('\n'));
+        const data: Record<string, unknown> = out.data ?? out;
+        expect(data.power).toBe('off');
       });
     });
   });
@@ -2814,6 +2992,40 @@ describe('devices command', () => {
       expect(apiMock.__instance.get).not.toHaveBeenCalled();
 
       fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+  });
+
+  // =====================================================================
+  // E-1: validation failures must exit 2
+  // =====================================================================
+  describe('E-1 exit code — validation failures must exit 2', () => {
+    it('devices status with empty deviceId exits 2', async () => {
+      const result = await runCli(registerDevicesCommand, ['devices', 'status', '']);
+      expect(result.exitCode).toBe(2);
+    });
+
+    it('devices command with unsupported command (setColor on Relay Switch) exits 2', async () => {
+      updateCacheFromDeviceList({
+        deviceList: [
+          { deviceId: 'RELAY1', deviceName: 'relay', deviceType: 'Relay Switch 1PM', hubDeviceId: 'HUB-1', enableCloudService: true },
+        ],
+        infraredRemoteList: [],
+      });
+      const result = await runCli(registerDevicesCommand,
+        ['devices', 'command', 'RELAY1', 'setColor', '255:0:0']);
+      expect(result.exitCode).toBe(2);
+    });
+
+    it('devices command setBrightness with missing parameter exits 2', async () => {
+      updateCacheFromDeviceList({
+        deviceList: [
+          { deviceId: 'BULB1', deviceName: 'bulb', deviceType: 'Color Bulb', hubDeviceId: 'HUB-1', enableCloudService: true },
+        ],
+        infraredRemoteList: [],
+      });
+      const result = await runCli(registerDevicesCommand,
+        ['devices', 'command', 'BULB1', 'setBrightness']);
+      expect(result.exitCode).toBe(2);
     });
   });
 });

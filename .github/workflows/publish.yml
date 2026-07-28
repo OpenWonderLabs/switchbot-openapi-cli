@@ -3,6 +3,12 @@ name: Publish to npm
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run — skip npm publish steps'
+        type: boolean
+        default: false
 
 jobs:
   publish:
@@ -18,19 +24,193 @@ jobs:
           registry-url: https://registry.npmjs.org
           cache: npm
       - run: npm ci
-      - run: npm run build
-      - run: npm test
-      - name: Verify tag matches package.json version
+      - run: npm run verify:release-gate
+
+      - name: Verify tag matches root CLI package.json version
+        if: github.event_name == 'release'
         run: |
           PKG_VERSION=$(node -p "require('./package.json').version")
           TAG_VERSION="${GITHUB_REF_NAME#v}"
           if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
-            echo "Tag $TAG_VERSION does not match package.json version $PKG_VERSION"
+            echo "Tag $TAG_VERSION does not match root package.json version $PKG_VERSION"
+            echo "Plugin versions are independent and read from packages/*/package.json directly."
             exit 1
           fi
-      - name: Smoke test packed npm artifact
-        run: npm run smoke:pack-install
-      - name: Publish package to npm dist-tag next
-        run: npm publish --tag next --provenance --access public
+
+      - name: Show resolved versions
+        run: |
+          CLI_VERSION=$(node -p "require('./package.json').version")
+          CODEX_VERSION=$(node -p "require('./packages/codex-plugin/package.json').version")
+          OPENCLAW_VERSION=$(node -p "require('./packages/openclaw-skill/package.json').version")
+          CLAUDE_CODE_VERSION=$(node -p "require('./packages/claude-code-plugin/package.json').version")
+          GEMINI_VERSION=$(node -p "require('./packages/gemini-extension/package.json').version")
+          echo "Root CLI:              @switchbot/openapi-cli@$CLI_VERSION"
+          echo "Codex plugin:          @switchbot/codex-plugin@$CODEX_VERSION"
+          echo "OpenClaw plugin:       @switchbot/openclaw-skill@$OPENCLAW_VERSION"
+          echo "Claude Code plugin:    @switchbot/claude-code-plugin@$CLAUDE_CODE_VERSION"
+          echo "Gemini extension:      @switchbot/gemini-extension@$GEMINI_VERSION"
+          {
+            echo "cli_version=$CLI_VERSION"
+            echo "codex_version=$CODEX_VERSION"
+            echo "openclaw_version=$OPENCLAW_VERSION"
+            echo "claude_code_version=$CLAUDE_CODE_VERSION"
+            echo "gemini_version=$GEMINI_VERSION"
+          } >> "$GITHUB_OUTPUT"
+        id: versions
+
+      - name: Detect which packages need publishing
+        id: detect
+        env:
+          CLI_VERSION: ${{ steps.versions.outputs.cli_version }}
+          CODEX_VERSION: ${{ steps.versions.outputs.codex_version }}
+          OPENCLAW_VERSION: ${{ steps.versions.outputs.openclaw_version }}
+          CLAUDE_CODE_VERSION: ${{ steps.versions.outputs.claude_code_version }}
+          GEMINI_VERSION: ${{ steps.versions.outputs.gemini_version }}
+        run: |
+          # For each package, query npm; if the exact version is already published, skip.
+          check_unpublished() {
+            local name="$1"
+            local version="$2"
+            local found
+            found=$(npm view "${name}@${version}" version 2>/dev/null || true)
+            if [ "$found" = "$version" ]; then
+              echo "false"
+            else
+              echo "true"
+            fi
+          }
+          CLI_PUBLISH=$(check_unpublished "@switchbot/openapi-cli" "$CLI_VERSION")
+          CODEX_PUBLISH=$(check_unpublished "@switchbot/codex-plugin" "$CODEX_VERSION")
+          OPENCLAW_PUBLISH=$(check_unpublished "@switchbot/openclaw-skill" "$OPENCLAW_VERSION")
+          CLAUDE_CODE_PUBLISH=$(check_unpublished "@switchbot/claude-code-plugin" "$CLAUDE_CODE_VERSION")
+          GEMINI_PUBLISH=$(check_unpublished "@switchbot/gemini-extension" "$GEMINI_VERSION")
+          echo "cli_publish=$CLI_PUBLISH"
+          echo "codex_publish=$CODEX_PUBLISH"
+          echo "openclaw_publish=$OPENCLAW_PUBLISH"
+          echo "claude_code_publish=$CLAUDE_CODE_PUBLISH"
+          echo "gemini_publish=$GEMINI_PUBLISH"
+          {
+            echo "cli_publish=$CLI_PUBLISH"
+            echo "codex_publish=$CODEX_PUBLISH"
+            echo "openclaw_publish=$OPENCLAW_PUBLISH"
+            echo "claude_code_publish=$CLAUDE_CODE_PUBLISH"
+            echo "gemini_publish=$GEMINI_PUBLISH"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Verify codex-plugin tarball peerDep is a concrete range
+        if: steps.detect.outputs.codex_publish == 'true'
+        run: |
+          TARBALL=$(npm pack -w @switchbot/codex-plugin --pack-destination /tmp/ 2>&1 | tail -1)
+          PEER=$(tar -xOzf "/tmp/$TARBALL" package/package.json | node -e "
+            const p = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+            console.log(p.peerDependencies?.['@switchbot/openapi-cli'] || '');
+          ")
+          if [ -z "$PEER" ] || echo "$PEER" | grep -q "workspace:"; then
+            echo "FAIL: codex-plugin peerDep is missing or unrewritten workspace:* — got: '$PEER'"
+            exit 1
+          fi
+          echo "OK: codex-plugin peerDep = '$PEER'"
+          rm -f "/tmp/$TARBALL"
+
+      - name: Verify openclaw-skill tarball peerDep is a concrete range
+        if: steps.detect.outputs.openclaw_publish == 'true'
+        run: |
+          TARBALL=$(npm pack -w @switchbot/openclaw-skill --pack-destination /tmp/ 2>&1 | tail -1)
+          PEER=$(tar -xOzf "/tmp/$TARBALL" package/package.json | node -e "
+            const p = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+            console.log(p.peerDependencies?.['@switchbot/openapi-cli'] || '');
+          ")
+          if [ -z "$PEER" ] || echo "$PEER" | grep -q "workspace:"; then
+            echo "FAIL: openclaw-skill peerDep is missing or unrewritten workspace:* — got: '$PEER'"
+            exit 1
+          fi
+          echo "OK: openclaw-skill peerDep = '$PEER'"
+          rm -f "/tmp/$TARBALL"
+
+      - name: Verify claude-code-plugin tarball peerDep is a concrete range
+        if: steps.detect.outputs.claude_code_publish == 'true'
+        run: |
+          TARBALL=$(npm pack -w @switchbot/claude-code-plugin --pack-destination /tmp/ 2>&1 | tail -1)
+          PEER=$(tar -xOzf "/tmp/$TARBALL" package/package.json | node -e "
+            const p = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+            console.log(p.peerDependencies?.['@switchbot/openapi-cli'] || '');
+          ")
+          if [ -z "$PEER" ] || echo "$PEER" | grep -q "workspace:"; then
+            echo "FAIL: claude-code-plugin peerDep is missing or unrewritten workspace:* — got: '$PEER'"
+            exit 1
+          fi
+          echo "OK: claude-code-plugin peerDep = '$PEER'"
+          rm -f "/tmp/$TARBALL"
+
+      - name: Verify gemini-extension tarball peerDep is a concrete range
+        if: steps.detect.outputs.gemini_publish == 'true'
+        run: |
+          TARBALL=$(npm pack -w @switchbot/gemini-extension --pack-destination /tmp/ 2>&1 | tail -1)
+          PEER=$(tar -xOzf "/tmp/$TARBALL" package/package.json | node -e "
+            const p = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+            console.log(p.peerDependencies?.['@switchbot/openapi-cli'] || '');
+          ")
+          if [ -z "$PEER" ] || echo "$PEER" | grep -q "workspace:"; then
+            echo "FAIL: gemini-extension peerDep is missing or unrewritten workspace:* — got: '$PEER'"
+            exit 1
+          fi
+          echo "OK: gemini-extension peerDep = '$PEER'"
+          rm -f "/tmp/$TARBALL"
+
+      - name: Publish root CLI to npm
+        if: steps.detect.outputs.cli_publish == 'true' && inputs.dry_run != true
+        run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish codex-plugin to npm
+        id: publish_codex
+        if: steps.detect.outputs.codex_publish == 'true' && inputs.dry_run != true
+        continue-on-error: true
+        run: npm publish -w @switchbot/codex-plugin --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish openclaw-skill to npm
+        id: publish_openclaw
+        if: steps.detect.outputs.openclaw_publish == 'true' && inputs.dry_run != true
+        continue-on-error: true
+        run: npm publish -w @switchbot/openclaw-skill --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish claude-code-plugin to npm
+        id: publish_claude_code
+        if: steps.detect.outputs.claude_code_publish == 'true' && inputs.dry_run != true
+        continue-on-error: true
+        run: npm publish -w @switchbot/claude-code-plugin --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish gemini-extension to npm
+        id: publish_gemini
+        if: steps.detect.outputs.gemini_publish == 'true' && inputs.dry_run != true
+        continue-on-error: true
+        run: npm publish -w @switchbot/gemini-extension --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Annotate plugin publish failures
+        if: steps.detect.outputs.codex_publish == 'true' && steps.publish_codex.outcome == 'failure'
+        run: |
+          echo "::warning::codex-plugin publish step failed; root CLI promotion is unaffected. Investigate before next release."
+
+      - name: Annotate OpenClaw plugin publish failures
+        if: steps.detect.outputs.openclaw_publish == 'true' && steps.publish_openclaw.outcome == 'failure'
+        run: |
+          echo "::warning::openclaw-skill publish step failed; root CLI promotion is unaffected. Investigate before next release."
+
+      - name: Annotate Claude Code plugin publish failures
+        if: steps.detect.outputs.claude_code_publish == 'true' && steps.publish_claude_code.outcome == 'failure'
+        run: |
+          echo "::warning::claude-code-plugin publish step failed; root CLI promotion is unaffected. Investigate before next release."
+
+      - name: Annotate Gemini extension publish failures
+        if: steps.detect.outputs.gemini_publish == 'true' && steps.publish_gemini.outcome == 'failure'
+        run: |
+          echo "::warning::gemini-extension publish step failed; root CLI promotion is unaffected. Investigate before next release."

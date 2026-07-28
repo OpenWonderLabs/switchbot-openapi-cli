@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import chalk from 'chalk';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -11,6 +12,7 @@ import { DAILY_QUOTA, todayUsage } from '../utils/quota.js';
 import { AGENT_BOOTSTRAP_SCHEMA_VERSION } from './agent-bootstrap.js';
 import { CATALOG_SCHEMA_VERSION } from '../devices/catalog.js';
 import { createSwitchBotMcpServer, listRegisteredTools } from './mcp.js';
+import { TOOL_PROFILES } from '../mcp/tool-profiles.js';
 import { getReleaseMetadata } from '../version-notes.js';
 import { VERSION as currentVersion } from '../version.js';
 import {
@@ -22,10 +24,10 @@ import {
 import { validateLoadedPolicy } from '../policy/validate.js';
 import { selectCredentialStore } from '../credentials/keychain.js';
 import { getActiveProfile } from '../lib/request-context.js';
-import { readDaemonState } from '../lib/daemon-state.js';
-import { isPidAlive } from '../rules/pid-file.js';
+import { readDaemonState, DAEMON_PID_FILE } from '../lib/daemon-state.js';
+import { isPidAlive, readPidFile } from '../rules/pid-file.js';
 
-interface Check {
+export interface Check {
   name: string;
   status: 'ok' | 'warn' | 'fail';
   detail: string | Record<string, unknown>;
@@ -899,6 +901,7 @@ function checkMcp(): Check {
   try {
     const server = createSwitchBotMcpServer();
     const tools = listRegisteredTools(server);
+    const allToolCount = TOOL_PROFILES.all.size;
     return {
       name: 'mcp',
       status: 'ok',
@@ -907,7 +910,7 @@ function checkMcp(): Check {
         toolCount: tools.length,
         tools,
         transportsAvailable: ['stdio', 'http'],
-        message: `${tools.length} tools registered; no network probe`,
+        message: `${tools.length} tools registered (default profile; use 'mcp serve --tools all' for ${allToolCount}); no network probe`,
       },
     };
   } catch (err) {
@@ -979,6 +982,120 @@ function checkNotifyConnectivity(): Check {
   };
 }
 
+async function checkLocalLlmReachable(): Promise<Check> {
+  // Only run if a policy is configured AND it references provider: local
+  // (either at the global automation level or in any rule's llm condition).
+  // Otherwise this check is silently skipped — operators without local LLM
+  // setup shouldn't see warnings about an endpoint they don't use.
+  const policyPath = resolvePolicyPath();
+  let loaded: { data: unknown };
+  try {
+    loaded = loadPolicyFile(policyPath);
+  } catch {
+    return { name: 'local-llm-reachable', status: 'ok', detail: { present: false, message: 'no policy or policy unreadable — check skipped' } };
+  }
+  const policy = loaded.data as {
+    automation?: { rules?: unknown };
+  } | null;
+  const automation = policy?.automation;
+  const ruleArr = Array.isArray(automation?.rules) ? (automation.rules as Array<Record<string, unknown>>) : [];
+  const usesLocal = ruleArr.some((rule) => {
+    const conds = Array.isArray(rule.conditions) ? (rule.conditions as Array<Record<string, unknown>>) : [];
+    return conds.some((c) => {
+      const llm = c.llm as Record<string, unknown> | undefined;
+      return llm && llm.provider === 'local';
+    });
+  });
+
+  if (!usesLocal) {
+    return { name: 'local-llm-reachable', status: 'ok', detail: { applicable: false, message: 'no policy reference to provider:local — check skipped' } };
+  }
+
+  const baseUrl = (process.env.SWITCHBOT_LOCAL_LLM_URL ?? 'http://localhost:11434/v1').replace(/\/v1\/?$/, '').replace(/\/+$/, '');
+  const start = Date.now();
+  try {
+    const reachable = await probeLocalLlmEndpoint(baseUrl);
+    const latencyMs = Date.now() - start;
+    if (!reachable) {
+      return {
+        name: 'local-llm-reachable',
+        status: 'fail',
+        detail: { baseUrl, latencyMs, message: 'endpoint did not respond — start your local LLM server (e.g. `ollama serve`)' },
+      };
+    }
+    return { name: 'local-llm-reachable', status: 'ok', detail: { baseUrl, latencyMs } };
+  } catch (err) {
+    return {
+      name: 'local-llm-reachable',
+      status: 'fail',
+      detail: { baseUrl, message: err instanceof Error ? err.message : String(err) },
+    };
+  }
+}
+
+async function probeLocalLlmEndpoint(baseUrl: string): Promise<boolean> {
+  const httpMod = await import('node:http');
+  const httpsMod = await import('node:https');
+  return new Promise((resolve) => {
+    let url: URL;
+    try { url = new URL(baseUrl); } catch { resolve(false); return; }
+    const isHttps = url.protocol === 'https:';
+    const lib = isHttps ? httpsMod.default : httpMod.default;
+    const req = lib.request(
+      {
+        hostname: url.hostname,
+        port: url.port || (isHttps ? 443 : 80),
+        path: url.pathname || '/',
+        method: 'GET',
+        timeout: 3_000,
+      },
+      (res) => {
+        // Any HTTP response (even 404) means the server is reachable.
+        res.on('data', () => { /* drain */ });
+        res.on('end', () => resolve(true));
+        res.resume();
+      },
+    );
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+    req.end();
+  });
+}
+
+async function checkDaemonIpc(): Promise<Check> {
+  // Probes the JSON-RPC IPC socket exposed by `switchbot rules run`. Treats
+  // the absence of a daemon process as 'ok' (informational): the daemon being
+  // stopped is a valid configuration. A reachable daemon must answer
+  // daemon.status within a short timeout for the check to pass.
+  const daemonPid = readPidFile(DAEMON_PID_FILE);
+  if (!daemonPid || !isPidAlive(daemonPid)) {
+    return { name: 'daemon-ipc', status: 'ok', detail: { applicable: false, message: 'daemon not running — check skipped' } };
+  }
+
+  try {
+    const { IpcDaemonClient } = await import('../daemon/client.js');
+    const client = new IpcDaemonClient({ timeoutMs: 1_500, connectTimeoutMs: 500 });
+    const start = Date.now();
+    const result = await client.ping();
+    const latencyMs = Date.now() - start;
+    return {
+      name: 'daemon-ipc',
+      status: 'ok',
+      detail: {
+        socketPath: client.getSocketPath(),
+        latencyMs,
+        ipcStatus: result.status,
+      },
+    };
+  } catch (err) {
+    return {
+      name: 'daemon-ipc',
+      status: 'fail',
+      detail: { message: err instanceof Error ? err.message : String(err) },
+    };
+  }
+}
+
 
 interface CheckDef {
   name: string;
@@ -990,7 +1107,7 @@ interface DoctorRunOpts {
   probe: boolean;
 }
 
-const CHECK_REGISTRY: CheckDef[] = [
+export const CHECK_REGISTRY: CheckDef[] = [
   { name: 'node', description: 'Node.js version compatibility', run: () => checkNodeVersion() },
   { name: 'path', description: 'switchbot binary reachable on PATH', run: () => checkPathDiscoverability() },
   { name: 'credentials', description: 'credentials file present and parseable', run: () => checkCredentials() },
@@ -1015,6 +1132,8 @@ const CHECK_REGISTRY: CheckDef[] = [
   { name: 'daemon', description: 'daemon state file + runtime status', run: () => checkDaemon() },
   { name: 'health', description: 'health endpoint availability (daemon --healthz-port)', run: () => checkHealthEndpoint() },
   { name: 'notify-connectivity', description: 'webhook URLs from notify actions in policy.yaml', run: () => checkNotifyConnectivity() },
+  { name: 'local-llm-reachable', description: 'local LLM endpoint reachable (only when policy uses provider:local)', run: () => checkLocalLlmReachable() },
+  { name: 'daemon-ipc', description: 'daemon JSON-RPC IPC socket reachable (only when daemon is running)', run: () => checkDaemonIpc() },
 ];
 
 interface FixResult {
@@ -1074,6 +1193,41 @@ interface DoctorCliOptions {
   yes?: boolean;
   probe?: boolean;
   quiet?: boolean;
+}
+
+export async function runDoctorChecks(
+  sections: readonly string[],
+  opts: DoctorRunOpts = { probe: false },
+): Promise<Check[]> {
+  const selected = CHECK_REGISTRY.filter((c) => sections.includes(c.name));
+  const checks: Check[] = [];
+  for (const def of selected) {
+    checks.push(await def.run(opts));
+  }
+  return checks;
+}
+
+/**
+ * Shared check-list formatter used by `switchbot doctor` (when run via this
+ * file's CLI handler, see below) and by `switchbot codex doctor` /
+ * `switchbot codex repair` / `switchbot codex setup`. Produces the chalk
+ * coloured tick/bang/cross output with a 24-wide name column.
+ */
+export function formatDoctorChecks(checks: Check[], quiet: boolean): void {
+  for (const c of checks) {
+    if (quiet && c.status === 'ok') continue;
+    const icon =
+      c.status === 'ok'   ? chalk.green('✓') :
+      c.status === 'warn' ? chalk.yellow('!') :
+                            chalk.red('✗');
+    const detailStr =
+      typeof c.detail === 'string'
+        ? c.detail
+        : typeof (c.detail as { message?: unknown }).message === 'string'
+          ? (c.detail as { message: string }).message
+          : JSON.stringify(c.detail);
+    console.log(`${icon} ${c.name.padEnd(24)} ${detailStr}`);
+  }
 }
 
 export function registerDoctorCommand(program: Command): void {

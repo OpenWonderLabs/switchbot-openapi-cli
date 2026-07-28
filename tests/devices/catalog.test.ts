@@ -170,6 +170,8 @@ const OFFICIAL_SUPPORTED_DEVICE_LIST_NAMES = [
   'Keypad Vision',
   'Keypad Vision Pro',
   'Lock Ultra',
+  'Lock Vision',
+  'Lock Vision Pro',
   'Standing Circulator Fan',
   'Pan/Tilt Cam Plus 2K',
   'Pan/Tilt Cam Plus 3K',
@@ -177,11 +179,9 @@ const OFFICIAL_SUPPORTED_DEVICE_LIST_NAMES = [
   'Candle Warmer Lamp',
   'Home Climate Panel',
   'Smart Radiator Thermostat',
-  'AI Art Frame',
   'Weather Station',
+  'AI Art Frame',
   'Lock Pro Matter Enabled',
-  'Lock Vision',
-  'Lock Vision Pro',
   'Permanent Outdoor Lights',
   'RGBICWW Ceiling Light',
   'Battery Circulator Fan 2 Pro',
@@ -303,6 +303,36 @@ describe('devices/catalog', () => {
       expect(tierOf('Smart Lock', 'unlock')).toBe('destructive');
       expect(tierOf('Smart Lock Lite', 'unlock')).toBe('destructive');
       expect(tierOf('Smart Lock Ultra', 'unlock')).toBe('destructive');
+    });
+
+    it('Lock Vision and Lock Vision Pro unlock are safetyTier: destructive', () => {
+      expect(tierOf('Lock Vision', 'unlock')).toBe('destructive');
+      expect(tierOf('Lock Vision Pro', 'unlock')).toBe('destructive');
+    });
+
+    it('AI Art Frame uploadImage is idempotent and exposes a URL example', () => {
+      const cmd = commandOf('AI Art Frame', 'uploadImage');
+      expect(cmd, 'AI Art Frame should expose an uploadImage command').toBeDefined();
+      expect(cmd?.idempotent).toBe(true);
+      expect(cmd?.parameter).toBeTruthy();
+      expect(cmd?.exampleParams?.[0]).toMatch(/^https:\/\//);
+    });
+
+    it('Smart Lock Pro Wifi is a distinct Matter-enabled entry, not merely an alias of Smart Lock', () => {
+      const match = findCatalogEntry('Smart Lock Pro Wifi');
+      expect(match).not.toBeNull();
+      expect(Array.isArray(match)).toBe(false);
+      const entry = match as { type: string; commands: { command: string }[] } | null;
+      expect(entry?.type).toBe('Smart Lock Pro Wifi');
+      expect(entry?.commands.some((c) => c.command === 'nightLatchUnlock')).toBe(true);
+    });
+
+    it('Weather Station resolves to the WeatherStation entry with documented status fields', () => {
+      const match = findCatalogEntry('Weather Station');
+      expect(match).not.toBeNull();
+      const entry = match as { type: string; statusFields: string[] } | null;
+      expect(entry?.type).toBe('WeatherStation');
+      expect(entry?.statusFields).toEqual(['temperature', 'humidity', 'battery', 'version']);
     });
 
     it('Garage Door Opener turnOn and turnOff are safetyTier: destructive', () => {

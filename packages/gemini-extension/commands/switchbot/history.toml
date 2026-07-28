@@ -1,0 +1,13 @@
+description = "Show device history and trends (temperature, humidity, power events, etc.)"
+prompt = """
+Show the history and trends for the SwitchBot device the user names. Resolve the device name
+to a deviceId (alias → exact → prefix → substring → fuzzy).
+
+Use device_history (mode="raw") to see recent state changes. If the user asks about trends or statistics,
+use device_history (mode="aggregate") with appropriate metrics (temperature, humidity, power, battery)
+and time range (default: last 24h). For specific time queries use device_history (mode="query") with
+the since parameter (e.g. "7d", "1h", "30m").
+
+Present the data as a summary with key stats and notable events.
+User input: {{args}}
+"""

@@ -3,6 +3,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+const keychainMock = vi.hoisted(() => vi.fn());
+
+vi.mock('../../src/credentials/keychain.js', () => ({
+  selectCredentialStore: keychainMock,
+}));
+
 const configMock = vi.hoisted(() => ({
   saveConfig: vi.fn(),
   showConfig: vi.fn(),
@@ -12,6 +18,51 @@ const configMock = vi.hoisted(() => ({
 }));
 
 vi.mock('../../src/config.js', () => configMock);
+
+// Mocks for onCredentialChange side-effects so we can assert all four
+// cache-clear functions are called on credential mutations.
+const clearCacheMock = vi.hoisted(() => vi.fn());
+const clearStatusCacheMock = vi.hoisted(() => vi.fn());
+
+vi.mock('../../src/devices/cache.js', async () => {
+  const actual = await vi.importActual<typeof import('../../src/devices/cache.js')>(
+    '../../src/devices/cache.js',
+  );
+  return {
+    ...actual,
+    clearCache: (...args: unknown[]) => clearCacheMock(...args),
+    clearStatusCache: (...args: unknown[]) => clearStatusCacheMock(...args),
+  };
+});
+
+const clearPrimedCredsMock = vi.hoisted(() => vi.fn());
+
+vi.mock('../../src/credentials/prime.js', async () => {
+  const actual = await vi.importActual<typeof import('../../src/credentials/prime.js')>(
+    '../../src/credentials/prime.js',
+  );
+  return {
+    ...actual,
+    clearPrimedCredentials: (...args: unknown[]) => clearPrimedCredsMock(...args),
+  };
+});
+
+const idempotencyClearForProfileMock = vi.hoisted(() => vi.fn());
+
+vi.mock('../../src/lib/idempotency.js', async () => {
+  const actual = await vi.importActual<typeof import('../../src/lib/idempotency.js')>(
+    '../../src/lib/idempotency.js',
+  );
+  return {
+    ...actual,
+    idempotencyCache: {
+      clearForProfile: (...args: unknown[]) => idempotencyClearForProfileMock(...args),
+      clear: vi.fn(),
+      run: vi.fn(),
+      size: vi.fn(() => 0),
+    },
+  };
+});
 
 import { registerConfigCommand } from '../../src/commands/config.js';
 import { runCli } from '../helpers/cli.js';
@@ -25,6 +76,10 @@ describe('config command', () => {
     configMock.getConfigSummary.mockReturnValue({ source: 'none' });
     configMock.listProfiles.mockReset();
     configMock.listProfiles.mockReturnValue([]);
+    clearCacheMock.mockReset();
+    clearStatusCacheMock.mockReset();
+    clearPrimedCredsMock.mockReset();
+    idempotencyClearForProfileMock.mockReset();
   });
 
   describe('set-token', () => {
@@ -62,6 +117,56 @@ describe('config command', () => {
       expect(configMock.saveConfig).not.toHaveBeenCalled();
       expect(res.exitCode).toBe(2);
       expect(res.stderr.join('\n').toLowerCase()).toMatch(/missing token\/secret/);
+    });
+
+    it('passes --label to saveConfig', async () => {
+      const res = await runCli(registerConfigCommand, [
+        'config', 'set-token', 'MY_T', 'MY_S', '--label', 'home',
+      ]);
+      expect(configMock.saveConfig).toHaveBeenCalledWith(
+        'MY_T', 'MY_S',
+        expect.objectContaining({ label: 'home' }),
+      );
+      expect(res.exitCode).toBeNull();
+    });
+
+    it('passes --daily-cap as a numeric limit to saveConfig', async () => {
+      const res = await runCli(registerConfigCommand, [
+        'config', 'set-token', 'MY_T', 'MY_S', '--daily-cap', '200',
+      ]);
+      expect(configMock.saveConfig).toHaveBeenCalledWith(
+        'MY_T', 'MY_S',
+        expect.objectContaining({ limits: { dailyCap: 200 } }),
+      );
+      expect(res.exitCode).toBeNull();
+    });
+
+    it('passes --default-flags as a split array to saveConfig', async () => {
+      const res = await runCli(registerConfigCommand, [
+        'config', 'set-token', 'MY_T', 'MY_S', '--default-flags', 'audit-log,verbose',
+      ]);
+      expect(configMock.saveConfig).toHaveBeenCalledWith(
+        'MY_T', 'MY_S',
+        expect.objectContaining({ defaults: { flags: ['audit-log', 'verbose'] } }),
+      );
+      expect(res.exitCode).toBeNull();
+    });
+
+    it('clears all four caches after saving credentials', async () => {
+      const res = await runCli(registerConfigCommand, ['config', 'set-token', 'T', 'S']);
+      expect(res.exitCode).toBeNull();
+      expect(clearCacheMock).toHaveBeenCalledOnce();
+      expect(clearStatusCacheMock).toHaveBeenCalledOnce();
+      expect(clearPrimedCredsMock).toHaveBeenCalledOnce();
+      expect(idempotencyClearForProfileMock).toHaveBeenCalledOnce();
+    });
+
+    it('does not clear caches when set-token fails (missing token)', async () => {
+      await runCli(registerConfigCommand, ['config', 'set-token']);
+      expect(clearCacheMock).not.toHaveBeenCalled();
+      expect(clearStatusCacheMock).not.toHaveBeenCalled();
+      expect(clearPrimedCredsMock).not.toHaveBeenCalled();
+      expect(idempotencyClearForProfileMock).not.toHaveBeenCalled();
     });
   });
 
@@ -174,6 +279,7 @@ describe('config command', () => {
   });
 
   describe('agent-profile', () => {
+
     let tmpHome: string;
     let homedirSpy: ReturnType<typeof vi.spyOn>;
 
@@ -254,5 +360,69 @@ describe('config command', () => {
       expect(typeof data.path).toBe('string');
       expect(data.template.label).toBe('agent');
     });
+  });
+});
+
+describe('set-token platform keychain hint', () => {
+  let savedPlatformDescriptor: PropertyDescriptor | undefined;
+
+  beforeEach(() => {
+    configMock.saveConfig.mockReset();
+    keychainMock.mockReset();
+    savedPlatformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+    keychainMock.mockResolvedValue({
+      name: 'file',
+      describe: () => ({ backend: 'file', tag: 'file', writable: true }),
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    });
+  });
+
+  afterEach(() => {
+    if (savedPlatformDescriptor) {
+      Object.defineProperty(process, 'platform', savedPlatformDescriptor);
+    }
+  });
+
+  it('emits native-keychain tip to stderr on darwin when backend is file', async () => {
+    Object.defineProperty(process, 'platform', {
+      value: 'darwin',
+      configurable: true,
+      writable: false,
+    });
+    const res = await runCli(registerConfigCommand, ['config', 'set-token', 'T', 'S']);
+    expect(res.exitCode).toBeNull();
+    expect(res.stderr.join('\n')).toContain('native keychain');
+  });
+
+  it('emits GNOME Keyring tip to stderr on linux when backend is file', async () => {
+    Object.defineProperty(process, 'platform', {
+      value: 'linux',
+      configurable: true,
+      writable: false,
+    });
+    const res = await runCli(registerConfigCommand, ['config', 'set-token', 'T', 'S']);
+    expect(res.exitCode).toBeNull();
+    expect(res.stderr.join('\n')).toContain('GNOME Keyring');
+  });
+
+  it('emits no keychain tip when the backend is not file', async () => {
+    Object.defineProperty(process, 'platform', {
+      value: 'darwin',
+      configurable: true,
+      writable: false,
+    });
+    keychainMock.mockResolvedValue({
+      name: 'keychain',
+      describe: () => ({ backend: 'keychain', tag: 'keychain', writable: true }),
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    });
+    const res = await runCli(registerConfigCommand, ['config', 'set-token', 'T', 'S']);
+    expect(res.exitCode).toBeNull();
+    expect(res.stderr.join('\n')).not.toContain('native keychain');
+    expect(res.stderr.join('\n')).not.toContain('GNOME');
   });
 });

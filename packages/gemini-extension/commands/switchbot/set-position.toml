@@ -1,0 +1,13 @@
+description = "Set position of a SwitchBot Curtain or Blind (0=open, 100=closed)"
+prompt = """
+Set the position of the SwitchBot Curtain, Blind Tilt, or Roller Shade the user names.
+Resolve the device name to a deviceId (alias → exact → prefix → substring → fuzzy). Verify
+the device supports "setPosition" via describe_device. This is a mutation-tier command.
+
+Parameter is 0-100 where 0=fully open and 100=fully closed. Convert natural language:
+- "half open" / "50%" → 50, "mostly closed" → 80, "crack open" → 10
+
+Use the send_command MCP tool with command "setPosition" and the numeric parameter.
+Report the result.
+User input: {{args}}
+"""

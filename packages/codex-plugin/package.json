@@ -1,0 +1,56 @@
+{
+  "name": "@switchbot/codex-plugin",
+  "version": "0.1.6",
+  "type": "module",
+  "description": "SwitchBot Codex plugin — wires Codex to the SwitchBot CLI MCP server (default 17 tools; `--tools all` for 28)",
+  "homepage": "https://github.com/OpenWonderLabs/switchbot-openapi-cli/tree/main/packages/codex-plugin",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OpenWonderLabs/switchbot-openapi-cli.git",
+    "directory": "packages/codex-plugin"
+  },
+  "bugs": "https://github.com/OpenWonderLabs/switchbot-openapi-cli/issues",
+  "license": "MIT",
+  "keywords": [
+    "codex",
+    "switchbot",
+    "smart-home",
+    "iot",
+    "mcp"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "switchbot-codex-auth": "./bin/auth.js",
+    "switchbot-codex-install": "./bin/install.js"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "setup/",
+    "skills/",
+    ".codex-plugin/",
+    ".agents/plugins/",
+    "plugins/",
+    "marketplace.json",
+    ".mcp.json",
+    "README.md"
+  ],
+  "peerDependencies": {
+    "@switchbot/openapi-cli": ">=3.7.1"
+  },
+  "peerDependenciesMeta": {
+    "@switchbot/openapi-cli": {
+      "optional": true
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "prepare": "node scripts/sync-skill.mjs",
+    "test": "node --test",
+    "typecheck": "node --check bin/auth.js && node --check bin/install.js"
+  }
+}

@@ -9,7 +9,7 @@ import {
   getCommandSafetyReason,
   DeviceCatalogEntry,
 } from '../devices/catalog.js';
-import { getCachedDevice, loadCache } from '../devices/cache.js';
+import { getCachedDevice, loadCache, getCachedStatusEntry } from '../devices/cache.js';
 import { loadDeviceMeta } from '../devices/device-meta.js';
 import { resolveDeviceId, NameResolveStrategy, ALL_STRATEGIES } from '../utils/name-resolver.js';
 import {
@@ -31,10 +31,11 @@ import { registerWatchCommand } from './watch.js';
 import { registerExplainCommand } from './explain.js';
 import { registerExpandCommand } from './expand.js';
 import { registerDevicesMetaCommand } from './device-meta.js';
-import { isDryRun } from '../utils/flags.js';
+import { isDryRun, getCacheMode } from '../utils/flags.js';
 import { DryRunSignal } from '../api/client.js';
 import { resolveField, resolveFieldList, listSupportedFieldInputs } from '../schema/field-aliases.js';
 import { allowsDirectDestructiveExecution, destructiveExecutionHint } from '../lib/destructive-mode.js';
+import { DEVICE_FIELD_ALIAS, DEVICE_ALL_COLS } from './devices-columns.js';
 
 const EXPAND_HINTS: Record<string, { command: string; flags: string }> = {
   'Air Conditioner':  { command: 'setAll',      flags: '--temp 26 --mode cool --fan low --power on' },
@@ -106,7 +107,7 @@ Run any subcommand with --help for its own flags and examples.
     .alias('ls')
     .description('List all physical devices and IR remote devices on the account')
     .addHelpText('after', `
-Default columns: deviceId, deviceName, type, category
+Default columns: deviceId, deviceName, type, category, family, room
 Pass --wide for the full operator view: + controlType, family, roomID, room, hub, cloud
 --fields accepts any subset of all column names (exit 2 on unknown names).
 
@@ -137,6 +138,11 @@ Examples:
   $ switchbot devices list --filter name=living,category=physical
   $ switchbot devices list --filter 'name~living'              # explicit substring
   $ switchbot devices list --filter 'type=/Air.*/'             # regex (case-insensitive)
+
+Cache note:
+  --cache is a global flag and must be placed BEFORE the subcommand:
+    switchbot --cache 5m devices list    ✓
+    switchbot devices list --cache 5m    ✗ (silently ignored)
 `)
     .option('--wide', 'Show all columns (controlType, family, roomID, room, hub, cloud)')
     .option('--show-hidden', 'Include devices hidden via "devices meta set --hide"')
@@ -200,6 +206,47 @@ Examples:
         };
 
         if (fmt === 'json' && process.argv.includes('--json')) {
+          const jsonFields = resolveFields();
+
+          if (jsonFields) {
+            const unknown = jsonFields.filter(k => !DEVICE_ALL_COLS.has(DEVICE_FIELD_ALIAS[k] ?? k));
+            if (unknown.length) {
+              exitWithError({ code: 2, kind: 'usage', message: `Unknown --fields value(s): ${unknown.join(', ')}` });
+            }
+          }
+
+          const normPhysical = (d: typeof deviceList[0]): Record<string, unknown> => ({
+            deviceId: d.deviceId, deviceName: d.deviceName,
+            type: d.deviceType || d.controlType || 'Unknown Device',
+            category: 'physical', controlType: d.controlType || '—',
+            family: d.familyName || '—', roomID: d.roomID || '—', room: d.roomName || '—',
+            hub: !d.hubDeviceId || d.hubDeviceId === '000000000000' ? '—' : d.hubDeviceId,
+            cloud: d.enableCloudService ?? null,
+            alias: deviceMeta.devices[d.deviceId]?.alias ?? '—',
+          });
+          const normIr = (d: typeof infraredRemoteList[0]): Record<string, unknown> => {
+            const inh = hubLocation.get(d.hubDeviceId);
+            return {
+              deviceId: d.deviceId, deviceName: d.deviceName,
+              type: d.remoteType, category: 'ir', controlType: d.controlType || '—',
+              family: inh?.family || '—', roomID: inh?.roomID || '—', room: inh?.room || '—',
+              hub: d.hubDeviceId, cloud: null,
+              alias: deviceMeta.devices[d.deviceId]?.alias ?? '—',
+            };
+          };
+          const project = jsonFields
+            ? (norm: Record<string, unknown>) =>
+                Object.fromEntries(jsonFields.map(k => {
+                  // Always emit the canonical key. Without this, --json --fields id,name
+                  // would echo the alias keys (id/name) while --format json --fields id,name
+                  // still emits canonical (deviceId/deviceName) — making the output schema
+                  // depend on which form the caller used. Canonicalize here so consumers
+                  // see a stable shape regardless of input alias.
+                  const canonical = DEVICE_FIELD_ALIAS[k] ?? k;
+                  return [canonical, norm[canonical] ?? null];
+                }))
+            : (norm: Record<string, unknown>) => norm;
+
           if (listClauses) {
             const filteredDeviceList = deviceList.filter((d) =>
               matchesFilter({ deviceId: d.deviceId, type: d.deviceType || '', name: d.deviceName, category: 'physical', room: d.roomName || '', controlType: d.controlType || '', family: d.familyName || '', hub: d.hubDeviceId || '', roomID: d.roomID || '', cloud: String(d.enableCloudService), alias: deviceMeta.devices[d.deviceId]?.alias || '' })
@@ -208,14 +255,22 @@ Examples:
               const inherited = hubLocation.get(d.hubDeviceId);
               return matchesFilter({ deviceId: d.deviceId, type: d.remoteType, name: d.deviceName, category: 'ir', room: inherited?.room || '', controlType: d.controlType || '', family: inherited?.family || '', hub: d.hubDeviceId || '', roomID: inherited?.roomID || '', cloud: '', alias: deviceMeta.devices[d.deviceId]?.alias || '' });
             });
-            printJson({ ok: true, deviceList: filteredDeviceList, infraredRemoteList: filteredIrList });
+            printJson({
+              ok: true,
+              deviceList: jsonFields ? filteredDeviceList.map(d => project(normPhysical(d))) : filteredDeviceList,
+              infraredRemoteList: jsonFields ? filteredIrList.map(d => project(normIr(d))) : filteredIrList,
+            });
           } else {
-            printJson({ ok: true, ...(body as object) });
+            printJson({
+              ok: true,
+              deviceList: jsonFields ? deviceList.map(d => project(normPhysical(d))) : deviceList,
+              infraredRemoteList: jsonFields ? infraredRemoteList.map(d => project(normIr(d))) : infraredRemoteList,
+            });
           }
           return;
         }
 
-        const narrowHeaders = ['deviceId', 'deviceName', 'type', 'category'];
+        const narrowHeaders = ['deviceId', 'deviceName', 'type', 'category', 'family', 'room'];
         const wideHeaders = ['deviceId', 'deviceName', 'type', 'category', 'controlType', 'family', 'roomID', 'room', 'hub', 'cloud', 'alias'];
         const userFields = resolveFields();
         const headers = userFields ? wideHeaders : (options.wide ? wideHeaders : narrowHeaders);
@@ -265,22 +320,7 @@ Examples:
 
         const defaultFields = options.wide ? undefined : narrowHeaders;
         // Accept API field names and short aliases alongside canonical column names
-        const DEVICE_LIST_ALIASES: Record<string, string> = {
-          id: 'deviceId',
-          name: 'deviceName',
-          deviceType: 'type',
-          type: 'type',
-          roomName: 'room',
-          familyName: 'family',
-          hubDeviceId: 'hub',
-          enableCloudService: 'cloud',
-          controlType: 'controlType',
-          deviceName: 'deviceName',
-          deviceId: 'deviceId',
-          category: 'category',
-          alias: 'alias',
-        };
-        renderRows(wideHeaders, rows, fmt, userFields ?? defaultFields, DEVICE_LIST_ALIASES);
+        renderRows(wideHeaders, rows, fmt, userFields ?? defaultFields, DEVICE_FIELD_ALIAS);
         if (fmt === 'table') {
           const totalLabel = listClauses
             ? `${rows.length} match(es) (${deviceList.length} physical + ${infraredRemoteList.length} IR before filter)`
@@ -304,6 +344,7 @@ Examples:
     .option('--name-category <cat>', 'Narrow --name by category: physical|ir', enumArg('--name-category', ['physical', 'ir'] as const))
     .option('--name-room <room>', 'Narrow --name by room name (substring match)', stringArg('--name-room'))
     .option('--ids <list>', 'Comma-separated device IDs for batch status (incompatible with --name)', stringArg('--ids'))
+    .option('--strict', 'Exit 1 if any device status fetch fails (batch mode only)')
     .addHelpText('after', `
 Status fields vary by device type. To discover them without a live call:
 
@@ -322,8 +363,13 @@ Examples:
   $ switchbot devices status ABC123DEF456 --json | jq '.data.battery'
   $ switchbot devices status --ids ABC123,DEF456,GHI789
   $ switchbot devices status --ids ABC123,DEF456 --fields power,battery
+
+Cache note:
+  --cache is a global flag and must be placed BEFORE the subcommand:
+    switchbot --cache 5m devices status <id>    ✓
+    switchbot devices status <id> --cache 5m    ✗ (silently ignored)
 `)
-    .action(async (deviceIdArgs: string[], options: { name?: string; nameStrategy?: string; nameType?: string; nameCategory?: 'physical' | 'ir'; nameRoom?: string; ids?: string }) => {
+    .action(async (deviceIdArgs: string[], options: { name?: string; nameStrategy?: string; nameType?: string; nameCategory?: 'physical' | 'ir'; nameRoom?: string; ids?: string; strict?: boolean }) => {
       try {
         // Batch mode: --ids id1,id2,id3 OR multiple positional args
         const batchIds = options.ids
@@ -367,6 +413,7 @@ Examples:
               }
             }
           }
+          if (options.strict && batch.some((e) => !(e as { ok: boolean }).ok)) process.exitCode = 1;
           return;
         }
 
@@ -376,8 +423,19 @@ Examples:
           category: options.nameCategory,
           room: options.nameRoom,
         });
-        const body = annotateStatusPayload(deviceId, await fetchDeviceStatus(deviceId));
-        const fetchedAt = new Date().toISOString();
+
+        if (options.strict) {
+          // --strict is batch-only: single-device fetches have no ok-flag array to evaluate,
+          // so there is nothing to translate into a non-zero exit code.
+          console.error('warning: --strict has no effect without --ids or multiple device IDs (batch mode only)');
+        }
+        const mode = getCacheMode();
+        const cacheEntry = mode.statusTtlMs > 0
+          ? getCachedStatusEntry(deviceId, mode.statusTtlMs)
+          : null;
+        const rawStatus = cacheEntry ? cacheEntry.body : await fetchDeviceStatus(deviceId);
+        const fetchedAt = cacheEntry ? cacheEntry.fetchedAt : new Date().toISOString();
+        const body = annotateStatusPayload(deviceId, rawStatus);
         const fmt = resolveFormat();
 
         if (fmt === 'json' && process.argv.includes('--json')) {

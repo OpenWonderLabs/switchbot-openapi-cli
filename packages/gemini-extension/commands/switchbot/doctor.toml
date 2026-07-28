@@ -1,0 +1,7 @@
+description = "Check SwitchBot integration health: CLI version, credentials, MCP server, quota"
+prompt = """
+Run a health check on the SwitchBot integration. Execute: switchbot doctor --json
+Parse the output and report: CLI version, credential status, MCP server status, and quota usage.
+Flag any failures with remediation hints. If the CLI is not found, instruct the user to run:
+  npm install -g @switchbot/openapi-cli
+"""

@@ -1,6 +1,6 @@
 {
   "name": "@switchbot/openapi-cli",
-  "version": "3.6.1",
+  "version": "3.8.0",
   "description": "SwitchBot smart home CLI — control devices, run scenes, stream real-time events, and integrate AI agents via MCP. Full API v1.1 coverage.",
   "keywords": [
     "switchbot",
@@ -35,8 +35,13 @@
   "publishConfig": {
     "access": "public"
   },
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "typecheck:workspaces": "npm run typecheck --workspaces --if-present",
+    "typecheck:all": "npm run typecheck && npm run typecheck:workspaces",
     "build": "node scripts/build.mjs",
     "dev": "tsx src/index.ts",
     "hooks:install": "node scripts/install-git-hooks.mjs",
@@ -46,40 +51,50 @@
     "prepare": "node scripts/install-git-hooks.mjs",
     "start": "node dist/index.js",
     "smoke:pack-install": "node scripts/smoke-pack-install.mjs",
+    "smoke:codex-pack-install": "node scripts/smoke-codex-pack-install.mjs",
+    "smoke:codex-git-sparse": "node scripts/smoke-codex-git-sparse.mjs",
+    "smoke:codex-temp-prefix-route-a": "node scripts/smoke-codex-temp-prefix-route-a.mjs",
+    "smoke:codex-route-b-live": "node scripts/smoke-codex-route-b-live.mjs",
+    "smoke:claude-code-pack-install": "node scripts/smoke-claude-code-pack-install.mjs",
+    "smoke:gemini-extension-lint": "node scripts/smoke-gemini-extension-lint.mjs",
     "test": "vitest run",
+    "test:workspaces": "npm test --workspaces --if-present",
+    "test:all": "npm test && npm run test:workspaces",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:release-smoke:manual": "npm test -- tests/commands/policy.test.ts tests/commands/devices.test.ts tests/commands/explain.test.ts tests/commands/doctor.test.ts tests/commands/mcp.test.ts tests/commands/health-check.test.ts tests/commands/quota.test.ts tests/commands/status-sync.test.ts tests/status-sync/smoke.test.ts tests/commands/watch.test.ts tests/commands/events.test.ts tests/devices/catalog-fidelity.test.ts tests/commands/schema.test.ts tests/commands/auth.test.ts tests/commands/config.test.ts tests/commands/scenes.test.ts tests/commands/batch.test.ts tests/commands/history.test.ts tests/commands/expand.test.ts tests/commands/webhook.test.ts tests/commands/daemon.test.ts tests/commands/upgrade-check.test.ts tests/commands/install.test.ts tests/commands/uninstall.test.ts tests/commands/rules.test.ts tests/commands/plan.test.ts",
-    "verify:pre-commit": "npm run build && npm test -- tests/version.test.ts",
-    "verify:pre-push": "npm run build && npm test -- tests/version.test.ts && npm run smoke:pack-install",
+    "verify:pre-commit": "npm run build && npm test -- tests/version.test.ts tests/install/codex-checks.test.ts tests/commands/codex.test.ts && npm run test:workspaces",
+    "verify:release-gate": "npm run build && npm test -- tests/version.test.ts tests/install/codex-checks.test.ts tests/commands/codex.test.ts && npm run test:workspaces && npm run smoke:pack-install && npm run smoke:codex-pack-install && npm run smoke:codex-git-sparse && npm run smoke:codex-temp-prefix-route-a && npm run smoke:codex-route-b-live && npm run smoke:claude-code-pack-install && npm run smoke:gemini-extension-lint",
+    "verify:pre-push": "npm run verify:release-gate",
     "verify:release": "node scripts/verify-release.mjs",
-    "prepublishOnly": "npm test && npm run build && npm run smoke:pack-install"
+    "prepublishOnly": "npm run verify:release-gate"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
-    "ajv": "^8.18.0",
-    "ajv-formats": "^3.0.1",
     "axios": "^1.7.9",
-    "chalk": "^5.4.1",
-    "cli-table3": "^0.6.5",
-    "commander": "^12.1.0",
-    "croner": "^10.0.1",
-    "js-yaml": "^4.1.1",
     "mqtt": "^5.3.0",
-    "pino": "^9.0.0",
-    "uuid": "^11.0.5",
-    "yaml": "^2.8.3",
-    "zod": "^4.3.6"
+    "open": "^10.2.0",
+    "pino": "^9.0.0"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.10.7",
     "@types/uuid": "^10.0.0",
     "@vitest/coverage-v8": "^2.1.9",
+    "ajv": "^8.18.0",
+    "ajv-formats": "^3.0.1",
+    "chalk": "^5.4.1",
+    "cli-table3": "^0.6.5",
+    "commander": "^12.1.0",
+    "croner": "^10.0.1",
     "esbuild": "^0.28.0",
+    "js-yaml": "^4.1.1",
     "markdownlint-cli": "^0.48.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
-    "vitest": "^2.1.9"
+    "uuid": "^11.0.5",
+    "vitest": "^2.1.9",
+    "yaml": "^2.8.3",
+    "zod": "^4.3.6"
   }
 }

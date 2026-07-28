@@ -1,0 +1,14 @@
+{
+  "name": "switchbot",
+  "displayName": "SwitchBot",
+  "version": "0.1.0",
+  "description": "Control SwitchBot smart-home devices from Claude Code via MCP.",
+  "author": {
+    "name": "OpenWonderLabs"
+  },
+  "repository": "https://github.com/OpenWonderLabs/switchbot-openapi-cli",
+  "homepage": "https://github.com/OpenWonderLabs/switchbot-openapi-cli",
+  "license": "MIT",
+  "keywords": ["switchbot", "smart-home", "iot", "mcp"],
+  "skills": "./skills/"
+}

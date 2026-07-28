@@ -7,27 +7,215 @@ All notable changes to `@switchbot/openapi-cli` are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Fixed
-
-- **Daemon start failed in bundled builds** (BUG-001): CLI entry path resolution navigated above the dist/ directory when running from the single-file bundle. Now correctly detects the bundled scenario.
-- **`rules run` exited 0 when `automation.enabled` was false** (BUG-002): daemon interpreted this as success. Now exits 1 with a clear message.
-- **Unknown subcommands exited 0** (BUG-005/BUG-008): `cache list`, `history list`, and other invalid subcommand inputs triggered Commander help display and exited 0. Now exits 2 (usage error).
-- **`mcp tools --json` omitted description and inputSchema** (BUG-007): tool directory only listed names. Now includes full tool metadata.
-- **Pino logger wrote to stdout** (BUG-009): redirected to stderr so it doesn't corrupt JSON/MCP output.
-
-### Changed (Breaking)
-
-- **`schemaVersion` bumped from `1.1` to `1.2`**: all `--json` responses now carry `schemaVersion: "1.2"`. Consumers that pin on the exact string must update their check. Parsers that only read `data`/`error` are unaffected.
-- **`catalog show <Type> --json`**: `data` is now always an array (single-entry array when filtering by type). Previously was a bare object for single-type queries.
-- **`devices commands <Type> --json`**: same change — `data` is always an array.
-- **`_fetchedAt` renamed to `fetchedAt`**: removed underscore prefix from the CLI-added timestamp field in `devices status` JSON output.
-- **`rules run --json` when `automation.enabled` is false**: previously emitted `{data: {kind:"control", controlKind:"disabled"}}` (success envelope) with exit 1. Now emits `{error: {code:1, kind:"runtime", message:"..."}}` (error envelope) — consistent with the JSON protocol.
+## [3.8.0]
 
 ### Added
 
-- **`devices expand` supports lighting commands**: `setBrightness` (`--brightness`), `setColor` (`--color`), and `setColorTemperature` (`--color-temp`) flags now expand for Color Bulb, Strip Light, Ceiling Light, and similar devices.
+- **AI MindClip support** — new device catalog entry, CLI command group (`switchbot mindclip recordings/recording/summary/todos/daily/weekly/urgent-todos`), and 3 MCP tools: `mindclip_recordings`, `mindclip_list_todos`, `mindclip_recall`.
+
+### Changed
+
+- **`device_history` MCP consolidation** — `get_device_history` / `query_device_history` / `aggregate_device_history` merged into a single `device_history` tool with a `mode: "raw" | "query" | "aggregate"` discriminator. Old names kept as deprecated aliases; CLI unchanged.
+- **Plugin default profile** — all three plugins now register `switchbot mcp serve` without `--tools all`; default profile exposes 17 tools. Add `--tools all` to your MCP config for all 28.
+- **Profile counts**: `readonly` 14, `default` 17, `all` 28.
+
+### Deprecated
+
+- `get_device_history`, `query_device_history`, `aggregate_device_history` — use `device_history(mode=...)` instead; aliases removed in 4.0.0.
+
+### Fixed
+
+- `primeCredentials` stale-write race condition on account switch
+- Idempotency cache now scoped per profile; `clearForProfile` on credential change
+- `auth keychain set/delete/migrate` now invalidates all caches via `onCredentialChange()`
+- `clearCache` / `clearStatusCache` EBUSY crash on Windows
+- MindClip URL path injection (`encodeURIComponent` on recording id)
+- MindClip MCP Zod schemas: reject empty strings and impossible calendar dates
+- ISO W53 validation for short years in CLI and MCP
+- MindClip MCP error envelope now preserves all structured fields via `apiErrorToMcpError()`
+- `device_history(mode="raw")` limit capped at 100 at runtime
+- `capabilities --surface mcp` derived from `TOOL_PROFILES.all`; deprecated aliases excluded
+- `reset` in-memory cleanup no longer double-calls `unlinkSync`
+- AI MindClip catalog aliases added (`MindClip`, `Mind Clip`, `AIMindClip`)
+
+## [3.7.9]
+
+### Added
+
+- **Gemini CLI extension** — new `@switchbot/gemini-extension` package (v0.1.0) wires Gemini CLI to the SwitchBot MCP server via the native Extension system. Includes 23 slash commands, GEMINI.md safety context, and credential injection via `env` mapping.
+- **`switchbot gemini setup`** — 6-step bootstrap pipeline: verify Gemini CLI, install switchbot CLI, register MCP server, authenticate, run doctor. Supports `--yes`, `--skip`, `--dry-run`, `--json`.
+- **`switchbot gemini doctor`** — health check covering node, path, credentials, MCP registration, and policy validation.
+- **CI `gemini-release-gates` job** — cross-platform (Ubuntu + Windows) static validation of extension manifest and command files.
+
+### Fixed
+
+- **Credential prime cache TTL** — added 5 s TTL to primed credentials so MCP hot-reload picks up rotated tokens without restart.
+- **OAuth account name** — `config show` now displays the account name from OAuth userinfo endpoint.
+
+### Changed
+
+- **`send_command` tool description** — explicitly lists mutation vs destructive commands so AI agents respect safety tiers even without GEMINI.md context.
+
+## [3.7.8]
+
+### Fixed
+
+- **Codex marketplace name mismatch** — `resolveMarketplaceName` previously read `.agents/plugins/marketplace.json` (name=`codex-plugin`) before the root `marketplace.json` (name=`switchbot`), causing the plugin ID to resolve as `switchbot@codex-plugin` while Codex registered the marketplace as `switchbot`. Priority flipped: root manifest is now authoritative, matching what `codex plugin marketplace add` validates.
+- **Route B git sparse checkout missing manifest at checkout root** — Codex validates `<checkout-root>/.agents/plugins/marketplace.json`; the sparse set only included `packages/codex-plugin`, so the manifest was absent. Added repo-root `.agents/plugins/marketplace.json` and `--sparse .agents/plugins` to the Route B registration call.
+- **`checkCodexPluginRegistered` false positive** — the text and JSON fallback paths matched any output containing `switchbot`, including the `Marketplace switchbot` title line. Both paths now require the `switchbot@` pattern so only actual plugin-ID lines are accepted.
+- **Windows `os error 32` stalls Route B for 17 s** — when a git file-lock is detected and the local `@switchbot/codex-plugin` package directory already exists, the 2 s / 5 s / 10 s retry sequence is skipped and `registerCodexPluginAuto` falls back to Route A immediately. On a fresh machine where the package is absent, the retry sequence is preserved. An explicit stderr message names the fallback reason.
+- **`codex repair` re-registers when already healthy** — new `preflight-plugin` step runs `checkCodexPluginRegistered` before the destructive remove+re-register cycle. When the plugin is already installed, both `remove-plugin` and `register-plugin` are auto-skipped. Force re-registration with `--skip preflight-plugin`.
+- **`@switchbot/claude-code-plugin` `plugin.json` missing `skills` field** — `plugins/switchbot/.claude-plugin/plugin.json` did not declare `"skills": "./skills/"`, so Claude Code would not load `SKILL.md` and the skill instructions would be absent. Field added.
+
+## [3.7.7]
+
+### Added
+
+- **`switchbot claude-code setup` command** — 6-step pipeline that bootstraps Claude Code integration end-to-end: verify `claude` CLI on PATH, optionally install `@switchbot/openapi-cli`, register the MCP server via `claude mcp add --scope user`, authenticate, and run a health check. Supports `--yes` (non-interactive), `--skip`, `--dry-run`, `--json`. Paste `npx @switchbot/openapi-cli claude-code setup` into Claude Code chat to set up without opening a terminal.
+- **Claude Code Plugin Marketplace support** — `.claude-plugin/marketplace.json` now correctly points to `packages/claude-code-plugin/plugins/switchbot` so `/plugin marketplace add OpenWonderLabs/switchbot-openapi-cli` followed by `/plugin install switchbot@switchbot` works end-to-end. `smoke-codex-git-sparse.mjs` extended to validate both the Claude Code and Codex marketplace entry points.
+
+### Fixed
+
+- **`switchbot auth login` clears device/status cache** — switching accounts no longer returns stale data from the previous account's cache. `clearCache()` and `clearStatusCache()` are called immediately after new credentials are saved.
+- **`codex setup --help` / `claude-code setup --help`** — both commands now list `--dry-run` and `--json` under a "Global flags that also apply to this command" section so users do not have to discover them from the README.
+
+## [3.7.5]
+
+### Fixed
+
+- **EPERM guard in `resolveMarketplaceSourceRoot`** — on Windows, junction creation at `@`-scoped npm paths fails with `EPERM` when the runner is not elevated. Both `src/install/codex-checks.ts` and `packages/codex-plugin/bin/install.js` now wrap every `symlinkSync` call in `createAlias`, which catches `EPERM` and throws an actionable error directing users to run the installer from an elevated terminal or choose a non-`@`-scoped install path.
+- **`CODEX_PLUGIN_DEFAULT_ID` constant in `repairStepRemovePlugin`** — the fallback plugin-remove call now uses the shared constant instead of a hardcoded string, eliminating the risk of divergence if the default ID changes.
+- **Codex plugin manifest location** — `packages/codex-plugin/.claude-plugin/marketplace.json` is now at the correct path and format; `plugins/switchbot/` structure added so `codex plugin add switchbot@switchbot` resolves the manifest reliably.
+- **Codex marketplace registration** — op order corrected, stale plugin DB cleared before re-registration, plugin path fixed; OS error 32 (file-in-use) retry improved for Windows.
+
+### Changed
+
+- **OpenClaw plugin publish path** — `@switchbot/openclaw-skill` is back in the monorepo npm publish matrix. `publish.yml` now version-checks and publishes it alongside the CLI and Codex plugin, while `npm-published-smoke.yml` verifies the published tarball through the shared plugin smoke path.
+- **OpenClaw package metadata** — `packages/openclaw-skill/README.md`, `.mcp.json`, and package metadata now describe the actual runtime contract: OpenClaw bootstraps via `bin/start.js`, then delegates to `switchbot mcp serve` for the CLI-owned MCP tool surface.
+- **Codex smoke tests** — `smoke-codex-temp-prefix-route-a.mjs` now uses `lib/node_modules/` on Linux/macOS and `node_modules/` on Windows for prefix installs; test scripts in both plugin packages changed to `node --test` for cross-platform glob-free discovery; plugin registration smokes added to release gate.
+
+## [3.7.3]
+
+### Added
+
+- **Route B (git marketplace)** — `codex setup` and `codex repair` now try `codex plugin marketplace add OpenWonderLabs/switchbot-openapi-cli --sparse packages/codex-plugin --ref main` before falling back to the local npm path. Route B requires no locally-installed `@switchbot/codex-plugin`, making fresh installs and CI environments work out of the box. Configurable via `CODEX_GIT_MARKETPLACE_REF` (default `main`) and `CODEX_MARKETPLACE_ADD_TIMEOUT` (default 60 000 ms).
+- **On-demand npm install** — when both Route B and Route A fail, `registerCodexPluginAuto` installs `@switchbot/codex-plugin@latest` and retries Route A automatically. Covers fresh-machine setups where the npm package was never installed.
+
+### Changed
+
+- **`codex setup` removes the `install-codex-plugin` step** — on-demand install is now embedded inside `register-plugin` via `registerCodexPluginAuto`, so the explicit step is no longer needed. `--skip install-codex-plugin` is still accepted (silently ignored) for backward compatibility.
+- **Legacy plugin ID cleanup** — `codex repair`'s `remove-plugin` step now removes both the current ID and the legacy ID `switchbot@switchbot-skill` before re-registering, matching the pre-clean behaviour already present in the registration helpers.
+
+### Fixed
+
+- **Dangling symlink crash** — `resolveMarketplaceSourceRoot` called `realpathSync` without a guard; if the junction/symlink target was deleted (e.g. after `nvm use` or `npm uninstall`), it threw ENOENT and aborted registration. It now catches the error, removes the stale link, and recreates it pointing at the current package root.
+- **Empty `CODEX_GIT_MARKETPLACE_REF` env var** — `??` was used instead of `||`, so setting the variable to an empty string passed `--ref ""` to the CLI instead of falling back to `"main"`.
+- **Misleading "installed" in error message** — when `@switchbot/codex-plugin` was already present and Route A retry still failed, the error reported "installed @switchbot/codex-plugin but Route A still failed". The message now says "already present" when no install actually ran.
+- **Platform-split error message** — the alias-path error now reads "not a junction" on Windows and "not a symlink" on Linux/macOS instead of the ambiguous "not a symlink/junction".
+- **`switchbot-codex-install` binary frozen** — `resolveMarketplaceSourceRoot` in `packages/codex-plugin/bin/install.js` is now marked frozen (not kept in sync with `codex-checks.ts`). The binary is deprecated; use `switchbot codex setup` instead.
+
+## [3.7.2]
+
+### Added
+
+- **Monorepo absorption** — `@switchbot/codex-plugin` (formerly `@cly-org/switchbot-codex-plugin`) now ships from this repository under `packages/codex-plugin/`. A single GitHub Release publishes any package whose version was bumped since the previous release.
+- **Codex command group** — `switchbot codex setup`, `switchbot codex doctor`, `switchbot codex repair` orchestrate Codex plugin install, the 7-check health summary, and end-to-end repair. `switchbot install --agent codex` is the register-only sibling.
+- **`codex setup` 6-step flow** — adds `install-codex-plugin` between `install-switchbot-cli` and `register-plugin`, so a single `npx @switchbot/openapi-cli codex setup` invocation can bootstrap a brand-new machine end-to-end without a separate `npm install -g @switchbot/codex-plugin`. Both install steps are skippable via `--skip`.
+
+### Changed
+
+- **Plugin package name** — `@cly-org/switchbot-codex-plugin` → `@switchbot/codex-plugin`. The old name was verification-stage with no published users; no `npm deprecate` notice is necessary.
+- **Codex plugin `onInstall` hook** — now best-effort: it always exits 0 so a missing or broken SwitchBot CLI never rolls back the Codex plugin install. When the CLI is present it runs `switchbot codex setup --yes` to fast-path setup; when absent it prints a hint pointing at `npx @switchbot/openapi-cli codex setup`.
+- **Plugin version reset to `0.1.0`** for first publish under the new scope.
+- **Publish workflow** — `.github/workflows/publish.yml` gains a `detect-versions` step and per-package guards so plugin failures (or unbumped versions) do not block CLI promotion. Plugin steps run `continue-on-error: true` and surface failures as workflow annotations. `openclaw-skill` removed from publish scope (distributed via companion repo).
+- **Smoke workflow** — `.github/workflows/npm-published-smoke.yml` is now a per-package matrix. CLI keeps offline + live smoke; plugins get tarball-shape checks (concrete peerDep, executable bin entries) without live smoke.
+- **CI** — `policy-schema-sync` cross-repo job removed; the skill consumer is now in this monorepo.
+
+### Fixed
+
+- **Codex `register-plugin` on Windows / npm scoped install dirs** — `codex plugin marketplace add` from `<npm-root>/@switchbot/codex-plugin` failed with `--ref is only supported for git marketplace sources` because codex CLI 0.133.0 misparses local paths containing `@` as `owner/repo@ref`. Registration now bridges via a junction at `%LOCALAPPDATA%\switchbot\codex-plugin-marketplace` (fallback `~/.switchbot/codex-plugin-marketplace`); divergent junctions are repaired in place, and any other state at the alias path surfaces an error instead of silently registering the broken `@` path.
+- **Codex plugin marketplace metadata** — `packages/codex-plugin/.agents/plugins/marketplace.json` was missing from the published tarball (file untracked + omitted from `files`). Now committed and listed under `files`, with the local-source path corrected to `../../` so `codex plugin add switchbot@codex-plugin` resolves the plugin manifest at `packageRoot/.codex-plugin/plugin.json`.
+- **Codex `plugin add` ACCESS_DENIED on Windows** — `codex plugin add` attempts to back up an existing installation before replacing it; on junction-backed paths the backup `rename()` fails with `os error 5`. Registration now issues a best-effort `codex plugin remove` before `codex plugin add` to skip the backup path entirely.
+- **OAuth callback port leak** — when `open()` threw (e.g. no default browser), the callback HTTP server stayed bound until the 120 s timeout, causing `EADDRINUSE` on immediate retry. The server is now shut down in the `open()` catch block.
+
+### Removed
+
+- Sibling repository `openclaw-switchbot-skill` is archived; future development happens here.
+
+## [3.7.1]
+
+### Fixed
+
+- **`auth login`** — credentials now decoded as hex instead of UTF-8 after AES-128-CBC decryption. The Wonder API returns raw binary bytes; decoding as UTF-8 produced non-ASCII characters that caused "Invalid character in header content" HTTP errors on subsequent API calls.
+- **`auth login`** — OAuth callback server now calls `closeAllConnections()` in every termination path (success, OAuth error, timeout). Previously, browser keep-alive TCP sockets prevented the CLI process from exiting after login completed.
+- **MCP `list_devices`** — `hubDeviceId` schema relaxed to `nullable().optional()` in both `deviceList` and `infraredRemoteList` output schemas. Devices without a hub (standalone Wi-Fi devices, IR remotes) return `null` or omit the field; the strict `z.string()` schema caused tool call validation failures for these devices.
+
+## [3.7.0]
+
+### Added
+
+- `auth login` — browser-based OAuth 2.0 login; stores credentials in OS keychain
+- `reset` command — clear all local data (credentials, cache, quota, history, metadata)
+- `SWITCHBOT_OAUTH_CLIENT_SECRET`, `SWITCHBOT_TOKEN_AES_KEY`, `SWITCHBOT_TOKEN_AES_IV` env-var overrides
+- `devices expand` supports `setBrightness`, `setColor`, `setColorTemperature`
+
+### Fixed
+
+- `reset --config`: scoped data paths correctly; no longer deletes unrelated `cache/` directory
+- `devices list --json --fields`: alias inputs resolve to canonical output keys
+- `config`: credential-missing hint preserves `--config` in recovery commands
+- Daemon start in bundled builds (BUG-001), `rules run` exit code (BUG-002), unknown subcommand exit code (BUG-005/008), `mcp tools --json` metadata (BUG-007), Pino stdout leak (BUG-009)
+
+### Changed (Breaking)
+
+- `schemaVersion` bumped to `1.2`
+- `catalog show <Type> --json` / `devices commands <Type> --json`: `data` is always an array
+- `_fetchedAt` renamed to `fetchedAt` in `devices status` JSON output
+- MCP `list_devices`: `roomID` and `controlType` now accept `null`
+
+## [3.6.3]
+
+### Fixed
+
+- **Webhook listener port race** (`webhook-listener.ts`): read `server.address()` synchronously inside the `listening` callback to prevent a stale port on Windows IOCP.
+- **Webhook 413 socket leak**: changed `req.destroy()` to `req.resume()` so the 413 response flushes before the connection is torn down; socket is destroyed on `res.finish`.
+- **`plan suggest` exit code**: missing `--device` now exits 2 (usage error) instead of 1.
+- **`plan suggest --devices` alias**: added `--devices` as a repeatable alias for `--device`; mixed usage preserves argv insertion order.
+- **`devices status --strict`**: added `--strict` flag that exits 1 if any batch device fetch fails.
+- **`device-meta list` hidden filter**: human mode now hides hidden devices by default; `--all` shows everything; JSON always exports all records.
+- **`doctor` MCP message**: now reports the default-profile tool count and hints at `--tools all`.
+- **`quota status` reset time**: "Remaining budget" line now includes the local reset time.
+- **`policy/validate` CJS interop**: replaced `createRequire` hack with a static `import` for `ajv-formats`, fixing esbuild bundling.
+- **`@modelcontextprotocol/sdk` bundled**: moved from `dependencies` to `devDependencies`; esbuild now inlines it, reducing install footprint.
+
+### Added
+
+- Shell completions for `policy`, `rules`, `auth keychain`, `status-sync`, and `daemon` command groups (bash / zsh / fish / PowerShell).
+- `TESTING.md`: three coverage conventions (exit-path tests, option smoke tests, message keyword assertions).
+- Layered coverage thresholds in `vitest.config.ts` (global lines ≥ 81%, `src/commands` lines ≥ 75%).
+- Test backfill: 2581 tests (+116 vs 3.6.2) covering auth migrate, completion, config, device-meta, devices, doctor, plan, quota, rules, webhook-listener, status-sync manager, daemon socket path/state, and bundle self-containment.
+
+## [3.6.2]
+
+### Added
+
+- **Catalog sync with upstream OpenAPI**: added `Weather Station` (deviceType `WeatherStation`, sensor with `atmosphericPressure` field), `Lock Vision` and `Lock Vision Pro` (video smart locks with the same lock/unlock/deadbolt safety semantics as Smart Lock Pro), the `Smart Lock Pro Wifi` Matter alias on the existing Smart Lock entry, and `uploadImage <imageUrl>` on AI Art Frame. The upload command parameter is documented as a single https URL pending upstream parameter-shape clarification.
+- **LLM condition USD and token budgets**: per-rule and global `llm_budget` now accept `max_tokens_per_hour` (hourly window, aligned with `max_calls_per_hour`) and `max_cost_per_day_usd` (24h window). Costs are computed from per-model USD pricing in `src/llm/pricing.ts` and reported on `DecideResult.usage`. Audit entries for `llm-condition` now carry `llmUsage`, and `llm-budget-exceeded` records `budgetDimension` (`calls | tokens | cost`), `budgetLimit`, and `budgetObserved`. New lints: `condition-llm-tokens-budget-zero` (warns when token cap is 0) and `condition-llm-cost-without-known-model` (warns when a USD cap is set with `provider: auto` since the cost dimension silently skips models not in the pricing table).
+- **Cross-event aggregation in conditions**: new `event_count` condition counts how many events fired for a given device inside a rolling time window. Schema:
+
+  ```yaml
+  conditions:
+    - event_count:
+        device: front-door         # deviceId or alias
+        event: motion.detected     # optional canonical event filter
+        window: "5m"               # duration: 100ms | 30s | 5m | 1h | 1d
+        min: 3                     # required floor
+        max: 10                    # optional ceiling
+  ```
+
+  Backed by the same per-device JSONL ring at `~/.switchbot/device-history/<deviceId>.jsonl` used by `events history`, with rotation honored. The LLM-condition `recent_events` hook (declared in v0.2 schema since Track κ but unwired) now also pulls from this fetcher, populating `context.recent_events` with up to N most-recent matching events on the trigger device. Engine-level `LlmConditionEvaluator` is now wired into `RulesEngine` (previously only `simulate` had it). New lints: `condition-event-count-bad-window` and `condition-event-count-max-below-min`.
+- **Local / non-tool-use LLM provider**: new `provider: local` for `llm` conditions points at any OpenAI-compatible chat completions endpoint (Ollama, llama.cpp server, vLLM, LM Studio). Defaults to `http://localhost:11434/v1`; override with `SWITCHBOT_LOCAL_LLM_URL`, `SWITCHBOT_LOCAL_LLM_MODEL`. Because most local servers don't support OpenAI-style tool use, `decide()` falls back to a structured-output prompt that asks for a `{"pass": bool, "reason": str}` JSON object and runs one repair retry if the first response is not parseable. Operators on tool-use-capable local endpoints can opt in via YAML `tool_use: true` or `SWITCHBOT_LOCAL_LLM_TOOL_USE=1`. New `LLMProvider.capabilities.toolUse` flag exposes this to the rest of the system. New `doctor` check `local-llm-reachable` probes the configured endpoint when (and only when) policy uses `provider: local`.
+- **Daemon JSON-RPC IPC transport**: `switchbot rules run` now exposes a JSON-RPC 2.0 endpoint over a Unix domain socket on POSIX (`~/.switchbot/daemon.sock`, mode 0600) and a per-user named pipe on Windows (`\\.\pipe\switchbot-daemon-<user>`). v1 methods: `daemon.status`, `daemon.ping`, `daemon.reload`. New client at `src/daemon/client.ts` exposes `IpcDaemonClient.call()` and `.ping()`. Wire protocol: newline-delimited JSON-RPC. Sets the foundation for future `mcp serve --via-daemon` proxying so MCP clients can avoid per-call CLI cold-start. New `doctor` check `daemon-ipc` reports IPC reachability and round-trip latency when the daemon is running.
 
 ## [3.4.0] - 2026-05-07
 

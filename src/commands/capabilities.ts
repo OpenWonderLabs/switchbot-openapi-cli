@@ -11,6 +11,7 @@ import { loadCache } from '../devices/cache.js';
 import { printJson } from '../utils/output.js';
 import { enumArg, stringArg } from '../utils/arg-parsers.js';
 import { IDENTITY } from './identity.js';
+import { TOOL_PROFILES, DEPRECATED_MCP_TOOLS } from '../mcp/tool-profiles.js';
 
 /** Collect the distinct catalog safety tiers actually used across the given entries. Sorted. */
 function collectSafetyTiersInUse(entries: DeviceCatalogEntry[]): SafetyTier[] {
@@ -122,6 +123,7 @@ export const COMMAND_META: Record<string, CommandMeta> = {
   'auth keychain set': DESTRUCTIVE_LOCAL,
   'auth keychain delete': DESTRUCTIVE_LOCAL,
   'auth keychain migrate': DESTRUCTIVE_LOCAL,
+  'auth login': DESTRUCTIVE_LOCAL,
   'cache show': READ_LOCAL,
   'cache clear': ACTION_LOCAL,
   'capabilities': READ_LOCAL,
@@ -213,6 +215,20 @@ export const COMMAND_META: Record<string, CommandMeta> = {
   'status-sync start': ACTION_LOCAL,
   'status-sync stop': ACTION_LOCAL,
   'status-sync status': READ_LOCAL,
+  'reset': DESTRUCTIVE_LOCAL,
+  'codex doctor': READ_LOCAL,
+  'codex repair': ACTION_LOCAL,
+  'codex setup': ACTION_LOCAL,
+  'claude-code setup': ACTION_LOCAL,
+  'gemini setup': ACTION_LOCAL,
+  'gemini doctor': READ_LOCAL,
+  'mindclip recordings': READ_REMOTE,
+  'mindclip recording': READ_REMOTE,
+  'mindclip summary': READ_REMOTE,
+  'mindclip todos': READ_REMOTE,
+  'mindclip daily': READ_REMOTE,
+  'mindclip weekly': READ_REMOTE,
+  'mindclip urgent-todos': READ_REMOTE,
   'uninstall': ACTION_LOCAL,
   'upgrade-check': READ_REMOTE,
   'webhook setup': ACTION_REMOTE,
@@ -225,19 +241,14 @@ function metaFor(command: string): CommandMeta | null {
   return COMMAND_META[command] ?? null;
 }
 
-const MCP_TOOLS = [
-  'list_devices',
-  'get_device_status',
-  'send_command',
-  'describe_device',
-  'list_scenes',
-  'run_scene',
-  'search_catalog',
-  'account_overview',
-  'get_device_history',
-  'query_device_history',
-  'aggregate_device_history',
-];
+// Derived from the single source of truth in src/mcp/tool-profiles.ts so that
+// `capabilities --surface mcp` never drifts behind the actual MCP server tool
+// registration. Sorted for stable output. Deprecated aliases are excluded —
+// they remain registered in the MCP server for backward compat but are not
+// advertised as part of the current API surface.
+export const MCP_TOOLS = [...TOOL_PROFILES.all]
+  .filter((t) => !DEPRECATED_MCP_TOOLS.has(t))
+  .sort();
 
 const IDEMPOTENCY_CONTRACT = {
   flag: '--idempotency-key <key>',
@@ -264,7 +275,7 @@ export interface CompactLeaf {
   recommendedMode: RecommendedMode;
 }
 
-function enumerateLeafNames(program: Command, prefix = ''): string[] {
+export function enumerateLeafNames(program: Command, prefix = ''): string[] {
   const out: string[] = [];
   for (const cmd of program.commands) {
     const full = prefix ? `${prefix} ${cmd.name()}` : cmd.name();

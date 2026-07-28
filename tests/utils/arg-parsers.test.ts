@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { InvalidArgumentError } from 'commander';
-import { intArg, durationArg, stringArg, enumArg } from '../../src/utils/arg-parsers.js';
+import { intArg, durationArg, stringArg, enumArg, dateArg, weekArg, isLongISOYear } from '../../src/utils/arg-parsers.js';
 
 describe('intArg', () => {
   const parse = intArg('--max');
@@ -115,5 +115,97 @@ describe('enumArg', () => {
   it('rejects values not in the allowed set', () => {
     expect(() => parse('xml')).toThrow(/must be one of: table, json, jsonl/);
     expect(() => parse('--help')).toThrow(/must be one of/);
+  });
+});
+
+describe('dateArg', () => {
+  const parse = dateArg('--date');
+
+  it('accepts valid YYYY-MM-DD dates', () => {
+    expect(parse('2026-06-13')).toBe('2026-06-13');
+    expect(parse('2026-01-01')).toBe('2026-01-01');
+    expect(parse('2026-12-31')).toBe('2026-12-31');
+  });
+
+  it('rejects dates with wrong separator', () => {
+    expect(() => parse('2026/06/13')).toThrow(InvalidArgumentError);
+    expect(() => parse('2026/06/13')).toThrow(/YYYY-MM-DD/);
+  });
+
+  it('rejects American date format', () => {
+    expect(() => parse('06-13-2026')).toThrow(/YYYY-MM-DD/);
+  });
+
+  it('rejects impossible calendar dates', () => {
+    expect(() => parse('2026-02-30')).toThrow(/calendar date/);
+    expect(() => parse('2026-13-01')).toThrow(/calendar date/);
+  });
+
+  it('rejects flag-like tokens', () => {
+    expect(() => parse('--help')).toThrow(/YYYY-MM-DD/);
+  });
+});
+
+describe('weekArg', () => {
+  const parse = weekArg('--week');
+
+  it('accepts valid ISO week strings W01-W52', () => {
+    expect(parse('2026-W23')).toBe('2026-W23');
+    expect(parse('2026-W01')).toBe('2026-W01');
+    expect(parse('2026-W09')).toBe('2026-W09');
+  });
+
+  it('accepts W53 for long ISO years (Jan 1 on Thursday)', () => {
+    // 2026: Jan 1 is Thursday → long year
+    expect(parse('2026-W53')).toBe('2026-W53');
+    // 2015: Jan 1 is Thursday → long year
+    expect(parse('2015-W53')).toBe('2015-W53');
+  });
+
+  it('rejects W53 for short ISO years', () => {
+    // 2027: Jan 1 is Friday → short year
+    expect(() => parse('2027-W53')).toThrow(InvalidArgumentError);
+    expect(() => parse('2027-W53')).toThrow(/only has 52 ISO weeks/);
+    // 2024: Jan 1 is Monday → short year
+    expect(() => parse('2024-W53')).toThrow(/only has 52 ISO weeks/);
+  });
+
+  it('rejects W00 (week 0 does not exist)', () => {
+    expect(() => parse('2026-W00')).toThrow(InvalidArgumentError);
+    expect(() => parse('2026-W00')).toThrow(/YYYY-Www/);
+  });
+
+  it('rejects W54 and above', () => {
+    expect(() => parse('2026-W54')).toThrow(/YYYY-Www/);
+    expect(() => parse('2026-W99')).toThrow(/YYYY-Www/);
+  });
+
+  it('rejects missing dash between year and W', () => {
+    expect(() => parse('2026W23')).toThrow(/YYYY-Www/);
+  });
+
+  it('rejects 2-digit years', () => {
+    expect(() => parse('26-W23')).toThrow(/YYYY-Www/);
+  });
+
+  it('rejects single-digit week', () => {
+    expect(() => parse('2026-W5')).toThrow(/YYYY-Www/);
+  });
+});
+
+describe('isLongISOYear', () => {
+  it('returns true for years where Jan 1 is Thursday', () => {
+    expect(isLongISOYear(2026)).toBe(true); // Jan 1 Thu
+    expect(isLongISOYear(2015)).toBe(true); // Jan 1 Thu
+  });
+
+  it('returns true for leap years where Jan 1 is Wednesday', () => {
+    expect(isLongISOYear(2020)).toBe(true); // Jan 1 Wed, leap year
+  });
+
+  it('returns false for short years', () => {
+    expect(isLongISOYear(2027)).toBe(false); // Jan 1 Fri
+    expect(isLongISOYear(2024)).toBe(false); // Jan 1 Mon
+    expect(isLongISOYear(2023)).toBe(false); // Jan 1 Sun
   });
 });

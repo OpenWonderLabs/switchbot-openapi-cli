@@ -6,6 +6,9 @@ on:
     types: [completed]
   workflow_dispatch:
     inputs:
+      package:
+        description: 'Package to verify (defaults: matrix runs all published packages)'
+        required: false
       version:
         description: 'Published npm version to verify (defaults to package.json from checked-out commit)'
         required: false
@@ -19,6 +22,19 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: '@switchbot/openapi-cli'
+            version_path: 'package.json'
+            kind: cli
+          - package: '@switchbot/codex-plugin'
+            version_path: 'packages/codex-plugin/package.json'
+            kind: plugin
+          - package: '@switchbot/openclaw-skill'
+            version_path: 'packages/openclaw-skill/package.json'
+            kind: plugin
     steps:
       - uses: actions/checkout@v4
         with:
@@ -29,16 +45,6 @@ jobs:
           node-version: 20.x
           registry-url: https://registry.npmjs.org
 
-      - name: Verify credentials present
-        env:
-          TOKEN: ${{ secrets.SWITCHBOT_TOKEN }}
-          SECRET: ${{ secrets.SWITCHBOT_SECRET }}
-        run: |
-          if [ -z "$TOKEN" ] || [ -z "$SECRET" ]; then
-            echo "SWITCHBOT_TOKEN / SWITCHBOT_SECRET not set in repo secrets"
-            exit 1
-          fi
-
       - name: Verify npm token present
         env:
           TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -48,62 +54,101 @@ jobs:
             exit 1
           fi
 
+      - name: Verify SwitchBot credentials present (cli only)
+        if: matrix.kind == 'cli'
+        env:
+          TOKEN: ${{ secrets.SWITCHBOT_TOKEN }}
+          SECRET: ${{ secrets.SWITCHBOT_SECRET }}
+        run: |
+          if [ -z "$TOKEN" ] || [ -z "$SECRET" ]; then
+            echo "SWITCHBOT_TOKEN / SWITCHBOT_SECRET not set in repo secrets (required for cli live smoke)"
+            exit 1
+          fi
+
       - name: Resolve target version
         id: version
+        env:
+          VERSION_PATH: ${{ matrix.version_path }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_PACKAGE: ${{ inputs.package }}
+          MATRIX_PACKAGE: ${{ matrix.package }}
         run: |
-          if [ -n "${{ inputs.version }}" ]; then
-            VERSION="${{ inputs.version }}"
+          # workflow_dispatch with explicit package: skip other matrix entries.
+          if [ -n "$INPUT_PACKAGE" ] && [ "$INPUT_PACKAGE" != "$MATRIX_PACKAGE" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Skipping $MATRIX_PACKAGE — workflow_dispatch targeted $INPUT_PACKAGE"
+            exit 0
+          fi
+          if [ -n "$INPUT_VERSION" ] && [ -n "$INPUT_PACKAGE" ]; then
+            VERSION="$INPUT_VERSION"
           else
-            VERSION=$(node -p "require('./package.json').version")
+            VERSION=$(node -p "require('./$VERSION_PATH').version")
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "target_version=$VERSION"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "target_version=$VERSION ($MATRIX_PACKAGE)"
 
       - name: Resolve current latest dist-tag
+        if: steps.version.outputs.skip != 'true'
         id: latest
+        env:
+          PACKAGE: ${{ matrix.package }}
         run: |
-          LATEST=$(npm view @switchbot/openapi-cli dist-tags.latest)
+          LATEST=$(npm view "$PACKAGE" dist-tags.latest 2>/dev/null || echo "")
           echo "version=$LATEST" >> "$GITHUB_OUTPUT"
           echo "current_latest=$LATEST"
 
       - name: Wait for npm package to become available
+        if: steps.version.outputs.skip != 'true'
         id: wait_package
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          PACKAGE: ${{ matrix.package }}
         run: |
           for i in $(seq 1 24); do
             if [ "${{ github.event_name }}" = "workflow_run" ]; then
-              FOUND=$(npm view "@switchbot/openapi-cli@next" version 2>/dev/null || true)
+              FOUND=$(npm view "${PACKAGE}@next" version 2>/dev/null || true)
               if [ "$FOUND" = "$VERSION" ]; then
                 echo "npm package is available on next: $FOUND"
                 exit 0
               fi
-              echo "waiting for @switchbot/openapi-cli@$VERSION to appear on npm dist-tag next ($i/24); current next=$FOUND"
+              # Tolerate the case where this matrix entry's package wasn't republished
+              # in this release (publish.yml's detect-versions step skipped it).
+              FOUND_AT_VERSION=$(npm view "${PACKAGE}@${VERSION}" version 2>/dev/null || true)
+              if [ "$FOUND_AT_VERSION" = "$VERSION" ]; then
+                echo "npm package version already exists (not republished this release): $FOUND_AT_VERSION — skipping smoke"
+                echo "skip=true" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              echo "waiting for ${PACKAGE}@${VERSION} on npm dist-tag next ($i/24); current next=$FOUND"
             else
-              FOUND=$(npm view "@switchbot/openapi-cli@$VERSION" version 2>/dev/null || true)
+              FOUND=$(npm view "${PACKAGE}@${VERSION}" version 2>/dev/null || true)
               if [ "$FOUND" = "$VERSION" ]; then
                 echo "npm package version is available: $FOUND"
                 exit 0
               fi
-              echo "waiting for @switchbot/openapi-cli@$VERSION to appear on npm ($i/24)"
+              echo "waiting for ${PACKAGE}@${VERSION} to appear on npm ($i/24)"
             fi
             sleep 10
           done
-          echo "Timed out waiting for @switchbot/openapi-cli@$VERSION on npm"
+          echo "Timed out waiting for ${PACKAGE}@${VERSION} on npm"
           exit 1
 
       - name: Install published package in a clean temp project
+        if: steps.version.outputs.skip != 'true' && steps.wait_package.outputs.skip != 'true'
         id: install_package
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          PACKAGE: ${{ matrix.package }}
         run: |
           TMPDIR=$(mktemp -d)
           echo "TMPDIR=$TMPDIR" >> "$GITHUB_ENV"
           cd "$TMPDIR"
           npm init -y >/dev/null 2>&1
-          npm install "@switchbot/openapi-cli@$VERSION"
+          npm install "${PACKAGE}@${VERSION}"
 
-      - name: Binary and offline smoke
+      - name: Binary and offline smoke (cli only)
+        if: matrix.kind == 'cli' && steps.version.outputs.skip != 'true' && steps.wait_package.outputs.skip != 'true'
         id: offline_smoke
         env:
           TMPDIR: ${{ env.TMPDIR }}
@@ -116,7 +161,8 @@ jobs:
           npx --no-install switchbot schema export --compact >/dev/null
           npx --no-install switchbot capabilities --json | jq -e '.data.commandMeta != null' >/dev/null
 
-      - name: Live smoke with configured credentials
+      - name: Live smoke with configured credentials (cli only)
+        if: matrix.kind == 'cli' && steps.version.outputs.skip != 'true' && steps.wait_package.outputs.skip != 'true'
         id: live_smoke
         env:
           TMPDIR: ${{ env.TMPDIR }}
@@ -127,30 +173,74 @@ jobs:
           npx --no-install switchbot doctor --json | jq -e '.data.summary != null' >/dev/null
           npx --no-install switchbot devices list --json | jq -e '.data.deviceList != null or .data.infraredRemoteList != null' >/dev/null
 
+      - name: Plugin tarball-shape smoke (plugins only)
+        if: matrix.kind == 'plugin' && steps.version.outputs.skip != 'true' && steps.wait_package.outputs.skip != 'true'
+        id: plugin_smoke
+        env:
+          TMPDIR: ${{ env.TMPDIR }}
+          PACKAGE: ${{ matrix.package }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          cd "$TMPDIR"
+          MANIFEST="node_modules/${PACKAGE}/package.json"
+          if [ ! -f "$MANIFEST" ]; then
+            echo "FAIL: $MANIFEST missing"
+            exit 1
+          fi
+          # peerDep must be a concrete range, not a workspace:* leak
+          PEER=$(node -p "require('./$MANIFEST').peerDependencies?.['@switchbot/openapi-cli'] || ''")
+          if [ -z "$PEER" ] || echo "$PEER" | grep -q "workspace:"; then
+            echo "FAIL: $PACKAGE peerDep missing or unrewritten — got: '$PEER'"
+            exit 1
+          fi
+          echo "OK: $PACKAGE peerDep = '$PEER'"
+          # All declared bin entries must point to readable files
+          node -e "
+            const pkg = require('./$MANIFEST');
+            const fs = require('fs');
+            const path = require('path');
+            const root = path.dirname('$MANIFEST');
+            const bins = pkg.bin || {};
+            for (const [name, target] of Object.entries(bins)) {
+              const p = path.join(root, target);
+              fs.accessSync(p);
+              console.log('OK: bin ' + name + ' -> ' + target);
+            }
+          "
+
       - name: Promote verified version to latest
-        if: success()
+        if: success() && steps.version.outputs.skip != 'true' && steps.wait_package.outputs.skip != 'true'
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          PACKAGE: ${{ matrix.package }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          npm dist-tag add "@switchbot/openapi-cli@$VERSION" latest
-          echo "Promoted @switchbot/openapi-cli@$VERSION to dist-tag latest"
+          npm dist-tag add "${PACKAGE}@${VERSION}" latest
+          echo "Promoted ${PACKAGE}@${VERSION} to dist-tag latest"
 
       - name: Deprecate failed version
         if: >
           failure() &&
           steps.wait_package.outcome == 'success' &&
+          steps.wait_package.outputs.skip != 'true' &&
           (
             steps.install_package.outcome == 'failure' ||
-            steps.offline_smoke.outcome == 'failure'
+            steps.offline_smoke.outcome == 'failure' ||
+            steps.plugin_smoke.outcome == 'failure'
           )
         env:
           VERSION: ${{ steps.version.outputs.version }}
           PREVIOUS_LATEST: ${{ steps.latest.outputs.version }}
+          PACKAGE: ${{ matrix.package }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          npm deprecate "@switchbot/openapi-cli@$VERSION" "Published to dist-tag next but failed package smoke tests. Install @switchbot/openapi-cli@${PREVIOUS_LATEST} or use dist-tag latest."
-          echo "Deprecated @switchbot/openapi-cli@$VERSION after package smoke failure"
+          if [ -n "$PREVIOUS_LATEST" ]; then
+            MSG="Published to dist-tag next but failed package smoke tests. Install ${PACKAGE}@${PREVIOUS_LATEST} or use dist-tag latest."
+          else
+            MSG="Published to dist-tag next but failed package smoke tests. No prior latest exists; investigate before re-publishing."
+          fi
+          npm deprecate "${PACKAGE}@${VERSION}" "$MSG"
+          echo "Deprecated ${PACKAGE}@${VERSION} after package smoke failure"
 
       - name: Cleanup temp project
         if: always()

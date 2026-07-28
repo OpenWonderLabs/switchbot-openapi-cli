@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SwitchBot Policy Editor</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header><h1>SwitchBot Policy</h1></header>
+  <main>
+    <section id="aliases-section">
+      <h2>Device Aliases</h2>
+      <div id="aliases-list"></div>
+      <button id="add-alias">+ Add alias</button>
+    </section>
+    <section id="confirmations-section">
+      <h2>Confirmations</h2>
+      <label><input type="checkbox" id="confirm-lock" value="lock"> Always confirm lock/unlock</label>
+    </section>
+    <section id="quiet-hours-section">
+      <h2>Quiet Hours</h2>
+      <label>From <input type="time" id="quiet-start" value="22:00"></label>
+      <label>To   <input type="time" id="quiet-end"   value="07:00"></label>
+    </section>
+    <section id="raw-section">
+      <h2>Raw YAML</h2>
+      <textarea id="raw-yaml" rows="20"></textarea>
+    </section>
+    <div id="actions">
+      <button id="save-btn">Save</button>
+      <span id="status"></span>
+    </div>
+  </main>
+  <script src="editor.js" type="module"></script>
+</body>
+</html>

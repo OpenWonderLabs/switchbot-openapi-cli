@@ -1,0 +1,21 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "switchbot",
+  "owner": {
+    "name": "OpenWonderLabs",
+    "email": "developer@wondertechlabs.com"
+  },
+  "plugins": [
+    {
+      "name": "switchbot",
+      "version": "0.1.0",
+      "author": {
+        "name": "OpenWonderLabs"
+      },
+      "homepage": "https://github.com/OpenWonderLabs/switchbot-openapi-cli",
+      "source": "./packages/claude-code-plugin/plugins/switchbot",
+      "description": "Control SwitchBot smart-home devices from Claude Code via MCP.",
+      "category": "Productivity"
+    }
+  ]
+}

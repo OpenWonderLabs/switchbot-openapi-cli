@@ -28,6 +28,7 @@ function makeProgram(): Command {
   const program = new Command();
   program.exitOverride();
   program.option('--json');
+  program.option('--config <path>', 'Override credential file location');
   registerAuthCommand(program);
   return program;
 }
@@ -210,6 +211,25 @@ describe('auth keychain set', () => {
     const data = expectJsonEnvelopeShape(parsed, ['profile', 'backend', 'written']);
     expect(data.written).toBe(true);
   });
+
+  it('clears all four caches after writing credentials', async () => {
+    clearCacheMock.mockReset();
+    clearStatusCacheMock.mockReset();
+    clearPrimedCredsMock.mockReset();
+    idempotencyClearForProfileMock.mockReset();
+
+    const store = makeStore({ writable: true });
+    selectMock.mockResolvedValue(store);
+    const file = path.join(tmpDir, 'creds.json');
+    fs.writeFileSync(file, JSON.stringify({ token: 'tk', secret: 'sk' }));
+
+    const res = await runCli(['auth', 'keychain', 'set', '--stdin-file', file]);
+    expect(res.exitCode).toBe(0);
+    expect(clearCacheMock).toHaveBeenCalledOnce();
+    expect(clearStatusCacheMock).toHaveBeenCalledOnce();
+    expect(clearPrimedCredsMock).toHaveBeenCalledOnce();
+    expect(idempotencyClearForProfileMock).toHaveBeenCalledOnce();
+  });
 });
 
 describe('auth keychain delete', () => {
@@ -231,6 +251,23 @@ describe('auth keychain delete', () => {
     const parsed = JSON.parse(res.stdout[0]) as Record<string, unknown>;
     const data = expectJsonEnvelopeShape(parsed, ['profile', 'backend', 'deleted']);
     expect(data.deleted).toBe(true);
+  });
+
+  it('clears all four caches after deleting credentials', async () => {
+    clearCacheMock.mockReset();
+    clearStatusCacheMock.mockReset();
+    clearPrimedCredsMock.mockReset();
+    idempotencyClearForProfileMock.mockReset();
+
+    const store = makeStore({ writable: true });
+    selectMock.mockResolvedValue(store);
+
+    const res = await runCli(['auth', 'keychain', 'delete', '--yes']);
+    expect(res.exitCode).toBe(0);
+    expect(clearCacheMock).toHaveBeenCalledOnce();
+    expect(clearStatusCacheMock).toHaveBeenCalledOnce();
+    expect(clearPrimedCredsMock).toHaveBeenCalledOnce();
+    expect(idempotencyClearForProfileMock).toHaveBeenCalledOnce();
   });
 });
 
@@ -337,5 +374,242 @@ describe('auth keychain migrate', () => {
     expect(data.migrated).toBe(true);
     expect(data.sourceDeleted).toBe(true);
     expect(data.sourceScrubbed).toBe(false);
+  });
+
+  it('exits 1 when the keychain write fails during migrate', async () => {
+    const store = makeStore({
+      writable: true,
+      setImpl: async () => {
+        throw new Error('permission denied');
+      },
+    });
+    selectMock.mockResolvedValue(store);
+
+    const file = path.join(tmpHome, '.switchbot', 'config.json');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ token: 't-src', secret: 's-src' }));
+
+    const res = await runCli(['auth', 'keychain', 'migrate']);
+    expect(res.exitCode).toBe(1);
+    expect(res.stderr.join('\n')).toContain('keychain write failed');
+  });
+
+  it('exits 1 when source config.json contains invalid JSON', async () => {
+    const file = path.join(tmpHome, '.switchbot', 'config.json');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, 'THIS IS NOT JSON');
+    const store = makeStore({ writable: true });
+    selectMock.mockResolvedValue(store);
+    const res = await runCli(['auth', 'keychain', 'migrate']);
+    expect(res.exitCode).toBe(1);
+    expect(res.stderr.join('\n')).toMatch(/failed to parse/i);
+  });
+
+  it('exits 1 when source config.json contains a non-object (array)', async () => {
+    const file = path.join(tmpHome, '.switchbot', 'config.json');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify([1, 2, 3]));
+    const store = makeStore({ writable: true });
+    selectMock.mockResolvedValue(store);
+    const res = await runCli(['auth', 'keychain', 'migrate']);
+    expect(res.exitCode).toBe(1);
+    expect(res.stderr.join('\n')).toMatch(/failed to parse/i);
+  });
+
+  it('exits 0 but logs a warning when --delete-file cleanup throws', async () => {
+    const store = makeStore({ writable: true });
+    selectMock.mockResolvedValue(store);
+
+    const file = path.join(tmpHome, '.switchbot', 'config.json');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    // Only token+secret → no metadata → cleanup tries fs.unlinkSync
+    fs.writeFileSync(file, JSON.stringify({ token: 't-src', secret: 's-src' }));
+
+    const unlinkSpy = vi.spyOn(fs, 'unlinkSync').mockImplementation(() => {
+      throw new Error('EPERM: operation not permitted');
+    });
+    try {
+      const res = await runCli(['auth', 'keychain', 'migrate', '--delete-file']);
+      expect(res.exitCode).toBe(0);
+      expect(res.stderr.join('\n')).toContain('warning: could not remove');
+    } finally {
+      unlinkSpy.mockRestore();
+    }
+  });
+
+  it('clears all four caches after a successful migrate', async () => {
+    clearCacheMock.mockReset();
+    clearStatusCacheMock.mockReset();
+    clearPrimedCredsMock.mockReset();
+    idempotencyClearForProfileMock.mockReset();
+
+    const store = makeStore({ writable: true });
+    selectMock.mockResolvedValue(store);
+    const file = path.join(tmpHome, '.switchbot', 'config.json');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ token: 't-mig', secret: 's-mig' }));
+
+    const res = await runCli(['auth', 'keychain', 'migrate']);
+    expect(res.exitCode).toBe(0);
+    expect(clearCacheMock).toHaveBeenCalledOnce();
+    expect(clearStatusCacheMock).toHaveBeenCalledOnce();
+    expect(clearPrimedCredsMock).toHaveBeenCalledOnce();
+    expect(idempotencyClearForProfileMock).toHaveBeenCalledOnce();
+  });
+});
+
+// ── auth login ────────────────────────────────────────────────────────────────
+
+const browserLoginMock = vi.fn();
+const verifyCredsMock = vi.fn();
+
+vi.mock('../../src/auth/browser-login.js', () => ({
+  browserLogin: (...args: unknown[]) => browserLoginMock(...args),
+}));
+
+vi.mock('../../src/auth/verify.js', () => ({
+  verifyCredentials: (...args: unknown[]) => verifyCredsMock(...args),
+}));
+
+const clearCacheMock = vi.fn();
+const clearStatusCacheMock = vi.fn();
+
+vi.mock('../../src/devices/cache.js', async () => {
+  const actual = await vi.importActual<typeof import('../../src/devices/cache.js')>(
+    '../../src/devices/cache.js',
+  );
+  return {
+    ...actual,
+    clearCache: (...args: unknown[]) => clearCacheMock(...args),
+    clearStatusCache: (...args: unknown[]) => clearStatusCacheMock(...args),
+  };
+});
+
+const clearPrimedCredsMock = vi.fn();
+
+vi.mock('../../src/credentials/prime.js', async () => {
+  const actual = await vi.importActual<typeof import('../../src/credentials/prime.js')>(
+    '../../src/credentials/prime.js',
+  );
+  return {
+    ...actual,
+    clearPrimedCredentials: (...args: unknown[]) => clearPrimedCredsMock(...args),
+  };
+});
+
+const idempotencyClearForProfileMock = vi.fn();
+
+vi.mock('../../src/lib/idempotency.js', async () => {
+  const actual = await vi.importActual<typeof import('../../src/lib/idempotency.js')>(
+    '../../src/lib/idempotency.js',
+  );
+  return {
+    ...actual,
+    idempotencyCache: {
+      clearForProfile: (...args: unknown[]) => idempotencyClearForProfileMock(...args),
+      clear: vi.fn(),
+      run: vi.fn(),
+      size: vi.fn(() => 0),
+    },
+  };
+});
+
+describe('auth login', () => {
+  beforeEach(() => {
+    browserLoginMock.mockReset();
+    verifyCredsMock.mockReset();
+    clearCacheMock.mockReset();
+    clearStatusCacheMock.mockReset();
+    clearPrimedCredsMock.mockReset();
+    idempotencyClearForProfileMock.mockReset();
+  });
+
+  it('saves credentials and exits 0 on success', async () => {
+    browserLoginMock.mockResolvedValue({ token: 'tok-abc123', secret: 'sec-xyz987' });
+    verifyCredsMock.mockResolvedValue({ ok: true });
+    const store = makeStore({ writable: true });
+    selectMock.mockResolvedValue(store);
+
+    const res = await runCli(['auth', 'login', '--no-open']);
+    expect(res.exitCode).toBe(0);
+    expect(store.set).toHaveBeenCalledWith('default', { token: 'tok-abc123', secret: 'sec-xyz987' });
+  });
+
+  it('exits 1 when browserLogin rejects', async () => {
+    browserLoginMock.mockRejectedValue(new Error('user cancelled'));
+    const res = await runCli(['auth', 'login', '--no-open']);
+    expect(res.exitCode).toBe(1);
+  });
+
+  it('exits 1 when credential verification fails (non-100 statusCode)', async () => {
+    browserLoginMock.mockResolvedValue({ token: 'bad-tok', secret: 'bad-sec' });
+    verifyCredsMock.mockResolvedValue({ ok: false, reason: 'API returned statusCode 401' });
+    const res = await runCli(['auth', 'login', '--no-open']);
+    expect(res.exitCode).toBe(1);
+  });
+
+  it('emits JSON on success under --json', async () => {
+    browserLoginMock.mockResolvedValue({ token: 'tok-abc123', secret: 'sec-xyz987' });
+    verifyCredsMock.mockResolvedValue({ ok: true });
+    const store = makeStore({ writable: true });
+    selectMock.mockResolvedValue(store);
+
+    const res = await runCli(['--json', 'auth', 'login', '--no-open']);
+    expect(res.exitCode).toBe(0);
+    const parsed = JSON.parse(res.stdout[0]) as Record<string, unknown>;
+    const data = (parsed['data'] ?? parsed) as Record<string, unknown>;
+    expect(data).toHaveProperty('loggedIn', true);
+    expect(data).toHaveProperty('verified', true);
+  });
+
+  it('writes credentials directly to the --config file instead of the keychain', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-auth-login-config-'));
+    const configFile = path.join(tmpDir, 'portable.json');
+
+    try {
+      browserLoginMock.mockResolvedValue({ token: 'tok-portable', secret: 'sec-portable' });
+      verifyCredsMock.mockResolvedValue({ ok: true });
+      // selectMock is already reset in beforeEach — it must not be called at all
+
+      const res = await runCli([
+        '--config', configFile,
+        'auth', 'login', '--no-open',
+      ]);
+      expect(res.exitCode).toBe(0);
+
+      // Credentials must be written to the config file, NOT to the keychain
+      expect(selectMock).not.toHaveBeenCalled();
+      expect(fs.existsSync(configFile)).toBe(true);
+      const saved = JSON.parse(fs.readFileSync(configFile, 'utf-8')) as Record<string, unknown>;
+      expect(saved['token']).toBe('tok-portable');
+      expect(saved['secret']).toBe('sec-portable');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('clears all four caches after successful login', async () => {
+    browserLoginMock.mockResolvedValue({ token: 'tok-new', secret: 'sec-new' });
+    verifyCredsMock.mockResolvedValue({ ok: true });
+    const store = makeStore({ writable: true });
+    selectMock.mockResolvedValue(store);
+
+    const res = await runCli(['auth', 'login', '--no-open']);
+    expect(res.exitCode).toBe(0);
+    expect(clearCacheMock).toHaveBeenCalledOnce();
+    expect(clearStatusCacheMock).toHaveBeenCalledOnce();
+    expect(clearPrimedCredsMock).toHaveBeenCalledOnce();
+    expect(idempotencyClearForProfileMock).toHaveBeenCalledOnce();
+  });
+
+  it('does not clear any cache when login fails', async () => {
+    browserLoginMock.mockRejectedValue(new Error('user cancelled'));
+
+    const res = await runCli(['auth', 'login', '--no-open']);
+    expect(res.exitCode).toBe(1);
+    expect(clearCacheMock).not.toHaveBeenCalled();
+    expect(clearStatusCacheMock).not.toHaveBeenCalled();
+    expect(clearPrimedCredsMock).not.toHaveBeenCalled();
+    expect(idempotencyClearForProfileMock).not.toHaveBeenCalled();
   });
 });

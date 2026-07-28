@@ -1,0 +1,6 @@
+{
+  "onInstall": {
+    "command": "switchbot-codex-auth",
+    "args": ["--hook"]
+  }
+}

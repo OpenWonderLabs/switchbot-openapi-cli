@@ -1,4 +1,8 @@
 export const COMMAND_KEYWORDS: Array<{ pattern: RegExp; command: string }> = [
+  // Compound patterns FIRST — disambiguate open+lock before single-word rules fire
+  { pattern: /\bopen\b.{0,30}\block\b|\bunlock\b/i, command: 'unlock' },
+  { pattern: /\bclose\b.{0,30}\block\b|\block\b.{0,30}\bclose\b/i, command: 'lock' },
+  // Single-word rules
   { pattern: /\boff\b|\bturn.?off\b|\bstop\b/i, command: 'turnOff' },
   { pattern: /\bon\b|\bturn.?on\b|\bstart\b/i, command: 'turnOn' },
   { pattern: /\bpress\b|\bclick\b|\btap\b/i, command: 'press' },

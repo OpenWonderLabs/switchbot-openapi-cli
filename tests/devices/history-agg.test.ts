@@ -211,6 +211,29 @@ describe('aggregateDeviceHistory — single bucket', () => {
     expect(res.buckets[0].metrics.temperature.count).toBe(2);
   });
 
+  it('when bucket is omitted, single bucket t is within the query range (not epoch)', async () => {
+    const file = path.join(historyDir, 'DEV2.jsonl');
+    writeJsonl(file, [
+      { t: '2026-04-19T10:00:00.000Z', topic: 'status', payload: { temperature: 21 } },
+      { t: '2026-04-19T14:00:00.000Z', topic: 'status', payload: { temperature: 23 } },
+    ]);
+
+    const res = await aggregateDeviceHistory('DEV2', {
+      from: '2026-04-19T00:00:00.000Z',
+      to:   '2026-04-20T00:00:00.000Z',
+      metrics: ['temperature'],
+      aggs: ['avg'],
+    });
+
+    expect(res.buckets).toHaveLength(1);
+    const bucketT = new Date(res.buckets[0].t).getTime();
+    // Must NOT be epoch (year 1970)
+    expect(bucketT).toBeGreaterThan(new Date('2026-01-01').getTime());
+    // Must be within the queried range
+    expect(bucketT).toBeGreaterThanOrEqual(new Date('2026-04-19T00:00:00.000Z').getTime());
+    expect(bucketT).toBeLessThanOrEqual(new Date('2026-04-20T00:00:00.000Z').getTime());
+  });
+
   it('returns empty buckets for an unknown device', async () => {
     const res = await aggregateDeviceHistory('does-not-exist', {
       from: '2026-04-19T00:00:00.000Z',
@@ -221,6 +244,55 @@ describe('aggregateDeviceHistory — single bucket', () => {
     expect(res.buckets).toEqual([]);
     expect(res.partial).toBe(false);
     expect(res.notes).toEqual([]);
+  });
+
+  it('yields one bucket when upper bound is open (toMs = Infinity)', async () => {
+    const file = path.join(historyDir, 'DEV_OPEN.jsonl');
+    const base = new Date('2026-04-19T10:00:00.000Z').getTime();
+    writeJsonl(file, [
+      { t: new Date(base).toISOString(),        topic: 'status', payload: { temperature: 20 } },
+      { t: new Date(base + 1000).toISOString(), topic: 'status', payload: { temperature: 22 } },
+      { t: new Date(base + 2000).toISOString(), topic: 'status', payload: { temperature: 24 } },
+    ]);
+
+    // Mock Date.now to return a large increment per call.
+    // Before the fix, each per-record call produces a different key → 3 buckets.
+    // After the fix, Date.now() is called once before the loop → 1 bucket.
+    let call = 0;
+    vi.spyOn(Date, 'now').mockImplementation(() => base + call++ * 1_000_000);
+
+    const res = await aggregateDeviceHistory('DEV_OPEN', {
+      from: '2026-04-19T00:00:00.000Z', // finite fromMs; no --to → toMs = +Infinity
+      metrics: ['temperature'],
+      aggs: ['count', 'avg'],
+    });
+
+    expect(res.buckets).toHaveLength(1);
+    expect(res.buckets[0].metrics.temperature.count).toBe(3);
+    expect(res.buckets[0].metrics.temperature.avg).toBe(22);
+  });
+
+  it('when only --to is given, single bucket t does not exceed the upper bound', async () => {
+    const toMs = new Date('2026-04-19T23:59:59.000Z').getTime();
+    const file = path.join(historyDir, 'DEV_TO_ONLY.jsonl');
+    writeJsonl(file, [
+      { t: '2026-04-19T10:00:00.000Z', topic: 'status', payload: { temperature: 20 } },
+      { t: '2026-04-19T14:00:00.000Z', topic: 'status', payload: { temperature: 22 } },
+    ]);
+
+    // Pin Date.now() to 1 h after toMs — before the fix this would produce
+    // stableKey = (now + toMs) / 2 which lands after toMs.
+    vi.spyOn(Date, 'now').mockReturnValue(toMs + 3_600_000);
+
+    const res = await aggregateDeviceHistory('DEV_TO_ONLY', {
+      to: '2026-04-19T23:59:59.000Z', // fromMs = -Infinity
+      metrics: ['temperature'],
+      aggs: ['avg'],
+    });
+
+    expect(res.buckets).toHaveLength(1);
+    const bucketT = new Date(res.buckets[0].t).getTime();
+    expect(bucketT).toBeLessThanOrEqual(toMs);
   });
 
   it('skips rotated files whose mtime is older than --since window', async () => {
@@ -261,5 +333,24 @@ describe('aggregateDeviceHistory — single bucket', () => {
     // Verify it's the current file's value (21), not the rotated file's (99)
     expect(res.buckets[0].metrics.temperature.min).toBe(21);
     expect(res.buckets[0].metrics.temperature.max).toBe(21);
+  });
+
+  it('produces one bucket with all records when --from/--to are omitted and no --bucket', async () => {
+    const file = path.join(historyDir, 'DEV1.jsonl');
+    writeJsonl(file, [
+      { t: '2026-04-19T10:00:00.000Z', topic: 'status', payload: { temperature: 20 } },
+      { t: '2026-04-20T10:00:00.000Z', topic: 'status', payload: { temperature: 22 } },
+      { t: '2026-04-21T10:00:00.000Z', topic: 'status', payload: { temperature: 24 } },
+    ]);
+
+    const res = await aggregateDeviceHistory('DEV1', {
+      metrics: ['temperature'],
+      aggs: ['count', 'min', 'max'],
+    });
+
+    expect(res.buckets).toHaveLength(1);
+    expect(res.buckets[0].metrics.temperature.count).toBe(3);
+    expect(res.buckets[0].metrics.temperature.min).toBe(20);
+    expect(res.buckets[0].metrics.temperature.max).toBe(24);
   });
 });

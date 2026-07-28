@@ -21,6 +21,7 @@ import {
 import { getCacheMode } from '../utils/flags.js';
 import { writeAudit } from '../utils/audit.js';
 import { isDryRun } from '../utils/flags.js';
+import { getActiveProfile } from '../lib/request-context.js';
 
 export interface Device {
   deviceId: string;
@@ -246,6 +247,7 @@ export async function executeCommand(
     options?.idempotencyKey,
     execute,
     { command: cmd, parameter },
+    getActiveProfile() ?? 'default',
   );
   if (!replayed) return result;
   writeAudit({

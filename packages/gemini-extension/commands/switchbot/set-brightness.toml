@@ -1,0 +1,9 @@
+description = "Set brightness of a SwitchBot light (pass device name and 0-100 value)"
+prompt = """
+Set the brightness of the SwitchBot light the user names. Resolve the device name to a deviceId
+(alias → exact → prefix → substring → fuzzy). Verify the device supports "setBrightness" via
+describe_device (Color Bulb, LED Strip, Ceiling Light, etc.). This is a mutation-tier command.
+Use the send_command MCP tool with command "setBrightness" and the numeric parameter (0-100).
+If the user gives a percentage like "50%", use parameter "50". Report the result.
+User input: {{args}}
+"""

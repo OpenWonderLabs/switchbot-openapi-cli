@@ -1,6 +1,9 @@
-import { createRequire } from 'node:module';
 import { Ajv2020 } from 'ajv/dist/2020.js';
 import type { ErrorObject } from 'ajv';
+// ajv-formats is a CJS module; the cast works around a NodeNext default-import
+// type inference gap while still allowing esbuild to inline it statically.
+import _addFormats from 'ajv-formats';
+const addFormats = _addFormats as unknown as (ajv: Ajv2020Type) => void;
 import { isMap, isSeq, isScalar, type Node, type LineCounter, type Document } from 'yaml';
 import { loadPolicyFile, type LoadedPolicy } from './load.js';
 import {
@@ -14,10 +17,6 @@ import { findCatalogEntry, getEffectiveCatalog } from '../devices/catalog.js';
 import { parseRuleCommand } from '../rules/action.js';
 import { destructiveVerbOf, DESTRUCTIVE_COMMANDS } from '../rules/destructive.js';
 import type { DeviceListBody } from '../lib/devices.js';
-
-const require = createRequire(import.meta.url);
-type AddFormatsFn = (ajv: Ajv2020Type) => Ajv2020Type;
-const addFormats = require('ajv-formats') as AddFormatsFn;
 
 type Ajv2020Type = InstanceType<typeof Ajv2020>;
 type ValidateFn = ReturnType<Ajv2020Type['compile']>;

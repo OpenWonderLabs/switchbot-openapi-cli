@@ -1,0 +1,6 @@
+{
+  "onInstall": {
+    "command": "node",
+    "args": ["../bin/auth.js"]
+  }
+}

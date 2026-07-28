@@ -14,6 +14,7 @@ npm-debug.log*
 # Environment & credentials
 .env
 .env.*
+!.env.example
 .switchbot/
 
 # Editor / OS
@@ -33,3 +34,8 @@ smoke-v3/
 switchbot-skill/
 docs/superpowers/
 docs/smoke-*
+
+# Local scratch / pack-test artifacts
+.npm-cache/
+.tmp-packtest*/
+trunc_test.txt

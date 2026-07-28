@@ -43,6 +43,7 @@ jobs:
             exit 1
           fi
       - run: npm test
+      - run: npm run test:workspaces
 
   bundle-smoke:
     name: esbuild bundle smoke test (Node ${{ matrix.node-version }})
@@ -146,33 +147,57 @@ jobs:
       - name: npm pack -> npm install tarball -> switchbot --version / policy new / policy validate
         run: npm run smoke:pack-install
 
-  policy-schema-sync:
-    name: Policy schema sync with skill repo
-    runs-on: ubuntu-latest
+  codex-release-gates:
+    name: Codex release gates (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
-      - name: Fetch skill repo's mirrored schema
-        run: |
-          HTTP=$(curl -o /tmp/skill-policy.schema.json -w "%{http_code}" -fsSL --retry 3 \
-            https://raw.githubusercontent.com/OpenWonderLabs/openclaw-switchbot-skill/main/examples/policy.schema.json \
-            2>/dev/null || echo "000")
-          if [ "$HTTP" = "404" ] || [ "$HTTP" = "000" ]; then
-            echo "SKIP: skill repo schema not yet published (HTTP $HTTP). Skipping drift check."
-            exit 0
-          fi
-          if [ "$HTTP" != "200" ]; then
-            echo "WARN: unexpected HTTP $HTTP fetching skill schema. Skipping drift check."
-            exit 0
-          fi
-          echo "Fetched skill schema (HTTP $HTTP). Diffing against CLI v0.2 source of truth..."
-          if ! diff -u /tmp/skill-policy.schema.json src/policy/schema/v0.2.json; then
-            echo ""
-            echo "FAIL: policy schema drift detected."
-            echo "  CLI source: src/policy/schema/v0.2.json"
-            echo "  Skill copy: https://github.com/OpenWonderLabs/openclaw-switchbot-skill/blob/main/examples/policy.schema.json"
-            echo ""
-            echo "Sync the skill's examples/policy.schema.json from the CLI file and cut a matching skill release."
-            exit 1
-          fi
-          echo "OK: policy schema matches skill repo."
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: npm
+      - run: npm ci
+      - run: npm run verify:release-gate
+
+  claude-code-release-gates:
+    name: Claude Code release gates (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run smoke:claude-code-pack-install
+
+  gemini-release-gates:
+    name: Gemini extension release gates (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run smoke:gemini-extension-lint
+      - name: Workspace tests
+        run: cd packages/gemini-extension && node --test

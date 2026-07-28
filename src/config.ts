@@ -5,11 +5,12 @@ import { createHash } from 'node:crypto';
 import { getConfigPath } from './utils/flags.js';
 import { getActiveProfile } from './lib/request-context.js';
 import { emitJsonError, isJsonMode } from './utils/output.js';
-import { getPrimedCredentials, resetPrimedCredentials } from './credentials/prime.js';
+import { getPrimedCredentials, clearPrimedCredentials } from './credentials/prime.js';
 
 export interface SwitchBotConfig {
   token: string;
   secret: string;
+  accountName?: string;
   label?: string;
   description?: string;
   limits?: { dailyCap?: number };
@@ -21,6 +22,7 @@ export interface ConfigSummary {
   path?: string;
   token?: string;
   secret?: string;
+  accountName?: string;
   label?: string;
   description?: string;
   dailyCap?: number;
@@ -82,10 +84,25 @@ export function loadConfig(): SwitchBotConfig {
   const file = configFilePath();
   if (!fs.existsSync(file)) {
     const profile = getActiveProfile();
-    const hint = profile
-      ? `No credentials configured for profile "${profile}". Run: switchbot --profile ${profile} config set-token <token> <secret>`
-      : 'No credentials configured. Run: switchbot config set-token <token> <secret>';
-    const msg = `${hint}\nOr set SWITCHBOT_TOKEN and SWITCHBOT_SECRET environment variables.`;
+    const override = getConfigPath();
+    // --config takes precedence over --profile (mirrors configFilePath ordering).
+    // The recovery commands must round-trip the active scope; otherwise the
+    // suggested `auth login` would write to the default keychain, which
+    // loadConfig() ignores while --config is set.
+    const prefix = override
+      ? `switchbot --config ${override}`
+      : profile
+      ? `switchbot --profile ${profile}`
+      : 'switchbot';
+    const setToken = `${prefix} config set-token <token> <secret>`;
+    const authLogin = `${prefix} auth login`;
+    const profileMsg = override
+      ? ` for config "${override}"`
+      : profile
+      ? ` for profile "${profile}"`
+      : '';
+    const hint = `No credentials configured${profileMsg}.`;
+    const msg = `${hint} Choose one:\n  1. ${authLogin}   (browser login)\n  2. ${setToken}   (manual)\n  3. Set SWITCHBOT_TOKEN and SWITCHBOT_SECRET environment variables`;
     if (isJsonMode()) {
       emitJsonError({ code: 1, kind: 'runtime', message: hint });
     } else {
@@ -163,6 +180,7 @@ export function saveConfig(token: string, secret: string, extras?: Partial<Switc
   const cfg: SwitchBotConfig = {
     token,
     secret,
+    ...(existing.accountName ? { accountName: existing.accountName } : {}),
     ...(existing.label ? { label: existing.label } : {}),
     ...(existing.description ? { description: existing.description } : {}),
     ...(existing.limits ? { limits: existing.limits } : {}),
@@ -171,14 +189,16 @@ export function saveConfig(token: string, secret: string, extras?: Partial<Switc
   if (extras) {
     const label = sanitizeOptionalString(extras.label);
     const description = sanitizeOptionalString(extras.description);
+    const accountName = sanitizeOptionalString(extras.accountName);
     if (label !== undefined) cfg.label = label;
     if (description !== undefined) cfg.description = description;
+    if (accountName !== undefined) cfg.accountName = accountName;
     if (extras.limits) cfg.limits = { ...(cfg.limits ?? {}), ...extras.limits };
     if (extras.defaults) cfg.defaults = { ...(cfg.defaults ?? {}), ...extras.defaults };
   }
 
   fs.writeFileSync(file, JSON.stringify(cfg, null, 2), { mode: 0o600 });
-  resetPrimedCredentials();
+  clearPrimedCredentials(getActiveProfile() ?? 'default');
 }
 
 /**
@@ -228,6 +248,7 @@ export function showConfig(): void {
     return;
   }
   console.log(`Credential source: ${summary.path}`);
+  if (summary.accountName) console.log(`account: ${summary.accountName}`);
   if (summary.label) console.log(`label : ${summary.label}`);
   if (summary.description) console.log(`desc  : ${summary.description}`);
   console.log(`token : ${summary.token ?? ''}`);
@@ -259,6 +280,7 @@ export function getConfigSummary(): ConfigSummary {
     return {
       source: 'file',
       path: file,
+      accountName: cfg.accountName,
       label: cfg.label,
       description: cfg.description,
       token: maskCredential(cfg.token),

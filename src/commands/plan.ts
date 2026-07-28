@@ -459,14 +459,35 @@ against the live API without executing any mutations.
       (v: string, prev: string[]) => [...prev, v],
       [] as string[],
     )
+    .option(
+      '--devices <id>',
+      'Alias for --device (repeatable)',
+      (v: string, prev: string[]) => [...prev, v],
+      [] as string[],
+    )
     .option('--out <file>', 'Write plan JSON to file instead of stdout')
-    .action((opts: { intent: string; device: string[]; out?: string }) => {
-      try {
-        if (opts.device.length === 0) {
-          console.error('error: at least one --device is required');
-          process.exit(1);
+    .action((opts: { intent: string; device: string[]; devices: string[]; out?: string }) => {
+      // Preserve argv order across --device / --devices: Commander stores each spelling in its
+      // own array, so [...device, ...devices] would reorder mixed input like
+      // "--device A --devices B --device C" → A, C, B.  Scan process.argv instead.
+      // (command.parseOptions() returns tokens but does not split across option-name variants,
+      // so it cannot restore cross-variant insertion order either.)
+      const allDevices: string[] = [];
+      const raw = process.argv;
+      for (let i = 0; i < raw.length; i++) {
+        const eqMatch = raw[i].match(/^--devices?=(.+)/);
+        if (eqMatch) { allDevices.push(eqMatch[1]); continue; }
+        if ((raw[i] === '--device' || raw[i] === '--devices') && i + 1 < raw.length) {
+          allDevices.push(raw[i + 1]);
         }
-        const devices = opts.device.map((ref) => {
+      }
+      if (allDevices.length === 0) allDevices.push(...opts.device, ...opts.devices);
+      if (allDevices.length === 0) {
+        console.error('error: at least one --device is required');
+        process.exit(2);
+      }
+      try {
+        const devices = allDevices.map((ref) => {
           const cached = getCachedDevice(ref);
           return { id: ref, name: cached?.name, type: cached?.type };
         });
