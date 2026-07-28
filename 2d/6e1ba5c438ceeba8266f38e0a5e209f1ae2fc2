@@ -1,0 +1,19 @@
+docs/policy-reference.md
+  s_9f908c2a5657b6::t_fbd5220cefc709 233
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "2d6e1ba5c438ceeba8266f38e0a5e209f1ae2fc2",
+  "prompts": {},
+  "sessions": {
+    "s_9f908c2a5657b6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "45b6fcbb-725e-4346-b8cd-9e2791236fef",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
