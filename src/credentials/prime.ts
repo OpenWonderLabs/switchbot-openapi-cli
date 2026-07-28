@@ -80,9 +80,7 @@ export function getPrimedCredentials(profile: string): CredentialBundle | null {
 }
 
 /**
- * Clear the in-memory credential cache. Called by saveConfig() when
- * credentials are written to disk so the next loadConfig() picks up
- * the new values instead of a stale primed entry.
+ * Test helper. Clears all cached and in-flight credential generations.
  */
 export function __resetPrimedCredentials(): void {
   for (const p of generations.keys()) {
