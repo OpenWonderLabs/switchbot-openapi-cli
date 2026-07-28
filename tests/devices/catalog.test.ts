@@ -178,6 +178,15 @@ const OFFICIAL_SUPPORTED_DEVICE_LIST_NAMES = [
   'Home Climate Panel',
   'Smart Radiator Thermostat',
   'AI Art Frame',
+  'Weather Station',
+  'Lock Pro Matter Enabled',
+  'Lock Vision',
+  'Lock Vision Pro',
+  'Permanent Outdoor Lights',
+  'RGBICWW Ceiling Light',
+  'Battery Circulator Fan 2 Pro',
+  'Kata Friends',
+  'AI MindClip',
 ] as const;
 
 describe('devices/catalog', () => {

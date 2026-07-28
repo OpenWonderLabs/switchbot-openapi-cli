@@ -278,14 +278,16 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'Smart Lock Pro Wifi',
     category: 'physical',
-    description: 'Matter-enabled Wi-Fi electronic deadbolt with lock and unlock control.',
+    description: 'Matter-enabled Wi-Fi electronic deadbolt with lock, unlock, and deadbolt control.',
     role: 'security',
     aliases: ['Lock Pro Matter Enabled'],
     commands: [
       { command: 'lock', parameter: '—', description: 'Lock the door', idempotent: true },
       { command: 'unlock', parameter: '—', description: 'Unlock the door', idempotent: true, safetyTier: 'destructive', safetyReason: 'Physically unlocks the door — anyone nearby can open it.' },
+      { command: 'nightLatchUnlock', parameter: '—', description: 'Unlock the night latch (EU)', idempotent: true, safetyTier: 'destructive', safetyReason: 'Physically unlocks the door — anyone nearby can open it.' },
+      { command: 'deadbolt', parameter: '—', description: 'Disengage the deadbolt or latch', idempotent: true, safetyTier: 'destructive', safetyReason: 'Physically unlocks the door — anyone nearby can open it.' },
     ],
-    statusFields: ['battery', 'version', 'lockState', 'doorState', 'calibrate'],
+    statusFields: ['battery', 'version', 'lockState', 'doorState', 'calibrate', 'onlineStatus'],
   },
   {
     type: 'Lock Vision',
@@ -295,9 +297,10 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     commands: [
       { command: 'lock', parameter: '—', description: 'Lock the door', idempotent: true },
       { command: 'unlock', parameter: '—', description: 'Unlock the door', idempotent: true, safetyTier: 'destructive', safetyReason: 'Physically unlocks the door — anyone nearby can open it.' },
+      { command: 'createKey', parameter: '\'{"name":"...","type":"...","password":"...","startTime":<s>,"endTime":<s>}\'', description: 'Create a passcode', idempotent: false, safetyTier: 'destructive', safetyReason: 'Provisions a new access credential — anyone with this passcode can unlock the door.' },
       { command: 'deleteKey', parameter: '\'{"id":<passcode_id>}\'', description: 'Delete a passcode by id', idempotent: true, safetyTier: 'destructive', safetyReason: 'Permanently removes a passcode — the holder immediately loses door access.' },
     ],
-    statusFields: ['battery', 'version', 'lockState', 'doorState', 'calibrate'],
+    statusFields: ['battery', 'version', 'lockState', 'doorState', 'calibrate', 'onlineStatus'],
   },
   {
     type: 'Lock Vision Pro',
@@ -307,9 +310,10 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     commands: [
       { command: 'lock', parameter: '—', description: 'Lock the door', idempotent: true },
       { command: 'unlock', parameter: '—', description: 'Unlock the door', idempotent: true, safetyTier: 'destructive', safetyReason: 'Physically unlocks the door — anyone nearby can open it.' },
+      { command: 'createKey', parameter: '\'{"name":"...","type":"...","password":"...","startTime":<s>,"endTime":<s>}\'', description: 'Create a passcode', idempotent: false, safetyTier: 'destructive', safetyReason: 'Provisions a new access credential — anyone with this passcode can unlock the door.' },
       { command: 'deleteKey', parameter: '\'{"id":<passcode_id>}\'', description: 'Delete a passcode by id', idempotent: true, safetyTier: 'destructive', safetyReason: 'Permanently removes a passcode — the holder immediately loses door access.' },
     ],
-    statusFields: ['battery', 'version', 'lockState', 'doorState', 'calibrate'],
+    statusFields: ['battery', 'version', 'lockState', 'doorState', 'calibrate', 'onlineStatus'],
   },
   {
     type: 'Plug',
@@ -499,7 +503,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
       { command: 'setMainLightBrightness', parameter: '{1-100}', description: 'Set main light brightness', idempotent: true, exampleParams: ['50'] },
       { command: 'setMainLightColorTemp', parameter: '{2700-6500}', description: 'Set main light color temperature (K)', idempotent: true, exampleParams: ['4000'] },
       { command: 'setColorLightBrightness', parameter: '{1-100}', description: 'Set color light brightness', idempotent: true, exampleParams: ['50'] },
-      { command: 'setColorLightRGB', parameter: '\'{0-255}:{0-255}:{0-255}\'', description: 'Set color light RGB color', idempotent: true },
+      { command: 'setColorLightRGB', parameter: '\'{0-255}:{0-255}:{0-255}\'', description: 'Set color light RGB color', idempotent: true, exampleParams: ['255:0:0'] },
     ],
     statusFields: ['power', 'mainLightPower', 'mainLightBrightness', 'mainLightColorTemp', 'colorLightPower', 'colorLightBrightness', 'colorLightRGB', 'version'],
   },
@@ -587,7 +591,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
       { command: 'setWindMode', parameter: 'direct | natural | sleep | hurricane', description: 'Wind mode', idempotent: true, exampleParams: ['natural', 'sleep'] },
       { command: 'setWindSpeed', parameter: '1-100', description: 'Fan speed', idempotent: true, exampleParams: ['50', '100'] },
     ],
-    statusFields: ['power', 'mode', 'version', 'battery', 'nightStatus', 'oscillation', 'verticalOscillation', 'chargingStatus', 'fanSpeed'],
+    statusFields: ['power', 'mode', 'version', 'onlineStatus', 'nightStatus', 'oscillation', 'verticalOscillation', 'chargingStatus', 'fanSpeed'],
   },
   {
     type: 'Blind Tilt',
@@ -735,6 +739,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     category: 'physical',
     description: 'Indoor weather station display with customizable quote screen.',
     role: 'sensor',
+    aliases: ['Weather Station'],
     commands: [
       { command: 'customQuote', parameter: 'custom text', description: 'Set a custom quote on the display', idempotent: true },
       { command: 'cancelCustom', parameter: 'default', description: 'Revert to default quote display', idempotent: true },
@@ -849,7 +854,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     role: 'other',
     readOnly: true,
     commands: [],
-    statusFields: ['version', 'battery', 'chargingStatus', 'recordingStatus', 'uploadStatus', 'hasUntransferredFiles'],
+    statusFields: ['battery', 'chargingStatus', 'recordingStatus', 'uploadStatus', 'hasUntransferredFiles'],
   },
   {
     type: 'Kata Friends',
