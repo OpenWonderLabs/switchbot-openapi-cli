@@ -1,0 +1,33 @@
+src/devices/catalog.ts
+  s_9f908c2a5657b6::t_bebcbfb187d753 867-868,870-872
+  s_9f908c2a5657b6::t_c61ca0fd350ddb 755,757
+  s_9f908c2a5657b6::t_3a96ff49fc7368 487
+  s_9f908c2a5657b6::t_e95128539de5ac 518
+src/credentials/prime.ts
+  s_9f908c2a5657b6::t_552df271127b42 83
+src/devices/param-validator.ts
+  s_9f908c2a5657b6::t_92648ac59b56e0 261-262,265
+  s_9f908c2a5657b6::t_bb89aaf4e6e4a4 243-251
+  s_9f908c2a5657b6::t_430307b871832b 302-303
+  s_9f908c2a5657b6::t_ceeff042d58dcb 328-329,344-345
+tests/devices/param-validator.test.ts
+  s_9f908c2a5657b6::t_0538a4e6f265ee 717-718,772-791
+  s_9f908c2a5657b6::t_928dea1a15fbb5 673,681-716
+  s_9f908c2a5657b6::t_3659bbc84308db 719
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "a68970d839aa03eb89ae091ecc2f3931c7d5c4a8",
+  "prompts": {},
+  "sessions": {
+    "s_9f908c2a5657b6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "45b6fcbb-725e-4346-b8cd-9e2791236fef",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
