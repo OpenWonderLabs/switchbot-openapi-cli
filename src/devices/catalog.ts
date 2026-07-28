@@ -758,7 +758,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     description: 'IR hub that bridges BLE devices to the cloud and learns IR remotes; no direct control commands.',
     role: 'hub',
     readOnly: true,
-    aliases: ['Hub', 'Hub Plus', 'Hub Mini2'],
+    aliases: ['Hub', 'Hub Plus', 'Hub Mini Matter Enabled'],
     commands: [],
     statusFields: ['version'],
   },
