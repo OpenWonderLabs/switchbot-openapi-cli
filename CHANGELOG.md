@@ -7,6 +7,18 @@ All notable changes to `@switchbot/openapi-cli` are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.8.1]
+
+### Fixed
+
+- `Hub Mini Matter Enabled` catalog alias mapping (#71)
+- `suggestedActions()` produced unexecutable suggestions for `WeatherStation`/`Kata Friends` commands missing `exampleParams`
+- `Permanent Outdoor Lights` / `RGBICWW Ceiling Light` `statusFields` missing `onlineStatus`
+- `Permanent Outdoor Lights` now validated for brightness/color/color-temperature ranges
+- `Battery Circulator Fan 2 Pro` given its own enum validation (`setWindMode`/`setNightLightMode` differ from earlier Circulator Fan models)
+- `Lock Vision` / `Lock Vision Pro` `createKey`/`deleteKey` now reuse Keypad passcode JSON validation
+- Stale doc comment on `__resetPrimedCredentials()` describing `clearPrimedCredentials()`'s behavior instead of its own
+
 ## [3.8.0]
 
 ### Added
