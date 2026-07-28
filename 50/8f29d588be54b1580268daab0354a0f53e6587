@@ -1,0 +1,37 @@
+packages/codex-plugin/.agents/plugins/marketplace.json
+  s_0857ba53256199::t_48870c5aaf5589 2
+src/install/codex-checks.ts
+  s_0857ba53256199::t_bad33a24cc69d0 302,304
+  s_0857ba53256199::t_99888933a8ae5b 46-57
+  s_0857ba53256199::t_70676e26f621a7 328
+  s_0857ba53256199::t_f342a5c2cd3517 256
+packages/codex-plugin/marketplace.json
+  s_0857ba53256199::t_b9f24376292625 1-20
+src/commands/codex.ts
+  s_0857ba53256199::t_5f1d06693d6cdd 178
+  s_0857ba53256199::t_4971404eb976ac 349-350,352-354,358-359
+  s_0857ba53256199::t_97d484d8f5d710 368-410
+  s_0857ba53256199::t_977228d177dd5c 703-704,706-708,712-713
+packages/codex-plugin/package.json
+  s_0857ba53256199::t_1b267539982060 36
+packages/codex-plugin/bin/install.js
+  s_0857ba53256199::t_e3927b0e848cd9 25-27,29-30,32-41
+  s_0857ba53256199::t_874b6afa766cf9 162
+  s_0857ba53256199::t_8870a1a4979bf4 122
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.1",
+  "base_commit_sha": "508f29d588be54b1580268daab0354a0f53e6587",
+  "prompts": {},
+  "sessions": {
+    "s_0857ba53256199": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7ee9e770-9683-4ad6-a210-7292b9d12706",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}

@@ -1,0 +1,40 @@
+src/auth/utils.ts
+  s_e9b1caed467e20::t_a3243f85a7d9b4 3-7
+src/auth/local-login-server.ts
+  s_e9b1caed467e20::t_ad5f61a7ecfda9 8
+  s_e9b1caed467e20::t_880b6553d65a64 4
+  s_e9b1caed467e20::t_300fcc2ce2f7a8 20
+  s_e9b1caed467e20::t_3658732b92d037 52
+  s_e9b1caed467e20::t_cddd741bf64288 117-118
+  s_e9b1caed467e20::t_08ed75c73afd58 381-394
+  s_e9b1caed467e20::t_8ec6975c3d9c34 18-19
+  s_e9b1caed467e20::t_8923da4b055855 123
+src/auth/constants.ts
+  s_e9b1caed467e20::t_9298334ea8d528 54,56-61
+  s_e9b1caed467e20::t_a983f3d2bf6834 21-23
+src/auth/oauth-callback.ts
+  s_e9b1caed467e20::t_e0804ca4840e09 2
+tests/auth/local-login-server.test.ts
+  s_e9b1caed467e20::t_e67178b7629044 193-195,201,208
+  s_e9b1caed467e20::t_33a1e630c53be0 150-158,162-164,173
+src/commands/auth.ts
+  s_e9b1caed467e20::t_42a0be116defe9 23,32
+  s_e9b1caed467e20::t_265ae4c7a875cc 430-439,456,462
+  s_e9b1caed467e20::t_929791e3e303d6 38-58
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "a3e645f018205216e2c2eb7f29c17f67bdbda29b",
+  "prompts": {},
+  "sessions": {
+    "s_e9b1caed467e20": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1609372a-454e-4580-90c6-e351730798f2",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}

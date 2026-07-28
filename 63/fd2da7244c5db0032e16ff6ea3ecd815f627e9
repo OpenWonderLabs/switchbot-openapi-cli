@@ -1,0 +1,19 @@
+docs/superpowers/specs/2026-05-21-mcp-test-coverage-design.md
+  s_fb6d2a8e0883f1::t_9678cf96b4124c 1-102
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "63fd2da7244c5db0032e16ff6ea3ecd815f627e9",
+  "prompts": {},
+  "sessions": {
+    "s_fb6d2a8e0883f1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "82c94bf3-3326-4bff-8e54-af5800a1f153",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}

@@ -1,0 +1,28 @@
+src/devices/cache.ts
+  s_fb6d2a8e0883f1::t_ae43fd9455870d 300-315
+tests/commands/devices.test.ts
+  s_fb6d2a8e0883f1::t_dcb34f032554eb 135
+  s_fb6d2a8e0883f1::t_de6603ef751a0a 1084-1086,1089
+  s_fb6d2a8e0883f1::t_59f3b9c95cb61b 41
+  s_fb6d2a8e0883f1::t_25b985d3c37218 1081-1083,1087-1088,1090-1103
+src/commands/devices.ts
+  s_fb6d2a8e0883f1::t_bc45d4397f4536 12
+  s_fb6d2a8e0883f1::t_e1af0591d2a8c1 406-412
+  s_fb6d2a8e0883f1::t_0ffc5a9b32f740 34
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "a3963567683c89d379021f9a05198ab7a6223a97",
+  "prompts": {},
+  "sessions": {
+    "s_fb6d2a8e0883f1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "82c94bf3-3326-4bff-8e54-af5800a1f153",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}

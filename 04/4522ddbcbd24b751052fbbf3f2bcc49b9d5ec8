@@ -1,0 +1,23 @@
+tests/commands/dry-run.test.ts
+  s_fb6d2a8e0883f1::t_59adb17ba6cb72 7
+tests/helpers/mcp-test-utils.ts
+  s_fb6d2a8e0883f1::t_d6f4ba3fe0f5b3 1-22
+tests/commands/mcp.test.ts
+  s_fb6d2a8e0883f1::t_8545ede270667c 2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "044522ddbcbd24b751052fbbf3f2bcc49b9d5ec8",
+  "prompts": {},
+  "sessions": {
+    "s_fb6d2a8e0883f1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "82c94bf3-3326-4bff-8e54-af5800a1f153",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}

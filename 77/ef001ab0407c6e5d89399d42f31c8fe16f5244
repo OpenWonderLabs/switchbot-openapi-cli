@@ -1,0 +1,19 @@
+tests/auth.test.ts
+  s_56c2132f65675e::t_3cd2f711dd4835 29,33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "77ef001ab0407c6e5d89399d42f31c8fe16f5244",
+  "prompts": {},
+  "sessions": {
+    "s_56c2132f65675e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ecafa754-348d-4f01-bcfc-33b9a7c69582",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}

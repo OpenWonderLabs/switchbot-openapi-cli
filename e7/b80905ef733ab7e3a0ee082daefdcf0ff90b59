@@ -1,0 +1,19 @@
+marketplace.json
+  s_0857ba53256199::t_56a883f4cb9f65 1-20
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.1",
+  "base_commit_sha": "e7b80905ef733ab7e3a0ee082daefdcf0ff90b59",
+  "prompts": {},
+  "sessions": {
+    "s_0857ba53256199": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7ee9e770-9683-4ad6-a210-7292b9d12706",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}

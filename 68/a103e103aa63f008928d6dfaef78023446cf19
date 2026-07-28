@@ -1,0 +1,21 @@
+tests/mcp/output-schema-boundary.test.ts
+  s_fb6d2a8e0883f1::t_352f50392f57e3 1-164
+src/commands/mcp.ts
+  s_fb6d2a8e0883f1::t_dfb9a7c07cb365 309,316
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "68a103e103aa63f008928d6dfaef78023446cf19",
+  "prompts": {},
+  "sessions": {
+    "s_fb6d2a8e0883f1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "82c94bf3-3326-4bff-8e54-af5800a1f153",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}

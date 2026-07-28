@@ -1,0 +1,32 @@
+src/auth/local-login-server.ts
+  s_e9b1caed467e20::t_41074dc4fd5cec 15,18-19,23,29,76-77,96-100,122,265-268,281,297-304
+tests/auth/token-exchange.test.ts
+  s_e9b1caed467e20::t_08c08663cb583c 41-45
+src/auth.ts
+  s_e9b1caed467e20::t_7adcb66d9743f0 3,22
+src/auth/browser-login.ts
+  s_e9b1caed467e20::t_f6a9f3ccfcf683 5,20-23,35,38,41,50-51
+tests/auth/local-login-server.test.ts
+  s_e9b1caed467e20::t_13fd7620a66d42 57,71
+  s_e9b1caed467e20::t_99e8e1f3f27899 30,32,37,47,119,160
+src/auth/token-exchange.ts
+  s_e9b1caed467e20::t_1118f9348c8287 5,13-18,47-49,64-68,70,72,77-82,85
+src/auth/constants.ts
+  s_e9b1caed467e20::t_91691a13350782 9-13,19-20,22-23,50
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "8ff89d1890b951be81843038ae60874d09355005",
+  "prompts": {},
+  "sessions": {
+    "s_e9b1caed467e20": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1609372a-454e-4580-90c6-e351730798f2",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}

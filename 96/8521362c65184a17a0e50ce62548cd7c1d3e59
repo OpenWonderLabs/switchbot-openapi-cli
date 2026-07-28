@@ -1,0 +1,21 @@
+src/lib/command-keywords.ts
+  s_fb6d2a8e0883f1::t_0469c101abd625 2-5
+tests/commands/plan-suggest.test.ts
+  s_fb6d2a8e0883f1::t_bfc19a150bd784 98-117
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "968521362c65184a17a0e50ce62548cd7c1d3e59",
+  "prompts": {},
+  "sessions": {
+    "s_fb6d2a8e0883f1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "82c94bf3-3326-4bff-8e54-af5800a1f153",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}

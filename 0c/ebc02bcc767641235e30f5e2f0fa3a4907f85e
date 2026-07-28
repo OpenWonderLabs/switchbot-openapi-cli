@@ -1,0 +1,21 @@
+packages/codex-plugin/tests/setup.test.js
+  s_ffdcf8765e4b95::t_eb8b884d095396 96
+  s_ffdcf8765e4b95::t_ace309719bc41f 138
+  s_ffdcf8765e4b95::t_8e26722b43fbc9 78
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.1",
+  "base_commit_sha": "0cebc02bcc767641235e30f5e2f0fa3a4907f85e",
+  "prompts": {},
+  "sessions": {
+    "s_ffdcf8765e4b95": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9bba38b1-2790-40b0-86d8-af1157ed343b",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}

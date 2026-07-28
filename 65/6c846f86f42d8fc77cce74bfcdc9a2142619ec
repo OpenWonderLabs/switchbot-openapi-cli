@@ -1,0 +1,23 @@
+tests/commands/dry-run.test.ts
+  s_fb6d2a8e0883f1::t_20d4c88d4b5515 170
+  s_fb6d2a8e0883f1::t_a23d04ce3e00fa 284
+  s_fb6d2a8e0883f1::t_d9eb8c7753c7c6 62-70
+  s_fb6d2a8e0883f1::t_326aa01fdc888c 216
+  s_fb6d2a8e0883f1::t_d593228a6a1194 231
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "656c846f86f42d8fc77cce74bfcdc9a2142619ec",
+  "prompts": {},
+  "sessions": {
+    "s_fb6d2a8e0883f1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "82c94bf3-3326-4bff-8e54-af5800a1f153",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}

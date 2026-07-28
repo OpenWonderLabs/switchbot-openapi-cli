@@ -1,0 +1,22 @@
+tests/commands/quota.test.ts
+  s_fb6d2a8e0883f1::t_5385f7d4998264 104-123
+src/commands/quota.ts
+  s_fb6d2a8e0883f1::t_42cd18fe608b70 3
+  s_fb6d2a8e0883f1::t_4539785ae6093e 95-99
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "799f366fe09cc3efd54719d8e9be4930a18f202e",
+  "prompts": {},
+  "sessions": {
+    "s_fb6d2a8e0883f1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "82c94bf3-3326-4bff-8e54-af5800a1f153",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}

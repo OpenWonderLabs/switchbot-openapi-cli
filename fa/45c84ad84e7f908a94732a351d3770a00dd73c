@@ -1,0 +1,21 @@
+tests/commands/devices.test.ts
+  s_fb6d2a8e0883f1::t_b896b8b3660b68 2932-2965
+tests/commands/scenes.test.ts
+  s_fb6d2a8e0883f1::t_c77c3aa2e7ad29 407-417
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "fa45c84ad84e7f908a94732a351d3770a00dd73c",
+  "prompts": {},
+  "sessions": {
+    "s_fb6d2a8e0883f1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "82c94bf3-3326-4bff-8e54-af5800a1f153",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}

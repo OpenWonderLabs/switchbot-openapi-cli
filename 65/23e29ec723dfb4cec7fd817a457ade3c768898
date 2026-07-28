@@ -1,0 +1,23 @@
+src/commands/devices.ts
+  s_4ecda003eaab8a::t_c26b28f74acaa4 38
+tests/commands/devices-constants.test.ts
+  s_4ecda003eaab8a::t_c8a9f0bea110c5 2
+src/commands/devices-columns.ts
+  s_4ecda003eaab8a::t_fe82d4729a7d2e 1-12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "6523e29ec723dfb4cec7fd817a457ade3c768898",
+  "prompts": {},
+  "sessions": {
+    "s_4ecda003eaab8a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b0316407-3d37-4a60-90c6-79e8ca7b00b1",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}

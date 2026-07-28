@@ -1,0 +1,21 @@
+.gitignore
+  s_4ecda003eaab8a::t_8d6c7201336b06 17
+.env.example
+  s_4ecda003eaab8a::t_8fadf285758d6a 1-14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "478bcd00c5491a317acaaf1c11d82235ad0f8614",
+  "prompts": {},
+  "sessions": {
+    "s_4ecda003eaab8a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b0316407-3d37-4a60-90c6-79e8ca7b00b1",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}

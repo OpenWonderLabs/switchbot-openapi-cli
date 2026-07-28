@@ -1,0 +1,19 @@
+tests/mcp/error-format-contract.test.ts
+  s_fb6d2a8e0883f1::t_93f3315e74ede0 1-139
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "8e99c15a7c9b050b9722e3f570ed87100468b42f",
+  "prompts": {},
+  "sessions": {
+    "s_fb6d2a8e0883f1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "82c94bf3-3326-4bff-8e54-af5800a1f153",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}

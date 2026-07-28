@@ -1,0 +1,28 @@
+src/commands/mcp.ts
+  s_fb6d2a8e0883f1::t_cfa899876e092c 113-115,118
+tests/commands/mcp.test.ts
+  s_fb6d2a8e0883f1::t_952c8bccb91f06 298
+  s_fb6d2a8e0883f1::t_e161c5a7bb5c9b 839
+  s_fb6d2a8e0883f1::t_83f27c0b86401a 226
+  s_fb6d2a8e0883f1::t_d021788e18e281 206,209-214
+  s_fb6d2a8e0883f1::t_ac3dcd72f64872 248
+  s_fb6d2a8e0883f1::t_c432a8f292aa4a 777-799
+  s_fb6d2a8e0883f1::t_5cd568b9a21ede 207-208
+  s_fb6d2a8e0883f1::t_77296a1acab96b 732,734-735
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "d11d405af4c2ce76e2dde35e228c0710d2919eb8",
+  "prompts": {},
+  "sessions": {
+    "s_fb6d2a8e0883f1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "82c94bf3-3326-4bff-8e54-af5800a1f153",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}

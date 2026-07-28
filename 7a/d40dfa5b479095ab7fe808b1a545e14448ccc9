@@ -1,0 +1,21 @@
+src/commands/mcp.ts
+  s_fb6d2a8e0883f1::t_0fd3c21f52b83a 1619-1641
+tests/commands/mcp.test.ts
+  s_fb6d2a8e0883f1::t_dabe3338a5865a 1295-1326
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "7ad40dfa5b479095ab7fe808b1a545e14448ccc9",
+  "prompts": {},
+  "sessions": {
+    "s_fb6d2a8e0883f1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "82c94bf3-3326-4bff-8e54-af5800a1f153",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+tests/commands/capabilities-meta.test.ts
+  s_6c4ea398812e0a::t_a0acada4bf358d 48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "ed57dfa854e406fd8c1324605c949e5c4b47b3c3",
+  "prompts": {},
+  "sessions": {
+    "s_6c4ea398812e0a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e4c6f82f-04d9-4fd4-aa47-e793554857ef",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
