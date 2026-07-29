@@ -29,13 +29,19 @@ The CHANGELOG itself follows Keep a Changelog + SemVer, with a
 **Changed (BREAKING)** section whenever a release introduces a breaking
 change (even in a patch version).
 
-## Plugin hook strategies
+## Plugin setup strategies
 
-The two plugin packages use different `onInstall` hook strategies — this is intentional:
+The two plugin packages use different setup strategies — this is intentional:
 
-| Package | Hook command | Reason |
-|---------|-------------|--------|
+| Package | Setup strategy | Reason |
+| --- | --- | --- |
 | `packages/claude-code-plugin` | `node ../bin/auth.js` (relative path) | Claude Code installs the full npm package; `bin/` is always adjacent. |
-| `packages/codex-plugin` | `switchbot-codex-auth` (global binary) | Codex may install only the `plugins/switchbot/` sub-directory, placing it in `~/.codex/plugins/switchbot/`. A relative path to `bin/auth.js` would escape the plugin directory and fail. Using the globally-installed binary works regardless of install layout. |
+| `packages/codex-plugin` | Explicit `switchbot codex setup` | Codex does not expose an install-time hook event. Its hook config accepts lifecycle hooks under `hooks`, but rejects a top-level `onInstall` field. |
 
-When changing either hook, preserve this distinction. Do not "unify" them without first verifying that both installation layouts still resolve the hook correctly.
+Keep the Claude Code relative hook unless its full-package installation layout
+changes. Keep the Codex plugin manifests hook-free until Codex exposes a
+supported install-time event; do not add a top-level `onInstall` hook.
+
+When Codex hook support changes, verify both the package-root and nested
+`plugins/switchbot/` marketplace layouts, then run
+`npm run smoke:codex-pack-install`.
