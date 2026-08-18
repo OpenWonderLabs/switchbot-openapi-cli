@@ -65,7 +65,6 @@ try {
   for (const requiredPath of [
     '.agents/plugins/marketplace.json',
     '.codex-plugin/plugin.json',
-    '.codex-plugin/hooks.json',
     '.mcp.json',
     'skills/switchbot/SKILL.md',
     'bin/auth.js',
@@ -89,12 +88,6 @@ try {
   const switchbotEntry = marketplace?.plugins?.find((p) => p?.name === 'switchbot');
   if (switchbotEntry?.source !== './plugins/switchbot') {
     throw new Error(`marketplace switchbot plugin source must be './plugins/switchbot', got ${switchbotEntry?.source ?? '<missing>'}`);
-  }
-
-  const hooks = readJson(path.join(pluginRoot, '.codex-plugin', 'hooks.json'));
-  const hookArgs = hooks?.onInstall?.args ?? [];
-  if (!Array.isArray(hookArgs) || !hookArgs.includes('--hook')) {
-    throw new Error(`onInstall hook must run auth.js --hook, got ${JSON.stringify(hookArgs)}`);
   }
 
   const switchbotBin = process.platform === 'win32'
@@ -125,7 +118,7 @@ try {
   }
 
   const envPath = `${path.join(workDir, 'node_modules', '.bin')}${path.delimiter}${process.env.PATH ?? ''}`;
-  const hook = spawnSync(
+  const setupHelper = spawnSync(
     process.execPath,
     [path.join(pluginRoot, 'bin', 'auth.js'), '--hook'],
     {
@@ -136,8 +129,10 @@ try {
       timeout: 30_000,
     },
   );
-  if ((hook.status ?? 1) !== 0) {
-    throw new Error(`codex plugin onInstall hook must exit 0; got ${hook.status ?? 1}\nstderr:\n${hook.stderr}`);
+  if ((setupHelper.status ?? 1) !== 0) {
+    throw new Error(
+      `codex plugin setup helper must exit 0; got ${setupHelper.status ?? 1}\nstderr:\n${setupHelper.stderr}`,
+    );
   }
 
   const { makeInstall, resolvePluginIdentifier, resolveMarketplaceSourceRoot } = await import(
@@ -200,7 +195,9 @@ try {
     );
   }
 
-  console.log('codex pack-install smoke ok: tarballs install, setup dry-run is present, hook is non-blocking, fresh install registration uses switchbot@switchbot');
+  console.log(
+    'codex pack-install smoke ok: tarballs install, setup dry-run and helper are present, fresh install registration uses switchbot@switchbot',
+  );
 } finally {
   for (const tarball of packed) {
     rmSync(tarball, { force: true });
