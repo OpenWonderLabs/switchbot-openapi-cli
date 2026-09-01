@@ -1,0 +1,19 @@
+docs/skills-only-plugin-submission-review.md
+  s_bc4c118f4180a3::t_1bb98ac0f2cfde 1-130
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "8b5243dbc3c2b1243346bb09bde2c2b8a98d560d",
+  "prompts": {},
+  "sessions": {
+    "s_bc4c118f4180a3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a05b83-b206-7032-811e-9db0cdaf224a",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
