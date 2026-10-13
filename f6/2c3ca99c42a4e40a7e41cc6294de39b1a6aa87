@@ -1,0 +1,26 @@
+CHANGELOG.md
+  h_dab4e149c2c598 54
+README.md
+  h_dab4e149c2c598 449
+docs/agent-guide.md
+  h_dab4e149c2c598 168-169
+docs/openapi-alignment-and-code-review.md
+  h_dab4e149c2c598 518-525
+docs/release-pipeline.md
+  h_dab4e149c2c598 134-140
+src/commands/mcp.ts
+  h_dab4e149c2c598 62,2872-2873,2875,2877
+tests/commands/mcp-profile-http.test.ts
+  h_dab4e149c2c598 8-9,17,26-49,60,66-67,87-112
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f62c3ca99c42a4e40a7e41cc6294de39b1a6aa87",
+  "prompts": {},
+  "humans": {
+    "h_dab4e149c2c598": {
+      "author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
