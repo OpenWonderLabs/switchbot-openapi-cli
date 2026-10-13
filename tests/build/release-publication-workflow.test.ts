@@ -1,6 +1,6 @@
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { parse } from 'yaml';
 import { z } from 'zod';
@@ -13,6 +13,38 @@ const PublishWorkflow = z.object({
 });
 
 describe('candidate publication workflow', () => {
+  it('resolves the five independent package versions into workflow outputs', () => {
+    const workflow = PublishWorkflow.parse(parse(readFileSync('.github/workflows/publish.yml', 'utf8')));
+    const step = workflow.jobs.publish.steps.find((item) => item.name === 'Resolve release versions');
+    if (!step?.run) throw new Error('release version resolution step is unavailable');
+    const directory = mkdtempSync(join(tmpdir(), 'switchbot release versions-'));
+    try {
+      const manifests = [
+        ['cli', 'package.json', '3.9.0'],
+        ['codex', 'packages/codex-plugin/package.json', '0.2.1'],
+        ['openclaw', 'packages/openclaw-skill/package.json', '0.2.2'],
+        ['claude', 'packages/claude-code-plugin/package.json', '0.2.3'],
+        ['gemini', 'packages/gemini-extension/package.json', '0.2.4'],
+      ];
+      for (const [, relative, version] of manifests) {
+        const file = join(directory, relative);
+        mkdirSync(dirname(file), { recursive: true });
+        writeFileSync(file, JSON.stringify({ version }));
+      }
+      const output = join(directory, 'outputs');
+      const result = spawnSync('/bin/bash', ['-e', '-c', step.run], {
+        cwd: directory,
+        env: { ...process.env, GITHUB_OUTPUT: output },
+        encoding: 'utf8',
+      });
+      expect(result.status, result.stderr).toBe(0);
+      const versions = Object.fromEntries(readFileSync(output, 'utf8').trim().split('\n').map((line) => line.split('=')));
+      expect(versions).toEqual(Object.fromEntries(manifests.map(([name, , version]) => [name, version])));
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('publishes a root candidate without moving the installed latest version', () => {
     const workflow = PublishWorkflow.parse(parse(readFileSync('.github/workflows/publish.yml', 'utf8')));
     const step = workflow.jobs.publish.steps.find((item) => item.name === 'Publish root CLI to npm');

@@ -523,3 +523,11 @@ Markdown：使用现有 `.gitignore` 排除依赖和本地文件，修复报告�
 - 最终全量 CLI 回归 168 文件、3086 passed、0 failed；新增的 keychain-only HTTP 回归同时证明请求凭据隔离与未知 profile 的拒绝边界。
 - Spec 审查确认正常首次发布的五包 `next` → exact artifact/required-host gates → `latest` 流程满足规划。部分发布失败后，重跑发现的 `already-published` 版本不会自动提升，是发布恢复限制，不得通过伪造 outcome 或跳过 host gate 规避。
 - GitHub release 使用独立的四条精简说明，不把完整 CHANGELOG 直接复制为 release 正文。Skills-only/ADR WIP 继续隔离。
+
+## v3.9.0 发布工作流恢复
+
+- `v3.9.0` tag 和四条精简正文的 GitHub Release 已发布，指向 `236a1ed`。发布前全量 3086 tests、插件 169 tests、文档与运行时版本核对通过；另修正 policy 表中遗留的“Phase 4 reserved”描述，经 PR #77 合入。
+- 首次 [npm 发布 run 38363496710](https://github.com/OpenWonderLabs/switchbot-openapi-cli/actions/runs/38363496710) 在版本解析处 Bash 引号错误退出，五个 npm publish 步骤均跳过，零包发布。新增执行真实 Bash 的五包版本解析回归，复现后修正；不将源码字符串断言当成脚本可执行性证据。
+- 保持公开 tag 不变。恢复入口从固定后的 main 工作流执行，显式 checkout 原 release_tag；outcome 保存 tag/revision，消费端先校验 GitHub exact ref 和 annotated tag 的 commit，再将同一 source revision 用于 artifact、host 和 promotion。
+- 实际 Bash 验证正确/缺失/错误 tag 与 dry-run 边界；旧 tag 中的 outcome helper 保留新增 source 字段。真实 GitHub API 验证仍绑定 `v3.9.0` → `236a1ed`；验证用 manifest 标记 dry-run，不伪造已发布包。
+- 直接手动 smoke 仍不提升 dist-tag；already-published 语义不改，真实账号与设备操作不进入门禁。npm provenance 的 workflow ref 和 release code source 分别记录，不伪装成同一提交。
