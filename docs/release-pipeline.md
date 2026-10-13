@@ -110,6 +110,26 @@ all five exact package versions: `@switchbot/openapi-cli@3.9.0` and
 Plugin versions are independent of the root tag and are read from each package
 manifest.
 
+To recover an existing immutable release after a workflow-only failure, dispatch
+the fixed workflow definition from `main` while selecting the original tag:
+
+```bash
+gh workflow run publish.yml --ref main -f release_tag=v3.9.0 -f dry_run=false
+```
+
+Non-dry dispatch requires a tag exactly matching `v<root package version>`.
+The checkout and all five package versions come from that tag, not the workflow
+dispatcher commit. The outcome artifact records `source.tag` and
+`source.revision`; the downstream source job verifies the exact GitHub ref,
+dereferences annotated tags, and rejects missing metadata or a changed target.
+Artifact, host, and promotion jobs all check out that verified revision.
+The npm provenance workflow reference identifies the fixed dispatcher workflow;
+the explicit source binding records the separately checked-out release code.
+
+Successful release events and tag-bound publisher dispatches enter the same
+candidate gates. A direct manual dispatch of `npm-published-smoke.yml` remains
+smoke-only and cannot invoke required-host promotion.
+
 For every exact package version, the workflow records one authoritative outcome
 in the `release-candidate-outcomes` artifact:
 

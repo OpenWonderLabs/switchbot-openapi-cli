@@ -446,7 +446,7 @@ Policy commands retain their documented specialized exit codes (including YAML p
 
 ## Development
 
-Verified CLI regression suite: 3086 tests. Plugin workspace checks are separate.
+Verified CLI regression suite: 3093 tests. Plugin workspace checks are separate.
 
 ```bash
 npm install && npm run build

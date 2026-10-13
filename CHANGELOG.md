@@ -52,6 +52,7 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Complete environment credentials no longer wait for native keychain reads during CLI startup or credential diagnostics.
 - Repair Windows Codex `.cmd` discovery, OpenClaw credential execution boundaries, and npm/old-CLI regression fixtures.
 - HTTP MCP accepts named profiles stored only in the keychain while still rejecting unknown profiles and invalid bearer tokens.
+- Fix release-version shell quoting and recover immutable release tags through source-bound workflow dispatch without skipping candidate gates.
 
 ## [3.8.1]
 

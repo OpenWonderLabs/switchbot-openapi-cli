@@ -5,11 +5,14 @@ on:
     types: [published]
   workflow_dispatch:
     inputs:
+      release_tag:
+        description: 'Existing release tag; no automatic new tag'
+        type: string
+        required: false
       dry_run:
         description: 'Dry run — record candidate outcomes without publishing'
         type: boolean
         default: false
-
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -18,6 +21,8 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
       - uses: actions/setup-node@v4
         with:
           node-version: 20.x
@@ -28,12 +33,20 @@ jobs:
       - run: npm run verify:release
 
       - name: Verify tag matches root CLI package.json version
-        if: github.event_name == 'release'
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'release' && github.ref_name || inputs.release_tag }}
+          DRY_RUN: ${{ inputs.dry_run }}
         run: |
-          PKG_VERSION=$(node -p "require('./package.json').version")
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
-          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
-            echo "Tag $TAG_VERSION does not match root package.json version $PKG_VERSION"
+          PKG_VERSION=$(node -p 'require("./package.json").version')
+          if [ -z "$RELEASE_TAG" ]; then
+            if [ "$DRY_RUN" = true ]; then
+              exit 0
+            fi
+            echo "A release tag is required unless dry_run is true"
+            exit 1
+          fi
+          if [ "$RELEASE_TAG" != "v$PKG_VERSION" ]; then
+            echo "Tag $RELEASE_TAG does not match root package.json version v$PKG_VERSION"
             exit 1
           fi
 
@@ -41,15 +54,32 @@ jobs:
         id: versions
         run: |
           {
-            echo "cli=$(node -p \"require('./package.json').version\")"
-            echo "codex=$(node -p \"require('./packages/codex-plugin/package.json').version\")"
-            echo "openclaw=$(node -p \"require('./packages/openclaw-skill/package.json').version\")"
-            echo "claude=$(node -p \"require('./packages/claude-code-plugin/package.json').version\")"
-            echo "gemini=$(node -p \"require('./packages/gemini-extension/package.json').version\")"
+            echo "cli=$(node -p 'require("./package.json").version')"
+            echo "codex=$(node -p 'require("./packages/codex-plugin/package.json").version')"
+            echo "openclaw=$(node -p 'require("./packages/openclaw-skill/package.json").version')"
+            echo "claude=$(node -p 'require("./packages/claude-code-plugin/package.json").version')"
+            echo "gemini=$(node -p 'require("./packages/gemini-extension/package.json").version')"
           } >> "$GITHUB_OUTPUT"
 
       - name: Initialize release candidate outcomes
         run: node scripts/release-candidate.mjs init --outcomes "$RUNNER_TEMP/release-candidate-outcomes.json" --expected "@switchbot/openapi-cli@${{ steps.versions.outputs.cli }},@switchbot/codex-plugin@${{ steps.versions.outputs.codex }},@switchbot/openclaw-skill@${{ steps.versions.outputs.openclaw }},@switchbot/claude-code-plugin@${{ steps.versions.outputs.claude }},@switchbot/gemini-extension@${{ steps.versions.outputs.gemini }}"
+
+      - name: Stamp release candidate source
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'release' && github.ref_name || inputs.release_tag }}
+        run: |
+          RELEASE_REVISION=$(git rev-parse HEAD)
+          export RELEASE_REVISION
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = `${process.env.RUNNER_TEMP}/release-candidate-outcomes.json`;
+          const outcomes = JSON.parse(fs.readFileSync(path, 'utf8'));
+          outcomes.source = {
+            tag: process.env.RELEASE_TAG || '',
+            revision: process.env.RELEASE_REVISION,
+          };
+          fs.writeFileSync(path, `${JSON.stringify(outcomes)}\n`);
+          NODE
 
       - name: Detect root CLI candidate
         id: detect_root

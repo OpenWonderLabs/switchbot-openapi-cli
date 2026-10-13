@@ -14,11 +14,47 @@ on:
         required: false
 
 jobs:
-  smoke:
+  source:
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.event == 'release')
+       (github.event.workflow_run.event == 'release' || github.event.workflow_run.event == 'workflow_dispatch'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      revision: ${{ steps.release_source.outputs.revision || steps.manual_source.outputs.revision }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+      - name: Download authoritative candidate source
+        if: github.event_name == 'workflow_run'
+        uses: actions/download-artifact@v4
+        with:
+          name: release-candidate-outcomes
+          path: ${{ runner.temp }}/release-candidate
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify immutable release source
+        if: github.event_name == 'workflow_run'
+        id: release_source
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/resolve-release-source.mjs --outcomes "$RUNNER_TEMP/release-candidate/release-candidate-outcomes.json" >> "$GITHUB_OUTPUT"
+      - name: Select direct manual smoke source
+        if: github.event_name == 'workflow_dispatch'
+        id: manual_source
+        run: echo "revision=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+
+  smoke:
+    needs: source
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       (github.event.workflow_run.event == 'release' || github.event.workflow_run.event == 'workflow_dispatch'))
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -45,7 +81,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ needs.source.outputs.revision }}
       - uses: actions/setup-node@v4
         with:
           node-version: 20.x
@@ -158,15 +194,18 @@ jobs:
           if [ -n "$TEMP_PROJECT" ] && [ -d "$TEMP_PROJECT" ]; then rm -rf "$TEMP_PROJECT"; fi
 
   required-hosts:
-    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'release'
-    needs: smoke
+    if: >
+      github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' &&
+      (github.event.workflow_run.event == 'release' || github.event.workflow_run.event == 'workflow_dispatch')
+    needs: [source, smoke]
     runs-on: ubuntu-latest
     permissions:
       actions: read
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ needs.source.outputs.revision }}
       - uses: actions/setup-node@v4
         with:
           node-version: 24.x
@@ -193,15 +232,18 @@ jobs:
           if-no-files-found: error
 
   promote:
-    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'release'
-    needs: [smoke, required-hosts]
+    if: >
+      github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' &&
+      (github.event.workflow_run.event == 'release' || github.event.workflow_run.event == 'workflow_dispatch')
+    needs: [source, smoke, required-hosts]
     runs-on: ubuntu-latest
     permissions:
       actions: read
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ needs.source.outputs.revision }}
       - uses: actions/setup-node@v4
         with:
           node-version: 20.x
