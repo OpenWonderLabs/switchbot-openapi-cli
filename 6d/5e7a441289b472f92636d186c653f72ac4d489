@@ -1,0 +1,20 @@
+README.md
+  s_8ee483543bc302::t_560e4e00c93adc 83-84
+  s_8ee483543bc302::t_f7776663199625 85
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6d5e7a441289b472f92636d186c653f72ac4d489",
+  "prompts": {},
+  "sessions": {
+    "s_8ee483543bc302": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0416e-cbc7-7470-bebe-97574e9997ee",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
