@@ -48,6 +48,7 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Keep Claude npm/plugin/GitHub marketplace versions aligned with fail-closed pack and release guards (#68).
 - Verify both Codex archive layouts are hook-free, remove the obsolete hook assertion, and exercise installed manual helpers and isolated native prefix registration (#74, #75).
 - Oversized local webhooks now receive HTTP 413 before graceful connection closure, with a bounded grace period for peers that keep streaming.
+- Track executable permissions for Git commit/push hooks so Git runs the configured verification gates.
 
 ## [3.8.1]
 
