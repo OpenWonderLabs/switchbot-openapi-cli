@@ -14,18 +14,18 @@ scene command when either `--audit-log` is passed or a profile sets
 
 Every record is a JSON object with at least the following fields:
 
-| Field          | Type                 | Notes                                                                                  |
-|----------------|----------------------|----------------------------------------------------------------------------------------|
-| `auditVersion` | number               | Schema version. Current: `2`. Missing on records written before audit versioning.      |
-| `t`            | string (ISO-8601)    | Timestamp when the record was written.                                                 |
-| `kind`         | string               | Record discriminator. Values: `command`, `rule-fire`, `rule-fire-dry`, `rule-throttled`, `rule-webhook-rejected`, `rule-notify`, `rule-evaluate`, `llm-suggest`, `llm-condition`, `llm-budget-exceeded`. |
-| `deviceId`     | string               | Target device ID.                                                                      |
-| `command`      | string               | SwitchBot command name (e.g. `turnOn`, `setColor`).                                    |
-| `parameter`    | string \| object     | Command parameter as sent — `"default"` when unused.                                   |
-| `commandType`  | `"command" \| "customize"` | Matches the upstream SwitchBot API field.                                        |
-| `dryRun`       | boolean              | `true` when the command was intercepted by `--dry-run` and never reached the network.  |
-| `result`       | `"ok" \| "error"`    | Optional — only present once the command completed (absent for `dryRun: true`).        |
-| `error`        | string               | Optional — populated when `result === "error"`.                                        |
+| Field | Type | Notes |
+| --- | --- | --- |
+| `auditVersion` | number | Schema version. Current: `2`. Missing on records written before audit versioning. |
+| `t` | string (ISO-8601) | Timestamp when the record was written. |
+| `kind` | string | Record discriminator. Values: `command`, `rule-fire`, `rule-fire-dry`, `rule-throttled`, `rule-webhook-rejected`, `rule-notify`, `rule-evaluate`, `llm-suggest`, `llm-condition`, `llm-budget-exceeded`. |
+| `deviceId` | string | Target device ID. |
+| `command` | string | SwitchBot command name (e.g. `turnOn`, `setColor`). |
+| `parameter` | string \| object | Command parameter as sent — `"default"` when unused. |
+| `commandType` | `"command" \| "customize"` | Matches the upstream SwitchBot API field. |
+| `dryRun` | boolean | `true` when the command was intercepted by `--dry-run` and never reached the network. |
+| `result` | `"ok" \| "error"` | Optional — only present once the command completed (absent for `dryRun: true`). |
+| `error` | string | Optional — populated when `result === "error"`. |
 
 ### Example
 

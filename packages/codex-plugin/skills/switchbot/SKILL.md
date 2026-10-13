@@ -12,7 +12,7 @@ Drive the user's SwitchBot smart home through the `switchbot` CLI. Always query 
 ## Authority chain
 
 | Question | Authoritative command |
-|---|---|
+| --- | --- |
 | What can I do (cold start)? | `switchbot agent-bootstrap --compact --json` |
 | What commands exist? | `switchbot capabilities --json` |
 | What flags does this command take? | `switchbot <cmd> --help --json` |
@@ -20,7 +20,8 @@ Drive the user's SwitchBot smart home through the `switchbot` CLI. Always query 
 | What's this device doing right now? | `switchbot devices status <id> --json` |
 | What can I do with this specific device type? | `switchbot devices describe <id> --json` |
 | What scenes are configured? | `switchbot scenes list --json` |
-| What's on the user's AI MindClip (recordings, todos, daily/weekly summaries)? | `switchbot mindclip recordings/recording/summary/todos/daily/weekly/urgent-todos --json` |
+| What's on the user's AI MindClip (recordings, transcript, todos, summaries)? | `switchbot mindclip recordings/recording/transcript/summary/todos/daily/weekly/urgent-todos --json` |
+| What's in a Kata Friends diary? | `switchbot devices diary <id> --start <unix-ms> --end <unix-ms> --json` (up to 31 days) |
 | What's in the user's `policy.yaml`? | `cat ~/.config/openclaw/switchbot/policy.yaml` |
 | Is my quota OK? | `switchbot quota status --json` |
 | Is the setup healthy? | `switchbot doctor --json` |
@@ -77,7 +78,7 @@ When the user says "bedroom light", resolve in this order:
 ## Safety gates
 
 | Tier | Examples | Behaviour |
-|---|---|---|
+| --- | --- | --- |
 | `read` | status, list, quota | Run freely. |
 | `ir-fire-forget` | IR power/AC/TV via Hub | Run; warn there is no device-side confirmation. |
 | `mutation` | turnOn/Off, setBrightness, setColor | Run. Append to audit log. |
@@ -90,7 +91,7 @@ Policy overrides: `confirmations.always_confirm` forces confirmation; `confirmat
 
 ## Policy compliance
 
-1. Call `policy_validate` (with `live: true`) once per device-control session.
+1. Run `switchbot policy validate --live --json` through the CLI once per device-control session. Use `policy_validate(live=true)` only when a separately configured MCP server exposes it; the default profile does not.
 2. Honour `quiet_hours`, `always_confirm`, and `never_confirm` from the validated policy.
 3. No policy file → proceed with default tiers.
 
@@ -100,7 +101,7 @@ Never write to `policy.yaml` without showing a diff and getting explicit approva
 
 ## Audit logging
 
-Use `audit_query` and `audit_stats` MCP tools to review past activity. For a full audit trail with CLI, use `switchbot --audit-log devices command <id> <cmd>`.
+The default MCP profile does not expose audit administration. Review past activity with `switchbot history show --json` through the CLI, or use `audit_query` / `audit_stats` only when a separately configured server exposes those tools. Enable CLI mutation logging explicitly with `switchbot --audit-log devices command <id> <cmd>`.
 
 ---
 
@@ -116,9 +117,9 @@ First-time login: `switchbot auth login` (opens browser). Headless: add `--no-op
 
 ---
 
-## Declarative automations (CLI ≥ 3.7.1)
+## Declarative automations (CLI ≥ 3.9.0)
 
-When the user wants "when X, do Y", author a rule in `policy.yaml` instead of a shell loop. Check schema version first (`head -1 policy.yaml`, must be `"0.2"`; if `"0.1"` run `switchbot policy migrate`).
+When the user wants "when X, do Y", author a rule in `policy.yaml` instead of a shell loop. Validate the policy through `switchbot policy validate --json`; CLI 3.9.0 requires `"0.2"`. A legacy `"0.1"` file must be migrated with CLI ≤2.15 before returning to this CLI.
 
 Start with `dry_run: true`:
 
@@ -165,7 +166,7 @@ Non-destructive steps run automatically; destructive steps prompt once. Via MCP:
 2. **Don't rely on `--name` picking one hit.** Resolve the name yourself; pass `deviceId` directly.
 3. **Check `commands[]` before calling a command.** `switchbot devices describe <id> --json` — not every device supports every command.
 4. **Quota counts attempts, not successes.** Above 80%, slow down and batch.
-5. **`--json` envelope** — every response is `{"schemaVersion":"1.1","data":...}` or `{"error":{...}}`. Read `.data`, check `.error` first. Parsers that read top-level fields silently get `undefined`.
+5. **`--json` envelope** — every response is `{"schemaVersion":"1.2","data":...}` or `{"schemaVersion":"1.2","error":{...}}`. Read `.data`, check `.error` first. Parsers that read top-level fields silently get `undefined`.
 
 ---
 
@@ -201,6 +202,6 @@ Never retry `destructive` actions automatically. For `mutation` retries, use a l
 
 ## Version
 
-Targets `@switchbot/openapi-cli` ≥ 3.7.1. If `switchbot --version` is older: `npm update -g @switchbot/openapi-cli`.
+Targets `@switchbot/openapi-cli` ≥ 3.9.0. If `switchbot --version` is older: `npm update -g @switchbot/openapi-cli`.
 
 <!-- MAINTENANCE: Identical copy at plugins/switchbot/skills/switchbot/SKILL.md — keep both in sync. -->

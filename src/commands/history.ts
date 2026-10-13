@@ -135,7 +135,8 @@ Examples:
     .addHelpText('after', `
 History is the append-only JSONL mirror of the per-device ring buffer: every
 'events mqtt-tail' event and every MCP tool status-refresh is written to
-~/.switchbot/device-history/<deviceId>.jsonl (rotates at 50MB × 3 files).
+~/.switchbot/device-history/<deviceId>.jsonl for the default profile (rotates at 50MB × 3 files).
+Named profiles use ~/.switchbot/profiles/<name>/device-history/<deviceId>.jsonl and never share history with the default profile or another named profile.
 
 Examples:
   $ switchbot history range <id> --since 7d --json

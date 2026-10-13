@@ -1,4 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import axios from 'axios';
+import { resetListCache } from '../../src/devices/cache.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -62,16 +64,20 @@ describe('executeRuleAction', () => {
 
   beforeEach(() => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sbrules-'));
+    vi.spyOn(os, 'homedir').mockReturnValue(tmp);
     auditFile = path.join(tmp, 'audit.log');
-    process.argv = ['node', 'cli', '--audit-log', '--audit-log-path', auditFile];
+    process.argv = ['node', 'cli', '--audit-log', '--audit-log-path', auditFile, '--config', path.join(tmp, 'config.json')];
+    resetListCache();
   });
   afterEach(() => {
     process.argv = originalArgv;
+    resetListCache();
+    vi.restoreAllMocks();
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
-  it('refuses a destructive command and records it in audit', async () => {
-    const action = { command: 'devices command LOCK-1 unlock' };
+  it.each(['unlock', 'nightLatchUnlock', 'createKey', 'deleteKey'])('refuses %s and records the safety rejection', async (verb) => {
+    const action = { command: `devices command LOCK-1 ${verb}` };
     const result = await executeRuleAction(action, {
       rule: { ...baseRule, then: [action] },
       fireId: 'fire-1',
@@ -79,12 +85,40 @@ describe('executeRuleAction', () => {
       skipApiCall: true,
     });
     expect(result.blocked).toBe(true);
-    expect(result.error).toContain('destructive-verb:unlock');
+    expect(result.error).toBe(`destructive-verb:${verb}`);
     const entries = readAudit(auditFile);
     expect(entries).toHaveLength(1);
     expect(entries[0].kind).toBe('rule-fire');
     expect(entries[0].result).toBe('error');
     expect(entries[0].rule?.name).toBe('test rule');
+  });
+
+  it.each([
+    ['Garage Door Opener', 'turnOn', false],
+    ['Garage Door Opener', 'turnOff', false],
+    ['Color Bulb', 'turnOn', true],
+    [null, 'turnOn', false],
+  ])('checks live inventory before automating %s %s', async (deviceType, command, allowed) => {
+    const requests: string[] = [];
+    const client = axios.create({
+      adapter: async (config) => {
+        requests.push(`${config.method} ${config.url}`);
+        return {
+          data: { body: config.method === 'get' ? {
+            deviceList: deviceType ? [{ deviceId: 'D1', deviceName: 'Target', deviceType }] : [],
+            infraredRemoteList: [],
+          } : {} },
+          status: 200, statusText: 'OK', headers: {}, config,
+        };
+      },
+    });
+    const action = { command: `devices command D1 ${command}` };
+    const result = await executeRuleAction(action, {
+      rule: { ...baseRule, then: [action] }, fireId: 'catalog-safety', aliases: {}, httpClient: client,
+    });
+    expect(result.ok).toBe(allowed);
+    expect(requests.filter((request) => request.startsWith('post '))).toHaveLength(allowed ? 1 : 0);
+    if (!allowed) expect(readAudit(auditFile).at(-1)?.result).toBe('error');
   });
 
   it('dry-run records rule-fire-dry and skips the API', async () => {

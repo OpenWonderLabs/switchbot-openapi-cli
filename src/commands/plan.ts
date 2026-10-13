@@ -1,12 +1,13 @@
 import { Command } from 'commander';
+import { Ajv2020 } from 'ajv/dist/2020.js';
+import type { ErrorObject } from 'ajv';
 import fs from 'node:fs';
 import readline from 'node:readline';
 import { randomUUID } from 'node:crypto';
 import { printJson, isJsonMode, handleError, exitWithError, UsageError } from '../utils/output.js';
-import { executeCommand, isDestructiveCommand } from '../lib/devices.js';
+import { executeCommand } from '../lib/devices.js';
 import { executeScene } from '../lib/scenes.js';
 import { getCachedDevice } from '../devices/cache.js';
-import { resolveDeviceId } from '../utils/name-resolver.js';
 import { containsCjk, inferCommandFromIntent } from '../lib/command-keywords.js';
 import {
   savePlanRecord,
@@ -14,8 +15,12 @@ import {
   updatePlanRecord,
   listPlanRecords,
   PLANS_DIR,
+  isCurrentPlanCredentialScope,
+  type PlanRecord,
 } from '../lib/plan-store.js';
 import { allowsDirectDestructiveExecution, destructiveExecutionHint } from '../lib/destructive-mode.js';
+import { isDryRun } from '../utils/flags.js';
+import { preparePlanTargets, type PreparedPlanCommand } from '../lib/plan-preflight.js';
 
 export interface PlanCommandStep {
   type: 'command';
@@ -47,19 +52,26 @@ export interface Plan {
   steps: PlanStep[];
 }
 
-function findDestructivePlanSteps(plan: Plan): Array<{ index: number; deviceId: string; command: string; commandType: 'command' | 'customize'; deviceType: string | null }> {
-  const destructive: Array<{ index: number; deviceId: string; command: string; commandType: 'command' | 'customize'; deviceType: string | null }> = [];
-  for (let i = 0; i < plan.steps.length; i++) {
-    const step = plan.steps[i];
-    if (step.type !== 'command') continue;
-    const resolvedDeviceId = resolveDeviceId(step.deviceId, step.deviceName);
-    const deviceType = getCachedDevice(resolvedDeviceId)?.type;
-    const commandType = step.commandType ?? 'command';
-    if (isDestructiveCommand(deviceType, step.command, commandType)) {
-      destructive.push({ index: i + 1, deviceId: resolvedDeviceId, command: step.command, commandType, deviceType: deviceType ?? null });
-    }
+
+function assertPlanCredentialScope(record: PlanRecord): void {
+  if (!record.credentialScope) {
+    exitWithError({
+      code: 2,
+      kind: 'guard',
+      message: `Plan ${record.planId} has no credential binding.`,
+      hint: 'Review the legacy plan and save it again under the intended credential selector before approval.',
+      context: { planId: record.planId, requiredWorkflow: 're-save-review-approve' },
+    });
   }
-  return destructive;
+  if (!isCurrentPlanCredentialScope(record.credentialScope)) {
+    exitWithError({
+      code: 2,
+      kind: 'guard',
+      message: `Plan ${record.planId} belongs to a different credential profile or config selector.`,
+      hint: 'Use the selector that saved this plan, or save and approve a new plan under the active selector.',
+      context: { planId: record.planId, requiredWorkflow: 're-save-review-approve' },
+    });
+  }
 }
 
 const PLAN_JSON_SCHEMA = {
@@ -127,79 +139,38 @@ export interface PlanValidationIssue {
   message: string;
 }
 
-export function validatePlan(raw: unknown): {
-  ok: true;
-  plan: Plan;
-} | { ok: false; issues: PlanValidationIssue[] } {
-  const issues: PlanValidationIssue[] = [];
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    return { ok: false, issues: [{ path: '$', message: 'plan must be a JSON object' }] };
+const planSchemaValidator = new Ajv2020({ allErrors: true, strict: false }).compile(PLAN_JSON_SCHEMA);
+
+function formatPlanErrorPath(instancePath: string, keyword: string, params: unknown): string {
+  const base = instancePath
+    ? instancePath.slice(1).split('/').map((segment) => segment.replace(/~1/g, '/').replace(/~0/g, '~')).reduce((path, segment) => {
+      const index = Number.parseInt(segment, 10);
+      return String(index) === segment ? `${path}[${segment}]` : path ? `${path}.${segment}` : segment;
+    }, '')
+    : '$';
+  if (keyword === 'additionalProperties' && params && typeof params === 'object' && 'additionalProperty' in params) {
+    const additionalProperty = params.additionalProperty;
+    if (typeof additionalProperty === 'string') return base === '$' ? additionalProperty : `${base}.${additionalProperty}`;
   }
-  const p = raw as Record<string, unknown>;
-  if (p.version !== '1.0') {
-    issues.push({ path: 'version', message: 'must equal "1.0"' });
+  if (keyword === 'required' && params && typeof params === 'object' && 'missingProperty' in params) {
+    const missingProperty = params.missingProperty;
+    if (typeof missingProperty === 'string') return base === '$' ? missingProperty : `${base}.${missingProperty}`;
   }
-  if (!Array.isArray(p.steps)) {
-    issues.push({ path: 'steps', message: 'must be an array' });
-    return { ok: false, issues };
+  return base;
+}
+
+export function validatePlan(raw: unknown): { ok: true; plan: Plan } | { ok: false; issues: PlanValidationIssue[] } {
+  if (!planSchemaValidator(raw)) {
+    return {
+      ok: false,
+      issues: (planSchemaValidator.errors ?? []).map((error: ErrorObject) => ({
+        path: formatPlanErrorPath(error.instancePath, error.keyword, error.params),
+        message: error.message ?? 'is invalid',
+      })),
+    };
   }
-  p.steps.forEach((step, i) => {
-    const at = `steps[${i}]`;
-    if (!step || typeof step !== 'object') {
-      issues.push({ path: at, message: 'must be an object' });
-      return;
-    }
-    const s = step as Record<string, unknown>;
-    switch (s.type) {
-      case 'command':
-        if (s.deviceId !== undefined && (typeof s.deviceId !== 'string' || !s.deviceId)) {
-          issues.push({ path: `${at}.deviceId`, message: 'must be a non-empty string when provided' });
-        }
-        if (s.deviceName !== undefined && (typeof s.deviceName !== 'string' || !s.deviceName)) {
-          issues.push({ path: `${at}.deviceName`, message: 'must be a non-empty string when provided' });
-        }
-        if (!s.deviceId && !s.deviceName) {
-          issues.push({ path: `${at}`, message: 'must have either "deviceId" or "deviceName"' });
-        }
-        if (s.deviceId && s.deviceName) {
-          issues.push({ path: `${at}`, message: '"deviceId" and "deviceName" cannot both be set' });
-        }
-        if (typeof s.command !== 'string' || !s.command) {
-          issues.push({ path: `${at}.command`, message: 'must be a non-empty string' });
-        }
-        if (
-          s.commandType !== undefined &&
-          s.commandType !== 'command' &&
-          s.commandType !== 'customize'
-        ) {
-          issues.push({
-            path: `${at}.commandType`,
-            message: 'must be "command" or "customize"',
-          });
-        }
-        break;
-      case 'scene':
-        if (typeof s.sceneId !== 'string' || !s.sceneId) {
-          issues.push({ path: `${at}.sceneId`, message: 'must be a non-empty string' });
-        }
-        break;
-      case 'wait':
-        if (typeof s.ms !== 'number' || !Number.isInteger(s.ms) || s.ms < 0 || s.ms > 600_000) {
-          issues.push({
-            path: `${at}.ms`,
-            message: 'must be an integer in [0, 600000]',
-          });
-        }
-        break;
-      default:
-        issues.push({
-          path: `${at}.type`,
-          message: 'must be one of "command" | "scene" | "wait"',
-        });
-    }
-  });
-  if (issues.length > 0) return { ok: false, issues };
-  return { ok: true, plan: raw as Plan };
+  const plan: Plan = raw as Plan;
+  return { ok: true, plan };
 }
 
 // ---------------------------------------------------------------------------
@@ -239,9 +210,25 @@ export function suggestPlan(opts: SuggestOptions): SuggestResult {
 }
 
 async function readPlanSource(file: string | undefined): Promise<unknown> {
-  const text = file === undefined || file === '-'
-    ? await readStdin()
-    : fs.readFileSync(file, 'utf8');
+  let text: string;
+  if (file === undefined || file === '-') {
+    text = await readStdin();
+  } else {
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(file);
+    } catch {
+      throw new UsageError(`Unable to read plan file: ${file}`);
+    }
+    if (!stat.isFile()) {
+      throw new UsageError(`Plan input must be a regular file: ${file}`);
+    }
+    try {
+      text = fs.readFileSync(file, 'utf8');
+    } catch {
+      throw new UsageError(`Unable to read plan file: ${file}`);
+    }
+  }
   if (!text.trim()) {
     throw new Error(
       file === undefined || file === '-'
@@ -281,8 +268,8 @@ interface PlanRunResult {
   plan: Plan;
   results: Array<
     | { step: number; type: 'command'; deviceId: string; command: string; status: 'ok' | 'error' | 'skipped' | 'dry-run'; error?: string; decision?: 'approved' | 'rejected' }
-    | { step: number; type: 'scene'; sceneId: string; status: 'ok' | 'error' | 'skipped'; error?: string }
-    | { step: number; type: 'wait'; ms: number; status: 'ok' | 'skipped' }
+    | { step: number; type: 'scene'; sceneId: string; status: 'ok' | 'error' | 'skipped' | 'dry-run'; error?: string }
+    | { step: number; type: 'wait'; ms: number; status: 'ok' | 'skipped' | 'dry-run' }
   >;
   summary: { total: number; ok: number; error: number; skipped: number; dryRun: number };
 }
@@ -292,23 +279,37 @@ async function executePlanSteps(
   plan: Plan,
   planId: string,
   options: { yes?: boolean; requireApproval?: boolean; continueOnError?: boolean },
+  preparedCommands: readonly PreparedPlanCommand[],
 ): Promise<PlanRunResult> {
   const out: PlanRunResult = {
     plan,
     results: [],
     summary: { total: plan.steps.length, ok: 0, error: 0, skipped: 0, dryRun: 0 },
   };
+  const commandsByStep = new Map(preparedCommands.map((command) => [command.stepIndex, command]));
   for (let i = 0; i < plan.steps.length; i++) {
     const step = plan.steps[i];
     const idx = i + 1;
     if (step.type === 'wait') {
-      await new Promise((r) => setTimeout(r, step.ms));
+      if (isDryRun()) {
+        out.results.push({ step: idx, type: 'wait', ms: step.ms, status: 'dry-run' });
+        out.summary.dryRun++;
+        if (!isJsonMode()) console.error(`  ${idx}. ◦ dry-run wait ${step.ms}ms`);
+        continue;
+      }
+      await new Promise((resolve) => setTimeout(resolve, step.ms));
       out.results.push({ step: idx, type: 'wait', ms: step.ms, status: 'ok' });
       out.summary.ok++;
       if (!isJsonMode()) console.log(`  ${idx}. wait ${step.ms}ms`);
       continue;
     }
     if (step.type === 'scene') {
+      if (isDryRun()) {
+        out.results.push({ step: idx, type: 'scene', sceneId: step.sceneId, status: 'dry-run' });
+        out.summary.dryRun++;
+        if (!isJsonMode()) console.error(`  ${idx}. ◦ dry-run scene ${step.sceneId}`);
+        continue;
+      }
       try {
         await executeScene(step.sceneId);
         out.results.push({ step: idx, type: 'scene', sceneId: step.sceneId, status: 'ok' });
@@ -323,10 +324,11 @@ async function executePlanSteps(
       }
       continue;
     }
-    const resolvedDeviceId = resolveDeviceId(step.deviceId, step.deviceName);
-    const deviceType = getCachedDevice(resolvedDeviceId)?.type;
-    const commandType = step.commandType ?? 'command';
-    const destructive = isDestructiveCommand(deviceType, step.command, commandType);
+    const prepared = commandsByStep.get(i);
+    if (!prepared) throw new Error(`Missing preflight result for command step ${idx}`);
+    const resolvedDeviceId = prepared.deviceId;
+    const commandType = prepared.commandType;
+    const destructive = prepared.destructive;
     let approvalDecision: 'approved' | undefined;
     if (destructive && !options.yes) {
       if (options.requireApproval) {
@@ -348,8 +350,14 @@ async function executePlanSteps(
         continue;
       }
     }
+    if (isDryRun()) {
+      out.results.push({ step: idx, type: 'command', deviceId: resolvedDeviceId, command: prepared.command, status: 'dry-run' });
+      out.summary.dryRun++;
+      if (!isJsonMode()) console.error(`  ${idx}. ◦ dry-run ${prepared.command} on ${resolvedDeviceId}`);
+      continue;
+    }
     try {
-      await executeCommand(resolvedDeviceId, step.command, step.parameter, commandType, undefined, { planId });
+      await executeCommand(resolvedDeviceId, prepared.command, prepared.parameter, commandType, undefined, { planId });
       out.results.push({ step: idx, type: 'command', deviceId: resolvedDeviceId, command: step.command, status: 'ok', ...(approvalDecision ? { decision: approvalDecision } : {}) });
       out.summary.ok++;
       if (!isJsonMode()) console.log(`  ${idx}. ✓ ${step.command} on ${resolvedDeviceId}`);
@@ -553,7 +561,48 @@ against the live API without executing any mutations.
           process.exit(2);
         }
         const planId = randomUUID();
-        const destructiveSteps = findDestructivePlanSteps(v.plan);
+        let preparation;
+        try {
+          preparation = await preparePlanTargets(v.plan.steps);
+        } catch (err) {
+          handleError(err);
+          return;
+        }
+        if (!preparation.ok) {
+          exitWithError({
+            code: 2,
+            kind: preparation.safetyCritical ? 'guard' : 'usage',
+            message: preparation.message,
+            hint: preparation.hint,
+            context: {
+              planId,
+              step: preparation.stepIndex + 1,
+              deviceId: preparation.deviceId,
+              validationKind: preparation.kind,
+              ...(preparation.safetyCritical ? { requiredWorkflow: 'plan-approval' } : {}),
+            },
+          });
+        }
+        const destructiveSteps = preparation.commands.filter((step) => step.destructive);
+        if (destructiveSteps.length > 0 && !isDryRun() && !options.yes && !options.requireApproval) {
+          exitWithError({
+            code: 2,
+            kind: 'guard',
+            message: `Destructive plan execution requires the reviewed plan workflow.`,
+            hint: 'Save and approve the plan, then use plan execute.',
+            context: {
+              planId,
+              destructiveSteps: destructiveSteps.map((step) => ({
+                step: step.stepIndex + 1,
+                deviceId: step.deviceId,
+                deviceType: step.deviceType,
+                command: step.command,
+                commandType: step.commandType,
+              })),
+              requiredWorkflow: 'plan-approval',
+            },
+          });
+        }
         if (options.yes && destructiveSteps.length > 0 && !allowsDirectDestructiveExecution()) {
           exitWithError({
             code: 2,
@@ -563,7 +612,7 @@ against the live API without executing any mutations.
             context: {
               planId,
               destructiveSteps: destructiveSteps.map((step) => ({
-                step: step.index,
+                step: step.stepIndex + 1,
                 deviceId: step.deviceId,
                 deviceType: step.deviceType,
                 command: step.command,
@@ -575,9 +624,9 @@ against the live API without executing any mutations.
         }
         let out: PlanRunResult;
         try {
-          out = await executePlanSteps(v.plan, planId, options);
+          out = await executePlanSteps(v.plan, planId, { ...options, yes: options.yes || isDryRun() }, preparation.commands);
           if (isJsonMode()) {
-            printJson({ ran: true, planId, ...out });
+            printJson({ ran: !isDryRun(), planId, ...out });
           } else {
             const { ok, error, skipped, total } = out.summary;
             console.log(`\nsummary: ok=${ok} error=${error} skipped=${skipped} total=${total}`);
@@ -612,7 +661,44 @@ against the live API without executing any mutations.
           context: { issues: v.issues },
         });
       }
-      const record = savePlanRecord(v.plan);
+      let preparation;
+      try {
+        preparation = await preparePlanTargets(v.plan.steps);
+      } catch (err) {
+        handleError(err);
+        return;
+      }
+      if (!preparation.ok) {
+        exitWithError({
+          code: 2,
+          kind: 'usage',
+          message: preparation.message,
+          hint: preparation.hint,
+          context: {
+            step: preparation.stepIndex + 1,
+            deviceId: preparation.deviceId,
+            validationKind: preparation.kind,
+          },
+        });
+      }
+      const preparedByStep = new Map(preparation.commands.map((command) => [command.stepIndex, command]));
+      const boundPlan: Plan = {
+        ...v.plan,
+        steps: v.plan.steps.map((step, stepIndex) => {
+          if (step.type !== 'command') return step;
+          const prepared = preparedByStep.get(stepIndex);
+          if (!prepared) throw new Error(`Missing preflight result for command step ${stepIndex + 1}`);
+          return {
+            ...step,
+            deviceId: prepared.deviceId,
+            deviceName: undefined,
+            command: prepared.command,
+            parameter: prepared.parameter,
+            commandType: prepared.commandType,
+          };
+        }),
+      };
+      const record = savePlanRecord(boundPlan);
       if (isJsonMode()) {
         printJson({ saved: true, planId: record.planId, status: record.status, createdAt: record.createdAt, plansDir: PLANS_DIR });
       } else {
@@ -686,6 +772,7 @@ against the live API without executing any mutations.
       if (!record) {
         exitWithError({ code: 2, kind: 'usage', message: `Plan ${planId} not found in ${PLANS_DIR}` });
       }
+      assertPlanCredentialScope(record);
       if (record.status === 'executed') {
         exitWithError({ code: 2, kind: 'guard', message: `Plan ${planId} has already been executed.` });
       }
@@ -717,6 +804,7 @@ against the live API without executing any mutations.
       if (!record) {
         exitWithError({ code: 2, kind: 'usage', message: `Plan ${planId} not found in ${PLANS_DIR}` });
       }
+      assertPlanCredentialScope(record);
       if (record.status !== 'approved') {
         exitWithError({
           code: 2, kind: 'guard',
@@ -725,9 +813,30 @@ against the live API without executing any mutations.
           context: { planId, status: record.status },
         });
       }
+      let preparation;
+      try {
+        preparation = await preparePlanTargets(record.plan.steps);
+      } catch (err) {
+        handleError(err);
+        return;
+      }
+      if (!preparation.ok) {
+        exitWithError({
+          code: 2,
+          kind: preparation.safetyCritical ? 'guard' : 'usage',
+          message: preparation.message,
+          hint: preparation.hint,
+          context: {
+            planId,
+            step: preparation.stepIndex + 1,
+            deviceId: preparation.deviceId,
+            validationKind: preparation.kind,
+          },
+        });
+      }
       let out: PlanRunResult;
       try {
-        out = await executePlanSteps(record.plan, planId, { ...options, yes: true });
+        out = await executePlanSteps(record.plan, planId, { ...options, yes: true }, preparation.commands);
       } catch (err) {
         handleError(err);
         return;
@@ -735,13 +844,15 @@ against the live API without executing any mutations.
       const { ok, error, skipped } = out.summary;
       const succeeded = error === 0 && skipped === 0;
       const failureReason = succeeded ? undefined : [error > 0 ? `${error} error${error > 1 ? 's' : ''}` : null, skipped > 0 ? `${skipped} skipped` : null].filter(Boolean).join(', ');
-      if (succeeded) {
-        updatePlanRecord(planId, { status: 'executed', executedAt: new Date().toISOString() });
-      } else {
-        updatePlanRecord(planId, { status: 'failed', failedAt: new Date().toISOString(), failureReason });
+      if (out.summary.dryRun === 0) {
+        if (succeeded) {
+          updatePlanRecord(planId, { status: 'executed', executedAt: new Date().toISOString() });
+        } else {
+          updatePlanRecord(planId, { status: 'failed', failedAt: new Date().toISOString(), failureReason });
+        }
       }
       if (isJsonMode()) {
-        printJson({ ran: true, planId, succeeded, ...out });
+        printJson({ ran: !isDryRun(), planId, succeeded, ...out });
       } else {
         console.log(`\nsummary: ok=${ok} error=${error} skipped=${skipped} total=${out.summary.total}`);
         if (!succeeded) console.error(`Plan marked as failed (${failureReason}). Re-run after fixing to retry.`);

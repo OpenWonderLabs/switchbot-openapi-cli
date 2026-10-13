@@ -101,7 +101,7 @@ function setupStepInstallSwitchbotCli(): StepOutcome {
 function setupStepRegisterMcp(): StepOutcome {
   const r = registerMcp();
   if (!r.ok) return { step: 'register-mcp', status: 'failed', message: r.error };
-  const hint = 'For slash commands + full context: gemini extensions install @switchbot/gemini-extension';
+  const hint = 'For slash commands + full context: gemini extensions install /absolute/path/to/gemini-extension';
   return { step: 'register-mcp', status: 'ok', message: r.alreadyRegistered ? `already registered. ${hint}` : `registered switchbot MCP server. ${hint}` };
 }
 
@@ -131,7 +131,7 @@ async function setupStepDoctorVerify(): Promise<StepOutcome> {
 
 export async function isGeminiAlreadyConfigured(): Promise<boolean> {
   if (checkGeminiCli().status !== 'ok') return false;
-  if (checkMcpRegistered().status !== 'ok') return false;
+  if (checkMcpRegistered().status === 'fail') return false;
   if (!await credentialsPresent()) return false;
   return true;
 }
@@ -239,7 +239,7 @@ Global flags that also apply to this command:
       const { outcomes, anyFailed, preflightFailed } = await runSetup(skip, ctx);
 
       if (isJsonMode()) {
-        printJson({ ok: !anyFailed, hasWarnings: outcomes.some((o) => o.status === 'warn'), preflightFailed, outcomes, ...(anyFailed ? {} : { extensionHint: 'gemini extensions install @switchbot/gemini-extension' }) });
+        printJson({ ok: !anyFailed, hasWarnings: outcomes.some((o) => o.status === 'warn'), preflightFailed, outcomes, ...(anyFailed ? {} : { extensionHint: 'gemini extensions install /absolute/path/to/gemini-extension' }) });
       } else {
         for (const o of outcomes) {
           const icon = o.status === 'ok' ? chalk.green('✓') : o.status === 'skipped' ? chalk.dim('·') : o.status === 'warn' ? chalk.yellow('⚠') : chalk.red('✗');
@@ -251,7 +251,7 @@ Global flags that also apply to this command:
           console.log(chalk.dim('Restart Gemini CLI to load the SwitchBot MCP tools.'));
           console.log('');
           console.log(chalk.yellow('Recommended: install the full extension for safety context + slash commands:'));
-          console.log(chalk.dim('  gemini extensions install @switchbot/gemini-extension'));
+          console.log(chalk.dim('  gemini extensions install /absolute/path/to/gemini-extension'));
           console.log(chalk.dim('  (provides GEMINI.md safety tiers, name resolution, and 23 slash commands)'));
           console.log('');
           console.log(chalk.dim('After restart, ask: "List my SwitchBot devices."'));

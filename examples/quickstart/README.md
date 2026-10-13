@@ -6,14 +6,14 @@ step is observable from a second terminal so you can verify the
 previous one before continuing.
 
 | Step | What you do | How to verify |
-|------|-------------|---------------|
+| --- | --- | --- |
 | 1 | Install the CLI | `switchbot --version` |
 | 2 | Save credentials | `switchbot config show` |
-| 3 | Cold-start snapshot | `agent-bootstrap --compact \| jq .identity` |
+| 3 | Cold-start snapshot | `agent-bootstrap --compact \| jq .data.identity` |
 | 4 | Scaffold policy | `switchbot policy validate` |
 | 5 | Stream events | first JSON line arrives within seconds |
 | 6 | Fire a command | audit log has one new entry |
-| 7 | Smoke test | `doctor --json \| jq '.overall'` prints `"ok"` |
+| 7 | Smoke test | `doctor --json \| jq '.data.overall'` prints `"ok"` |
 
 ---
 
@@ -37,11 +37,12 @@ switchbot --version
 
 ## 2. Save credentials
 
-Get token + secret from SwitchBot mobile app → Profile → Preferences →
-Developer Options → Get Token. Pick one storage backend:
+Get token + secret from SwitchBot App ≥9.0: Profile → Preferences → About,
+tap App Version ten times → Developer Options → Get Token. Keep both local.
 
 ```bash
 # Option A — environment variables (CI friendly, no disk writes):
+mkdir -p ~/.switchbot
 cp examples/quickstart/config.env.example ~/.switchbot/.env
 chmod 0600 ~/.switchbot/.env
 $EDITOR ~/.switchbot/.env
@@ -68,7 +69,7 @@ Even if you don't plan to wire an agent yet, this proves the CLI can
 read its cache and catalog without spending API quota:
 
 ```bash
-switchbot agent-bootstrap --compact | jq '.identity, .devices.total, .schemaVersion'
+switchbot agent-bootstrap --compact | jq '.data.identity, .data.devices.total, .schemaVersion'
 ```
 
 ## 4. Scaffold a policy file
@@ -78,20 +79,19 @@ aliases, quiet hours, destructive-command confirmations, audit log
 location, and (v0.2 only) automation rules.
 
 ```bash
-mkdir -p ~/.config/switchbot
+mkdir -p ~/.config/openclaw/switchbot
 cp examples/quickstart/policy.yaml.example \
-   ~/.config/switchbot/policy.yaml
+   ~/.config/openclaw/switchbot/policy.yaml
 
 # Replace the sample deviceId under `aliases` with a real one:
-switchbot devices list --json | jq '.data[] | {id: .deviceId, name: .deviceName}'
-$EDITOR ~/.config/switchbot/policy.yaml
+switchbot devices list --json | jq '.data.devices[] | {id: .deviceId, name: .deviceName}'
+$EDITOR ~/.config/openclaw/switchbot/policy.yaml
 
 switchbot policy validate
 ```
 
-If you don't need the rules engine yet, edit `version:` back to `"0.1"`
-and drop the `automation:` block — the rest of the file stays valid for
-both schemas.
+This build requires policy version `"0.2"`. Omit `automation` if you do not
+need rules. Legacy v0.1 files require migration with CLI ≤2.15 before upgrading.
 
 ## 5. Stream real-time events
 
@@ -131,11 +131,11 @@ switchbot history show --since 5m --json | jq '.data[-1]'
 that aren't green. Empty array means you're done.
 
 ```bash
-switchbot doctor --json | jq '.checks[] | select(.status != "ok")'
+switchbot doctor --json | jq '.data.checks[] | select(.status != "ok")'
 
 # Specifically confirm the catalog ↔ agent-bootstrap schema sync check
 # an agent should poll each session:
-switchbot doctor --json | jq '.checks[] | select(.name == "catalog-schema")'
+switchbot doctor --json | jq '.data.checks[] | select(.name == "catalog-schema")'
 ```
 
 ---

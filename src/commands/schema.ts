@@ -156,7 +156,7 @@ function runSchemaExport(options: { type?: string; types?: string; role?: string
 
   const finish = (finalTypes: Array<Record<string, unknown>>) => {
     const payload: Record<string, unknown> = {
-      version: '1.0',
+      version: '2.0',
       types: finalTypes,
     };
     if (!options.compact) {

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import { registerSchemaCommand } from '../../src/commands/schema.js';
+import type { ResourceCatalog } from '../../src/devices/resources.js';
 import { updateCacheFromDeviceList, resetListCache } from '../../src/devices/cache.js';
 import { runCli } from '../helpers/cli.js';
 import { expectJsonEnvelopeContainingKeys } from '../helpers/contracts.js';
@@ -12,7 +13,7 @@ describe('schema export', () => {
     const out = res.stdout.join('');
     const envelope = JSON.parse(out) as Record<string, unknown>;
     const parsed = expectJsonEnvelopeContainingKeys(envelope, ['version', 'types', 'generatedAt', 'resources', 'cliAddedFields']);
-    expect(parsed.version).toBe('1.0');
+    expect(parsed.version).toBe('2.0');
     expect(parsed.generatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(Array.isArray(parsed.types)).toBe(true);
     expect(parsed.types.length).toBeGreaterThan(10);
@@ -23,6 +24,124 @@ describe('schema export', () => {
         expect(typeof c.safetyTier).toBe('string');
       }
     }
+  });
+
+  it('exports both scheduling timestamps as required for single-use Keypad passcodes', async () => {
+    const res = await runCli(registerSchemaCommand, ['schema', 'export']);
+    const data = JSON.parse(res.stdout.join('')).data;
+    const key = data.resources.keys.find((entry: { keyType: string }) => entry.keyType === 'disposable');
+    expect(key.requiredParams).toContain('startTime');
+    expect(key.requiredParams).toContain('endTime');
+    expect(key.optionalParams).not.toContain('startTime');
+    expect(key.optionalParams).not.toContain('endTime');
+  });
+
+  it('exports v2 webhook envelopes with context device types and nested fields', async () => {
+    const res = await runCli(registerSchemaCommand, ['schema', 'export']);
+    const data = JSON.parse(res.stdout.join('')).data as {
+      version: string;
+      resources: {
+        version: string;
+        webhooks: {
+          events: Array<{
+            eventType: string;
+            eventVersion: string;
+            context: {
+              deviceType: string;
+              fields: Array<{
+                name: string;
+                type: string;
+                fields?: Array<{ name: string; type: string }>;
+              }>;
+            };
+          }> ;
+        };
+      };
+    };
+
+    expect(data.version).toBe('2.0');
+    expect(data.resources.version).toBe('2.0');
+
+    const bot = data.resources.webhooks.events.find(
+      (event) => event.context.deviceType === 'WoHand',
+    );
+    expect(bot).toMatchObject({ eventType: 'changeReport', eventVersion: '1' });
+
+    const mindClip = data.resources.webhooks.events.find(
+      (event) => event.context.deviceType === 'AI MindClip',
+    );
+    const completedUpload = mindClip?.context.fields.find(
+      (field) => field.name === 'chargeUploadCompleted',
+    );
+    expect(completedUpload).toMatchObject({ type: 'object' });
+    const uploadFields = completedUpload?.fields ?? [];
+    expect(uploadFields.find((field) => field.name === 'fileID')).toMatchObject({ type: 'string' });
+    expect(uploadFields.find((field) => field.name === 'status')).toMatchObject({ type: 'number' });
+  });
+
+  it('describes official webhook context variants for payload consumers', async () => {
+    const res = await runCli(registerSchemaCommand, ['schema', 'export']);
+    const data = JSON.parse(res.stdout.join('')).data as {
+      resources: {
+        webhooks: {
+          events: Array<{
+            context: {
+              deviceType: string;
+              fields: Array<{ name: string; type: string }>;
+            };
+          }>;
+        };
+      };
+    };
+    const fieldType = (deviceType: string, fieldName: string) =>
+      data.resources.webhooks.events
+        .find((event) => event.context.deviceType === deviceType)
+        ?.context.fields.find((field) => field.name === fieldName)?.type;
+
+    expect(fieldType('WoMeterPlus', 'scale')).toBe('string');
+    expect(fieldType('MeterPro(CO2)', 'CO2')).toBe('number');
+    expect(fieldType('WoPlugEU', 'switchStatus')).toBe('number');
+    expect(fieldType('WoKeypad', 'eventName')).toBe('string');
+    expect(fieldType('Video Doorbell', 'press')).toBe('boolean');
+  });
+
+  it('distinguishes documented webhook support variants', async () => {
+    const res = await runCli(registerSchemaCommand, ['schema', 'export']);
+    const data = JSON.parse(res.stdout.join('')).data as { resources: ResourceCatalog };
+    const events = data.resources.webhooks.events;
+    const fieldType = (deviceType: string, fieldName: string) =>
+      events.find((event) => event.context.deviceType === deviceType)
+        ?.context.fields.find((field) => field.name === fieldName)?.type;
+
+    expect(fieldType('WoPlugJP', 'powerState')).toBe('string');
+    expect(fieldType('Relay Switch 2PM', 'switch1Status')).toBe('number');
+    expect(fieldType('WoRollerShade', 'slidePosition')).toBe('number');
+    expect(fieldType('Hub 3', 'detectionState')).toBe('string');
+    expect(fieldType('Kata Friends', 'deviceId')).toBe('string');
+  });
+
+  it('exports only documented scene REST operations', async () => {
+    const res = await runCli(registerSchemaCommand, ['schema', 'export']);
+    const data = JSON.parse(res.stdout.join('')).data as {
+      resources: { scenes: { operations: Array<{ method: string; endpoint: string }> } };
+    };
+
+    const operations = data.resources.scenes.operations.map(
+      (operation) => operation.method + ' ' + operation.endpoint,
+    );
+    expect(operations).toEqual([
+      'GET /v1.1/scenes',
+      'POST /v1.1/scenes/{sceneId}/execute',
+    ]);
+  });
+
+  it('does not impose undocumented webhook account limits', async () => {
+    const res = await runCli(registerSchemaCommand, ['schema', 'export']);
+    const data = JSON.parse(res.stdout.join('')).data as {
+      resources: { webhooks: Record<string, unknown> };
+    };
+
+    expect(data.resources.webhooks).not.toHaveProperty('constraints');
   });
 
   it('bare schema defaults to export', async () => {
@@ -126,7 +245,7 @@ describe('schema export', () => {
     expect(hubMini.role).toBe('hub');
     expect(hubMini.statusFields).toEqual(['version']);
     expect(hub3.role).toBe('hub');
-    expect(hub3.statusFields).toEqual(['version', 'temperature', 'humidity', 'lightLevel']);
+    expect(hub3.statusFields).toEqual(expect.arrayContaining(['version', 'temperature', 'humidity', 'lightLevel', 'moveDetected', 'onlineStatus']));
   });
 
   it('exports official GitHub-documented device types observed in the real account', async () => {

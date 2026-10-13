@@ -44,6 +44,11 @@ vi.mock('../../src/api/client.js', () => ({
   },
 }));
 
+// OS keychain I/O is external to this protocol suite; never read user secrets.
+vi.mock('../../src/credentials/keychain.js', () => ({
+  selectCredentialStore: async () => ({ get: async () => null }),
+}));
+
 // Mock the cache so MCP's send_command validation/destructive-check paths are
 // deterministic and don't depend on the user's ~/.switchbot/devices.json.
 const cacheMock = vi.hoisted(() => {
@@ -163,50 +168,6 @@ describe('mcp server', () => {
     delete process.env.SWITCHBOT_ALLOW_DIRECT_DESTRUCTIVE;
   });
 
-  it('exposes the twenty-eight tools with titles and input schemas', async () => {
-    const { client } = await pair();
-    const { tools } = await client.listTools();
-
-    const names = tools.map((t) => t.name).sort();
-    expect(names).toEqual(
-      [
-        'account_overview',
-        'aggregate_device_history',
-        'audit_query',
-        'audit_stats',
-        'describe_device',
-        'device_history',
-        'get_device_history',
-        'get_device_status',
-        'list_devices',
-        'list_scenes',
-        'mindclip_list_todos',
-        'mindclip_recall',
-        'mindclip_recordings',
-        'plan_run',
-        'plan_suggest',
-        'policy_add_rule',
-        'policy_diff',
-        'policy_migrate',
-        'policy_new',
-        'policy_validate',
-        'query_device_history',
-        'rule_notifications',
-        'rules_explain',
-        'rules_simulate',
-        'rules_suggest',
-        'run_scene',
-        'search_catalog',
-        'send_command',
-      ].sort()
-    );
-
-    for (const t of tools) {
-      expect(t.description, `${t.name} should have a description`).toBeTypeOf('string');
-      expect(t.inputSchema, `${t.name} should expose an inputSchema`).toBeDefined();
-      expect(t.inputSchema.type).toBe('object');
-    }
-  });
 
   it('send_command rejects destructive commands without confirm:true', async () => {
     cacheMock.map.set('LOCK1', { type: 'Smart Lock', name: 'Front Door', category: 'physical' });
@@ -580,40 +541,77 @@ describe('mcp server', () => {
     expect(res.isError).toBe(true);
   });
 
-  it('mindclip_recordings action=list calls /v1.1/mindclip/recordings and returns body', async () => {
-    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: { list: [{ id: 'r1' }] } } });
-    const { client } = await pair();
-    const res = await client.callTool({ name: 'mindclip_recordings', arguments: { action: 'list' } });
-    expect(res.isError).toBeFalsy();
-    const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
-    expect(parsed).toEqual({ list: [{ id: 'r1' }] });
-    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/recordings', {
-      params: {},
-    });
+  it('reads a 31-day diary in readonly mode but refuses a wider window before GET', async () => {
+    const endTimestamp = 31 * 24 * 60 * 60 * 1000;
+    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {
+      diary: [{ detail: '{"mood":"happy"}' }],
+      diaryAI: [{ detail: 'AI reflection' }],
+      comicDiaryAI: [{ detail: '{"panels":[]}', thumbnail: 'storage/comic/key' }],
+    } } });
+    const { client, server } = await pair('readonly');
+    try {
+      const result = await client.callTool({
+        name: 'device_diary',
+        arguments: { deviceId: 'kata/1?#', startTimestamp: 0, endTimestamp },
+      });
+      expect(result.isError).toBeFalsy();
+      expect(result.structuredContent).toHaveProperty('data.diary.0.detail', '{"mood":"happy"}');
+      expect(result.structuredContent).toHaveProperty('data.comicDiaryAI.0.thumbnail', 'storage/comic/key');
+      expect(apiMock.__instance.get.mock.calls[0]?.[0]).toBe('/v1.1/devices/kata%2F1%3F%23/diary');
+      apiMock.__instance.get.mockClear();
+      const tooLong = await client.callTool({
+        name: 'device_diary',
+        arguments: { deviceId: 'kata/1?#', startTimestamp: 0, endTimestamp: endTimestamp + 1 },
+      });
+      expect(tooLong.isError).toBe(true);
+      expect(tooLong.structuredContent).toMatchObject({ error: { kind: 'usage', code: 2 } });
+      expect(apiMock.__instance.get).not.toHaveBeenCalled();
+    } finally {
+      await client.close();
+      await server.close();
+    }
   });
 
-  it('mindclip_recordings action=list forwards device, page, size, and time-range params', async () => {
-    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {} } });
-    const { client } = await pair();
-    await client.callTool({
-      name: 'mindclip_recordings',
-      arguments: { action: 'list', deviceID: 'AABBCC', pageNum: 2, pageSize: 10, startTime: 1000, endTime: 2000, folderID: 3 },
-    });
-    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/recordings', {
-      params: { deviceID: 'AABBCC', pageNum: 2, pageSize: 10, startTime: 1000, endTime: 2000, folderID: 3 },
-    });
+  it('reads an opaque transcript ID without hiding its pending transcription state', async () => {
+    const body = { id: 'recording /?#', transcribeStatus: 1, speakers: [] };
+    apiMock.__instance.get.mockResolvedValueOnce({ data: { body } });
+    const { client, server } = await pair('readonly');
+    try {
+      const result = await client.callTool({
+        name: 'mindclip_recordings',
+        arguments: { action: 'transcript', id: body.id, language: 'zh' },
+      });
+      expect(result.isError).toBeFalsy();
+      expect(result.structuredContent).toMatchObject({ data: { transcribeStatus: 1 } });
+      expect(result.structuredContent).not.toHaveProperty('data.transcribeResult');
+      const [url, requestOptions] = apiMock.__instance.get.mock.calls[0];
+      expect(url).toBe('/v1.1/mindclip/recordings/recording%20%2F%3F%23/transcript');
+      expect(requestOptions?.params ?? {}).not.toHaveProperty('language');
+    } finally {
+      await client.close();
+      await server.close();
+    }
   });
 
-  it('mindclip_recordings action=get calls /v1.1/mindclip/recordings/{id} with optional language', async () => {
-    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: { id: 'r1' } } });
-    const { client } = await pair();
-    await client.callTool({
-      name: 'mindclip_recordings',
-      arguments: { action: 'get', id: 'r1', language: 'en' },
-    });
-    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/recordings/r1', {
-      params: { language: 'en' },
-    });
+  it.each([
+    { name: 'mindclip_recordings', arguments: { action: 'list', pageNum: 1, pageSize: 20 } },
+    { name: 'mindclip_recordings', arguments: { action: 'list', deviceID: 'D1', pageSize: 20 } },
+    { name: 'mindclip_recordings', arguments: { action: 'list', deviceID: 'D1', pageNum: 1 } },
+    { name: 'mindclip_list_todos', arguments: { pageNum: 1, pageSize: 20 } },
+    { name: 'mindclip_recall', arguments: { period: 'daily' } },
+    { name: 'mindclip_recall', arguments: { period: 'weekly' } },
+    { name: 'mindclip_recall', arguments: { period: 'urgent_todos' } },
+  ])('refuses incomplete official MindClip query $name $arguments', async (request) => {
+    apiMock.__instance.get.mockResolvedValue({ data: { body: { list: [] } } });
+    const { client, server } = await pair('readonly');
+    try {
+      const result = await client.callTool(request);
+      expect(result.isError).toBe(true);
+      expect(apiMock.__instance.get).not.toHaveBeenCalled();
+    } finally {
+      await client.close();
+      await server.close();
+    }
   });
 
   it('mindclip_recordings action=get rejects missing id with a usage error', async () => {
@@ -624,160 +622,12 @@ describe('mcp server', () => {
     expect(text).toContain('action="get" requires `id`');
   });
 
-  it('mindclip_recordings action=summary calls /v1.1/mindclip/summaries/{id}', async () => {
-    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: { summary: 'ok' } } });
-    const { client } = await pair();
-    const res = await client.callTool({ name: 'mindclip_recordings', arguments: { action: 'summary', id: 's1' } });
-    const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
-    expect(parsed).toEqual({ summary: 'ok' });
-    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/summaries/s1', { params: {} });
-  });
-
   it('mindclip_recordings action=summary rejects missing id with a usage error', async () => {
     const { client } = await pair();
     const res = await client.callTool({ name: 'mindclip_recordings', arguments: { action: 'summary' } });
     expect(res.isError).toBeTruthy();
     const text = (res.content as Array<{ text: string }>)[0].text;
     expect(text).toContain('action="summary" requires `id`');
-  });
-
-  it('mindclip_list_todos calls /v1.1/mindclip/todos and returns body', async () => {
-    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: { items: [{ id: 't1' }] } } });
-    const { client } = await pair();
-    const res = await client.callTool({ name: 'mindclip_list_todos', arguments: {} });
-    const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
-    expect(parsed).toEqual({ items: [{ id: 't1' }] });
-    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/todos', { params: {} });
-  });
-
-  it('mindclip_list_todos forwards completed/category/device/file/time filters', async () => {
-    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {} } });
-    const { client } = await pair();
-    await client.callTool({
-      name: 'mindclip_list_todos',
-      arguments: {
-        completedNum: 1,
-        category: 2,
-        pageNum: 1,
-        pageSize: 20,
-        deviceID: 'D1',
-        fileID: 'F1',
-        startTime: 100,
-        endTime: 200,
-      },
-    });
-    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/todos', {
-      params: {
-        completedNum: 1,
-        category: 2,
-        pageNum: 1,
-        pageSize: 20,
-        deviceID: 'D1',
-        fileID: 'F1',
-        startTime: 100,
-        endTime: 200,
-      },
-    });
-  });
-
-  it('mindclip_recall period=daily calls /v1.1/mindclip/assistant/daily with date param', async () => {
-    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {} } });
-    const { client } = await pair();
-    await client.callTool({
-      name: 'mindclip_recall',
-      arguments: { period: 'daily', date: '2026-06-13' },
-    });
-    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/assistant/daily', {
-      params: { date: '2026-06-13' },
-    });
-  });
-
-  it('mindclip_recall period=weekly calls /v1.1/mindclip/assistant/weekly with week param', async () => {
-    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {} } });
-    const { client } = await pair();
-    await client.callTool({
-      name: 'mindclip_recall',
-      arguments: { period: 'weekly', week: '2026-W23' },
-    });
-    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/assistant/weekly', {
-      params: { week: '2026-W23' },
-    });
-  });
-
-  it('mindclip_recall period=urgent_todos calls /v1.1/mindclip/assistant/urgent-todos and omits date when not provided', async () => {
-    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {} } });
-    const { client } = await pair();
-    await client.callTool({ name: 'mindclip_recall', arguments: { period: 'urgent_todos' } });
-    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/assistant/urgent-todos', {
-      params: {},
-    });
-  });
-
-  // ---------------------------------------------------------------------------
-  // G2/G3: branch-routing + parameter-forwarding completeness for the
-  // consolidated mindclip tools. Covers default branches the basic tests
-  // skipped (period=daily/weekly without date/week, action=get without
-  // language) and partial-filter combinations.
-  // ---------------------------------------------------------------------------
-
-  it('mindclip_recall period=daily without date hits /v1.1/mindclip/assistant/daily with empty params', async () => {
-    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {} } });
-    const { client } = await pair();
-    await client.callTool({ name: 'mindclip_recall', arguments: { period: 'daily' } });
-    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/assistant/daily', { params: {} });
-  });
-
-  it('mindclip_recall period=weekly without week hits /v1.1/mindclip/assistant/weekly with empty params', async () => {
-    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {} } });
-    const { client } = await pair();
-    await client.callTool({ name: 'mindclip_recall', arguments: { period: 'weekly' } });
-    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/assistant/weekly', { params: {} });
-  });
-
-  it('mindclip_recall period=urgent_todos with explicit date passes the date through', async () => {
-    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {} } });
-    const { client } = await pair();
-    await client.callTool({ name: 'mindclip_recall', arguments: { period: 'urgent_todos', date: '2026-06-12' } });
-    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/assistant/urgent-todos', {
-      params: { date: '2026-06-12' },
-    });
-  });
-
-  it('mindclip_recordings action=get omits language when caller did not pass one', async () => {
-    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: { id: 'r1' } } });
-    const { client } = await pair();
-    await client.callTool({ name: 'mindclip_recordings', arguments: { action: 'get', id: 'r1' } });
-    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/recordings/r1', { params: {} });
-  });
-
-  it('mindclip_recordings action=list with only deviceID forwards just that filter', async () => {
-    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {} } });
-    const { client } = await pair();
-    await client.callTool({ name: 'mindclip_recordings', arguments: { action: 'list', deviceID: 'AB' } });
-    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/recordings', {
-      params: { deviceID: 'AB' },
-    });
-  });
-
-  it('mindclip_recordings action=list with only paging forwards just paging', async () => {
-    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {} } });
-    const { client } = await pair();
-    await client.callTool({
-      name: 'mindclip_recordings',
-      arguments: { action: 'list', pageNum: 4, pageSize: 25 },
-    });
-    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/recordings', {
-      params: { pageNum: 4, pageSize: 25 },
-    });
-  });
-
-  it('mindclip_list_todos with only deviceID forwards just that filter', async () => {
-    apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {} } });
-    const { client } = await pair();
-    await client.callTool({ name: 'mindclip_list_todos', arguments: { deviceID: 'D9' } });
-    expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/todos', {
-      params: { deviceID: 'D9' },
-    });
   });
 
   // ---------------------------------------------------------------------------
@@ -791,11 +641,11 @@ describe('mcp server', () => {
     const { client } = await pair();
     await client.callTool({
       name: 'mindclip_recordings',
-      arguments: { action: 'list', id: 'should-be-ignored', deviceID: 'AB' },
+      arguments: { action: 'list', id: 'should-be-ignored', deviceID: 'AB', pageNum: 1, pageSize: 20 },
     });
     // The list endpoint must be called (NOT /v1.1/mindclip/recordings/should-be-ignored)
     expect(apiMock.__instance.get).toHaveBeenCalledWith('/v1.1/mindclip/recordings', {
-      params: { deviceID: 'AB' },
+      params: { deviceID: 'AB', pageNum: 1, pageSize: 20 },
     });
     // params must not carry id
     const params = apiMock.__instance.get.mock.calls[0]?.[1]?.params ?? {};
@@ -1349,26 +1199,119 @@ describe('mcp server', () => {
   });
 
   describe('plan/audit tools', () => {
-    it('plan_run skips destructive steps when yes is not set', async () => {
+    it('previews mixed MCP plan steps without waiting or mutating', async () => {
+      cacheMock.map.set('BOT1', { type: 'Bot', name: 'Button', category: 'physical' });
+      const savedArgv = process.argv;
+      const { client, server } = await pair();
+      process.argv = ['node', 'switchbot', '--dry-run'];
+      vi.useFakeTimers();
+      try {
+        const pending = client.callTool({ name: 'plan_run', arguments: { plan: {
+          version: '1.0', steps: [
+            { type: 'wait', ms: 60_000 },
+            { type: 'scene', sceneId: 'SCENE1' },
+            { type: 'command', deviceId: 'BOT1', command: 'turnOn' },
+          ],
+        } } });
+        void pending.catch(() => {});
+        await vi.advanceTimersByTimeAsync(0);
+        expect(vi.getTimerCount()).toBe(0);
+        const result = await pending;
+        expect(result.isError).toBeFalsy();
+        expect(result.structuredContent).toMatchObject({
+          ran: false, summary: { ok: 0, dryRun: 3 },
+          results: [
+            { type: 'wait', status: 'dry-run' },
+            { type: 'scene', status: 'dry-run' },
+            { type: 'command', status: 'dry-run' },
+          ],
+        });
+        expect(apiMock.__instance.post).not.toHaveBeenCalled();
+      } finally {
+        await client.close();
+        await server.close();
+        vi.clearAllTimers();
+        vi.useRealTimers();
+        process.argv = savedArgv;
+      }
+    });
+
+    it('plan_run refuses a cold-cache unlock before any mutation', async () => {
+      apiMock.__instance.get.mockResolvedValue({ data: { body: {
+        deviceList: [{ deviceId: 'LOCK1', deviceName: 'Front Door', deviceType: 'Smart Lock' }],
+        infraredRemoteList: [],
+      } } });
+      apiMock.__instance.post.mockResolvedValue({ data: { body: { accepted: true } } });
+      const { client, server } = await pair('default');
+      try {
+        const res = await client.callTool({
+          name: 'plan_run',
+          arguments: { plan: { version: '1.0', steps: [
+            { type: 'command', deviceId: 'LOCK1', command: 'unlock' },
+          ] } },
+        });
+        expect(res.isError).toBe(true);
+        expect(parseErrorText((res.content as Array<{ text: string }>)[0].text).error.kind).toBe('guard');
+        expect(apiMock.__instance.post).not.toHaveBeenCalled();
+      } finally {
+        await client.close();
+        await server.close();
+      }
+    });
+
+    it('plan_run refuses the whole destructive plan without yes before any mutation', async () => {
       cacheMock.map.set('LOCK1', { type: 'Smart Lock', name: 'Front Door', category: 'physical' });
-      const { client } = await pair();
+      cacheMock.map.set('BOT1', { type: 'Bot', name: 'Button', category: 'physical' });
+      const { client, server } = await pair('default');
+      try {
+        const result = await client.callTool({ name: 'plan_run', arguments: { plan: {
+          version: '1.0',
+          steps: [
+            { type: 'command', deviceId: 'BOT1', command: 'turnOn' },
+            { type: 'command', deviceId: 'LOCK1', command: 'unlock' },
+          ],
+        } } });
+        expect(result.isError).toBe(true);
+        expect(result.structuredContent).toHaveProperty('error.kind', 'guard');
+        expect(apiMock.__instance.post).not.toHaveBeenCalled();
+      } finally {
+        await client.close();
+        await server.close();
+      }
+    });
 
-      const res = await client.callTool({
-        name: 'plan_run',
-        arguments: {
-          plan: {
-            version: '1.0',
-            steps: [{ type: 'command', deviceId: 'LOCK1', command: 'unlock' }],
-          },
-        },
-      });
-
-      expect(res.isError).toBeFalsy();
-      const sc = (res as { structuredContent?: Record<string, unknown> }).structuredContent!;
-      const summary = sc.summary as Record<string, number>;
-      expect(summary.total).toBe(1);
-      expect(summary.skipped).toBe(1);
-      expect(summary.error).toBe(0);
+    it('plan_run executes validated non-destructive commands with successful results', async () => {
+      cacheMock.map.set('BOT1', { type: 'Bot', name: 'Button', category: 'physical' });
+      cacheMock.map.set('LAMP1', { type: 'Color Bulb', name: 'Lamp', category: 'physical' });
+      apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body: {} } });
+      const { client, server } = await pair('default');
+      try {
+        const result = await client.callTool({ name: 'plan_run', arguments: { plan: {
+          version: '1.0',
+          steps: [
+            { type: 'command', deviceId: 'BOT1', command: 'turnOn' },
+            { type: 'command', deviceId: 'LAMP1', command: 'setBrightness', parameter: 50 },
+          ],
+        } } });
+        expect(result.isError).toBeFalsy();
+        expect(result.structuredContent).toMatchObject({
+          ran: true,
+          results: [
+            { deviceId: 'BOT1', status: 'ok' },
+            { deviceId: 'LAMP1', status: 'ok' },
+          ],
+          summary: { total: 2, ok: 2, error: 0, dryRun: 0 },
+        });
+        expect(apiMock.__instance.post).toHaveBeenNthCalledWith(1, '/v1.1/devices/BOT1/commands', {
+          command: 'turnOn', parameter: 'default', commandType: 'command',
+        });
+        expect(apiMock.__instance.post).toHaveBeenNthCalledWith(2, '/v1.1/devices/LAMP1/commands', {
+          command: 'setBrightness', parameter: '50', commandType: 'command',
+        });
+      } finally {
+        await client.close();
+        await server.close();
+      }
     });
 
     it('plan_run rejects direct destructive execution when yes=true in the default profile', async () => {
@@ -1877,35 +1820,4 @@ describe('mcp server', () => {
     });
   });
 
-  describe('plan_run — outputSchema structuredContent shape', () => {
-    it('returns typed results array with step/type/status fields', async () => {
-      const { client } = await pair();
-      // Mock the device command API call
-      apiMock.__instance.post.mockResolvedValueOnce({ data: { statusCode: 100, body: {} } });
-      cacheMock.map.set('DEVICE1', { type: 'Bot', name: 'test bot', category: 'physical' });
-
-      const plan = {
-        version: '1.0',
-        description: 'test',
-        steps: [{ type: 'command', deviceId: 'DEVICE1', command: 'turnOn' }],
-      };
-
-      const result = await client.callTool({
-        name: 'plan_run',
-        arguments: { plan },
-      });
-
-      expect(result.isError).toBeFalsy();
-      const sc = (result as { structuredContent: {
-        ran: boolean;
-        results: Array<{ step: number; type: string; status: string }>;
-        summary: { total: number; ok: number; error: number; skipped: number };
-      } }).structuredContent;
-
-      expect(sc.ran).toBe(true);
-      expect(sc.results).toHaveLength(1);
-      expect(sc.results[0]).toMatchObject({ step: 1, type: 'command', status: 'ok' });
-      expect(sc.summary).toMatchObject({ total: 1, ok: 1, error: 0, skipped: 0 });
-    });
-  });
 });

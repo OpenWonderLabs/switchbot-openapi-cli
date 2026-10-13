@@ -8,6 +8,10 @@
 export const DESTRUCTIVE_COMMANDS = [
   'lock',
   'unlock',
+  'nightLatchUnlock',
+  'createKey',
+  'deleteKey',
+  'deadbolt',
   'deleteWebhook',
   'deleteScene',
   'factoryReset',

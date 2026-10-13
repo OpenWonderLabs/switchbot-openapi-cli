@@ -72,6 +72,33 @@ describe('doctor command', () => {
     expect(creds.detail.backend).toBeDefined();
   });
 
+  it('reports healthy env credentials without waiting for a stalled keychain read', async () => {
+    vi.useFakeTimers();
+    process.env.SWITCHBOT_TOKEN = 'env-token';
+    process.env.SWITCHBOT_SECRET = 'env-secret';
+    credStoreGetMock.mockImplementation(() => new Promise(() => {}));
+    try {
+      const outcome = Promise.race([
+        runCli(registerDoctorCommand, ['--json', 'doctor', '--section', 'credentials']),
+        new Promise<null>((resolve) => setTimeout(resolve, 10_000, null)),
+      ]);
+      await vi.advanceTimersByTimeAsync(10_000);
+      const result = await outcome;
+      expect(result).not.toBeNull();
+      const payload = JSON.parse(result!.stdout.join(''));
+      expect(payload.data.ok).toBe(true);
+      expect(payload.data.checks).toEqual([expect.objectContaining({
+        name: 'credentials',
+        status: 'ok',
+        detail: expect.objectContaining({ source: 'env' }),
+      })]);
+    } finally {
+      vi.useRealTimers();
+      delete process.env.SWITCHBOT_TOKEN;
+      delete process.env.SWITCHBOT_SECRET;
+    }
+  });
+
   it('reports credentials:ok when env vars are set', async () => {
     process.env.SWITCHBOT_TOKEN = 't';
     process.env.SWITCHBOT_SECRET = 's';

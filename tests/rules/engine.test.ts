@@ -885,12 +885,15 @@ describe('RulesEngine.reload', () => {
 
   // ── suppressIfAlreadyDesired ────────────────────────────────────────────
   describe('suppressIfAlreadyDesired', () => {
-    it('suppresses turnOn when device is already on', async () => {
+    it.each([
+      ['turnOn', 'ON'],
+      ['turnOff', 'off'],
+    ])('suppresses %s when REST power is already %s', async (command, power) => {
       const fires: EngineFireEntry[] = [];
       const rule: Rule = {
         name: 'auto-on',
         when: { source: 'mqtt', event: 'motion.detected' },
-        then: [{ command: 'devices command <id> turnOn', device: 'hallway lamp' }],
+        then: [{ command: `devices command <id> ${command}`, device: 'hallway lamp' }],
         dry_run: true,
         suppressIfAlreadyDesired: true,
       };
@@ -900,7 +903,7 @@ describe('RulesEngine.reload', () => {
         mqttClient: mqtt as unknown as SwitchBotMqttClient,
         mqttCredential: fakeCredential,
         skipApiCall: true,
-        statusFetcher: async () => ({ powerState: 'on' }),
+        statusFetcher: async () => ({ power }),
         onFire: (e) => fires.push(e),
       });
       await engine.start();
@@ -929,7 +932,7 @@ describe('RulesEngine.reload', () => {
         mqttClient: mqtt as unknown as SwitchBotMqttClient,
         mqttCredential: fakeCredential,
         skipApiCall: true,
-        statusFetcher: async () => ({ powerState: 'off' }),
+        statusFetcher: async () => ({ power: 'OFF' }),
         onFire: (e) => fires.push(e),
       });
       await engine.start();

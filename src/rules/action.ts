@@ -18,7 +18,9 @@
  */
 
 import type { AxiosInstance } from 'axios';
-import { executeCommand } from '../lib/devices.js';
+import { executeCommand, fetchDeviceList } from '../lib/devices.js';
+import { getCachedDevice } from '../devices/cache.js';
+import { deriveSafetyTier, findCatalogEntry } from '../devices/catalog.js';
 import { writeAudit } from '../utils/audit.js';
 import { isDestructiveCommand } from './destructive.js';
 import { isCommandAction } from './types.js';
@@ -215,7 +217,25 @@ export async function executeRuleAction(
     return { ok: true, deviceId, verb: parsed.verb };
   }
 
+  let safetyBlocked = false;
   try {
+    // A generic verb such as turnOn can be destructive for a particular model.
+    // Resolve inventory before any live mutation; an unknown target is not approval.
+    let device = getCachedDevice(deviceId);
+    if (!device) {
+      await fetchDeviceList(ctx.httpClient, { bypassCache: true });
+      device = getCachedDevice(deviceId);
+    }
+    const entry = device ? findCatalogEntry(device.type) : null;
+    if (!entry || Array.isArray(entry)) {
+      safetyBlocked = true;
+      throw new Error(`Cannot verify automation safety for device ${deviceId}; no unambiguous catalog entry.`);
+    }
+    const spec = entry.commands.find((command) => command.command === parsed.verb);
+    if (!spec || deriveSafetyTier(spec, entry) === 'destructive') {
+      safetyBlocked = true;
+      throw new Error(`Automation refuses ${parsed.verb} for ${entry.type}: ${spec ? 'destructive command' : 'unknown command'}.`);
+    }
     await executeCommand(deviceId, parsed.verb, parameter, 'command', ctx.httpClient);
     writeAudit({
       t: new Date().toISOString(),
@@ -243,7 +263,7 @@ export async function executeRuleAction(
       command: parsed.verb,
       parameter: parameter ?? 'default',
       commandType: 'command',
-      dryRun: false,
+      dryRun: safetyBlocked,
       result: 'error',
       error: msg,
       rule: {
@@ -253,7 +273,7 @@ export async function executeRuleAction(
         fireId: ctx.fireId,
       },
     });
-    return { ok: false, error: msg, deviceId, verb: parsed.verb };
+    return { ok: false, error: msg, deviceId, verb: parsed.verb, ...(safetyBlocked ? { blocked: true } : {}) };
   }
 }
 

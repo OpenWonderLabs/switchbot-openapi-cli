@@ -179,7 +179,7 @@ describe('dryRun support on mutating tools', () => {
     expect(apiMock.__instance.post).not.toHaveBeenCalled();
   });
 
-  it('send_command dryRun:true passes through for uncataloged device type (bug #55)', async () => {
+  it('send_command dryRun:true fails closed for unknown physical device types', async () => {
     cacheMock.map.set('NEWDEV', { type: 'FutureGadget9000', name: 'Lab Device', category: 'physical' });
     const { client } = await pair();
 
@@ -188,10 +188,9 @@ describe('dryRun support on mutating tools', () => {
       arguments: { deviceId: 'NEWDEV', command: 'anyCommand', dryRun: true },
     });
 
-    expect(res.isError).toBeFalsy();
-    const parsed = JSON.parse((res.content as Array<{ text: string }>)[0].text);
-    expect(parsed.dryRun).toBe(true);
-    expect(parsed.wouldSend.command).toBe('anyCommand');
+    expect(res.isError).toBe(true);
+    const parsed = parseErrorText((res.content as Array<{ text: string }>)[0].text);
+    expect(parsed.error.context?.validationKind).toBe('unknown-device-type');
     expect(apiMock.__instance.post).not.toHaveBeenCalled();
   });
 

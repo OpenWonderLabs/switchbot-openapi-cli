@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
-const MIN_VERSION = '3.7.1';
+const MIN_VERSION = '3.9.0';
 
 function versionAtLeast(have, need) {
   const a = have.split('.').map(n => parseInt(n, 10) || 0);
@@ -53,5 +53,7 @@ export function makeCheckCli(exec) {
   };
 }
 
-const defaultExec = promisify(execFile);
+const exec = promisify(execFile);
+const defaultExec = (cmd, args, options) =>
+  exec(cmd, args, { ...options, shell: process.platform === 'win32' });
 export const checkCli = makeCheckCli(defaultExec);

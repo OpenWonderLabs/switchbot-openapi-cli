@@ -283,6 +283,22 @@ describe('policy validator (v0.2)', () => {
     expect(result.schemaVersion).toBe('0.2');
   });
 
+  it.each(['deadbolt', 'nightLatchUnlock', 'createKey', 'deleteKey'])('rejects %s in never_confirm', (verb) => {
+    const loaded = writeAndLoad(
+      tmpDir,
+      [
+        "version: \"0.2\"",
+        "confirmations:",
+        "  never_confirm:",
+        `    - ${verb}`,
+        "",
+      ].join("\n"),
+    );
+    const result = validateLoadedPolicy(loaded);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((error) => error.keyword === "not")).toBe(true);
+  });
+
   it('accepts a v0.2 policy with a well-formed MQTT rule', () => {
     const loaded = writeAndLoad(
       tmpDir,
@@ -382,6 +398,10 @@ describe('policy validator (v0.2)', () => {
 
   it.each([
     'devices command <id> lock',
+    'devices command <id> deadbolt',
+    'devices command <id> nightLatchUnlock',
+    'devices command <id> createKey',
+    'devices command <id> deleteKey',
     'devices command <id> factoryReset',
     'webhooks delete <id>',
     'scenes delete <id>',
@@ -648,6 +668,32 @@ describe('policy validator (v0.2)', () => {
     const err = result.errors.find((e) => e.keyword === 'rule-live-unsupported-command');
     expect(err).toBeDefined();
     expect(err!.path).toBe('/automation/rules/0/then/0/command');
+  });
+
+  it.each(['turnOn', 'turnOff'])('rejects garage %s automation after inventory resolves its safety tier', (command) => {
+    const loaded = writeAndLoad(tmpDir, [
+      'version: "0.2"',
+      'aliases:',
+      '  garage: 01-202407090924-26354212',
+      'automation:',
+      '  rules:',
+      '    - name: "garage action"',
+      '      when: { source: mqtt, event: x.y }',
+      '      then:',
+      `        - command: "devices command <id> ${command}"`,
+      '          device: garage',
+    ].join('\n'));
+    const result = validateLoadedPolicyAgainstInventory(loaded, {
+      deviceList: [{
+        deviceId: '01-202407090924-26354212', deviceName: 'Garage',
+        deviceType: 'Garage Door Opener', enableCloudService: true, hubDeviceId: '',
+      }],
+      infraredRemoteList: [],
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContainEqual(expect.objectContaining({
+      keyword: 'rule-destructive-action', path: '/automation/rules/0/then/0/command',
+    }));
   });
 
   it('live inventory validation rejects stale mqtt trigger device refs', () => {

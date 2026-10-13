@@ -2,8 +2,10 @@
   "mcpServers": {
     "switchbot": {
       "command": "node",
-      "args": ["${pluginDir}/bin/start.js"],
-      "description": "SwitchBot smart-home MCP server bootstrapper; launches the full tool surface exposed by `switchbot mcp serve`"
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/bin/start.js"
+      ],
+      "description": "SwitchBot smart-home MCP bootstrapper; launches the installed CLI's default MCP profile."
     }
   }
 }

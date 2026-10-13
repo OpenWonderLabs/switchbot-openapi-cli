@@ -11,10 +11,8 @@
 #    within the first session, without risking a real actuator.
 #
 #  Schema version:
-#    v0.2 — enables the `automation.rules[]` block. If you don't need
-#    the rules engine yet, change the top line back to "0.1" and delete
-#    the `automation:` section; the rest of the file is valid for both
-#    versions.
+#    v0.2 is required. Omit automation if the rules engine is not needed.
+#    Migrate v0.1 with CLI <=2.15 before upgrading to this CLI.
 #
 #  Copy to install:
 #    mkdir -p ~/.config/openclaw/switchbot
@@ -32,32 +30,26 @@ version: "0.2"
 
 # Human-readable names → deviceIds. Aliases remove ambiguity when two
 # devices share a substring of their display name. Replace the sample
-# ID with one from `switchbot devices list --json | jq '.data[].deviceId'`.
+# ID with one from `switchbot devices list --json | jq '.data.devices[].deviceId'`.
 aliases:
-  "hallway lamp": "AA-BB-CC-DD-EE-FF"
+  "hallway lamp": "AABBCCDDEEFF"
 
-# Destructive commands (Smart Lock unlock, Garage Door open, …) always
-# prompt unless explicitly overridden. Mutation-tier is commented out
-# by default — uncomment only if you trust the agent to turn devices
-# on/off without a confirmation step.
+# Agents honor this preference; native destructive operations still use the
+# reviewed plan workflow. Never pre-approve door-releasing commands.
 confirmations:
-  destructive: always
-  # mutation: never
+  always_confirm: ["lock", "unlock", "deadbolt"]
 
-# Silence noisy automations between 23:00 and 07:00 local time. Crossing
-# midnight is supported natively.
+# Agents honor quiet hours; rules use their explicit time_between condition.
+# Crossing midnight is supported.
 quiet_hours:
-  enabled: true
   start: "23:00"
   end: "07:00"
 
-# Append every mutating command to a JSONL audit log. Retention is a
-# soft hint — the CLI never trims the file itself; plug in `logrotate`
-# or similar if you want bounded disk usage.
+# Agents pass --audit-log and --audit-log-path explicitly. Retention is a
+# preference, not automatic file rotation.
 audit:
-  enabled: true
-  path: "~/.switchbot/audit.log"
-  retention_days: 90
+  log_path: "~/.switchbot/audit.log"
+  retention: "90d"
 
 # One dry-run rule: prove the engine fires end-to-end without touching
 # the bulb. Once you're confident, set `dry_run: false` to arm it.

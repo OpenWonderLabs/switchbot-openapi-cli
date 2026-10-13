@@ -12,6 +12,7 @@ import { getActiveProfile } from '../lib/request-context.js';
 import { resetListCache, resetStatusCache } from '../devices/cache.js';
 import { clearPrimedCredentials } from '../credentials/prime.js';
 import { idempotencyCache } from '../lib/idempotency.js';
+import { resolveDeviceHistoryDir } from "../mcp/device-history.js";
 
 const BASE = path.join(os.homedir(), '.switchbot');
 
@@ -42,12 +43,12 @@ function removeItem(itemPath: string, type: 'file' | 'dir'): { status: 'removed'
   }
 }
 
-function makeDataItems(dataDir: string, configOverride: boolean): Array<{ key: string; label: string; path: string; type: 'file' | 'dir' }> {
-  // quota / device-history / audit are always global (their writers hardcode ~/.switchbot regardless of --config)
+function makeDataItems(dataDir: string, configOverride: boolean, profile: string): Array<{ key: string; label: string; path: string; type: "file" | "dir" }> {
+  // Quota and audit remain process-global; device history is scoped to the selected profile.
   const items: Array<{ key: string; label: string; path: string; type: 'file' | 'dir' }> = [
     { key: 'devices',        label: 'Devices list cache', path: path.join(dataDir, 'devices.json'),     type: 'file' },
     { key: 'quota',          label: 'Quota counter',      path: path.join(BASE, 'quota.json'),          type: 'file' },
-    { key: 'device-history', label: 'Device history',     path: path.join(BASE, 'device-history'),      type: 'dir'  },
+    { key: "device-history", label: "Device history",     path: resolveDeviceHistoryDir(profile),          type: "dir"  },
     { key: 'device-meta',    label: 'Device metadata',    path: path.join(dataDir, 'device-meta.json'), type: 'file' },
     { key: 'status',         label: 'Status cache',       path: path.join(dataDir, 'status.json'),      type: 'file' },
     { key: 'audit',          label: 'Audit log',          path: path.join(BASE, 'audit.log'),           type: 'file' },
@@ -82,7 +83,7 @@ export function registerResetCommand(program: Command): void {
       const dataDir = configOverride
         ? path.dirname(path.resolve(configOverride))
         : BASE;
-      const dataItems = makeDataItems(dataDir, Boolean(configOverride));
+      const dataItems = makeDataItems(dataDir, Boolean(configOverride), profile);
 
       if (isDryRun()) {
         const preview: string[] = [];

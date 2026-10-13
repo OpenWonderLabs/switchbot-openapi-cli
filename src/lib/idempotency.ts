@@ -44,6 +44,13 @@ export function fingerprintIdempotencyKey(key: string): string {
 // string cannot be confused with any serialised value.
 const UNDEFINED_SENTINEL = '\x00undefined\x00';
 
+export interface IdempotencyRequestShape {
+  deviceId: string;
+  command: string;
+  commandType: string;
+  parameter: unknown;
+}
+
 function sortedJsonStringify(value: unknown): string {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     return JSON.stringify(value);
@@ -56,18 +63,18 @@ function sortedJsonStringify(value: unknown): string {
   return JSON.stringify(sorted);
 }
 
-function shapeSignature(command: string, parameter: unknown): string {
-  let parm: string;
-  if (parameter === undefined) {
-    parm = UNDEFINED_SENTINEL;
+function shapeSignature(shape: IdempotencyRequestShape): string {
+  let parameter: string;
+  if (shape.parameter === undefined) {
+    parameter = UNDEFINED_SENTINEL;
   } else {
     try {
-      parm = sortedJsonStringify(parameter);
+      parameter = sortedJsonStringify(shape.parameter);
     } catch {
-      parm = String(parameter);
+      parameter = String(shape.parameter);
     }
   }
-  return `${command}::${parm}`;
+  return JSON.stringify([shape.deviceId, shape.command, shape.commandType, parameter]);
 }
 
 export class IdempotencyCache {
@@ -85,7 +92,7 @@ export class IdempotencyCache {
    * On new execution, caches the result for ttlMs.
    *
    * When `shape` is provided, a cached hit is validated against the original
-   * (command, parameter) fingerprint; mismatched shape raises
+   * request fingerprint; mismatched shape raises
    * {@link IdempotencyConflictError}.
    *
    * `profile` tags the entry so {@link clearForProfile} can evict only the
@@ -100,7 +107,7 @@ export class IdempotencyCache {
   async run<T>(
     key: string | undefined,
     fn: () => Promise<T>,
-    shape?: { command: string; parameter: unknown },
+    shape?: IdempotencyRequestShape,
     profile?: string,
   ): Promise<{ result: T; replayed: boolean }> {
     if (key === undefined || key === null) {
@@ -114,7 +121,7 @@ export class IdempotencyCache {
     const hashed = hashKey(profile ? `${profile}\x00${key}` : key);
     const now = Date.now();
     const cached = this.cache.get(hashed);
-    const currentShape = shape ? shapeSignature(shape.command, shape.parameter) : '*';
+    const currentShape = shape ? shapeSignature(shape) : '*';
 
     if (cached && cached.expiresAt > now) {
       if (shape && cached.shape !== '*' && cached.shape !== currentShape) {

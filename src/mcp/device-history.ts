@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { assertValidProfileName, getActiveProfile } from "../lib/request-context.js";
 
 export interface HistoryEntry {
   t: string;
@@ -32,11 +33,19 @@ const MAX_HISTORY = 100;
 const JSONL_ROTATE_BYTES = 50 * 1024 * 1024; // 50 MB
 const JSONL_KEEP_ROTATIONS = 3;               // .1 .2 .3
 
-function historyDir(): string {
-  return path.join(os.homedir(), '.switchbot', 'device-history');
+export function resolveDeviceHistoryDir(profile = getActiveProfile()): string {
+  if (profile === undefined || profile === "default") {
+    return path.join(os.homedir(), ".switchbot", "device-history");
+  }
+  assertValidProfileName(profile);
+  return path.join(os.homedir(), ".switchbot", "profiles", profile, "device-history");
 }
 
 export class DeviceHistoryStore {
+  constructor(private readonly profile?: string) {
+    if (profile !== undefined && profile !== "default") assertValidProfileName(profile);
+  }
+
   // In-memory size counter so we don't stat() on every append.
   private jsonlSizes: Map<string, number> = new Map();
 
@@ -46,7 +55,7 @@ export class DeviceHistoryStore {
   }
 
   private get dir(): string {
-    return historyDir();
+    return resolveDeviceHistoryDir(this.profile ?? getActiveProfile());
   }
 
   record(deviceId: string, topic: string, deviceType: string, payload: unknown, t?: string): void {
@@ -85,9 +94,10 @@ export class DeviceHistoryStore {
       const jsonlPath = path.join(this.dir, `${fileKey}.jsonl`);
       const line = JSON.stringify(record) + '\n';
       const lineBytes = Buffer.byteLength(line, 'utf-8');
+      const sizeKey = [this.dir, fileKey].join("\0");
 
       // Seed size counter from disk on first touch (avoids drift across restarts).
-      let size = this.jsonlSizes.get(fileKey);
+      let size = this.jsonlSizes.get(sizeKey);
       if (size === undefined) {
         try {
           size = fs.existsSync(jsonlPath) ? fs.statSync(jsonlPath).size : 0;
@@ -102,7 +112,7 @@ export class DeviceHistoryStore {
       }
 
       fs.appendFileSync(jsonlPath, line, { mode: 0o600 });
-      this.jsonlSizes.set(fileKey, size + lineBytes);
+      this.jsonlSizes.set(sizeKey, size + lineBytes);
     } catch {
       // best-effort
     }

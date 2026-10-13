@@ -27,7 +27,7 @@ Pass `--trace-unsafe` to any command to disable masking and print all headers
 verbatim. A prominent one-time warning is printed to stderr when this flag is
 active:
 
-```
+```text
 WARNING  --trace-unsafe: sensitive headers will be printed UNMASKED. Do not share this output.
 ```
 

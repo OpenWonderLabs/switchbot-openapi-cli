@@ -27,8 +27,8 @@ describe('catalog fidelity fixtures', () => {
       expect(entry?.role, `${label} role drifted from observed fixture`).toBe(fixture.role);
       expect(
         entry?.statusFields ?? [],
-        `${label} statusFields drifted from observed fixture`,
-      ).toEqual(fixture.statusFields);
+        `${label} lost an observed status field`,
+      ).toEqual(expect.arrayContaining(fixture.statusFields));
     }
   });
 

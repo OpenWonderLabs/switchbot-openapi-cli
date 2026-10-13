@@ -20,14 +20,35 @@ vi.mock('../../src/credentials/keychain.js', async () => {
 
 beforeEach(() => {
   selectMock.mockReset();
+  vi.stubEnv('SWITCHBOT_TOKEN', undefined);
+  vi.stubEnv('SWITCHBOT_SECRET', undefined);
   __resetPrimedCredentials();
 });
 
 afterEach(() => {
   __resetPrimedCredentials();
+  vi.unstubAllEnvs();
+  vi.useRealTimers();
 });
 
 describe('primeCredentials', () => {
+  it('does not wait for a stalled keychain when complete env credentials are present', async () => {
+    vi.useFakeTimers();
+    vi.stubEnv('SWITCHBOT_TOKEN', 'env-token');
+    vi.stubEnv('SWITCHBOT_SECRET', 'env-secret');
+    selectMock.mockResolvedValue({
+      name: 'keychain',
+      get: () => new Promise(() => {}),
+    });
+
+    const outcome = Promise.race([
+      primeCredentials('default').then(() => 'ready'),
+      new Promise((resolve) => setTimeout(resolve, 10_000, 'timed-out')),
+    ]);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(await outcome).toBe('ready');
+  });
+
   it('caches a successful keychain read and makes it accessible via getPrimedCredentials', async () => {
     const get = vi.fn().mockResolvedValue({ token: 'T', secret: 'S' });
     selectMock.mockResolvedValue({ name: 'keychain', get } as any);
@@ -52,6 +73,24 @@ describe('primeCredentials', () => {
 
     await primeCredentials('default');
     expect(getPrimedCredentials('work')).toBeNull();
+  });
+
+  it("shares one keychain lookup for concurrent refreshes of a profile", async () => {
+    let resolveGet!: (creds: { token: string; secret: string }) => void;
+    const pending = new Promise<{ token: string; secret: string }>((resolve) => { resolveGet = resolve; });
+    const get = vi.fn().mockReturnValue(pending);
+    selectMock.mockResolvedValue({ name: "keychain", get } as any);
+
+    const first = primeCredentials("default");
+    const second = primeCredentials("default");
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(get).toHaveBeenCalledOnce();
+    resolveGet({ token: "fresh-token", secret: "fresh-secret" });
+    await Promise.all([first, second]);
+
+    expect(getPrimedCredentials("default")).toEqual({ token: "fresh-token", secret: "fresh-secret" });
   });
 
   it('repriming the same profile short-circuits (no extra store selection)', async () => {

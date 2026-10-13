@@ -1,7 +1,7 @@
 // packages/openclaw-skill/bin/setup-flow.js
 // Interactive setup for the SwitchBot OpenClaw plugin. Guides the user
 // through installing the underlying @switchbot/openapi-cli, verifying
-// version >= 3.7.1, and confirming credentials via `switchbot doctor`.
+// version >= 3.9.0, and confirming credentials via `switchbot doctor`.
 //
 // This module is invoked only via `switchbot-openclaw setup`. It is
 // never loaded on the MCP-server path, so it is free to write to stdout.
@@ -9,13 +9,15 @@
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { formatError } from '../lib/error-messages.js';
+import { REQUIRED_CLI_VERSION, versionAtLeast } from '../setup/check-cli.js';
+import { switchbotInvocation } from '../setup/cli-invocation.js';
 
 const exec = promisify(execFile);
-const REQUIRED_CLI = '3.7.1';
 
 async function hasCli() {
   try {
-    await exec('switchbot', ['--version'], { timeout: 5000 });
+    const invocation = switchbotInvocation(['--version']);
+    await exec(invocation.command, invocation.args, { timeout: 5000 });
     return true;
   } catch (err) {
     if (err && err.code === 'ENOENT') return false;
@@ -26,7 +28,8 @@ async function hasCli() {
 
 async function cliVersion() {
   try {
-    const { stdout } = await exec('switchbot', ['--version'], { timeout: 5000 });
+    const invocation = switchbotInvocation(['--version']);
+    const { stdout } = await exec(invocation.command, invocation.args, { timeout: 5000 });
     const m = stdout.trim().match(/\d+\.\d+\.\d+/);
     return m ? m[0] : null;
   } catch {
@@ -34,17 +37,6 @@ async function cliVersion() {
   }
 }
 
-function versionAtLeast(have, need) {
-  const a = have.split('.').map((n) => parseInt(n, 10) || 0);
-  const b = need.split('.').map((n) => parseInt(n, 10) || 0);
-  for (let i = 0; i < Math.max(a.length, b.length); i++) {
-    const ai = a[i] ?? 0;
-    const bi = b[i] ?? 0;
-    if (ai > bi) return true;
-    if (ai < bi) return false;
-  }
-  return true;
-}
 
 async function npmPrefix() {
   try {
@@ -62,8 +54,9 @@ function prefixLikelyNeedsSudo(prefix) {
 }
 
 function runInherit(cmd, args) {
+  const invocation = cmd === 'switchbot' ? switchbotInvocation(args) : { command: cmd, args };
   return new Promise((resolve) => {
-    const p = spawn(cmd, args, { stdio: 'inherit' });
+    const p = spawn(invocation.command, invocation.args, { stdio: 'inherit' });
     p.on('close', (code) => resolve(code ?? 0));
     p.on('error', () => resolve(127));
   });
@@ -103,22 +96,22 @@ export async function runSetup() {
     console.log(formatError('cli-version-too-low'));
     process.exit(1);
   }
-  if (!versionAtLeast(version, REQUIRED_CLI)) {
+  if (!versionAtLeast(version, REQUIRED_CLI_VERSION)) {
     console.log('');
-    console.log(`[2/3] CLI ${version} is below the ${REQUIRED_CLI} minimum required by this plugin.`);
+    console.log(`[2/3] CLI ${version} is below the ${REQUIRED_CLI_VERSION} minimum required by this plugin.`);
     console.log(formatError('cli-version-too-low'));
     process.exit(1);
   }
-  console.log(`[2/3] Version satisfies >= ${REQUIRED_CLI}.`);
+  console.log(`[2/3] Version satisfies >= ${REQUIRED_CLI_VERSION}.`);
   console.log('');
 
-  // Step 3: auth / connectivity via doctor
-  console.log('[3/3] Running `switchbot doctor` to verify credentials and connectivity...');
+  // Step 3: credentials only; unrelated policy/daemon failures do not imply logout.
+  console.log('[3/3] Running `switchbot doctor --section credentials`...');
   console.log('');
-  const code = await runInherit('switchbot', ['doctor']);
+  const code = await runInherit('switchbot', ['doctor', '--section', 'credentials']);
   if (code !== 0) {
     console.log('');
-    console.log(formatError('token-expired'));
+    console.log(formatError('doctor-check-failed'));
     console.log('');
     console.log('Then re-run: switchbot-openclaw setup');
     process.exit(1);

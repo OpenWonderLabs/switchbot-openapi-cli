@@ -1,6 +1,6 @@
 {
   "name": "@switchbot/openapi-cli",
-  "version": "3.8.1",
+  "version": "3.9.0",
   "description": "SwitchBot smart home CLI — control devices, run scenes, stream real-time events, and integrate AI agents via MCP. Full API v1.1 coverage.",
   "keywords": [
     "switchbot",
@@ -45,7 +45,7 @@
     "build": "node scripts/build.mjs",
     "dev": "tsx src/index.ts",
     "hooks:install": "node scripts/install-git-hooks.mjs",
-    "lint:md": "markdownlint \"**/*.md\"",
+    "lint:md": "markdownlint --ignore-path .gitignore \"**/*.md\"",
     "lint:md:changelog": "markdownlint CHANGELOG.md",
     "lint:stdout": "bash scripts/lint-stdout.sh",
     "prepare": "node scripts/install-git-hooks.mjs",
@@ -57,6 +57,8 @@
     "smoke:codex-route-b-live": "node scripts/smoke-codex-route-b-live.mjs",
     "smoke:claude-code-pack-install": "node scripts/smoke-claude-code-pack-install.mjs",
     "smoke:gemini-extension-lint": "node scripts/smoke-gemini-extension-lint.mjs",
+    "smoke:release-host": "node scripts/smoke-release-host.mjs",
+    "smoke:openclaw-bootstrap": "node scripts/smoke-openclaw-bootstrap.mjs",
     "test": "vitest run",
     "test:workspaces": "npm test --workspaces --if-present",
     "test:all": "npm test && npm run test:workspaces",
@@ -64,7 +66,7 @@
     "test:coverage": "vitest run --coverage",
     "test:release-smoke:manual": "npm test -- tests/commands/policy.test.ts tests/commands/devices.test.ts tests/commands/explain.test.ts tests/commands/doctor.test.ts tests/commands/mcp.test.ts tests/commands/health-check.test.ts tests/commands/quota.test.ts tests/commands/status-sync.test.ts tests/status-sync/smoke.test.ts tests/commands/watch.test.ts tests/commands/events.test.ts tests/devices/catalog-fidelity.test.ts tests/commands/schema.test.ts tests/commands/auth.test.ts tests/commands/config.test.ts tests/commands/scenes.test.ts tests/commands/batch.test.ts tests/commands/history.test.ts tests/commands/expand.test.ts tests/commands/webhook.test.ts tests/commands/daemon.test.ts tests/commands/upgrade-check.test.ts tests/commands/install.test.ts tests/commands/uninstall.test.ts tests/commands/rules.test.ts tests/commands/plan.test.ts",
     "verify:pre-commit": "npm run build && npm test -- tests/version.test.ts tests/install/codex-checks.test.ts tests/commands/codex.test.ts && npm run test:workspaces",
-    "verify:release-gate": "npm run build && npm test -- tests/version.test.ts tests/install/codex-checks.test.ts tests/commands/codex.test.ts && npm run test:workspaces && npm run smoke:pack-install && npm run smoke:codex-pack-install && npm run smoke:codex-git-sparse && npm run smoke:codex-temp-prefix-route-a && npm run smoke:codex-route-b-live && npm run smoke:claude-code-pack-install && npm run smoke:gemini-extension-lint",
+    "verify:release-gate": "npm run build && npm run verify:release && npm test -- tests/version.test.ts tests/install/codex-checks.test.ts tests/commands/codex.test.ts && npm run test:workspaces && npm run smoke:pack-install && npm run smoke:codex-pack-install && npm run smoke:codex-git-sparse && npm run smoke:codex-temp-prefix-route-a && npm run smoke:codex-route-b-live && npm run smoke:claude-code-pack-install && npm run smoke:gemini-extension-lint",
     "verify:pre-push": "npm run verify:release-gate",
     "verify:release": "node scripts/verify-release.mjs",
     "prepublishOnly": "npm run verify:release-gate"

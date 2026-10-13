@@ -1,3 +1,4 @@
+import { dirname, join } from 'node:path';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const spawnSyncMock = vi.hoisted(() => vi.fn());
@@ -73,6 +74,59 @@ describe('checkMcpRegistered', () => {
     const r = checkMcpRegistered();
     expect(r.status).toBe('fail');
     expect(r.detail).toContain('not found');
+  });
+
+  it('returns ok when the installed extension supplies the server without settings.json', () => {
+    const extensionManifest = join(dirname(GEMINI_SETTINGS_PATH), 'extensions', 'switchbot', 'gemini-extension.json');
+    existsSyncMock.mockImplementation((candidate) => candidate === extensionManifest);
+    readFileSyncMock.mockReturnValueOnce(JSON.stringify({
+      name: 'switchbot',
+      mcpServers: { switchbot: { command: 'switchbot', args: ['mcp', 'serve'] } },
+    }));
+
+    const r = checkMcpRegistered();
+
+    expect(r.status).toBe('ok');
+    expect(r.detail).toContain('extension');
+  });
+
+  it('keeps an installed extension registered when settings omit its server', () => {
+    const extensionManifest = join(dirname(GEMINI_SETTINGS_PATH), 'extensions', 'switchbot', 'gemini-extension.json');
+    existsSyncMock.mockImplementation((candidate) => candidate === GEMINI_SETTINGS_PATH || candidate === extensionManifest);
+    readFileSyncMock.mockImplementation((candidate) => candidate === GEMINI_SETTINGS_PATH
+      ? JSON.stringify({ theme: 'dark' })
+      : JSON.stringify({ name: 'switchbot', mcpServers: { switchbot: { command: 'switchbot', args: ['mcp', 'serve'] } } }));
+
+    expect(checkMcpRegistered().status).toBe('ok');
+    expect(registerMcp()).toEqual({ ok: true, alreadyRegistered: true });
+    expect(writeFileSyncMock).not.toHaveBeenCalled();
+  });
+
+  it('warns when user settings override an active extension server', () => {
+    const extensionManifest = join(dirname(GEMINI_SETTINGS_PATH), 'extensions', 'switchbot', 'gemini-extension.json');
+    existsSyncMock.mockImplementation((candidate) => candidate === GEMINI_SETTINGS_PATH || candidate === extensionManifest);
+    readFileSyncMock.mockImplementation((candidate) => candidate === GEMINI_SETTINGS_PATH
+      ? JSON.stringify({ mcpServers: { switchbot: { command: 'custom-switchbot', args: [] } } })
+      : JSON.stringify({ name: 'switchbot', mcpServers: { switchbot: { command: 'switchbot', args: ['mcp', 'serve'] } } }));
+
+    const result = checkMcpRegistered();
+
+    expect(result.status).toBe('warn');
+  });
+
+  it('reports an installed extension disabled for the current workspace', () => {
+    const extensionsDir = join(dirname(GEMINI_SETTINGS_PATH), 'extensions');
+    const extensionManifest = join(extensionsDir, 'switchbot', 'gemini-extension.json');
+    const enablementConfig = join(extensionsDir, 'extension-enablement.json');
+    existsSyncMock.mockImplementation((candidate) => candidate === extensionManifest || candidate === enablementConfig);
+    readFileSyncMock.mockImplementation((candidate) => candidate === extensionManifest
+      ? JSON.stringify({ name: 'switchbot', mcpServers: { switchbot: { command: 'switchbot', args: ['mcp', 'serve'] } } })
+      : JSON.stringify({ switchbot: { overrides: ['!' + process.cwd().split(String.fromCharCode(92)).join('/') + '/*'] } }));
+
+    const result = checkMcpRegistered();
+
+    expect(result.status).toBe('fail');
+    expect(result.detail).toContain('disabled');
   });
 
   it('returns fail when settings.json has no mcpServers key', () => {

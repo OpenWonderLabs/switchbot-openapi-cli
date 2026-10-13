@@ -7,7 +7,7 @@
 export const MCP_SERVER_NAME = 'switchbot';
 export const MCP_TRANSPORT = 'stdio';
 export const MCP_ENTRY_COMMAND = 'node';
-export const MCP_ENTRY_ARGS = ['${pluginDir}/bin/start.js'];
+export const MCP_ENTRY_ARGS = ['${CLAUDE_PLUGIN_ROOT}/bin/start.js'];
 export const MCP_DELEGATE_COMMAND = ['switchbot', 'mcp', 'serve'];
 
 export function createServer() {

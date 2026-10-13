@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import http from 'node:http';
 import crypto from 'node:crypto';
-import { printJson, isJsonMode, handleError, UsageError, emitStreamHeader } from '../utils/output.js';
+import { printJsonLine, isJsonMode, handleError, UsageError, emitStreamHeader } from '../utils/output.js';
 import { intArg, stringArg, durationArg } from '../utils/arg-parsers.js';
 import { parseDurationToMs } from '../utils/flags.js';
 import { parseFilterExpr, matchClause, FilterSyntaxError, type FilterClause } from '../utils/filter.js';
@@ -76,10 +76,7 @@ interface EventRecord {
 
 function emitJsonStreamRecord<T extends { schemaVersion: string }>(record: T): void {
   const { schemaVersion, ...rest } = record as T & Record<string, unknown>;
-  printJson({
-    payloadVersion: schemaVersion,
-    ...rest,
-  });
+  printJsonLine({ payloadVersion: schemaVersion, ...rest });
 }
 
 function matchFilterDetail(
@@ -362,7 +359,8 @@ Sink types (--sink, repeatable):
   telegram           Send to Telegram via --telegram-token / --telegram-chat
   homeassistant      POST to HA via --ha-url + --ha-webhook-id (or --ha-token)
 
-Device state is also persisted to ~/.switchbot/device-history/<deviceId>.json
+Device state is also persisted to ~/.switchbot/device-history/<deviceId>.json for the default profile
+or ~/.switchbot/profiles/<name>/device-history/<deviceId>.json for a named profile,
 regardless of sink configuration.
 
 Examples:

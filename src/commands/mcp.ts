@@ -1,5 +1,10 @@
 import { Command } from 'commander';
+import { createServer } from 'node:http';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { ToolCallback } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { AnySchema, SchemaOutput, ZodRawShapeCompat } from '@modelcontextprotocol/sdk/server/zod-compat.js';
+import type { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
+import type { CallToolResult, ServerNotification, ServerRequest } from '@modelcontextprotocol/sdk/types.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
@@ -9,6 +14,7 @@ import { VERSION } from '../version.js';
 import {
   fetchDeviceList,
   fetchDeviceStatus,
+  fetchDeviceDiary,
   executeCommand,
   describeDevice,
   validateCommand,
@@ -16,6 +22,7 @@ import {
   getDestructiveReason,
   searchCatalog,
   DeviceNotFoundError,
+  DeviceDiaryValidationError,
   toMcpDescribeShape,
   toMcpDeviceListShape,
   toMcpIrDeviceShape,
@@ -25,6 +32,7 @@ import {
   listRecordings,
   getRecording,
   getSummary,
+  getTranscript,
   listTodos,
   getDailyRecall,
   getWeeklySummary,
@@ -50,8 +58,8 @@ import {
 } from '../devices/history-agg.js';
 import { todayUsage } from '../utils/quota.js';
 import { describeCache } from '../devices/cache.js';
-import { withRequestContext } from '../lib/request-context.js';
-import { primeCredentials } from '../credentials/prime.js';
+import { assertValidProfileName, getActiveProfile, withRequestContext } from '../lib/request-context.js';
+import { getPrimedCredentials, primeCredentials } from '../credentials/prime.js';
 import { profileFilePath, tryLoadConfig } from '../config.js';
 import {
   loadPolicyFile,
@@ -66,7 +74,8 @@ import {
   type PolicySchemaVersion,
 } from '../policy/schema.js';
 import { planMigration } from '../policy/migrate.js';
-import { suggestPlan } from './plan.js';
+import { suggestPlan, validatePlan } from './plan.js';
+import type { Plan } from './plan.js';
 import { suggestRule } from '../rules/suggest.js';
 import { addRuleToPolicyFile, AddRuleError } from '../policy/add-rule.js';
 import {
@@ -78,9 +87,9 @@ import { simulateRule } from '../rules/simulate.js';
 import { allowsDirectDestructiveExecution, destructiveExecutionHint } from '../lib/destructive-mode.js';
 import { writeFileSync } from 'node:fs';
 import { readAudit, type AuditEntry } from '../utils/audit.js';
-import { parseDurationToMs } from '../utils/flags.js';
+import { isDryRun, parseDurationToMs } from '../utils/flags.js';
 import { resolveDeviceId } from '../utils/name-resolver.js';
-import { validatePlan } from './plan.js';
+import { preparePlanTargets, type PlanPreflightResult } from '../lib/plan-preflight.js';
 import { parse as yamlParse } from 'yaml';
 import { diffPolicyValues } from '../policy/diff.js';
 
@@ -343,8 +352,27 @@ async function runDeviceHistoryAggregate(args: {
   }
 }
 
-export function createSwitchBotMcpServer(options?: { eventManager?: EventSubscriptionManager; toolProfile?: ToolProfile }): McpServer {
-  const eventManager = options?.eventManager;
+type McpPlanStepResult =
+  | { step: number; type: 'command'; deviceId: string; command: string; status: 'ok' | 'error' | 'skipped' | 'dry-run'; error?: string }
+  | { step: number; type: 'scene'; sceneId: string; status: 'ok' | 'error' | 'dry-run'; error?: string }
+  | { step: number; type: 'wait'; ms: number; status: 'ok' | 'dry-run' };
+
+type McpPlanExecutionResult = {
+  ran: boolean;
+  plan: Plan;
+  results: McpPlanStepResult[];
+  summary: { total: number; ok: number; error: number; skipped: number; dryRun: number };
+};
+
+export interface SwitchBotMcpServerOptions {
+  eventManager?: EventSubscriptionManager;
+  eventManagerProfile?: string;
+  toolProfile?: ToolProfile;
+}
+
+export function createSwitchBotMcpServer(options?: SwitchBotMcpServerOptions): McpServer {
+  const eventManagerProfile = options?.eventManagerProfile ?? getActiveProfile() ?? 'default';
+  const eventManager = eventManagerProfile === (getActiveProfile() ?? 'default') ? options?.eventManager : undefined;
   const allowedTools = TOOL_PROFILES[options?.toolProfile ?? 'default'];
   const profileName = options?.toolProfile ?? 'default';
   const server = new McpServer(
@@ -380,79 +408,109 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
   );
 
   const skip = (name: string) => !allowedTools.has(name);
+  const registerTool = <OutputArgs extends ZodRawShapeCompat | AnySchema, InputArgs extends AnySchema>(
+    name: string,
+    config: Parameters<typeof server.registerTool<OutputArgs, InputArgs>>[1],
+    callback: (args: SchemaOutput<InputArgs>, extra: RequestHandlerExtra<ServerRequest, ServerNotification>) => CallToolResult | Promise<CallToolResult>,
+  ) => {
+    const primedCallback = async (args: SchemaOutput<InputArgs>, extra: RequestHandlerExtra<ServerRequest, ServerNotification>) => {
+      await primeCredentials(getActiveProfile() ?? 'default');
+      return callback(args, extra);
+    };
+    // Every local tool has an input schema; the SDK also supports a separate no-input callback form.
+    return server.registerTool(name, config, primedCallback as ToolCallback<InputArgs>);
+  };
 
   // ---- list_devices ---------------------------------------------------------
-  if (!skip('list_devices'))
-  server.registerTool(
-    'list_devices',
-    {
-      title: 'List all devices on the account',
-      description:
-        'Fetch the complete inventory of physical devices and IR remotes on this SwitchBot account. Refreshes the local metadata cache and groups devices by type. Use this as the bootstrap call to discover available deviceIds. Devices without enableCloudService cannot receive commands via API. IR remotes depend on a Hub for connectivity.',
-      _meta: { agentSafetyTier: 'read' },
-      inputSchema: z.object({}).strict(),
-      outputSchema: {
-        deviceList: z.array(z.object({
-          deviceId: z.string(),
-          deviceName: z.string(),
-          deviceType: z.string().optional(),
-          enableCloudService: z.boolean(),
-          hubDeviceId: z.string().nullable().optional(),
-          roomID: z.string().nullable().optional(),
-          roomName: z.string().nullable().optional(),
-          familyName: z.string().optional(),
-          controlType: z.string().nullable().optional(),
-        }).passthrough()).describe('Physical SwitchBot devices'),
-        infraredRemoteList: z.array(z.object({
-          deviceId: z.string(),
-          deviceName: z.string(),
-          remoteType: z.string(),
-          hubDeviceId: z.string().nullable().optional(),
-          controlType: z.string().nullable().optional(),
-        }).passthrough()).describe('IR remote devices'),
-      },
+  if (!skip('list_devices')) registerTool('list_devices',
+  {
+    title: 'List all devices on the account',
+    description:
+      'Fetch the complete inventory of physical devices and IR remotes on this SwitchBot account. Refreshes the local metadata cache and groups devices by type. Use this as the bootstrap call to discover available deviceIds. Devices without enableCloudService cannot receive commands via API. IR remotes depend on a Hub for connectivity.',
+    _meta: { agentSafetyTier: 'read' },
+    inputSchema: z.object({}).strict(),
+    outputSchema: {
+      deviceList: z.array(z.object({
+        deviceId: z.string(),
+        deviceName: z.string(),
+        deviceType: z.string().optional(),
+        enableCloudService: z.boolean(),
+        hubDeviceId: z.string().nullable().optional(),
+        roomID: z.string().nullable().optional(),
+        roomName: z.string().nullable().optional(),
+        familyName: z.string().optional(),
+        controlType: z.string().nullable().optional(),
+      }).passthrough()).describe('Physical SwitchBot devices'),
+      infraredRemoteList: z.array(z.object({
+        deviceId: z.string(),
+        deviceName: z.string(),
+        remoteType: z.string(),
+        hubDeviceId: z.string().nullable().optional(),
+        controlType: z.string().nullable().optional(),
+      }).passthrough()).describe('IR remote devices'),
     },
-    async () => {
-      const body = await fetchDeviceList();
+  },
+  async () => {
+    const body = await fetchDeviceList();
+    return {
+      content: [{ type: 'text', text: JSON.stringify(body, null, 2) }],
+      structuredContent: {
+        deviceList: body.deviceList.map(toMcpDeviceListShape),
+        infraredRemoteList: body.infraredRemoteList.map(toMcpIrDeviceShape),
+      },
+    };
+  })
+
+  // ---- device_diary ---------------------------------------------------------
+  if (!skip('device_diary')) registerTool('device_diary', {
+    title: 'Read Kata pet diary',
+    description: 'Read Kata diary, AI diary, and comic diary over an integer-millisecond window of at most 31 days. Embedded JSON detail strings and image storage keys are returned unchanged; storage keys are not download URLs.',
+    _meta: { agentSafetyTier: 'read' },
+    inputSchema: z.object({
+      deviceId: z.string().min(1).describe('Kata device ID'),
+      startTimestamp: z.number().int().min(0).describe('Start timestamp in Unix milliseconds'),
+      endTimestamp: z.number().int().min(0).describe('End timestamp in Unix milliseconds'),
+    }).strict(),
+    outputSchema: { data: z.unknown().describe('Unmodified diary operation body') },
+  }, async ({ deviceId, startTimestamp, endTimestamp }) => {
+    try {
+      const data = await fetchDeviceDiary(deviceId, startTimestamp, endTimestamp);
       return {
-        content: [{ type: 'text', text: JSON.stringify(body, null, 2) }],
-        structuredContent: {
-          deviceList: body.deviceList.map(toMcpDeviceListShape),
-          infraredRemoteList: body.infraredRemoteList.map(toMcpIrDeviceShape),
-        },
+        content: [{ type: 'text', text: JSON.stringify(data, null, 2) }],
+        structuredContent: { data },
       };
+    } catch (error) {
+      if (error instanceof DeviceDiaryValidationError) return mcpError('usage', 2, error.message);
+      return apiErrorToMcpError(error);
     }
-  );
+  });
 
   // ---- get_device_status ----------------------------------------------------
-  if (!skip('get_device_status'))
-  server.registerTool(
-    'get_device_status',
-    {
-      title: 'Get live status for a device',
-      description:
-        'Query the real-time status payload for a physical device. IR remotes have no status channel and will error.',
-      _meta: { agentSafetyTier: 'read' },
-      inputSchema: z.object({
-        deviceId: z.string().describe('Device ID from list_devices'),
-      }).strict(),
-      outputSchema: {
-        status: z.object({
-          deviceId: z.string().optional(),
-          deviceType: z.string().optional(),
-          hubDeviceId: z.string().optional(),
-          connectionStatus: z.string().optional(),
-        }).passthrough().describe('Live device status (deviceId + deviceType + device-specific fields)'),
-      },
+  if (!skip('get_device_status')) registerTool('get_device_status',
+  {
+    title: 'Get live status for a device',
+    description:
+      'Query the real-time status payload for a physical device. IR remotes have no status channel and will error.',
+    _meta: { agentSafetyTier: 'read' },
+    inputSchema: z.object({
+      deviceId: z.string().describe('Device ID from list_devices'),
+    }).strict(),
+    outputSchema: {
+      status: z.object({
+        deviceId: z.string().optional(),
+        deviceType: z.string().optional(),
+        hubDeviceId: z.string().optional(),
+        connectionStatus: z.string().optional(),
+      }).passthrough().describe('Live device status (deviceId + deviceType + device-specific fields)'),
     },
-    async ({ deviceId }) => {
-      const body = await fetchDeviceStatus(deviceId);
-      return {
-        content: [{ type: 'text', text: JSON.stringify(body, null, 2) }],
-        structuredContent: { status: body as { deviceId?: string; deviceType?: string; [key: string]: unknown } },
-      };
-    }
-  );
+  },
+  async ({ deviceId }) => {
+    const body = await fetchDeviceStatus(deviceId);
+    return {
+      content: [{ type: 'text', text: JSON.stringify(body, null, 2) }],
+      structuredContent: { status: body as { deviceId?: string; deviceType?: string; [key: string]: unknown } },
+    };
+  })
 
   function deprecatedAlias(replacement: string, mode: string, baseDescription: string) {
     return {
@@ -465,151 +523,92 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
   // Consolidates the previous get_device_history / query_device_history /
   // aggregate_device_history trio. The `mode` discriminator selects which
   // shape of result is returned. All modes are read-only and zero quota cost
-  // (data comes from the local ~/.switchbot/device-history/ store).
-  if (!skip('device_history'))
-  server.registerTool(
-    'device_history',
-    {
-      title: 'Local device history (raw / query / aggregate)',
-      description:
-        'Read locally-persisted device state history captured from MQTT events. ' +
-        'No API call — zero quota cost. Pick `mode`: ' +
-        '"raw" returns the latest entry plus the most recent N records (or, if deviceId is omitted, a list of devices with stored history); ' +
-        '"query" returns time-ranged records (since OR from/to) with optional field projection and limit; ' +
-        '"aggregate" returns bucketed statistics (count/min/max/avg/sum/p50/p95) over numeric metrics.',
-      _meta: { agentSafetyTier: 'read' },
-      inputSchema: z.object({
-        mode: z.enum(['raw', 'query', 'aggregate']).describe(
-          '"raw": latest entry + recent N records (limit, default 20); "query": time-ranged record list; "aggregate": bucketed stats.',
-        ),
-        deviceId: z.string().min(1).optional().describe(
-          'Device MAC address. Required for query/aggregate. For raw, omit to list all devices with stored history.',
-        ),
-        // raw mode
-        limit: z.number().int().min(1).max(10000).optional().describe(
-          'raw: max history entries (default 20, max 100). query: max records (default 1000, max 10000).',
-        ),
-        // query / aggregate mode (time range)
-        since: z.string().optional().describe('Relative window ending now, e.g. "30s","15m","1h","7d". Mutually exclusive with from/to.'),
-        from: z.string().optional().describe('Range start (ISO-8601). Used by query/aggregate.'),
-        to: z.string().optional().describe('Range end (ISO-8601). Used by query/aggregate.'),
-        // query mode
-        fields: z.array(z.string()).optional().describe('query: project these payload fields; omit for full payload.'),
-        // aggregate mode
-        metrics: z.array(z.string().min(1)).min(1).optional().describe(
-          'aggregate (required): one or more numeric payload field names (e.g. ["temperature","humidity"]).',
-        ),
-        aggs: z.array(z.enum(ALL_AGG_FNS as unknown as [AggFn, ...AggFn[]])).optional()
-          .describe('aggregate: aggregation functions per metric (default ["count","avg"]).'),
-        bucket: z.string().optional().describe('aggregate: bucket width like "5m","1h","1d". Omit for a single bucket spanning the full range.'),
-        maxBucketSamples: z.number().int().positive().max(MAX_SAMPLE_CAP).optional()
-          .describe(`aggregate: per-bucket sample cap (default 10000, max ${MAX_SAMPLE_CAP}). partial=true when any bucket was capped.`),
-      }).strict().superRefine((val, ctx) => {
-        if (val.mode === 'raw' && val.limit !== undefined && val.limit > 100) {
-          ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['limit'], message: 'limit for mode="raw" cannot exceed 100' });
-        }
-      }),
-      outputSchema: {
-        // raw mode (deviceId set)
-        deviceId: z.string().optional(),
-        latest: z.unknown().optional(),
-        history: z.array(z.unknown()).optional(),
-        // raw mode (deviceId omitted)
-        devices: z.array(z.object({ deviceId: z.string(), latest: z.unknown() })).optional(),
-        // query mode
-        count: z.number().int().optional(),
-        records: z.array(z.object({
-          t: z.string(),
-          topic: z.string(),
-          deviceType: z.string().optional(),
-          payload: z.unknown(),
-        })).optional(),
-        // aggregate mode
-        bucket: z.string().optional(),
-        from: z.string().optional(),
-        to: z.string().optional(),
-        metrics: z.array(z.string()).optional(),
-        aggs: z.array(z.enum(ALL_AGG_FNS as unknown as [AggFn, ...AggFn[]])).optional(),
-        buckets: z.array(z.object({
-          t: z.string(),
-          metrics: z.record(z.string(), z.object({
-            count: z.number().optional(),
-            min: z.number().optional(),
-            max: z.number().optional(),
-            avg: z.number().optional(),
-            sum: z.number().optional(),
-            p50: z.number().optional(),
-            p95: z.number().optional(),
-          })),
-        })).optional(),
-        partial: z.boolean().optional(),
-        notes: z.array(z.string()).optional(),
-      },
-    },
-    async (args) => {
-      // ---- raw mode ------------------------------------------------------
-      if (args.mode === 'raw') {
-        if (args.deviceId !== undefined) {
-          const latest = deviceHistoryStore.getLatest(args.deviceId);
-          const rawLimit = Math.min(args.limit ?? 20, 100);
-          const history = deviceHistoryStore.getHistory(args.deviceId, rawLimit);
-          const result = { deviceId: args.deviceId, latest, history };
-          return {
-            content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-            structuredContent: result,
-          };
-        }
-        const ids = deviceHistoryStore.listDevices();
-        const devices = ids.map((id) => ({ deviceId: id, latest: deviceHistoryStore.getLatest(id) }));
-        const result = { devices };
-        return {
-          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-          structuredContent: result,
-        };
-      }
-
-      // ---- query mode ----------------------------------------------------
-      if (args.mode === 'query') return runDeviceHistoryQuery(args as Parameters<typeof runDeviceHistoryQuery>[0]); // cast strips mode
-
-      // ---- aggregate mode ------------------------------------------------
-      // Zod enum guarantees mode === 'aggregate' here
-      return runDeviceHistoryAggregate(args as Parameters<typeof runDeviceHistoryAggregate>[0]);
-    }
-  );
-
-  // ---- deprecated aliases for device_history ------------------------------
-  // 3.x backward-compat — removed in 4.0.0. query/aggregate aliases delegate
-  // to module-level helpers; raw (get_device_history) inlines the logic since
-  // it's short. Schemas mirror the relevant subset of the device_history schema
-  // so old clients keep their shape.
-  if (!skip('get_device_history'))
-  server.registerTool(
-    'get_device_history',
-    {
-      title: '[Deprecated] Latest + recent device history',
-      ...deprecatedAlias('device_history', 'raw',
-        'Read the latest entry plus the most recent N records for one device, or list devices with stored history when deviceId is omitted. No API call — zero quota cost.',
+  // (default: ~/.switchbot/device-history; named: ~/.switchbot/profiles/<name>/device-history).
+  if (!skip('device_history')) registerTool('device_history',
+  {
+    title: 'Local device history (raw / query / aggregate)',
+    description:
+      'Read locally-persisted device state history captured from MQTT events. ' +
+      'No API call — zero quota cost. Pick `mode`: ' +
+      '"raw" returns the latest entry plus the most recent N records (or, if deviceId is omitted, a list of devices with stored history); ' +
+      '"query" returns time-ranged records (since OR from/to) with optional field projection and limit; ' +
+      '"aggregate" returns bucketed statistics (count/min/max/avg/sum/p50/p95) over numeric metrics.',
+    _meta: { agentSafetyTier: 'read' },
+    inputSchema: z.object({
+      mode: z.enum(['raw', 'query', 'aggregate']).describe(
+        '"raw": latest entry + recent N records (limit, default 20); "query": time-ranged record list; "aggregate": bucketed stats.',
       ),
-      inputSchema: z.object({
-        deviceId: z.string().min(1).optional().describe(
-          'Device MAC address. Omit to list all devices with stored history.',
-        ),
-        // raw-mode only: hard-capped at 100 here; the consolidated `device_history` schema uses max 10000 across all modes (raw enforces 100 at runtime).
-        limit: z.number().int().min(1).max(100).optional().describe(
-          'Max history entries to return (default 20, max 100).',
-        ),
-      }).strict(),
-      outputSchema: {
-        deviceId: z.string().optional(),
-        latest: z.unknown().optional(),
-        history: z.array(z.unknown()).optional(),
-        devices: z.array(z.object({ deviceId: z.string(), latest: z.unknown() })).optional(),
-      },
+      deviceId: z.string().min(1).optional().describe(
+        'Device MAC address. Required for query/aggregate. For raw, omit to list all devices with stored history.',
+      ),
+      // raw mode
+      limit: z.number().int().min(1).max(10000).optional().describe(
+        'raw: max history entries (default 20, max 100). query: max records (default 1000, max 10000).',
+      ),
+      // query / aggregate mode (time range)
+      since: z.string().optional().describe('Relative window ending now, e.g. "30s","15m","1h","7d". Mutually exclusive with from/to.'),
+      from: z.string().optional().describe('Range start (ISO-8601). Used by query/aggregate.'),
+      to: z.string().optional().describe('Range end (ISO-8601). Used by query/aggregate.'),
+      // query mode
+      fields: z.array(z.string()).optional().describe('query: project these payload fields; omit for full payload.'),
+      // aggregate mode
+      metrics: z.array(z.string().min(1)).min(1).optional().describe(
+        'aggregate (required): one or more numeric payload field names (e.g. ["temperature","humidity"]).',
+      ),
+      aggs: z.array(z.enum(ALL_AGG_FNS as unknown as [AggFn, ...AggFn[]])).optional()
+        .describe('aggregate: aggregation functions per metric (default ["count","avg"]).'),
+      bucket: z.string().optional().describe('aggregate: bucket width like "5m","1h","1d". Omit for a single bucket spanning the full range.'),
+      maxBucketSamples: z.number().int().positive().max(MAX_SAMPLE_CAP).optional()
+        .describe(`aggregate: per-bucket sample cap (default 10000, max ${MAX_SAMPLE_CAP}). partial=true when any bucket was capped.`),
+    }).strict().superRefine((val, ctx) => {
+      if (val.mode === 'raw' && val.limit !== undefined && val.limit > 100) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['limit'], message: 'limit for mode="raw" cannot exceed 100' });
+      }
+    }),
+    outputSchema: {
+      // raw mode (deviceId set)
+      deviceId: z.string().optional(),
+      latest: z.unknown().optional(),
+      history: z.array(z.unknown()).optional(),
+      // raw mode (deviceId omitted)
+      devices: z.array(z.object({ deviceId: z.string(), latest: z.unknown() })).optional(),
+      // query mode
+      count: z.number().int().optional(),
+      records: z.array(z.object({
+        t: z.string(),
+        topic: z.string(),
+        deviceType: z.string().optional(),
+        payload: z.unknown(),
+      })).optional(),
+      // aggregate mode
+      bucket: z.string().optional(),
+      from: z.string().optional(),
+      to: z.string().optional(),
+      metrics: z.array(z.string()).optional(),
+      aggs: z.array(z.enum(ALL_AGG_FNS as unknown as [AggFn, ...AggFn[]])).optional(),
+      buckets: z.array(z.object({
+        t: z.string(),
+        metrics: z.record(z.string(), z.object({
+          count: z.number().optional(),
+          min: z.number().optional(),
+          max: z.number().optional(),
+          avg: z.number().optional(),
+          sum: z.number().optional(),
+          p50: z.number().optional(),
+          p95: z.number().optional(),
+        })),
+      })).optional(),
+      partial: z.boolean().optional(),
+      notes: z.array(z.string()).optional(),
     },
-    async (args) => {
+  },
+  async (args) => {
+    // ---- raw mode ------------------------------------------------------
+    if (args.mode === 'raw') {
       if (args.deviceId !== undefined) {
         const latest = deviceHistoryStore.getLatest(args.deviceId);
-        const history = deviceHistoryStore.getHistory(args.deviceId, args.limit ?? 20);
+        const rawLimit = Math.min(args.limit ?? 20, 100);
+        const history = deviceHistoryStore.getHistory(args.deviceId, rawLimit);
         const result = { deviceId: args.deviceId, latest, history };
         return {
           content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
@@ -624,1232 +623,1250 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
         structuredContent: result,
       };
     }
-  );
+  
+    // ---- query mode ----------------------------------------------------
+    if (args.mode === 'query') return runDeviceHistoryQuery(args as Parameters<typeof runDeviceHistoryQuery>[0]); // cast strips mode
+  
+    // ---- aggregate mode ------------------------------------------------
+    // Zod enum guarantees mode === 'aggregate' here
+    return runDeviceHistoryAggregate(args as Parameters<typeof runDeviceHistoryAggregate>[0]);
+  })
 
-  if (!skip('query_device_history'))
-  server.registerTool(
-    'query_device_history',
-    {
-      title: '[Deprecated] Time-ranged device history query',
-      ...deprecatedAlias('device_history', 'query',
-        'Return time-ranged records (since OR from/to) with optional field projection and limit. No API call.',
+  // ---- deprecated aliases for device_history ------------------------------
+  // 3.x backward-compat — removed in 4.0.0. query/aggregate aliases delegate
+  // to module-level helpers; raw (get_device_history) inlines the logic since
+  // it's short. Schemas mirror the relevant subset of the device_history schema
+  // so old clients keep their shape.
+  if (!skip('get_device_history')) registerTool('get_device_history',
+  {
+    title: '[Deprecated] Latest + recent device history',
+    ...deprecatedAlias('device_history', 'raw',
+      'Read the latest entry plus the most recent N records for one device, or list devices with stored history when deviceId is omitted. No API call — zero quota cost.',
+    ),
+    inputSchema: z.object({
+      deviceId: z.string().min(1).optional().describe(
+        'Device MAC address. Omit to list all devices with stored history.',
       ),
-      inputSchema: z.object({
-        deviceId: z.string().describe('Device MAC address (required).'),
-        since: z.string().optional().describe('Relative window ending now, e.g. "30s","15m","1h","7d". Mutually exclusive with from/to.'),
-        from: z.string().optional().describe('Range start (ISO-8601). Mutually exclusive with since.'),
-        to: z.string().optional().describe('Range end (ISO-8601). Used together with from.'),
-        fields: z.array(z.string()).optional().describe('Project these payload fields; omit for full payload.'),
-        limit: z.number().int().min(1).max(10000).optional().describe('Max records to return (default 1000, max 10000).'),
-      }).strict(),
-      outputSchema: {
-        deviceId: z.string(),
-        count: z.number().int(),
-        records: z.array(z.object({
-          t: z.string(),
-          topic: z.string(),
-          deviceType: z.string().optional(),
-          payload: z.unknown(),
-        })),
-        notes: z.array(z.string()).optional(),
-      },
+      // raw-mode only: hard-capped at 100 here; the consolidated `device_history` schema uses max 10000 across all modes (raw enforces 100 at runtime).
+      limit: z.number().int().min(1).max(100).optional().describe(
+        'Max history entries to return (default 20, max 100).',
+      ),
+    }).strict(),
+    outputSchema: {
+      deviceId: z.string().optional(),
+      latest: z.unknown().optional(),
+      history: z.array(z.unknown()).optional(),
+      devices: z.array(z.object({ deviceId: z.string(), latest: z.unknown() })).optional(),
     },
-    async (args) => runDeviceHistoryQuery(args)
-  );
+  },
+  async (args) => {
+    if (args.deviceId !== undefined) {
+      const latest = deviceHistoryStore.getLatest(args.deviceId);
+      const history = deviceHistoryStore.getHistory(args.deviceId, args.limit ?? 20);
+      const result = { deviceId: args.deviceId, latest, history };
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+        structuredContent: result,
+      };
+    }
+    const ids = deviceHistoryStore.listDevices();
+    const devices = ids.map((id) => ({ deviceId: id, latest: deviceHistoryStore.getLatest(id) }));
+    const result = { devices };
+    return {
+      content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+      structuredContent: result,
+    };
+  })
 
-  if (!skip('aggregate_device_history'))
-  server.registerTool(
-    'aggregate_device_history',
-    {
-      title: '[Deprecated] Bucketed device-history aggregation',
-      ...deprecatedAlias('device_history', 'aggregate',
-        'Return bucketed statistics (count/min/max/avg/sum/p50/p95) over numeric metrics. No API call.',
-      ),
-      inputSchema: z.object({
-        deviceId: z.string().describe('Device MAC address (required).'),
-        since: z.string().optional().describe('Relative window ending now, e.g. "30s","15m","1h","7d". Mutually exclusive with from/to.'),
-        from: z.string().optional().describe('Range start (ISO-8601). Mutually exclusive with since.'),
-        to: z.string().optional().describe('Range end (ISO-8601). Used together with from.'),
-        metrics: z.array(z.string().min(1)).min(1).describe(
-          'One or more numeric payload field names to aggregate (e.g. ["temperature","humidity"]).',
-        ),
-        aggs: z.array(z.enum(ALL_AGG_FNS as unknown as [AggFn, ...AggFn[]])).optional().describe(
-          'Aggregation functions per metric (default ["count","avg"]).',
-        ),
-        bucket: z.string().optional().describe('Bucket width like "5m","1h","1d". Omit for a single bucket spanning the full range.'),
-        maxBucketSamples: z.number().int().positive().max(MAX_SAMPLE_CAP).optional()
-          .describe(`Per-bucket sample cap (default 10000, max ${MAX_SAMPLE_CAP}). partial=true when any bucket was capped.`),
-      }).strict(),
-      outputSchema: {
-        deviceId: z.string(),
-        bucket: z.string().optional(),
-        from: z.string().optional(),
-        to: z.string().optional(),
-        metrics: z.array(z.string()),
-        aggs: z.array(z.enum(ALL_AGG_FNS as unknown as [AggFn, ...AggFn[]])),
-        buckets: z.array(z.object({
-          t: z.string(),
-          metrics: z.record(z.string(), z.object({
-            count: z.number().optional(),
-            min: z.number().optional(),
-            max: z.number().optional(),
-            avg: z.number().optional(),
-            sum: z.number().optional(),
-            p50: z.number().optional(),
-            p95: z.number().optional(),
-          })),
-        })),
-        partial: z.boolean().optional(),
-        notes: z.array(z.string()).optional(),
-      },
+  if (!skip('query_device_history')) registerTool('query_device_history',
+  {
+    title: '[Deprecated] Time-ranged device history query',
+    ...deprecatedAlias('device_history', 'query',
+      'Return time-ranged records (since OR from/to) with optional field projection and limit. No API call.',
+    ),
+    inputSchema: z.object({
+      deviceId: z.string().describe('Device MAC address (required).'),
+      since: z.string().optional().describe('Relative window ending now, e.g. "30s","15m","1h","7d". Mutually exclusive with from/to.'),
+      from: z.string().optional().describe('Range start (ISO-8601). Mutually exclusive with since.'),
+      to: z.string().optional().describe('Range end (ISO-8601). Used together with from.'),
+      fields: z.array(z.string()).optional().describe('Project these payload fields; omit for full payload.'),
+      limit: z.number().int().min(1).max(10000).optional().describe('Max records to return (default 1000, max 10000).'),
+    }).strict(),
+    outputSchema: {
+      deviceId: z.string(),
+      count: z.number().int(),
+      records: z.array(z.object({
+        t: z.string(),
+        topic: z.string(),
+        deviceType: z.string().optional(),
+        payload: z.unknown(),
+      })),
+      notes: z.array(z.string()).optional(),
     },
-    async (args) => runDeviceHistoryAggregate(args)
-  );
+  },
+  async (args) => runDeviceHistoryQuery(args))
+
+  if (!skip('aggregate_device_history')) registerTool('aggregate_device_history',
+  {
+    title: '[Deprecated] Bucketed device-history aggregation',
+    ...deprecatedAlias('device_history', 'aggregate',
+      'Return bucketed statistics (count/min/max/avg/sum/p50/p95) over numeric metrics. No API call.',
+    ),
+    inputSchema: z.object({
+      deviceId: z.string().describe('Device MAC address (required).'),
+      since: z.string().optional().describe('Relative window ending now, e.g. "30s","15m","1h","7d". Mutually exclusive with from/to.'),
+      from: z.string().optional().describe('Range start (ISO-8601). Mutually exclusive with since.'),
+      to: z.string().optional().describe('Range end (ISO-8601). Used together with from.'),
+      metrics: z.array(z.string().min(1)).min(1).describe(
+        'One or more numeric payload field names to aggregate (e.g. ["temperature","humidity"]).',
+      ),
+      aggs: z.array(z.enum(ALL_AGG_FNS as unknown as [AggFn, ...AggFn[]])).optional().describe(
+        'Aggregation functions per metric (default ["count","avg"]).',
+      ),
+      bucket: z.string().optional().describe('Bucket width like "5m","1h","1d". Omit for a single bucket spanning the full range.'),
+      maxBucketSamples: z.number().int().positive().max(MAX_SAMPLE_CAP).optional()
+        .describe(`Per-bucket sample cap (default 10000, max ${MAX_SAMPLE_CAP}). partial=true when any bucket was capped.`),
+    }).strict(),
+    outputSchema: {
+      deviceId: z.string(),
+      bucket: z.string().optional(),
+      from: z.string().optional(),
+      to: z.string().optional(),
+      metrics: z.array(z.string()),
+      aggs: z.array(z.enum(ALL_AGG_FNS as unknown as [AggFn, ...AggFn[]])),
+      buckets: z.array(z.object({
+        t: z.string(),
+        metrics: z.record(z.string(), z.object({
+          count: z.number().optional(),
+          min: z.number().optional(),
+          max: z.number().optional(),
+          avg: z.number().optional(),
+          sum: z.number().optional(),
+          p50: z.number().optional(),
+          p95: z.number().optional(),
+        })),
+      })),
+      partial: z.boolean().optional(),
+      notes: z.array(z.string()).optional(),
+    },
+  },
+  async (args) => runDeviceHistoryAggregate(args))
 
   // ---- send_command ---------------------------------------------------------
-  if (!skip('send_command'))
-  server.registerTool(
-    'send_command',
-    {
-      title: 'Send a control command to a device',
-      description:
-        'Execute a control command on a device (turnOn, setColor, startClean, unlock, openDoor, createKey, etc.). Safety tiers: mutation (turnOn/Off, setBrightness, setColor) — runs freely; destructive (lock, unlock, openDoor, createKey, deleteKey) — requires confirm:true and is blocked in the default safety profile. Use the reviewed plan workflow for destructive commands unless an explicit dev profile allows direct execution. Commands are validated offline against the device catalog. Use idempotencyKey to safely deduplicate retries within 60 seconds.',
-      _meta: { agentSafetyTier: 'action' },
-      inputSchema: z.object({
-        deviceId: z.string().describe('Device ID from list_devices'),
-        command: z.string().describe('Command name, case-sensitive (e.g. turnOn, setColor, unlock)'),
-        parameter: z
-          .union([z.string(), z.number(), z.boolean(), z.record(z.string(), z.unknown()), z.array(z.unknown())])
-          .optional()
-          .describe('Command parameter. Omit for no-arg commands.'),
-        commandType: z
-          .enum(['command', 'customize'])
-          .optional()
-          .default('command')
-          .describe('"command" for built-in commands; "customize" for user-defined IR buttons'),
-        confirm: z
-          .boolean()
-          .optional()
-          .default(false)
-          .describe('Required true for destructive commands (unlock, garage open, createKey, ...)'),
-        idempotencyKey: z
-          .string()
-          .optional()
-          .describe(
-            'Deduplication key — repeat calls with the same key within 60s replay the first result (adds replayed:true). Same key + different (command, parameter) within 60s returns an idempotency_conflict guard error.',
-          ),
-        dryRun: z
-          .boolean()
-          .optional()
-          .describe('When true, do not call the API — return { ok:true, dryRun:true, wouldSend:{...} } instead.'),
-      }).strict(),
-      outputSchema: {
-        ok: z.literal(true),
-        command: z.string().optional(),
-        deviceId: z.string().optional(),
-        result: z.unknown().optional().describe('API response body from SwitchBot (absent on dryRun)'),
-        riskProfile: z
-          .object({
-            riskLevel: z.enum(['high', 'medium', 'low']),
-            requiresConfirmation: z.boolean(),
-            supportsDryRun: z.literal(true),
-            idempotencyHint: z.enum(['safe', 'non-idempotent']),
-            recommendedMode: z.enum(['review-before-execute', 'plan', 'direct']),
-          })
-          .optional()
-          .describe(
-            'Device+command-specific risk metadata. riskLevel:"high" means confirm:true was required. Always present on dryRun responses so agents can preview risk before committing.',
-          ),
-        verification: z
-          .object({
-            verifiable: z.boolean(),
-            reason: z.string(),
-            suggestedFollowup: z.string(),
-          })
-          .optional()
-          .describe(
-            'Present when the target is an IR device. IR is unidirectional — agents should treat the success as "signal sent" not "state changed".',
-          ),
-        dryRun: z.literal(true).optional().describe('Present when dryRun:true was requested'),
-        wouldSend: z.object({
-          deviceId: z.string(),
-          command: z.string(),
-          parameter: z.unknown(),
-          commandType: z.string(),
-        }).optional().describe('The request shape that would have been POSTed (present when dryRun:true)'),
-      },
+  if (!skip('send_command')) registerTool('send_command',
+  {
+    title: 'Send a control command to a device',
+    description:
+      'Execute a control command on a device (turnOn, setColor, startClean, unlock, openDoor, createKey, etc.). Safety tiers: mutation (turnOn/Off, setBrightness, setColor) — runs freely; destructive (lock, unlock, openDoor, createKey, deleteKey) — requires confirm:true and is blocked in the default safety profile. Use the reviewed plan workflow for destructive commands unless an explicit dev profile allows direct execution. Commands are validated offline against the device catalog. Use idempotencyKey to safely deduplicate retries within 60 seconds.',
+    _meta: { agentSafetyTier: 'action' },
+    inputSchema: z.object({
+      deviceId: z.string().describe('Device ID from list_devices'),
+      command: z.string().describe('Command name, case-sensitive (e.g. turnOn, setColor, unlock)'),
+      parameter: z
+        .union([z.string(), z.number(), z.boolean(), z.record(z.string(), z.unknown()), z.array(z.unknown())])
+        .optional()
+        .describe('Command parameter. Omit for no-arg commands.'),
+      commandType: z
+        .enum(['command', 'customize'])
+        .optional()
+        .default('command')
+        .describe('"command" for built-in commands; "customize" for user-defined IR buttons'),
+      confirm: z
+        .boolean()
+        .optional()
+        .default(false)
+        .describe('Required true for destructive commands (unlock, garage open, createKey, ...)'),
+      idempotencyKey: z
+        .string()
+        .optional()
+        .describe(
+          'Deduplication key — repeat calls with the same key within 60s replay the first result (adds replayed:true). Same key + different (command, parameter) within 60s returns an idempotency_conflict guard error.',
+        ),
+      dryRun: z
+        .boolean()
+        .optional()
+        .describe('When true, do not call the API — return { ok:true, dryRun:true, wouldSend:{...} } instead.'),
+    }).strict(),
+    outputSchema: {
+      ok: z.literal(true),
+      command: z.string().optional(),
+      deviceId: z.string().optional(),
+      result: z.unknown().optional().describe('API response body from SwitchBot (absent on dryRun)'),
+      riskProfile: z
+        .object({
+          riskLevel: z.enum(['high', 'medium', 'low']),
+          requiresConfirmation: z.boolean(),
+          supportsDryRun: z.literal(true),
+          idempotencyHint: z.enum(['safe', 'non-idempotent']),
+          recommendedMode: z.enum(['review-before-execute', 'plan', 'direct']),
+        })
+        .optional()
+        .describe(
+          'Device+command-specific risk metadata. riskLevel:"high" means confirm:true was required. Always present on dryRun responses so agents can preview risk before committing.',
+        ),
+      verification: z
+        .object({
+          verifiable: z.boolean(),
+          reason: z.string(),
+          suggestedFollowup: z.string(),
+        })
+        .optional()
+        .describe(
+          'Present when the target is an IR device. IR is unidirectional — agents should treat the success as "signal sent" not "state changed".',
+        ),
+      dryRun: z.literal(true).optional().describe('Present when dryRun:true was requested'),
+      wouldSend: z.object({
+        deviceId: z.string(),
+        command: z.string(),
+        parameter: z.unknown(),
+        commandType: z.string(),
+      }).optional().describe('The request shape that would have been POSTed (present when dryRun:true)'),
     },
-    async ({ deviceId, command, parameter, commandType, confirm, idempotencyKey, dryRun }) => {
-      const effectiveType = commandType ?? 'command';
-      let effectiveCommand = command;
-      let effectiveParameter: unknown = parameter;
-
-      // stringifiedParam mirrors the CLI form that validateCommand /
-      // validateParameter expect — B-1 runs on the string representation.
-      const stringifiedParam =
-        parameter === undefined ? undefined : typeof parameter === 'string' ? parameter : JSON.stringify(parameter);
-
-      // dryRun early-return — no API call. We still preflight the deviceId
-      // against the local cache so fabricated IDs don't silently pass
-      // validation (bug #SYS-3). Dry-run is meant to catch bad inputs; a
-      // dry-run that accepts anything is worse than no dry-run at all.
-      if (dryRun) {
-        const cached = getCachedDevice(deviceId);
-        if (!cached) {
-          return mcpError('usage', 2, `Device "${deviceId}" not found in local cache.`, {
-            subKind: 'device-not-found',
-            hint: "Run 'list_devices' first to warm the cache, then retry with dryRun:true.",
-            context: { deviceId },
-          });
-        }
-        const dryValidation = validateCommand(deviceId, effectiveCommand, stringifiedParam, effectiveType);
-        if (!dryValidation.ok) {
-          return mcpError(
-            'usage',
-            2,
-            dryValidation.error.message,
-            {
-              hint: dryValidation.error.hint,
-              context: {
-                validationKind: dryValidation.error.kind,
-                deviceType: cached.type,
-                command: effectiveCommand,
-              },
-            },
-          );
-        }
-        if (dryValidation.normalized) {
-          effectiveCommand = dryValidation.normalized;
-        }
-        // R-2: run B-1 param validation in dry-run too, so dry-run doesn't
-        // falsely accept inputs the live API would reject.
-        if (effectiveType !== 'customize') {
-          const pv = validateParameter(cached.type, effectiveCommand, stringifiedParam);
-          if (!pv.ok) {
-            return mcpError('usage', 2, pv.error, {
-              hint: 'Dry-run rejected the parameter client-side; the API would reject it too.',
-              context: { deviceType: cached.type, command: effectiveCommand, parameter: stringifiedParam },
-            });
-          }
-          if (pv.normalized !== undefined) {
-            effectiveParameter = parseParameterForWire(pv.normalized);
-          }
-        }
-        const wouldSend = {
-          deviceId,
-          command: effectiveCommand,
-          parameter: effectiveParameter ?? 'default',
-          commandType: effectiveType,
-        };
-        const dryIsDestructive = isDestructiveCommand(cached.type, effectiveCommand, effectiveType);
-        const dryRiskProfile = buildRiskProfile(cached.type, effectiveCommand, effectiveType, dryIsDestructive);
-        const structured = { ok: true as const, dryRun: true as const, riskProfile: dryRiskProfile, wouldSend };
-        return {
-          content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
-          structuredContent: structured,
-        };
+  },
+  async ({ deviceId, command, parameter, commandType, confirm, idempotencyKey, dryRun }) => {
+    const effectiveType = commandType ?? 'command';
+    let effectiveCommand = command;
+    let effectiveParameter: unknown = parameter;
+  
+    // stringifiedParam mirrors the CLI form that validateCommand /
+    // validateParameter expect — B-1 runs on the string representation.
+    const stringifiedParam =
+      parameter === undefined ? undefined : typeof parameter === 'string' ? parameter : JSON.stringify(parameter);
+  
+    // dryRun early-return — no API call. We still preflight the deviceId
+    // against the local cache so fabricated IDs don't silently pass
+    // validation (bug #SYS-3). Dry-run is meant to catch bad inputs; a
+    // dry-run that accepts anything is worse than no dry-run at all.
+    if (dryRun) {
+      const cached = getCachedDevice(deviceId);
+      if (!cached) {
+        return mcpError('usage', 2, `Device "${deviceId}" not found in local cache.`, {
+          subKind: 'device-not-found',
+          hint: "Run 'list_devices' first to warm the cache, then retry with dryRun:true.",
+          context: { deviceId },
+        });
       }
-
-      // Resolve the device's catalog type via cache or a fresh lookup so we
-      // can evaluate destructive/validation without an extra round-trip if
-      // the cache is warm.
-      let typeName = getCachedDevice(deviceId)?.type;
-      if (!typeName) {
-        const body = await fetchDeviceList();
-        const physical = body.deviceList.find((d) => d.deviceId === deviceId);
-        const ir = body.infraredRemoteList.find((d) => d.deviceId === deviceId);
-        if (!physical && !ir) {
-          return mcpError('runtime', 152, `Device not found: ${deviceId}`, {
-            hint: "Check the deviceId with 'switchbot devices list' (IDs are case-sensitive).",
-          });
-        }
-        typeName = physical ? physical.deviceType : ir!.remoteType;
-      }
-
-      const destructive = isDestructiveCommand(typeName, effectiveCommand, effectiveType);
-      if (destructive && !allowsDirectDestructiveExecution()) {
-        const reason = getDestructiveReason(typeName, effectiveCommand, effectiveType);
+      const dryValidation = validateCommand(deviceId, effectiveCommand, stringifiedParam, effectiveType);
+      if (!dryValidation.ok) {
         return mcpError(
-          'guard', 3,
-          `Direct destructive execution is disabled for command "${effectiveCommand}" on device type "${typeName}".`,
+          'usage',
+          2,
+          dryValidation.error.message,
           {
-            hint: reason ? `${destructiveExecutionHint()} Reason: ${reason}` : destructiveExecutionHint(),
+            hint: dryValidation.error.hint,
             context: {
+              validationKind: dryValidation.error.kind,
+              deviceType: cached.type,
               command: effectiveCommand,
-              deviceType: typeName,
-              directExecutionAllowed: false,
-              requiredWorkflow: 'plan-approval',
-              ...(reason ? { safetyReason: reason, destructiveReason: reason } : {}),
             },
           },
         );
       }
-
-      if (destructive && !confirm) {
-        const reason = getDestructiveReason(typeName, effectiveCommand, effectiveType);
-        const entry = typeName ? findCatalogEntry(typeName) : null;
-        const spec =
-          entry && !Array.isArray(entry)
-            ? entry.commands.find((c) => c.command === effectiveCommand)
-            : undefined;
-        const hint = reason
-          ? `Re-issue with confirm:true after confirming with the user. Reason: ${reason}`
-          : 'Re-issue the call with confirm:true to proceed.';
-        return mcpError(
-          'guard', 3,
-          `Command "${effectiveCommand}" on device type "${typeName}" is destructive and requires confirm:true.`,
-          {
-            hint,
-            context: {
-              command: effectiveCommand,
-              deviceType: typeName,
-              description: spec?.description ?? null,
-              ...(reason ? { safetyReason: reason, destructiveReason: reason } : {}),
-            },
-          },
-        );
+      if (dryValidation.normalized) {
+        effectiveCommand = dryValidation.normalized;
       }
-
-      // validateCommand covers command existence + required/unexpected-parameter.
-      // stringifiedParam was computed once at the top of the handler so dry-run
-      // and live paths share the same shape.
-      const validation = validateCommand(deviceId, effectiveCommand, stringifiedParam, effectiveType);
-      if (!validation.ok) {
-        return mcpError(
-          'usage', 2,
-          validation.error.message,
-          {
-            hint: validation.error.hint,
-            context: { validationKind: validation.error.kind, deviceType: typeName, command: effectiveCommand },
-          },
-        );
-      }
-      if (validation.normalized) {
-        effectiveCommand = validation.normalized;
-      }
-
-      // R-2: run B-1 client-side parameter validator (range/format checks).
-      // Customize commands (user-defined IR buttons) opt out — the catalog
-      // cannot know their expected shape.
+      // R-2: run B-1 param validation in dry-run too, so dry-run doesn't
+      // falsely accept inputs the live API would reject.
       if (effectiveType !== 'customize') {
-        const pv = validateParameter(typeName, effectiveCommand, stringifiedParam);
+        const pv = validateParameter(cached.type, effectiveCommand, stringifiedParam);
         if (!pv.ok) {
           return mcpError('usage', 2, pv.error, {
-            context: { deviceType: typeName, command: effectiveCommand, parameter: stringifiedParam, validationKind: 'param-out-of-range' },
+            hint: 'Dry-run rejected the parameter client-side; the API would reject it too.',
+            context: { deviceType: cached.type, command: effectiveCommand, parameter: stringifiedParam },
           });
         }
         if (pv.normalized !== undefined) {
           effectiveParameter = parseParameterForWire(pv.normalized);
         }
       }
-
-      let result: unknown;
-      try {
-        result = await executeCommand(deviceId, effectiveCommand, effectiveParameter, effectiveType, undefined, {
-          idempotencyKey,
-        });
-      } catch (err) {
-        if (err instanceof Error && err.name === 'IdempotencyConflictError') {
-          return mcpError('guard', 2, err.message, {
-            hint: 'Use a fresh idempotencyKey, or wait for the prior key to expire (60s TTL).',
-            context: {
-              existingShape: (err as { existingShape?: string }).existingShape,
-              newShape: (err as { newShape?: string }).newShape,
-            },
-          });
-        }
-        return apiErrorToMcpError(err);
-      }
-      const isIr = getCachedDevice(deviceId)?.category === 'ir';
-      const liveIsDestructive = destructive;
-      const riskProfile = buildRiskProfile(typeName, effectiveCommand, effectiveType, liveIsDestructive);
-      const structured: {
-        ok: true;
-        command: string;
-        deviceId: string;
-        result: unknown;
-        riskProfile: typeof riskProfile;
-        verification?: {
-          verifiable: boolean;
-          reason: string;
-          suggestedFollowup: string;
-        };
-      } = { ok: true as const, command: effectiveCommand, deviceId, result, riskProfile };
-      if (isIr) {
-        structured.verification = {
-          verifiable: false,
-          reason: 'IR transmission is unidirectional; no receipt acknowledgment is possible.',
-          suggestedFollowup: 'Confirm visible change manually or via a paired state sensor.',
-        };
-      }
+      const wouldSend = {
+        deviceId,
+        command: effectiveCommand,
+        parameter: effectiveParameter ?? 'default',
+        commandType: effectiveType,
+      };
+      const dryIsDestructive = isDestructiveCommand(cached.type, effectiveCommand, effectiveType);
+      const dryRiskProfile = buildRiskProfile(cached.type, effectiveCommand, effectiveType, dryIsDestructive);
+      const structured = { ok: true as const, dryRun: true as const, riskProfile: dryRiskProfile, wouldSend };
       return {
         content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
         structuredContent: structured,
       };
     }
-  );
+  
+    // Resolve the device's catalog type via cache or a fresh lookup so we
+    // can evaluate destructive/validation without an extra round-trip if
+    // the cache is warm.
+    let typeName = getCachedDevice(deviceId)?.type;
+    if (!typeName) {
+      const body = await fetchDeviceList();
+      const physical = body.deviceList.find((d) => d.deviceId === deviceId);
+      const ir = body.infraredRemoteList.find((d) => d.deviceId === deviceId);
+      if (!physical && !ir) {
+        return mcpError('runtime', 152, `Device not found: ${deviceId}`, {
+          hint: "Check the deviceId with 'switchbot devices list' (IDs are case-sensitive).",
+        });
+      }
+      typeName = physical ? physical.deviceType : ir!.remoteType;
+    }
+  
+    const destructive = isDestructiveCommand(typeName, effectiveCommand, effectiveType);
+    if (destructive && !allowsDirectDestructiveExecution()) {
+      const reason = getDestructiveReason(typeName, effectiveCommand, effectiveType);
+      return mcpError(
+        'guard', 3,
+        `Direct destructive execution is disabled for command "${effectiveCommand}" on device type "${typeName}".`,
+        {
+          hint: reason ? `${destructiveExecutionHint()} Reason: ${reason}` : destructiveExecutionHint(),
+          context: {
+            command: effectiveCommand,
+            deviceType: typeName,
+            directExecutionAllowed: false,
+            requiredWorkflow: 'plan-approval',
+            ...(reason ? { safetyReason: reason, destructiveReason: reason } : {}),
+          },
+        },
+      );
+    }
+  
+    if (destructive && !confirm) {
+      const reason = getDestructiveReason(typeName, effectiveCommand, effectiveType);
+      const entry = typeName ? findCatalogEntry(typeName) : null;
+      const spec =
+        entry && !Array.isArray(entry)
+          ? entry.commands.find((c) => c.command === effectiveCommand)
+          : undefined;
+      const hint = reason
+        ? `Re-issue with confirm:true after confirming with the user. Reason: ${reason}`
+        : 'Re-issue the call with confirm:true to proceed.';
+      return mcpError(
+        'guard', 3,
+        `Command "${effectiveCommand}" on device type "${typeName}" is destructive and requires confirm:true.`,
+        {
+          hint,
+          context: {
+            command: effectiveCommand,
+            deviceType: typeName,
+            description: spec?.description ?? null,
+            ...(reason ? { safetyReason: reason, destructiveReason: reason } : {}),
+          },
+        },
+      );
+    }
+  
+    // validateCommand covers command existence + required/unexpected-parameter.
+    // stringifiedParam was computed once at the top of the handler so dry-run
+    // and live paths share the same shape.
+    const validation = validateCommand(deviceId, effectiveCommand, stringifiedParam, effectiveType);
+    if (!validation.ok) {
+      return mcpError(
+        'usage', 2,
+        validation.error.message,
+        {
+          hint: validation.error.hint,
+          context: { validationKind: validation.error.kind, deviceType: typeName, command: effectiveCommand },
+        },
+      );
+    }
+    if (validation.normalized) {
+      effectiveCommand = validation.normalized;
+    }
+  
+    // R-2: run B-1 client-side parameter validator (range/format checks).
+    // Customize commands (user-defined IR buttons) opt out — the catalog
+    // cannot know their expected shape.
+    if (effectiveType !== 'customize') {
+      const pv = validateParameter(typeName, effectiveCommand, stringifiedParam);
+      if (!pv.ok) {
+        return mcpError('usage', 2, pv.error, {
+          context: { deviceType: typeName, command: effectiveCommand, parameter: stringifiedParam, validationKind: 'param-out-of-range' },
+        });
+      }
+      if (pv.normalized !== undefined) {
+        effectiveParameter = parseParameterForWire(pv.normalized);
+      }
+    }
+  
+    let result: unknown;
+    try {
+      result = await executeCommand(deviceId, effectiveCommand, effectiveParameter, effectiveType, undefined, {
+        idempotencyKey,
+      });
+    } catch (err) {
+      if (err instanceof Error && err.name === 'IdempotencyConflictError') {
+        return mcpError('guard', 2, err.message, {
+          hint: 'Use a fresh idempotencyKey, or wait for the prior key to expire (60s TTL).',
+          context: {
+            existingShape: (err as { existingShape?: string }).existingShape,
+            newShape: (err as { newShape?: string }).newShape,
+          },
+        });
+      }
+      return apiErrorToMcpError(err);
+    }
+    const isIr = getCachedDevice(deviceId)?.category === 'ir';
+    const liveIsDestructive = destructive;
+    const riskProfile = buildRiskProfile(typeName, effectiveCommand, effectiveType, liveIsDestructive);
+    const structured: {
+      ok: true;
+      command: string;
+      deviceId: string;
+      result: unknown;
+      riskProfile: typeof riskProfile;
+      verification?: {
+        verifiable: boolean;
+        reason: string;
+        suggestedFollowup: string;
+      };
+    } = { ok: true as const, command: effectiveCommand, deviceId, result, riskProfile };
+    if (isIr) {
+      structured.verification = {
+        verifiable: false,
+        reason: 'IR transmission is unidirectional; no receipt acknowledgment is possible.',
+        suggestedFollowup: 'Confirm visible change manually or via a paired state sensor.',
+      };
+    }
+    return {
+      content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+      structuredContent: structured,
+    };
+  })
 
   // ---- run_scene ------------------------------------------------------------
-  if (!skip('run_scene'))
-  server.registerTool(
-    'run_scene',
-    {
-      title: 'Execute a manual scene',
-      description: 'Execute a manual SwitchBot scene by its sceneId (from list_scenes).',
-      _meta: { agentSafetyTier: 'action' },
-      inputSchema: z.object({
-        sceneId: z.string().describe('Scene ID from list_scenes'),
-        dryRun: z
-          .boolean()
-          .optional()
-          .describe('When true, do not call the API — return { ok:true, dryRun:true, wouldSend:{...} } instead.'),
-      }).strict(),
-      outputSchema: {
-        ok: z.literal(true),
-        sceneId: z.string().optional(),
-        dryRun: z.literal(true).optional().describe('Present when dryRun:true was requested'),
-        wouldSend: z.object({
-          sceneId: z.string(),
-        }).optional().describe('The request shape that would have been POSTed (present when dryRun:true)'),
-      },
+  if (!skip('run_scene')) registerTool('run_scene',
+  {
+    title: 'Execute a manual scene',
+    description: 'Execute a manual SwitchBot scene by its sceneId (from list_scenes).',
+    _meta: { agentSafetyTier: 'action' },
+    inputSchema: z.object({
+      sceneId: z.string().describe('Scene ID from list_scenes'),
+      dryRun: z
+        .boolean()
+        .optional()
+        .describe('When true, do not call the API — return { ok:true, dryRun:true, wouldSend:{...} } instead.'),
+    }).strict(),
+    outputSchema: {
+      ok: z.literal(true),
+      sceneId: z.string().optional(),
+      dryRun: z.literal(true).optional().describe('Present when dryRun:true was requested'),
+      wouldSend: z.object({
+        sceneId: z.string(),
+      }).optional().describe('The request shape that would have been POSTed (present when dryRun:true)'),
     },
-    async ({ sceneId, dryRun }) => {
-      if (dryRun) {
-        let scenes: Array<{ sceneId: string; sceneName: string }> = [];
-        try {
-          scenes = await fetchScenes();
-        } catch {
-          // network failure — degrade gracefully, skip validation
-        }
-        const found = scenes.find((s) => s.sceneId === sceneId);
-        if (scenes.length > 0 && !found) {
-          return mcpError('usage', 2, `Scene not found: ${sceneId}`, {
-            subKind: 'scene-not-found',
-            hint: "Check the sceneId with 'list_scenes' (IDs are case-sensitive).",
-            context: { sceneId, candidates: scenes.map((s) => ({ sceneId: s.sceneId, sceneName: s.sceneName })).slice(0, 5) },
-          });
-        }
-        const wouldSend = { sceneId, sceneName: found?.sceneName ?? null };
-        const structured = { ok: true as const, dryRun: true as const, wouldSend };
-        return {
-          content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
-          structuredContent: structured,
-        };
-      }
+  },
+  async ({ sceneId, dryRun }) => {
+    if (dryRun) {
+      let scenes: Array<{ sceneId: string; sceneName: string }> = [];
       try {
-        await executeScene(sceneId);
-      } catch (err) {
-        return apiErrorToMcpError(err);
+        scenes = await fetchScenes();
+      } catch {
+        // network failure — degrade gracefully, skip validation
       }
-      const structured = { ok: true as const, sceneId };
+      const found = scenes.find((s) => s.sceneId === sceneId);
+      if (scenes.length > 0 && !found) {
+        return mcpError('usage', 2, `Scene not found: ${sceneId}`, {
+          subKind: 'scene-not-found',
+          hint: "Check the sceneId with 'list_scenes' (IDs are case-sensitive).",
+          context: { sceneId, candidates: scenes.map((s) => ({ sceneId: s.sceneId, sceneName: s.sceneName })).slice(0, 5) },
+        });
+      }
+      const wouldSend = { sceneId, sceneName: found?.sceneName ?? null };
+      const structured = { ok: true as const, dryRun: true as const, wouldSend };
       return {
         content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
         structuredContent: structured,
       };
     }
-  );
+    try {
+      await executeScene(sceneId);
+    } catch (err) {
+      return apiErrorToMcpError(err);
+    }
+    const structured = { ok: true as const, sceneId };
+    return {
+      content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+      structuredContent: structured,
+    };
+  })
 
   // ---- list_scenes (companion to run_scene) ---------------------------------
-  if (!skip('list_scenes'))
-  server.registerTool(
-    'list_scenes',
-    {
-      title: 'List all manual scenes',
-      description: 'Fetch all manual scenes configured in the SwitchBot app.',
-      _meta: { agentSafetyTier: 'read' },
-      inputSchema: z.object({}).strict(),
-      outputSchema: {
-        scenes: z.array(z.object({ sceneId: z.string(), sceneName: z.string() })),
-      },
+  if (!skip('list_scenes')) registerTool('list_scenes',
+  {
+    title: 'List all manual scenes',
+    description: 'Fetch all manual scenes configured in the SwitchBot app.',
+    _meta: { agentSafetyTier: 'read' },
+    inputSchema: z.object({}).strict(),
+    outputSchema: {
+      scenes: z.array(z.object({ sceneId: z.string(), sceneName: z.string() })),
     },
-    async () => {
-      const scenes = await fetchScenes();
-      return {
-        content: [{ type: 'text', text: JSON.stringify(scenes, null, 2) }],
-        structuredContent: { scenes },
-      };
-    }
-  );
+  },
+  async () => {
+    const scenes = await fetchScenes();
+    return {
+      content: [{ type: 'text', text: JSON.stringify(scenes, null, 2) }],
+      structuredContent: { scenes },
+    };
+  })
 
   // ---- search_catalog -------------------------------------------------------
-  if (!skip('search_catalog'))
-  server.registerTool(
-    'search_catalog',
-    {
-      title: 'Search the offline device catalog',
-      description:
-        'Search the built-in device catalog by type name or alias. Returns matching entries with their commands, roles, destructive flags, and status fields. No API call.',
-      _meta: { agentSafetyTier: 'read' },
-      inputSchema: z.object({
-        query: z.string().describe('Search query (matches type and aliases, case-insensitive). Must be non-empty; use list_catalog_types to enumerate instead.'),
-        limit: z.number().int().min(1).max(100).optional().default(20).describe('Max entries returned (default 20)'),
-      }).strict(),
-      outputSchema: {
-        results: z.array(z.object({
-          type: z.string(),
-          category: z.enum(['physical', 'ir']),
-          commands: z.array(z.object({
-            command: z.string(),
-            parameter: z.string(),
-            description: z.string(),
-            commandType: z.enum(['command', 'customize']).optional(),
-            idempotent: z.boolean().optional(),
-            safetyTier: z.enum(['read', 'mutation', 'ir-fire-forget', 'destructive', 'maintenance']).optional(),
-            safetyReason: z.string().optional(),
-          }).passthrough()),
-          aliases: z.array(z.string()).optional(),
-          statusFields: z.array(z.string()).optional(),
-          role: z.string().optional(),
-          readOnly: z.boolean().optional(),
-        }).passthrough()).describe('Matching catalog entries'),
-        total: z.number().int().describe('Number of entries returned'),
-      },
+  if (!skip('search_catalog')) registerTool('search_catalog',
+  {
+    title: 'Search the offline device catalog',
+    description:
+      'Search the built-in device catalog by type name or alias. Returns matching entries with their commands, roles, destructive flags, and status fields. No API call.',
+    _meta: { agentSafetyTier: 'read' },
+    inputSchema: z.object({
+      query: z.string().describe('Search query (matches type and aliases, case-insensitive). Must be non-empty; use list_catalog_types to enumerate instead.'),
+      limit: z.number().int().min(1).max(100).optional().default(20).describe('Max entries returned (default 20)'),
+    }).strict(),
+    outputSchema: {
+      results: z.array(z.object({
+        type: z.string(),
+        category: z.enum(['physical', 'ir']),
+        commands: z.array(z.object({
+          command: z.string(),
+          parameter: z.string(),
+          description: z.string(),
+          commandType: z.enum(['command', 'customize']).optional(),
+          idempotent: z.boolean().optional(),
+          safetyTier: z.enum(['read', 'mutation', 'ir-fire-forget', 'destructive', 'maintenance']).optional(),
+          safetyReason: z.string().optional(),
+        }).passthrough()),
+        aliases: z.array(z.string()).optional(),
+        statusFields: z.array(z.string()).optional(),
+        role: z.string().optional(),
+        readOnly: z.boolean().optional(),
+      }).passthrough()).describe('Matching catalog entries'),
+      total: z.number().int().describe('Number of entries returned'),
     },
-    async ({ query, limit }) => {
-      if (query.trim() === '') {
-        return mcpError(
-          'usage',
-          2,
-          'search_catalog requires a non-empty query.',
-          {
-            hint: "Pass a search term like 'Bot' or 'Hub', or call list_catalog_types to enumerate all types without a query.",
-          },
-        );
-      }
-      const hits = searchCatalog(query, limit);
-      const normalised = hits.map((e) => ({
-        ...e,
-        commands: e.commands.map((c) => {
-          const tier = deriveSafetyTier(c, e);
-          const reason = getCommandSafetyReason(c);
-          return {
-            ...c,
-            safetyTier: tier,
-            ...(reason ? { safetyReason: reason } : {}),
-          };
-        }),
-      }));
-      const structured = { results: normalised as unknown as Array<Record<string, unknown>>, total: normalised.length };
-      return {
-        content: [{ type: 'text', text: JSON.stringify(normalised, null, 2) }],
-        structuredContent: structured,
-      };
+  },
+  async ({ query, limit }) => {
+    if (query.trim() === '') {
+      return mcpError(
+        'usage',
+        2,
+        'search_catalog requires a non-empty query.',
+        {
+          hint: "Pass a search term like 'Bot' or 'Hub', or call list_catalog_types to enumerate all types without a query.",
+        },
+      );
     }
-  );
+    const hits = searchCatalog(query, limit);
+    const normalised = hits.map((e) => ({
+      ...e,
+      commands: e.commands.map((c) => {
+        const tier = deriveSafetyTier(c, e);
+        const reason = getCommandSafetyReason(c);
+        return {
+          ...c,
+          safetyTier: tier,
+          ...(reason ? { safetyReason: reason } : {}),
+        };
+      }),
+    }));
+    const structured = { results: normalised as unknown as Array<Record<string, unknown>>, total: normalised.length };
+    return {
+      content: [{ type: 'text', text: JSON.stringify(normalised, null, 2) }],
+      structuredContent: structured,
+    };
+  })
 
   // ---- describe_device ------------------------------------------------------
-  if (!skip('describe_device'))
-  server.registerTool(
-    'describe_device',
-    {
-      title: 'Describe a specific device',
-      description:
-        'Resolve a deviceId to its metadata + catalog entry + suggested safe actions. Pass live:true to also fetch real-time status values.',
-      _meta: { agentSafetyTier: 'read' },
-      inputSchema: z.object({
-        deviceId: z.string().describe('Device ID from list_devices'),
-        live: z.boolean().optional().default(false).describe('Also fetch live /status values (costs 1 extra API call)'),
-      }).strict(),
-      outputSchema: {
-        device: z.object({
-          device: z.object({ deviceId: z.string(), deviceName: z.string() }).passthrough(),
-          isPhysical: z.boolean(),
-          typeName: z.string(),
-          controlType: z.string().nullable(),
-          source: z.enum(['catalog', 'live', 'catalog+live', 'none']),
-          capabilities: z.unknown().nullable(),
-          suggestedActions: z.array(z.object({
-            command: z.string(),
-            parameter: z.string().optional(),
-            description: z.string(),
-          })).optional(),
-          inheritedLocation: z.object({
-            family: z.string().optional(),
-            room: z.string().optional(),
-          }).optional(),
-        }).passthrough().describe('Device metadata, catalog entry, capabilities, and optional live status'),
-      },
+  if (!skip('describe_device')) registerTool('describe_device',
+  {
+    title: 'Describe a specific device',
+    description:
+      'Resolve a deviceId to its metadata + catalog entry + suggested safe actions. Pass live:true to also fetch real-time status values.',
+    _meta: { agentSafetyTier: 'read' },
+    inputSchema: z.object({
+      deviceId: z.string().describe('Device ID from list_devices'),
+      live: z.boolean().optional().default(false).describe('Also fetch live /status values (costs 1 extra API call)'),
+    }).strict(),
+    outputSchema: {
+      device: z.object({
+        device: z.object({ deviceId: z.string(), deviceName: z.string() }).passthrough(),
+        isPhysical: z.boolean(),
+        typeName: z.string(),
+        controlType: z.string().nullable(),
+        source: z.enum(['catalog', 'live', 'catalog+live', 'none']),
+        capabilities: z.unknown().nullable(),
+        suggestedActions: z.array(z.object({
+          command: z.string(),
+          parameter: z.string().optional(),
+          description: z.string(),
+        })).optional(),
+        inheritedLocation: z.object({
+          family: z.string().optional(),
+          room: z.string().optional(),
+        }).optional(),
+      }).passthrough().describe('Device metadata, catalog entry, capabilities, and optional live status'),
     },
-    async ({ deviceId, live }) => {
-      try {
-        const result = await describeDevice(deviceId, { live });
-        return {
-          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-          structuredContent: { device: toMcpDescribeShape(result) },
-        };
-      } catch (err) {
-        if (err instanceof DeviceNotFoundError) {
-          return mcpError('runtime', 152, err.message, {
-            hint: "Check the deviceId with 'switchbot devices list' (IDs are case-sensitive).",
-            context: { deviceId },
-          });
-        }
-        return apiErrorToMcpError(err);
+  },
+  async ({ deviceId, live }) => {
+    try {
+      const result = await describeDevice(deviceId, { live });
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+        structuredContent: { device: toMcpDescribeShape(result) },
+      };
+    } catch (err) {
+      if (err instanceof DeviceNotFoundError) {
+        return mcpError('runtime', 152, err.message, {
+          hint: "Check the deviceId with 'switchbot devices list' (IDs are case-sensitive).",
+          context: { deviceId },
+        });
       }
+      return apiErrorToMcpError(err);
     }
-  );
+  })
 
   // ---- account_overview ---------------------------------------------------
-  if (!skip('account_overview'))
-  server.registerTool(
-    'account_overview',
-    {
-      title: 'Bootstrap account overview',
-      description:
-        'Get a complete account snapshot: devices, scenes, quota usage, cache status, and MQTT connection state. Use this for cold-start initialization or periodic health checks.',
-      _meta: { agentSafetyTier: 'read' },
-      inputSchema: z.object({}).strict(),
-      outputSchema: {
-        version: z.string(),
-        schemaVersion: z.string(),
-        devices: z.array(z.object({
-          deviceId: z.string(),
-          deviceName: z.string(),
-          deviceType: z.string().optional(),
-        }).passthrough()).describe('All physical devices'),
-        infraredRemotes: z.array(z.object({
-          deviceId: z.string(),
-          deviceName: z.string(),
-          remoteType: z.string(),
-        }).passthrough()).describe('All IR remotes'),
-        scenes: z.array(z.object({
-          sceneId: z.string(),
-          sceneName: z.string(),
-        }).passthrough()).describe('All manual scenes'),
-        quota: z.object({
-          date: z.string(),
-          total: z.number(),
-          remaining: z.number(),
-          endpoints: z.record(z.string(), z.number()).optional(),
-        }).describe('Today\'s quota usage'),
-        cache: z.object({
-          list: z.object({
-            path: z.string(),
-            exists: z.boolean(),
-            lastUpdated: z.string().optional(),
-            ageMs: z.number().optional(),
-            deviceCount: z.number().optional(),
-          }),
-          status: z.object({
-            path: z.string(),
-            exists: z.boolean(),
-            entryCount: z.number(),
-            oldestFetchedAt: z.string().optional(),
-            newestFetchedAt: z.string().optional(),
-          }),
-        }).describe('Cache status'),
-        mqtt: z.object({
-          state: z.string(),
-          subscribers: z.number(),
-        }).optional().describe('MQTT connection state (present when REST credentials are configured; auto-provisioned via POST /v1.1/iot/credential)'),
-      },
+  if (!skip('account_overview')) registerTool('account_overview',
+  {
+    title: 'Bootstrap account overview',
+    description:
+      'Get a complete account snapshot: devices, scenes, quota usage, cache status, and MQTT connection state. Use this for cold-start initialization or periodic health checks.',
+    _meta: { agentSafetyTier: 'read' },
+    inputSchema: z.object({}).strict(),
+    outputSchema: {
+      version: z.string(),
+      schemaVersion: z.string(),
+      devices: z.array(z.object({
+        deviceId: z.string(),
+        deviceName: z.string(),
+        deviceType: z.string().optional(),
+      }).passthrough()).describe('All physical devices'),
+      infraredRemotes: z.array(z.object({
+        deviceId: z.string(),
+        deviceName: z.string(),
+        remoteType: z.string(),
+      }).passthrough()).describe('All IR remotes'),
+      scenes: z.array(z.object({
+        sceneId: z.string(),
+        sceneName: z.string(),
+      }).passthrough()).describe('All manual scenes'),
+      quota: z.object({
+        date: z.string(),
+        total: z.number(),
+        remaining: z.number(),
+        endpoints: z.record(z.string(), z.number()).optional(),
+      }).describe('Today\'s quota usage'),
+      cache: z.object({
+        list: z.object({
+          path: z.string(),
+          exists: z.boolean(),
+          lastUpdated: z.string().optional(),
+          ageMs: z.number().optional(),
+          deviceCount: z.number().optional(),
+        }),
+        status: z.object({
+          path: z.string(),
+          exists: z.boolean(),
+          entryCount: z.number(),
+          oldestFetchedAt: z.string().optional(),
+          newestFetchedAt: z.string().optional(),
+        }),
+      }).describe('Cache status'),
+      mqtt: z.object({
+        state: z.string(),
+        subscribers: z.number(),
+      }).optional().describe('MQTT connection state (present when REST credentials are configured; auto-provisioned via POST /v1.1/iot/credential)'),
     },
-    async () => {
-      const deviceList = await fetchDeviceList();
-      const sceneList = await fetchScenes();
-      const cacheInfo = describeCache();
-      const quota = todayUsage();
-
-      const overview = {
-        version: VERSION,
-        schemaVersion: '1.1',
-        devices: deviceList.deviceList.map(toMcpDeviceListShape),
-        infraredRemotes: deviceList.infraredRemoteList.map(toMcpIrDeviceShape),
-        scenes: sceneList.map((s) => ({
-          sceneId: s.sceneId,
-          sceneName: s.sceneName,
-        })),
-        quota: {
-          date: quota.date,
-          total: quota.total,
-          remaining: quota.remaining,
-          endpoints: quota.endpoints,
+  },
+  async () => {
+    const deviceList = await fetchDeviceList();
+    const sceneList = await fetchScenes();
+    const cacheInfo = describeCache();
+    const quota = todayUsage();
+  
+    const overview = {
+      version: VERSION,
+      schemaVersion: '1.1',
+      devices: deviceList.deviceList.map(toMcpDeviceListShape),
+      infraredRemotes: deviceList.infraredRemoteList.map(toMcpIrDeviceShape),
+      scenes: sceneList.map((s) => ({
+        sceneId: s.sceneId,
+        sceneName: s.sceneName,
+      })),
+      quota: {
+        date: quota.date,
+        total: quota.total,
+        remaining: quota.remaining,
+        endpoints: quota.endpoints,
+      },
+      cache: {
+        list: cacheInfo.list,
+        status: cacheInfo.status,
+      },
+      ...(eventManager && eventManagerProfile === (getActiveProfile() ?? 'default') ? {
+        mqtt: {
+          state: eventManager.getState(),
+          subscribers: eventManager.getSubscriberCount(),
         },
-        cache: {
-          list: cacheInfo.list,
-          status: cacheInfo.status,
-        },
-        ...(eventManager ? {
-          mqtt: {
-            state: eventManager.getState(),
-            subscribers: eventManager.getSubscriberCount(),
-          },
-        } : {}),
-      };
-
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify(overview, null, 2),
-        }],
-        structuredContent: overview,
-      };
-    }
-  );
+      } : {}),
+    };
+  
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify(overview, null, 2),
+      }],
+      structuredContent: overview,
+    };
+  })
 
   // ---- mindclip_recordings -----------------------------------------------
   // Consolidates the previous mindclip_list_recordings / mindclip_get_recording /
   // mindclip_get_summary trio. The `action` discriminator selects the operation;
   // each branch validates its own required params at handler time.
-  if (!skip('mindclip_recordings'))
-  server.registerTool(
-    'mindclip_recordings',
-    {
-      title: 'AI MindClip recordings (list / get / summary)',
-      description:
-        'Read recordings captured by AI MindClip devices. Pick `action`: ' +
-        '"list" returns a paginated page (filters: deviceID, time range, folderID, paging); ' +
-        '"get" fetches metadata + transcript for one recording (requires `id`; optional `language`); ' +
-        '"summary" returns the AI-generated summary (key points, action items) for a recording (requires `id`).',
-      _meta: { agentSafetyTier: 'read' },
-      inputSchema: z.object({
-        action: z.enum(['list', 'get', 'summary']).describe(
-          '"list": browse recordings page; "get": fetch one by id; "summary": fetch AI summary by id.',
-        ),
-        // get / summary
-        id: z.string().min(1).optional().describe('Recording ID — required when action="get" or "summary".'),
-        language: z.string().min(1).optional().describe('Language code (e.g. "en", "zh") — only honored when action="get".'),
-        // list filters
-        deviceID: z.string().min(1).optional().describe('Filter by SwitchBot device ID — list only.'),
-        pageNum: z.number().int().min(1).optional().describe('Page number (>= 1) — list only.'),
-        pageSize: z.number().int().min(1).max(100).optional().describe('Results per page (1-100) — list only.'),
-        startTime: z.number().int().min(0).optional().describe('Start timestamp in ms since epoch — list only.'),
-        endTime: z.number().int().min(0).optional().describe('End timestamp in ms since epoch — list only.'),
-        folderID: z.number().int().min(0).optional().describe('Filter by folder ID — list only.'),
-      }).strict(),
-      outputSchema: {
-        data: z.unknown().describe('Operation-shaped envelope: list -> recordings page, get -> single recording, summary -> AI summary body.'),
-      },
+  if (!skip('mindclip_recordings')) registerTool('mindclip_recordings',
+  {
+    title: 'AI MindClip recordings (list / get / summary / transcript)',
+    description:
+      'Read recordings captured by AI MindClip devices. Pick `action`: ' +
+      '"list" returns a paginated page (requires deviceID, pageNum, pageSize); ' +
+      '"get" fetches recording metadata (requires `id`; optional `language`); ' +
+      '"summary" returns the AI-generated summary (requires `id`); ' +
+      '"transcript" returns the official transcription status and result (requires `id`). ' +
+      'Pending and failed states are preserved; JSON-encoded transcript details remain strings.',
+    _meta: { agentSafetyTier: 'read' },
+    inputSchema: z.object({
+      action: z.enum(['list', 'get', 'summary', 'transcript']).describe(
+        '"list": browse recordings; "get": metadata; "summary": AI summary; "transcript": transcription state and result.',
+      ),
+      // Single-recording operations
+      id: z.string().min(1).optional().describe('Recording ID — required for get, summary, and transcript.'),
+      language: z.string().min(1).optional().describe('Legacy get-only language filter; upstream support is unverified.'),
+      // list filters
+      deviceID: z.string().min(1).optional().describe('Device ID; required for action="list".'),
+      pageNum: z.number().int().min(1).optional().describe('Page number (>= 1); required for action="list".'),
+      pageSize: z.number().int().min(1).max(100).optional().describe('Page size (1-100); required for action="list".'),
+      startTime: z.number().int().min(0).optional().describe('Start timestamp in ms since epoch — list only.'),
+      endTime: z.number().int().min(0).optional().describe('End timestamp in ms since epoch — list only.'),
+      folderID: z.number().int().min(0).optional().describe('Filter by folder ID — list only.'),
+    }).strict(),
+    outputSchema: {
+      data: z.unknown().describe('Raw operation body; transcript includes its transcription state without decoding embedded JSON strings.'),
     },
-    async (args) => {
-      try {
-        let data: unknown;
-        if (args.action === 'list') {
-          data = await listRecordings({
-            deviceID: args.deviceID,
-            pageNum: args.pageNum,
-            pageSize: args.pageSize,
-            startTime: args.startTime,
-            endTime: args.endTime,
-            folderID: args.folderID,
-          });
-        } else if (args.action === 'get') {
-          if (!args.id) return mcpError('usage', 2, 'mindclip_recordings: action="get" requires `id`.');
-          data = await getRecording(args.id, args.language);
-        } else {
-          if (!args.id) return mcpError('usage', 2, 'mindclip_recordings: action="summary" requires `id`.');
-          data = await getSummary(args.id);
+  },
+  async (args) => {
+    try {
+      let data: unknown;
+      if (args.action === 'list') {
+        if (args.deviceID === undefined || args.pageNum === undefined || args.pageSize === undefined) {
+          return mcpError('usage', 2, 'mindclip_recordings: action="list" requires deviceID, pageNum, and pageSize.');
         }
-        return {
-          content: [{ type: 'text', text: JSON.stringify(data, null, 2) }],
-          structuredContent: { data: data as Record<string, unknown> },
-        };
-      } catch (err) {
-        return apiErrorToMcpError(err);
+        data = await listRecordings({
+          deviceID: args.deviceID,
+          pageNum: args.pageNum,
+          pageSize: args.pageSize,
+          startTime: args.startTime,
+          endTime: args.endTime,
+          folderID: args.folderID,
+        });
+      } else if (args.action === 'get') {
+        if (!args.id) return mcpError('usage', 2, 'mindclip_recordings: action="get" requires `id`.');
+        data = await getRecording(args.id, args.language);
+      } else if (args.action === 'transcript') {
+        if (!args.id) return mcpError('usage', 2, 'mindclip_recordings: action="transcript" requires `id`.');
+        data = await getTranscript(args.id);
+      } else {
+        if (!args.id) return mcpError('usage', 2, 'mindclip_recordings: action="summary" requires `id`.');
+        data = await getSummary(args.id);
       }
+      return {
+        content: [{ type: 'text', text: JSON.stringify(data, null, 2) }],
+        structuredContent: { data },
+      };
+    } catch (err) {
+      return apiErrorToMcpError(err);
     }
-  );
+  })
 
   // ---- mindclip_list_todos ------------------------------------------------
-  if (!skip('mindclip_list_todos'))
-  server.registerTool(
-    'mindclip_list_todos',
-    {
-      title: 'List AI MindClip to-do items',
-      description:
-        'List AI-extracted to-dos pulled from voice recordings. Filters: completedNum (0=all/1=incomplete/2=completed), category (0=any/1=work/2=life/3=hobby/4=holiday/5=other), pagination, deviceID, fileID, time range.',
-      _meta: { agentSafetyTier: 'read' },
-      inputSchema: z.object({
-        completedNum: z.number().int().min(0).max(2).optional()
-          .describe('0=all (default), 1=incomplete, 2=completed'),
-        category: z.number().int().min(0).max(5).optional()
-          .describe('0=any, 1=work, 2=life, 3=hobby, 4=holiday, 5=other'),
-        pageNum: z.number().int().min(1).optional().describe('Page number (>= 1)'),
-        pageSize: z.number().int().min(1).max(100).optional().describe('Results per page (1-100)'),
-        deviceID: z.string().min(1).optional().describe('Filter by SwitchBot device ID'),
-        fileID: z.string().min(1).optional().describe('Filter by source recording file ID'),
-        startTime: z.number().int().min(0).optional().describe('Start timestamp in ms since epoch'),
-        endTime: z.number().int().min(0).optional().describe('End timestamp in ms since epoch'),
-      }).strict(),
-      outputSchema: {
-        data: z.unknown().describe('Todos page envelope as returned by /v1.1/mindclip/todos (opaque body)'),
-      },
+  if (!skip('mindclip_list_todos')) registerTool('mindclip_list_todos',
+  {
+    title: 'List AI MindClip to-do items',
+    description:
+      'List AI-extracted to-dos from voice recordings. Requires completedNum, pageNum, and pageSize. Legacy extra filters and numeric filter meanings remain unverified.',
+    _meta: { agentSafetyTier: 'read' },
+    inputSchema: z.object({
+      completedNum: z.number().int().min(0).max(2)
+        .describe('Required completion filter (legacy range 0-2); upstream value meanings are unverified.'),
+      category: z.number().int().min(0).max(5).optional()
+        .describe('Legacy filter (0-5); upstream support and value meanings are unverified.'),
+      pageNum: z.number().int().min(1).describe('Page number (>= 1)'),
+      pageSize: z.number().int().min(1).max(100).describe('Results per page (1-100)'),
+      deviceID: z.string().min(1).optional().describe('Filter by SwitchBot device ID'),
+      fileID: z.string().min(1).optional().describe('Filter by source recording file ID'),
+      startTime: z.number().int().min(0).optional().describe('Start timestamp in ms since epoch'),
+      endTime: z.number().int().min(0).optional().describe('End timestamp in ms since epoch'),
+    }).strict(),
+    outputSchema: {
+      data: z.unknown().describe('Todos page envelope as returned by /v1.1/mindclip/todos (opaque body)'),
     },
-    async (args) => {
-      try {
-        const data = await listTodos(args);
-        return {
-          content: [{ type: 'text', text: JSON.stringify(data, null, 2) }],
-          structuredContent: { data: data as Record<string, unknown> },
-        };
-      } catch (err) {
-        return apiErrorToMcpError(err);
-      }
+  },
+  async (args) => {
+    try {
+      const data = await listTodos(args);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(data, null, 2) }],
+        structuredContent: { data: data as Record<string, unknown> },
+      };
+    } catch (err) {
+      return apiErrorToMcpError(err);
     }
-  );
+  })
 
   // ---- mindclip_recall ----------------------------------------------------
   // Consolidates mindclip_daily_recall / mindclip_weekly_summary /
   // mindclip_urgent_todos. The `period` discriminator selects which AI-curated
   // assistant view to fetch.
-  if (!skip('mindclip_recall'))
-  server.registerTool(
-    'mindclip_recall',
-    {
-      title: 'AI MindClip recall (daily / weekly / urgent)',
-      description:
-        'Fetch AI-curated assistant views over MindClip recordings. Pick `period`: ' +
-        '"daily" returns the daily recall (key moments, decisions, action items) for a date; ' +
-        '"weekly" returns the weekly summary across recordings in an ISO week; ' +
-        '"urgent_todos" returns the AI-surfaced urgent to-dos for a date (deadlines, follow-ups). ' +
-        'Daily/urgent_todos accept optional `date` (YYYY-MM-DD); weekly accepts optional `week` (YYYY-Www). ' +
-        'Omit the time arg to get the server default (most recent for daily/weekly; yesterday for urgent_todos).',
-      _meta: { agentSafetyTier: 'read' },
-      inputSchema: z.object({
-        period: z.enum(['daily', 'weekly', 'urgent_todos']).describe(
-          '"daily": daily recall by date; "weekly": weekly summary by ISO week; "urgent_todos": urgent to-dos by date.',
-        ),
-        date: z.string().regex(DATE_REGEX).refine(isCalendarValidDate, {
-          message: 'Invalid calendar date — month/day are out of range or otherwise impossible.',
-        }).optional()
-          .describe('YYYY-MM-DD — used by period="daily" or "urgent_todos"; omit for server default.'),
-        week: z.string().regex(WEEK_REGEX).refine(
-          (v) => Number(v.slice(6)) < 53 || isLongISOYear(Number(v.slice(0, 4))),
-          { message: 'W53 does not exist for this year — only long ISO years (Jan 1 on Thursday, or leap year starting Wednesday) have 53 ISO weeks.' },
-        ).optional()
-          .describe('YYYY-Www (weeks 01-53) — used by period="weekly"; omit for server default.'),
-      }).strict().superRefine((val, ctx) => {
-        if (val.period !== 'weekly' && val.week !== undefined) {
-          ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['week'], message: '`week` is only valid when period="weekly"' });
-        }
-        if (val.period === 'weekly' && val.date !== undefined) {
-          ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['date'], message: '`date` is only valid when period="daily" or "urgent_todos"' });
-        }
-      }),
-      outputSchema: {
-        data: z.unknown().describe('Period-shaped envelope: daily -> daily recall, weekly -> weekly summary, urgent_todos -> urgent todos list.'),
-      },
-    },
-    async (args) => {
-      try {
-        let data: unknown;
-        if (args.period === 'daily') {
-          data = await getDailyRecall(args.date);
-        } else if (args.period === 'weekly') {
-          data = await getWeeklySummary(args.week);
-        } else {
-          data = await getUrgentTodos(args.date);
-        }
-        return {
-          content: [{ type: 'text', text: JSON.stringify(data, null, 2) }],
-          structuredContent: { data: data as Record<string, unknown> },
-        };
-      } catch (err) {
-        return apiErrorToMcpError(err);
+  if (!skip('mindclip_recall')) registerTool('mindclip_recall',
+  {
+    title: 'AI MindClip recall (daily / weekly / urgent)',
+    description:
+      'Fetch AI-curated assistant views over MindClip recordings. Pick `period`: ' +
+      '"daily" returns the daily recall (key moments, decisions, action items) for a date; ' +
+      '"weekly" returns the weekly summary across recordings in an ISO week; ' +
+      '"urgent_todos" returns the AI-surfaced urgent to-dos for a date (deadlines, follow-ups). ' +
+      'Requires date (YYYY-MM-DD) for daily/urgent_todos, or week (YYYY-Www) for weekly; no date or week is inferred.',
+    _meta: { agentSafetyTier: 'read' },
+    inputSchema: z.object({
+      period: z.enum(['daily', 'weekly', 'urgent_todos']).describe(
+        '"daily": daily recall by date; "weekly": weekly summary by ISO week; "urgent_todos": urgent to-dos by date.',
+      ),
+      date: z.string().regex(DATE_REGEX).refine(isCalendarValidDate, {
+        message: 'Invalid calendar date — month/day are out of range or otherwise impossible.',
+      }).optional()
+        .describe('YYYY-MM-DD; required for daily/urgent_todos.'),
+      week: z.string().regex(WEEK_REGEX).refine(
+        (v) => Number(v.slice(6)) < 53 || isLongISOYear(Number(v.slice(0, 4))),
+        { message: 'W53 does not exist for this year — only long ISO years (Jan 1 on Thursday, or leap year starting Wednesday) have 53 ISO weeks.' },
+      ).optional()
+        .describe('YYYY-Www; required for weekly.'),
+    }).strict().superRefine((val, ctx) => {
+      if (val.period !== 'weekly' && val.week !== undefined) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['week'], message: '`week` is only valid when period="weekly"' });
       }
+      if (val.period === 'weekly' && val.date !== undefined) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['date'], message: '`date` is only valid when period="daily" or "urgent_todos"' });
+      }
+    }),
+    outputSchema: {
+      data: z.unknown().describe('Period-shaped envelope: daily -> daily recall, weekly -> weekly summary, urgent_todos -> urgent todos list.'),
+    },
+  },
+  async (args) => {
+    try {
+      let data: unknown;
+      if (args.period === 'daily') {
+        if (args.date === undefined) return mcpError('usage', 2, 'mindclip_recall: daily requires date.');
+        data = await getDailyRecall(args.date);
+      } else if (args.period === 'weekly') {
+        if (args.week === undefined) return mcpError('usage', 2, 'mindclip_recall: weekly requires week.');
+        data = await getWeeklySummary(args.week);
+      } else {
+        if (args.date === undefined) return mcpError('usage', 2, 'mindclip_recall: urgent_todos requires date.');
+        data = await getUrgentTodos(args.date);
+      }
+      return {
+        content: [{ type: 'text', text: JSON.stringify(data, null, 2) }],
+        structuredContent: { data: data as Record<string, unknown> },
+      };
+    } catch (err) {
+      return apiErrorToMcpError(err);
     }
-  );
+  })
 
   // ---- policy_validate -----------------------------------------------------
-  if (!skip('policy_validate'))
-  server.registerTool(
-    'policy_validate',
-    {
-      title: 'Validate a policy.yaml file',
-      description:
-        'Check a policy file against the embedded JSON Schema, offline command/device semantics, and local safety guards. ' +
-        'By default this stays offline; set live=true to resolve aliases and rule targets against the current account inventory. ' +
-        'It still does not verify commands against live capabilities, current firmware, or other runtime-only device behavior. ' +
-        'When no path is given, reads the resolved default (${SWITCHBOT_POLICY_PATH} or ~/.config/openclaw/switchbot/policy.yaml). ' +
-        'Use before relying on aliases/quiet_hours/confirmations so the agent never acts on a broken policy.',
-      _meta: { agentSafetyTier: 'read' },
-      inputSchema: z.object({
-        path: z.string().optional().describe('Optional policy file path; defaults to the resolved default path'),
-        live: z.boolean().optional().describe('When true, also resolve aliases and rule targets against the current account inventory'),
-      }).strict(),
-      outputSchema: {
-        policyPath: z.string(),
-        schemaVersion: z.string(),
-        validationScope: z.string(),
-        limitations: z.array(z.string()),
-        present: z.boolean().describe('false when the file does not exist'),
-        valid: z.boolean().nullable().describe('null when present=false'),
-        errors: z.array(z.object({
-          path: z.string(),
-          line: z.number().optional(),
-          col: z.number().optional(),
-          keyword: z.string(),
-          message: z.string(),
-          hint: z.string().optional(),
-          schemaPath: z.string(),
-        })).describe('Empty when valid or when the file is missing'),
-      },
+  if (!skip('policy_validate')) registerTool('policy_validate',
+  {
+    title: 'Validate a policy.yaml file',
+    description:
+      'Check a policy file against the embedded JSON Schema, offline command/device semantics, and local safety guards. ' +
+      'By default this stays offline; set live=true to resolve aliases and rule targets against the current account inventory. ' +
+      'It still does not verify commands against live capabilities, current firmware, or other runtime-only device behavior. ' +
+      'When no path is given, reads the resolved default (${SWITCHBOT_POLICY_PATH} or ~/.config/openclaw/switchbot/policy.yaml). ' +
+      'Use before relying on aliases/quiet_hours/confirmations so the agent never acts on a broken policy.',
+    _meta: { agentSafetyTier: 'read' },
+    inputSchema: z.object({
+      path: z.string().optional().describe('Optional policy file path; defaults to the resolved default path'),
+      live: z.boolean().optional().describe('When true, also resolve aliases and rule targets against the current account inventory'),
+    }).strict(),
+    outputSchema: {
+      policyPath: z.string(),
+      schemaVersion: z.string(),
+      validationScope: z.string(),
+      limitations: z.array(z.string()),
+      present: z.boolean().describe('false when the file does not exist'),
+      valid: z.boolean().nullable().describe('null when present=false'),
+      errors: z.array(z.object({
+        path: z.string(),
+        line: z.number().optional(),
+        col: z.number().optional(),
+        keyword: z.string(),
+        message: z.string(),
+        hint: z.string().optional(),
+        schemaPath: z.string(),
+      })).describe('Empty when valid or when the file is missing'),
     },
-    async ({ path: pathArg, live }) => {
-      const policyPath = resolvePolicyPath({ flag: pathArg });
-      try {
-        const loaded = loadPolicyFile(policyPath);
-        let result = validateLoadedPolicy(loaded);
-        if (live) {
-          if (!tryLoadConfig()) {
-            return mcpError('runtime', 151, 'policy_validate live=true requires configured SwitchBot credentials.', {
-              hint: "Run 'switchbot config set-token' first, or set SWITCHBOT_TOKEN and SWITCHBOT_SECRET.",
-            });
-          }
-          const inventory = await fetchDeviceList(undefined, { bypassCache: true });
-          result = validateLoadedPolicyAgainstInventory(loaded, inventory);
+  },
+  async ({ path: pathArg, live }) => {
+    const policyPath = resolvePolicyPath({ flag: pathArg });
+    try {
+      const loaded = loadPolicyFile(policyPath);
+      let result = validateLoadedPolicy(loaded);
+      if (live) {
+        if (!tryLoadConfig()) {
+          return mcpError('runtime', 151, 'policy_validate live=true requires configured SwitchBot credentials.', {
+            hint: "Run 'switchbot config set-token' first, or set SWITCHBOT_TOKEN and SWITCHBOT_SECRET.",
+          });
         }
+        const inventory = await fetchDeviceList(undefined, { bypassCache: true });
+        result = validateLoadedPolicyAgainstInventory(loaded, inventory);
+      }
+      const structured = {
+        policyPath: result.policyPath,
+        schemaVersion: result.schemaVersion,
+        validationScope: result.validationScope,
+        limitations: result.limitations,
+        present: true,
+        valid: result.valid,
+        errors: result.errors,
+      };
+      return {
+        content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+        structuredContent: structured,
+      };
+    } catch (err) {
+      if (err instanceof PolicyFileNotFoundError) {
         const structured = {
-          policyPath: result.policyPath,
-          schemaVersion: result.schemaVersion,
-          validationScope: result.validationScope,
-          limitations: result.limitations,
-          present: true,
-          valid: result.valid,
-          errors: result.errors,
+          policyPath,
+          schemaVersion: CURRENT_POLICY_SCHEMA_VERSION,
+          validationScope: 'schema+offline-semantics' as const,
+          limitations: [
+            'Does not resolve aliases against the live device inventory.',
+            'Does not verify commands against the real target device, live capabilities, or current firmware.',
+          ],
+          present: false,
+          valid: null,
+          errors: [],
         };
         return {
           content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
           structuredContent: structured,
         };
-      } catch (err) {
-        if (err instanceof PolicyFileNotFoundError) {
-          const structured = {
-            policyPath,
-            schemaVersion: CURRENT_POLICY_SCHEMA_VERSION,
-            validationScope: 'schema+offline-semantics' as const,
-            limitations: [
-              'Does not resolve aliases against the live device inventory.',
-              'Does not verify commands against the real target device, live capabilities, or current firmware.',
-            ],
-            present: false,
-            valid: null,
-            errors: [],
-          };
-          return {
-            content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
-            structuredContent: structured,
-          };
-        }
-        if (err instanceof PolicyYamlParseError) {
-          const structured = {
-            policyPath,
-            schemaVersion: CURRENT_POLICY_SCHEMA_VERSION,
-            validationScope: 'schema+offline-semantics' as const,
-            limitations: [
-              'Does not resolve aliases against the live device inventory.',
-              'Does not verify commands against the real target device, live capabilities, or current firmware.',
-            ],
-            present: true,
-            valid: false,
-            errors: err.yamlErrors.map((e) => ({
-              path: '',
-              line: e.line,
-              col: e.col,
-              keyword: 'yaml-parse',
-              message: e.message,
-              schemaPath: '',
-            })),
-          };
-          return {
-            content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
-            structuredContent: structured,
-          };
-        }
-        throw err;
       }
+      if (err instanceof PolicyYamlParseError) {
+        const structured = {
+          policyPath,
+          schemaVersion: CURRENT_POLICY_SCHEMA_VERSION,
+          validationScope: 'schema+offline-semantics' as const,
+          limitations: [
+            'Does not resolve aliases against the live device inventory.',
+            'Does not verify commands against the real target device, live capabilities, or current firmware.',
+          ],
+          present: true,
+          valid: false,
+          errors: err.yamlErrors.map((e) => ({
+            path: '',
+            line: e.line,
+            col: e.col,
+            keyword: 'yaml-parse',
+            message: e.message,
+            schemaPath: '',
+          })),
+        };
+        return {
+          content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+          structuredContent: structured,
+        };
+      }
+      throw err;
     }
-  );
+  })
 
   // ---- policy_new ----------------------------------------------------------
-  if (!skip('policy_new'))
-  server.registerTool(
-    'policy_new',
-    {
-      title: 'Scaffold a starter policy.yaml',
-      description:
-        'Write a starter policy file to the resolved default path (or a given path). Refuses to overwrite unless force=true. ' +
-        'This is a write action: the agent should only call it after confirming with the user.',
-      _meta: { agentSafetyTier: 'action' },
-      inputSchema: z.object({
-        path: z.string().optional().describe('Optional target path; defaults to the resolved default'),
-        force: z.boolean().optional().describe('When true, overwrite an existing file'),
-      }).strict(),
-      outputSchema: {
-        policyPath: z.string(),
-        schemaVersion: z.string(),
-        bytesWritten: z.number(),
-        overwritten: z.boolean(),
-      },
+  if (!skip('policy_new')) registerTool('policy_new',
+  {
+    title: 'Scaffold a starter policy.yaml',
+    description:
+      'Write a starter policy file to the resolved default path (or a given path). Refuses to overwrite unless force=true. ' +
+      'This is a write action: the agent should only call it after confirming with the user.',
+    _meta: { agentSafetyTier: 'action' },
+    inputSchema: z.object({
+      path: z.string().optional().describe('Optional target path; defaults to the resolved default'),
+      force: z.boolean().optional().describe('When true, overwrite an existing file'),
+    }).strict(),
+    outputSchema: {
+      policyPath: z.string(),
+      schemaVersion: z.string(),
+      bytesWritten: z.number(),
+      overwritten: z.boolean(),
     },
-    async ({ path: pathArg, force }) => {
-      const policyPath = resolvePolicyPath({ flag: pathArg });
-      const doForce = force === true;
-      if (fs.existsSync(policyPath) && !doForce) {
-        return mcpError('guard', 5, `refusing to overwrite existing policy at ${policyPath}`, {
-          hint: 'pass force=true to overwrite, or choose a different path',
-          context: { policyPath },
-        });
-      }
-      const template = readPolicyExampleYaml();
-      fs.mkdirSync(pathDirname(policyPath), { recursive: true });
-      fs.writeFileSync(policyPath, template, { encoding: 'utf-8' });
-      const structured = {
-        policyPath,
-        schemaVersion: CURRENT_POLICY_SCHEMA_VERSION,
-        bytesWritten: Buffer.byteLength(template, 'utf-8'),
-        overwritten: doForce,
-      };
-      return {
-        content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
-        structuredContent: structured,
-      };
+  },
+  async ({ path: pathArg, force }) => {
+    const policyPath = resolvePolicyPath({ flag: pathArg });
+    const doForce = force === true;
+    if (fs.existsSync(policyPath) && !doForce) {
+      return mcpError('guard', 5, `refusing to overwrite existing policy at ${policyPath}`, {
+        hint: 'pass force=true to overwrite, or choose a different path',
+        context: { policyPath },
+      });
     }
-  );
+    const template = readPolicyExampleYaml();
+    fs.mkdirSync(pathDirname(policyPath), { recursive: true });
+    fs.writeFileSync(policyPath, template, { encoding: 'utf-8' });
+    const structured = {
+      policyPath,
+      schemaVersion: CURRENT_POLICY_SCHEMA_VERSION,
+      bytesWritten: Buffer.byteLength(template, 'utf-8'),
+      overwritten: doForce,
+    };
+    return {
+      content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+      structuredContent: structured,
+    };
+  })
 
   // ---- policy_migrate ------------------------------------------------------
-  if (!skip('policy_migrate'))
-  server.registerTool(
-    'policy_migrate',
-    {
-      title: 'Migrate a policy file to the latest supported schema',
-      description:
-        'Rewrites a policy file between schema versions this CLI still supports while preserving comments. ' +
-        'Safe by default: if the migrated document would fail schema validation, the file is NOT rewritten ' +
-        'and the tool returns status="precheck-failed" with the list of errors. ' +
-        'Pass dryRun=true to preview without touching the file. ' +
-        'This release only supports v0.2, so legacy v0.1 files are reported as unsupported rather than migrated.',
-      _meta: { agentSafetyTier: 'action' },
-      inputSchema: z.object({
-        path: z.string().optional().describe('Optional policy file path; defaults to the resolved default path'),
-        dryRun: z.boolean().optional().describe('When true, report what would change without writing'),
-        to: z.string().optional().describe(`Target schema version (default: latest supported, "${LATEST_SUPPORTED_VERSION}")`),
-      }).strict(),
-      outputSchema: {
-        policyPath: z.string(),
-        fileVersion: z.string().optional(),
-        targetVersion: z.string(),
-        supportedVersions: z.array(z.string()),
-        status: z.enum([
-          'already-current',
-          'migrated',
-          'dry-run',
-          'no-version-field',
-          'unsupported',
-          'precheck-failed',
-          'file-not-found',
-        ]),
-        from: z.string().optional(),
-        to: z.string().optional(),
-        bytesWritten: z.number().optional(),
-        message: z.string(),
-        errors: z
-          .array(z.object({ path: z.string(), keyword: z.string(), message: z.string() }))
-          .optional(),
-      },
+  if (!skip('policy_migrate')) registerTool('policy_migrate',
+  {
+    title: 'Migrate a policy file to the latest supported schema',
+    description:
+      'Rewrites a policy file between schema versions this CLI still supports while preserving comments. ' +
+      'Safe by default: if the migrated document would fail schema validation, the file is NOT rewritten ' +
+      'and the tool returns status="precheck-failed" with the list of errors. ' +
+      'Pass dryRun=true to preview without touching the file. ' +
+      'This release only supports v0.2, so legacy v0.1 files are reported as unsupported rather than migrated.',
+    _meta: { agentSafetyTier: 'action' },
+    inputSchema: z.object({
+      path: z.string().optional().describe('Optional policy file path; defaults to the resolved default path'),
+      dryRun: z.boolean().optional().describe('When true, report what would change without writing'),
+      to: z.string().optional().describe(`Target schema version (default: latest supported, "${LATEST_SUPPORTED_VERSION}")`),
+    }).strict(),
+    outputSchema: {
+      policyPath: z.string(),
+      fileVersion: z.string().optional(),
+      targetVersion: z.string(),
+      supportedVersions: z.array(z.string()),
+      status: z.enum([
+        'already-current',
+        'migrated',
+        'dry-run',
+        'no-version-field',
+        'unsupported',
+        'precheck-failed',
+        'file-not-found',
+      ]),
+      from: z.string().optional(),
+      to: z.string().optional(),
+      bytesWritten: z.number().optional(),
+      message: z.string(),
+      errors: z
+        .array(z.object({ path: z.string(), keyword: z.string(), message: z.string() }))
+        .optional(),
     },
-    async ({ path: pathArg, dryRun, to }) => {
-      const policyPath = resolvePolicyPath({ flag: pathArg });
-      const target = (to ?? LATEST_SUPPORTED_VERSION) as PolicySchemaVersion;
-
-      let loaded;
-      try {
-        loaded = loadPolicyFile(policyPath);
-      } catch (err) {
-        if (err instanceof PolicyFileNotFoundError) {
-          const structured = {
-            policyPath,
-            targetVersion: target,
-            supportedVersions: [...SUPPORTED_POLICY_SCHEMA_VERSIONS],
-            status: 'file-not-found' as const,
-            message: `policy file not found: ${policyPath}`,
-          };
-          return {
-            content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
-            structuredContent: structured,
-          };
-        }
-        throw err;
-      }
-
-      const data = loaded.data as { version?: unknown } | null;
-      const fileVersion = typeof data?.version === 'string' ? data.version : undefined;
-      const base = {
-        policyPath,
-        fileVersion,
-        targetVersion: target,
-        supportedVersions: [...SUPPORTED_POLICY_SCHEMA_VERSIONS],
-      };
-
-      if (!fileVersion) {
+  },
+  async ({ path: pathArg, dryRun, to }) => {
+    const policyPath = resolvePolicyPath({ flag: pathArg });
+    const target = (to ?? LATEST_SUPPORTED_VERSION) as PolicySchemaVersion;
+  
+    let loaded;
+    try {
+      loaded = loadPolicyFile(policyPath);
+    } catch (err) {
+      if (err instanceof PolicyFileNotFoundError) {
         const structured = {
-          ...base,
-          status: 'no-version-field' as const,
-          message: `policy has no \`version\` field — add \`version: "${CURRENT_POLICY_SCHEMA_VERSION}"\``,
+          policyPath,
+          targetVersion: target,
+          supportedVersions: [...SUPPORTED_POLICY_SCHEMA_VERSIONS],
+          status: 'file-not-found' as const,
+          message: `policy file not found: ${policyPath}`,
         };
         return {
           content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
           structuredContent: structured,
         };
       }
-
-      if (!SUPPORTED_POLICY_SCHEMA_VERSIONS.includes(fileVersion as PolicySchemaVersion)) {
-        const isLegacy = fileVersion === '0.1';
-        const structured = {
-          ...base,
-          status: 'unsupported' as const,
-          message: isLegacy
-            ? `policy schema v${fileVersion} is legacy and cannot be migrated by this CLI`
-            : `policy schema v${fileVersion} is not supported (supports: ${SUPPORTED_POLICY_SCHEMA_VERSIONS.join(', ')})`,
-        };
-        return {
-          content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
-          structuredContent: structured,
-        };
-      }
-
-      if (fileVersion === target) {
-        const structured = {
-          ...base,
-          status: 'already-current' as const,
-          message: `already on schema v${target}; no migration needed`,
-          bytesWritten: 0,
-        };
-        return {
-          content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
-          structuredContent: structured,
-        };
-      }
-
-      const plan = planMigration(loaded, fileVersion as PolicySchemaVersion, target);
-      if (!plan.precheck.valid) {
-        const structured = {
-          ...base,
-          status: 'precheck-failed' as const,
-          message: `migrated policy fails schema v${target} precheck; file not written`,
-          errors: plan.precheck.errors.map((e) => ({ path: e.path, keyword: e.keyword, message: e.message })),
-        };
-        return {
-          content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
-          structuredContent: structured,
-        };
-      }
-
-      const bytes = Buffer.byteLength(plan.nextSource, 'utf-8');
-      if (dryRun) {
-        const structured = {
-          ...base,
-          status: 'dry-run' as const,
-          from: plan.fromVersion,
-          to: plan.toVersion,
-          bytesWritten: 0,
-          message: `dry-run: would upgrade v${plan.fromVersion} → v${plan.toVersion} (${bytes} bytes)`,
-        };
-        return {
-          content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
-          structuredContent: structured,
-        };
-      }
-
-      writeFileSync(policyPath, plan.nextSource, { encoding: 'utf-8' });
+      throw err;
+    }
+  
+    const data = loaded.data as { version?: unknown } | null;
+    const fileVersion = typeof data?.version === 'string' ? data.version : undefined;
+    const base = {
+      policyPath,
+      fileVersion,
+      targetVersion: target,
+      supportedVersions: [...SUPPORTED_POLICY_SCHEMA_VERSIONS],
+    };
+  
+    if (!fileVersion) {
       const structured = {
         ...base,
-        status: 'migrated' as const,
-        from: plan.fromVersion,
-        to: plan.toVersion,
-        bytesWritten: bytes,
-        message: `migrated ${policyPath} to schema v${plan.toVersion} (from v${plan.fromVersion})`,
+        status: 'no-version-field' as const,
+        message: `policy has no \`version\` field — add \`version: "${CURRENT_POLICY_SCHEMA_VERSION}"\``,
       };
       return {
         content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
         structuredContent: structured,
       };
     }
-  );
+  
+    if (!SUPPORTED_POLICY_SCHEMA_VERSIONS.includes(fileVersion as PolicySchemaVersion)) {
+      const isLegacy = fileVersion === '0.1';
+      const structured = {
+        ...base,
+        status: 'unsupported' as const,
+        message: isLegacy
+          ? `policy schema v${fileVersion} is legacy and cannot be migrated by this CLI`
+          : `policy schema v${fileVersion} is not supported (supports: ${SUPPORTED_POLICY_SCHEMA_VERSIONS.join(', ')})`,
+      };
+      return {
+        content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+        structuredContent: structured,
+      };
+    }
+  
+    if (fileVersion === target) {
+      const structured = {
+        ...base,
+        status: 'already-current' as const,
+        message: `already on schema v${target}; no migration needed`,
+        bytesWritten: 0,
+      };
+      return {
+        content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+        structuredContent: structured,
+      };
+    }
+  
+    const plan = planMigration(loaded, fileVersion as PolicySchemaVersion, target);
+    if (!plan.precheck.valid) {
+      const structured = {
+        ...base,
+        status: 'precheck-failed' as const,
+        message: `migrated policy fails schema v${target} precheck; file not written`,
+        errors: plan.precheck.errors.map((e) => ({ path: e.path, keyword: e.keyword, message: e.message })),
+      };
+      return {
+        content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+        structuredContent: structured,
+      };
+    }
+  
+    const bytes = Buffer.byteLength(plan.nextSource, 'utf-8');
+    if (dryRun) {
+      const structured = {
+        ...base,
+        status: 'dry-run' as const,
+        from: plan.fromVersion,
+        to: plan.toVersion,
+        bytesWritten: 0,
+        message: `dry-run: would upgrade v${plan.fromVersion} → v${plan.toVersion} (${bytes} bytes)`,
+      };
+      return {
+        content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+        structuredContent: structured,
+      };
+    }
+  
+    writeFileSync(policyPath, plan.nextSource, { encoding: 'utf-8' });
+    const structured = {
+      ...base,
+      status: 'migrated' as const,
+      from: plan.fromVersion,
+      to: plan.toVersion,
+      bytesWritten: bytes,
+      message: `migrated ${policyPath} to schema v${plan.toVersion} (from v${plan.fromVersion})`,
+    };
+    return {
+      content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+      structuredContent: structured,
+    };
+  })
 
   // ---- policy_diff ---------------------------------------------------------
-  if (!skip('policy_diff'))
-  server.registerTool(
-    'policy_diff',
-    {
-      title: 'Compare two policy files',
-      description:
-        'Compare two policy YAML files and return the same contract as `switchbot --json policy diff`: ' +
-        '{ leftPath, rightPath, equal, changeCount, truncated, stats, changes, diff }.',
-      _meta: { agentSafetyTier: 'read' },
-      inputSchema: z.object({
-        left_path: z.string().min(1).describe('Path to the baseline policy file.'),
-        right_path: z.string().min(1).describe('Path to the candidate policy file.'),
-      }).strict(),
-      outputSchema: {
-        leftPath: z.string(),
-        rightPath: z.string(),
-        equal: z.boolean(),
-        changeCount: z.number().int(),
-        truncated: z.boolean(),
-        stats: z.object({
-          added: z.number().int(),
-          removed: z.number().int(),
-          changed: z.number().int(),
-        }),
-        changes: z.array(z.object({
-          path: z.string(),
-          kind: z.enum(['added', 'removed', 'changed']),
-          before: z.unknown().optional(),
-          after: z.unknown().optional(),
-        })),
-        diff: z.string(),
-      },
+  if (!skip('policy_diff')) registerTool('policy_diff',
+  {
+    title: 'Compare two policy files',
+    description:
+      'Compare two policy YAML files and return the same contract as `switchbot --json policy diff`: ' +
+      '{ leftPath, rightPath, equal, changeCount, truncated, stats, changes, diff }.',
+    _meta: { agentSafetyTier: 'read' },
+    inputSchema: z.object({
+      left_path: z.string().min(1).describe('Path to the baseline policy file.'),
+      right_path: z.string().min(1).describe('Path to the candidate policy file.'),
+    }).strict(),
+    outputSchema: {
+      leftPath: z.string(),
+      rightPath: z.string(),
+      equal: z.boolean(),
+      changeCount: z.number().int(),
+      truncated: z.boolean(),
+      stats: z.object({
+        added: z.number().int(),
+        removed: z.number().int(),
+        changed: z.number().int(),
+      }),
+      changes: z.array(z.object({
+        path: z.string(),
+        kind: z.enum(['added', 'removed', 'changed']),
+        before: z.unknown().optional(),
+        after: z.unknown().optional(),
+      })),
+      diff: z.string(),
     },
-    ({ left_path, right_path }) => {
-      let leftSource = '';
-      let rightSource = '';
-      try {
-        leftSource = fs.readFileSync(left_path, 'utf-8');
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') {
-          return mcpError('usage', 2, `policy file not found: ${left_path}`, {
-            context: { policyPath: left_path },
-          });
-        }
-        return mcpError('runtime', 1, `failed to read ${left_path}: ${String(err)}`);
+  },
+  ({ left_path, right_path }) => {
+    let leftSource = '';
+    let rightSource = '';
+    try {
+      leftSource = fs.readFileSync(left_path, 'utf-8');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') {
+        return mcpError('usage', 2, `policy file not found: ${left_path}`, {
+          context: { policyPath: left_path },
+        });
       }
-      try {
-        rightSource = fs.readFileSync(right_path, 'utf-8');
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') {
-          return mcpError('usage', 2, `policy file not found: ${right_path}`, {
-            context: { policyPath: right_path },
-          });
-        }
-        return mcpError('runtime', 1, `failed to read ${right_path}: ${String(err)}`);
+      return mcpError('runtime', 1, `failed to read ${left_path}: ${String(err)}`);
+    }
+    try {
+      rightSource = fs.readFileSync(right_path, 'utf-8');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') {
+        return mcpError('usage', 2, `policy file not found: ${right_path}`, {
+          context: { policyPath: right_path },
+        });
       }
-
-      let leftDoc: unknown;
-      let rightDoc: unknown;
-      try {
-        leftDoc = yamlParse(leftSource);
-      } catch (err) {
-        return mcpError('usage', 2, `YAML parse error in ${left_path}: ${(err as Error).message}`);
-      }
-      try {
-        rightDoc = yamlParse(rightSource);
-      } catch (err) {
-        return mcpError('usage', 2, `YAML parse error in ${right_path}: ${(err as Error).message}`);
-      }
-
-      const result = {
-        leftPath: left_path,
-        rightPath: right_path,
-        ...diffPolicyValues(leftDoc, rightDoc, leftSource, rightSource),
-      };
-
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
-        structuredContent: result,
-      };
-    },
-  );
+      return mcpError('runtime', 1, `failed to read ${right_path}: ${String(err)}`);
+    }
+  
+    let leftDoc: unknown;
+    let rightDoc: unknown;
+    try {
+      leftDoc = yamlParse(leftSource);
+    } catch (err) {
+      return mcpError('usage', 2, `YAML parse error in ${left_path}: ${(err as Error).message}`);
+    }
+    try {
+      rightDoc = yamlParse(rightSource);
+    } catch (err) {
+      return mcpError('usage', 2, `YAML parse error in ${right_path}: ${(err as Error).message}`);
+    }
+  
+    const result = {
+      leftPath: left_path,
+      rightPath: right_path,
+      ...diffPolicyValues(leftDoc, rightDoc, leftSource, rightSource),
+    };
+  
+    return {
+      content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+      structuredContent: result,
+    };
+  },)
 
   // switchbot://events resource — snapshot of recent shadow events from the ring buffer.
   // Returns up to 100 recent events. When MQTT is disabled, returns an empty list with a state note.
@@ -1866,6 +1883,9 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
         mimeType: 'application/json',
       },
       (_uri) => {
+        if (eventManagerProfile !== (getActiveProfile() ?? 'default')) {
+          throw new Error('Events are unavailable for this credential profile.');
+        }
         const state = eventManager.getState();
         const events = state !== 'disabled' ? eventManager.getRecentEvents(100) : [];
         return {
@@ -1880,670 +1900,643 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
   }
 
   // ---- plan_suggest ---------------------------------------------------------
-  if (!skip('plan_suggest'))
-  server.registerTool(
-    'plan_suggest',
-    {
-      title: 'Draft a SwitchBot execution plan from intent',
-      description:
-        'Generate a candidate Plan JSON from a natural language intent and a list of device IDs. ' +
-        'Uses keyword heuristics (no LLM) to pick the command. The returned plan is ready to pass to ' +
-        '`plan run` — review and edit before executing. Recognised commands: turnOn, turnOff, press, ' +
-        'lock, unlock, open, close, pause. Falls back to turnOn with a warning when intent is unclear.',
-      _meta: { agentSafetyTier: 'read' },
-      inputSchema: z.object({
-        intent: z.string().min(1).describe('Natural language description of what to do (e.g. "turn off all lights").'),
-        device_ids: z.array(z.string().min(1)).min(1).describe('Device IDs to act on.'),
-      }).strict(),
-      outputSchema: {
-        plan: z.unknown().describe('Candidate Plan JSON (version 1.0) ready to pass to plan run.'),
-        warnings: z.array(z.string()).describe('Informational warnings (e.g. unrecognized intent defaulted to turnOn).'),
-      },
+  if (!skip('plan_suggest')) registerTool('plan_suggest',
+  {
+    title: 'Draft a SwitchBot execution plan from intent',
+    description:
+      'Generate a candidate Plan JSON from a natural language intent and a list of device IDs. ' +
+      'Uses keyword heuristics (no LLM) to pick the command. The returned plan is ready to pass to ' +
+      '`plan run` — review and edit before executing. Recognised commands: turnOn, turnOff, press, ' +
+      'lock, unlock, open, close, pause. Falls back to turnOn with a warning when intent is unclear.',
+    _meta: { agentSafetyTier: 'read' },
+    inputSchema: z.object({
+      intent: z.string().min(1).describe('Natural language description of what to do (e.g. "turn off all lights").'),
+      device_ids: z.array(z.string().min(1)).min(1).describe('Device IDs to act on.'),
+    }).strict(),
+    outputSchema: {
+      plan: z.unknown().describe('Candidate Plan JSON (version 1.0) ready to pass to plan run.'),
+      warnings: z.array(z.string()).describe('Informational warnings (e.g. unrecognized intent defaulted to turnOn).'),
     },
-    ({ intent, device_ids }) => {
-      const devices = device_ids.map((id) => {
-        const cached = getCachedDevice(id);
-        return { id, name: cached?.name, type: cached?.type };
-      });
-      try {
-        const { plan, warnings } = suggestPlan({ intent, devices });
-        return {
-          content: [{ type: 'text' as const, text: JSON.stringify({ plan, warnings }, null, 2) }],
-          structuredContent: { plan, warnings },
-        };
-      } catch (err) {
-        return apiErrorToMcpError(err);
-      }
-    },
-  );
+  },
+  ({ intent, device_ids }) => {
+    const devices = device_ids.map((id) => {
+      const cached = getCachedDevice(id);
+      return { id, name: cached?.name, type: cached?.type };
+    });
+    try {
+      const { plan, warnings } = suggestPlan({ intent, devices });
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify({ plan, warnings }, null, 2) }],
+        structuredContent: { plan, warnings },
+      };
+    } catch (err) {
+      return apiErrorToMcpError(err);
+    }
+  },)
 
   // ---- plan_run -------------------------------------------------------------
-  if (!skip('plan_run'))
-  server.registerTool(
-    'plan_run',
-    {
-      title: 'Validate and execute a SwitchBot plan',
-      description:
-        'Execute a Plan JSON object (version 1.0). Destructive command steps are skipped unless yes=true, and the default safety profile still refuses direct destructive execution in favor of the reviewed plan workflow. ' +
-        'Scene and wait steps run in order. Returns per-step results and a summary.',
-      _meta: { agentSafetyTier: 'action' },
-      inputSchema: z.object({
-        plan: z.unknown().describe('Plan JSON object (same schema as `switchbot plan run`).'),
-        yes: z.boolean().optional().describe('Authorize destructive command steps.'),
-        continue_on_error: z.boolean().optional().describe('Keep executing later steps after a failed step.'),
-      }).strict(),
-      outputSchema: {
-        ran: z.boolean(),
-        plan: z.unknown(),
-        results: z.array(z.discriminatedUnion('type', [
-          z.object({
-            step: z.number(),
-            type: z.literal('command'),
-            deviceId: z.string(),
-            command: z.string(),
-            status: z.enum(['ok', 'error', 'skipped']),
-            error: z.string().optional(),
-          }).passthrough(),
-          z.object({
-            step: z.number(),
-            type: z.literal('scene'),
-            sceneId: z.string(),
-            status: z.enum(['ok', 'error']),
-            error: z.string().optional(),
-          }).passthrough(),
-          z.object({
-            step: z.number(),
-            type: z.literal('wait'),
-            ms: z.number(),
-            status: z.literal('ok'),
-          }).passthrough(),
-        ])),
-        summary: z.object({
-          total: z.number().int(),
-          ok: z.number().int(),
-          error: z.number().int(),
-          skipped: z.number().int(),
-        }),
-      },
+  if (!skip('plan_run')) registerTool('plan_run',
+  {
+    title: 'Validate and execute a SwitchBot plan',
+    description:
+      'Preflight every target before executing a Plan JSON object (version 1.0). Default profiles refuse destructive execution in favor of the reviewed CLI plan workflow. ' +
+      'Scene and wait steps run in order. Global dry-run previews every step without waiting or mutations; ran=false and status="dry-run" identify previews.',
+    _meta: { agentSafetyTier: 'action' },
+    inputSchema: z.object({
+      plan: z.unknown().describe('Plan JSON object (same schema as `switchbot plan run`).'),
+      yes: z.boolean().optional().describe('Authorize destructive command steps.'),
+      continue_on_error: z.boolean().optional().describe('Keep executing later steps after a failed step.'),
+    }).strict(),
+    outputSchema: {
+      ran: z.boolean(),
+      plan: z.unknown(),
+      results: z.array(z.discriminatedUnion('type', [
+        z.object({
+          step: z.number(),
+          type: z.literal('command'),
+          deviceId: z.string(),
+          command: z.string(),
+          status: z.enum(['ok', 'error', 'skipped', 'dry-run']),
+          error: z.string().optional(),
+        }).passthrough(),
+        z.object({
+          step: z.number(),
+          type: z.literal('scene'),
+          sceneId: z.string(),
+          status: z.enum(['ok', 'error', 'dry-run']),
+          error: z.string().optional(),
+        }).passthrough(),
+        z.object({
+          step: z.number(),
+          type: z.literal('wait'),
+          ms: z.number(),
+          status: z.enum(['ok', 'dry-run']),
+        }).passthrough(),
+      ])),
+      summary: z.object({
+        total: z.number().int(),
+        ok: z.number().int(),
+        error: z.number().int(),
+        skipped: z.number().int(),
+        dryRun: z.number().int(),
+      }),
     },
-    async ({ plan, yes, continue_on_error }) => {
-      const validated = validatePlan(plan);
-      if (!validated.ok) {
-        return mcpError('usage', 2, 'plan invalid', {
-          context: { issues: validated.issues },
-          hint: 'Fix the reported issues and retry plan_run.',
-        });
-      }
-
-      const out: {
-        ran: true;
-        plan: typeof validated.plan;
-        results: Array<
-          | { step: number; type: 'command'; deviceId: string; command: string; status: 'ok' | 'error' | 'skipped'; error?: string }
-          | { step: number; type: 'scene'; sceneId: string; status: 'ok' | 'error'; error?: string }
-          | { step: number; type: 'wait'; ms: number; status: 'ok' }
-        >;
-        summary: { total: number; ok: number; error: number; skipped: number };
-      } = {
-        ran: true,
-        plan: validated.plan,
-        results: [],
-        summary: { total: validated.plan.steps.length, ok: 0, error: 0, skipped: 0 },
-      };
-
-      const continueOnError = continue_on_error === true;
-      const allowDestructive = yes === true;
-      const destructiveSteps = validated.plan.steps
-        .map((step, index) => ({ step, index }))
-        .filter((entry): entry is { step: typeof validated.plan.steps[number] & { type: 'command' }; index: number } => entry.step.type === 'command')
-        .map(({ step, index }) => {
-          const resolvedDeviceId = resolveDeviceId(step.deviceId, step.deviceName);
-          const commandType = step.commandType ?? 'command';
-          const deviceType = getCachedDevice(resolvedDeviceId)?.type;
-          return {
-            index: index + 1,
-            deviceId: resolvedDeviceId,
+  },
+  async ({ plan, yes, continue_on_error }) => {
+    const validated = validatePlan(plan);
+    if (!validated.ok) {
+      return mcpError('usage', 2, 'plan invalid', {
+        context: { issues: validated.issues },
+        hint: 'Fix the reported issues and retry plan_run.',
+      });
+    }
+    let prepared: PlanPreflightResult;
+    try {
+      prepared = await preparePlanTargets(validated.plan.steps);
+    } catch (err) {
+      return apiErrorToMcpError(err);
+    }
+    if (!prepared.ok) {
+      return mcpError(prepared.safetyCritical ? 'guard' : 'usage', 2, prepared.message, {
+        hint: prepared.hint,
+        context: { step: prepared.stepIndex + 1, deviceId: prepared.deviceId, requiredWorkflow: 'plan-approval' },
+      });
+    }
+    const targetsByStep = new Map(prepared.commands.map((target) => [target.stepIndex, target]));
+  
+    const dryRun = isDryRun();
+    const out: McpPlanExecutionResult = {
+      ran: !dryRun,
+      plan: validated.plan,
+      results: [],
+      summary: { total: validated.plan.steps.length, ok: 0, error: 0, skipped: 0, dryRun: 0 },
+    };
+  
+    const continueOnError = continue_on_error === true;
+    const allowDestructive = yes === true;
+    const destructiveSteps = prepared.commands.filter((target) => target.destructive);
+    if (destructiveSteps.length > 0 && !dryRun && !allowsDirectDestructiveExecution()) {
+      return mcpError('guard', 3, 'Direct destructive execution is disabled for plan_run.', {
+        hint: destructiveExecutionHint(),
+        context: {
+          destructiveSteps: destructiveSteps.map((step) => ({
+            step: step.stepIndex + 1,
+            deviceId: step.deviceId,
+            deviceType: step.deviceType,
             command: step.command,
-            commandType,
-            deviceType: deviceType ?? null,
-            destructive: isDestructiveCommand(deviceType, step.command, commandType),
-          };
-        })
-        .filter((step) => step.destructive);
-      if (allowDestructive && destructiveSteps.length > 0 && !allowsDirectDestructiveExecution()) {
-        return mcpError('guard', 3, 'Direct destructive execution is disabled for plan_run.', {
-          hint: destructiveExecutionHint(),
-          context: {
-            destructiveSteps: destructiveSteps.map((step) => ({
-              step: step.index,
-              deviceId: step.deviceId,
-              deviceType: step.deviceType,
-              command: step.command,
-              commandType: step.commandType,
-            })),
-            requiredWorkflow: 'plan-approval',
-          },
-        });
+            commandType: step.commandType,
+          })),
+          requiredWorkflow: 'plan-approval',
+        },
+      });
+    }
+  
+    for (let i = 0; i < validated.plan.steps.length; i++) {
+      const step = validated.plan.steps[i];
+      const idx = i + 1;
+  
+      if (step.type === 'wait') {
+        if (!dryRun) await new Promise((resolve) => setTimeout(resolve, step.ms));
+        out.results.push({ step: idx, type: 'wait', ms: step.ms, status: dryRun ? 'dry-run' : 'ok' });
+        if (dryRun) out.summary.dryRun++;
+        else out.summary.ok++;
+        continue;
       }
-
-      for (let i = 0; i < validated.plan.steps.length; i++) {
-        const step = validated.plan.steps[i];
-        const idx = i + 1;
-
-        if (step.type === 'wait') {
-          await new Promise((resolve) => setTimeout(resolve, step.ms));
-          out.results.push({ step: idx, type: 'wait', ms: step.ms, status: 'ok' });
-          out.summary.ok++;
+  
+      if (step.type === 'scene') {
+        if (dryRun) {
+          out.results.push({ step: idx, type: 'scene', sceneId: step.sceneId, status: 'dry-run' });
+          out.summary.dryRun++;
           continue;
         }
-
-        if (step.type === 'scene') {
-          try {
-            await executeScene(step.sceneId);
-            out.results.push({ step: idx, type: 'scene', sceneId: step.sceneId, status: 'ok' });
-            out.summary.ok++;
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            out.results.push({ step: idx, type: 'scene', sceneId: step.sceneId, status: 'error', error: msg });
-            out.summary.error++;
-            if (!continueOnError) break;
-          }
-          continue;
-        }
-
-        let resolvedDeviceId = '';
         try {
-          resolvedDeviceId = resolveDeviceId(step.deviceId, step.deviceName);
-          const commandType = step.commandType ?? 'command';
-          const deviceType = getCachedDevice(resolvedDeviceId)?.type;
-          const destructive = isDestructiveCommand(deviceType, step.command, commandType);
-          if (destructive && !allowDestructive) {
-            out.results.push({
-              step: idx,
-              type: 'command',
-              deviceId: resolvedDeviceId,
-              command: step.command,
-              status: 'skipped',
-              error: 'destructive — rerun with yes=true',
-            });
-            out.summary.skipped++;
-            if (!continueOnError) break;
-            continue;
-          }
-
-          await executeCommand(resolvedDeviceId, step.command, step.parameter, commandType);
+          await executeScene(step.sceneId);
+          out.results.push({ step: idx, type: 'scene', sceneId: step.sceneId, status: 'ok' });
+          out.summary.ok++;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          out.results.push({ step: idx, type: 'scene', sceneId: step.sceneId, status: 'error', error: msg });
+          out.summary.error++;
+          if (!continueOnError) break;
+        }
+        continue;
+      }
+  
+      let resolvedDeviceId = '';
+      try {
+        const target = targetsByStep.get(i)!;
+        resolvedDeviceId = target.deviceId;
+        const { commandType, destructive } = target;
+        if (destructive && !allowDestructive && !dryRun) {
           out.results.push({
             step: idx,
             type: 'command',
             deviceId: resolvedDeviceId,
             command: step.command,
-            status: 'ok',
+            status: 'skipped',
+            error: 'destructive — rerun with yes=true',
           });
-          out.summary.ok++;
-        } catch (err) {
-          if (err instanceof Error && err.name === 'DryRunSignal') {
-            out.results.push({
-              step: idx,
-              type: 'command',
-              deviceId: resolvedDeviceId || step.deviceId || 'unknown',
-              command: step.command,
-              status: 'ok',
-            });
-            out.summary.ok++;
-            continue;
-          }
-          const msg = err instanceof Error ? err.message : String(err);
+          out.summary.skipped++;
+          if (!continueOnError) break;
+          continue;
+        }
+        if (dryRun) {
+          out.results.push({ step: idx, type: 'command', deviceId: target.deviceId, command: target.command, status: 'dry-run' });
+          out.summary.dryRun++;
+          continue;
+        }
+  
+        await executeCommand(target.deviceId, target.command, target.parameter, commandType);
+        out.results.push({
+          step: idx,
+          type: 'command',
+          deviceId: resolvedDeviceId,
+          command: target.command,
+          status: 'ok',
+        });
+        out.summary.ok++;
+      } catch (err) {
+        if (err instanceof Error && err.name === 'DryRunSignal') {
           out.results.push({
             step: idx,
             type: 'command',
             deviceId: resolvedDeviceId || step.deviceId || 'unknown',
             command: step.command,
-            status: 'error',
-            error: msg,
+            status: 'dry-run',
           });
-          out.summary.error++;
-          if (!continueOnError) break;
+          out.summary.dryRun++;
+          continue;
         }
+        const msg = err instanceof Error ? err.message : String(err);
+        out.results.push({
+          step: idx,
+          type: 'command',
+          deviceId: resolvedDeviceId || step.deviceId || 'unknown',
+          command: step.command,
+          status: 'error',
+          error: msg,
+        });
+        out.summary.error++;
+        if (!continueOnError) break;
       }
-
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(out, null, 2) }],
-        structuredContent: out,
-      };
-    },
-  );
+    }
+  
+    return {
+      content: [{ type: 'text' as const, text: JSON.stringify(out, null, 2) }],
+      structuredContent: out,
+    };
+  },)
 
   // ---- audit_query ----------------------------------------------------------
-  if (!skip('audit_query'))
-  server.registerTool(
-    'audit_query',
-    {
-      title: 'Query command/rule audit log entries',
-      description:
-        'Filter entries from the local audit log (default ~/.switchbot/audit.log) by time range, kind, device, rule, and result. ' +
-        'Useful for review flows and rule-fire inspection without leaving MCP.',
-      _meta: { agentSafetyTier: 'read' },
-      inputSchema: z.object({
-        file: z.string().optional().describe('Optional audit log path; defaults to ~/.switchbot/audit.log.'),
-        since: z.string().optional().describe('Relative window ending now (e.g. "30m", "24h"). Mutually exclusive with from/to.'),
-        from: z.string().optional().describe('Range start (ISO-8601).'),
-        to: z.string().optional().describe('Range end (ISO-8601).'),
-        kinds: z.array(z.enum(['command', 'rule-fire', 'rule-fire-dry', 'rule-throttled', 'rule-webhook-rejected'])).optional().describe('Filter by entry kind.'),
-        device_id: z.string().optional().describe('Filter by deviceId.'),
-        rule_name: z.string().optional().describe('Filter by rule.name (rule-engine entries).'),
-        results: z.array(z.enum(['ok', 'error', 'dry-run'])).optional().describe('Filter by execution result.'),
-        limit: z.number().int().min(1).max(5000).optional().describe('Max entries returned from the tail of the filtered set (default 200).'),
-      }).strict(),
-      outputSchema: {
-        file: z.string(),
-        totalMatched: z.number().int(),
-        returned: z.number().int(),
-        entries: z.array(z.unknown()),
-      },
+  if (!skip('audit_query')) registerTool('audit_query',
+  {
+    title: 'Query command/rule audit log entries',
+    description:
+      'Filter entries from the local audit log (default ~/.switchbot/audit.log) by time range, kind, device, rule, and result. ' +
+      'Useful for review flows and rule-fire inspection without leaving MCP.',
+    _meta: { agentSafetyTier: 'read' },
+    inputSchema: z.object({
+      file: z.string().optional().describe('Optional audit log path; defaults to ~/.switchbot/audit.log.'),
+      since: z.string().optional().describe('Relative window ending now (e.g. "30m", "24h"). Mutually exclusive with from/to.'),
+      from: z.string().optional().describe('Range start (ISO-8601).'),
+      to: z.string().optional().describe('Range end (ISO-8601).'),
+      kinds: z.array(z.enum(['command', 'rule-fire', 'rule-fire-dry', 'rule-throttled', 'rule-webhook-rejected'])).optional().describe('Filter by entry kind.'),
+      device_id: z.string().optional().describe('Filter by deviceId.'),
+      rule_name: z.string().optional().describe('Filter by rule.name (rule-engine entries).'),
+      results: z.array(z.enum(['ok', 'error', 'dry-run'])).optional().describe('Filter by execution result.'),
+      limit: z.number().int().min(1).max(5000).optional().describe('Max entries returned from the tail of the filtered set (default 200).'),
+    }).strict(),
+    outputSchema: {
+      file: z.string(),
+      totalMatched: z.number().int(),
+      returned: z.number().int(),
+      entries: z.array(z.unknown()),
     },
-    ({ file, since, from, to, kinds, device_id, rule_name, results, limit }) => {
-      const filePath = file ?? DEFAULT_AUDIT_LOG_FILE;
-      const entries = readAudit(filePath);
-      try {
-        const filtered = filterAuditEntries(entries, {
-          since,
-          from,
-          to,
-          kinds,
-          deviceId: device_id,
-          ruleName: rule_name,
-          results,
-        });
-        const bounded = filtered.slice(-Math.max(1, limit ?? 200));
-        const out = {
-          file: filePath,
-          totalMatched: filtered.length,
-          returned: bounded.length,
-          entries: bounded,
-        };
-        return {
-          content: [{ type: 'text' as const, text: JSON.stringify(out, null, 2) }],
-          structuredContent: out,
-        };
-      } catch (err) {
-        return mcpError('usage', 2, err instanceof Error ? err.message : 'invalid audit query options');
-      }
-    },
-  );
-
-  // ---- audit_stats ----------------------------------------------------------
-  if (!skip('audit_stats'))
-  server.registerTool(
-    'audit_stats',
-    {
-      title: 'Aggregate audit log counts for review dashboards',
-      description:
-        'Compute summary counters over the local audit log: by kind, by result, top devices, and top rules. ' +
-        'Supports the same filters as audit_query.',
-      _meta: { agentSafetyTier: 'read' },
-      inputSchema: z.object({
-        file: z.string().optional().describe('Optional audit log path; defaults to ~/.switchbot/audit.log.'),
-        since: z.string().optional().describe('Relative window ending now (e.g. "6h"). Mutually exclusive with from/to.'),
-        from: z.string().optional().describe('Range start (ISO-8601).'),
-        to: z.string().optional().describe('Range end (ISO-8601).'),
-        kinds: z.array(z.enum(['command', 'rule-fire', 'rule-fire-dry', 'rule-throttled', 'rule-webhook-rejected'])).optional().describe('Filter by entry kind.'),
-        device_id: z.string().optional().describe('Filter by deviceId.'),
-        rule_name: z.string().optional().describe('Filter by rule.name (rule-engine entries).'),
-        results: z.array(z.enum(['ok', 'error', 'dry-run'])).optional().describe('Filter by execution result.'),
-        top_n: z.number().int().min(1).max(100).optional().describe('Number of top device/rule rows to return (default 10).'),
-      }).strict(),
-      outputSchema: {
-        file: z.string(),
-        totalMatched: z.number().int(),
-        byKind: z.record(z.string(), z.number().int()),
-        byResult: z.record(z.string(), z.number().int()),
-        topDevices: z.array(z.object({ deviceId: z.string(), count: z.number().int() })),
-        topRules: z.array(z.object({ ruleName: z.string(), count: z.number().int() })),
-      },
-    },
-    ({ file, since, from, to, kinds, device_id, rule_name, results, top_n }) => {
-      const filePath = file ?? DEFAULT_AUDIT_LOG_FILE;
-      const entries = readAudit(filePath);
-      try {
-        const filtered = filterAuditEntries(entries, {
-          since,
-          from,
-          to,
-          kinds,
-          deviceId: device_id,
-          ruleName: rule_name,
-          results,
-        });
-
-        const byKind = new Map<string, number>();
-        const byResult = new Map<string, number>();
-        const byDevice = new Map<string, number>();
-        const byRule = new Map<string, number>();
-
-        for (const entry of filtered) {
-          byKind.set(entry.kind, (byKind.get(entry.kind) ?? 0) + 1);
-          if (entry.result) byResult.set(entry.result, (byResult.get(entry.result) ?? 0) + 1);
-          if (entry.deviceId) byDevice.set(entry.deviceId, (byDevice.get(entry.deviceId) ?? 0) + 1);
-          if (entry.rule?.name) byRule.set(entry.rule.name, (byRule.get(entry.rule.name) ?? 0) + 1);
-        }
-
-        const topN = top_n ?? 10;
-        const out = {
-          file: filePath,
-          totalMatched: filtered.length,
-          byKind: Object.fromEntries([...byKind.entries()].sort((a, b) => a[0].localeCompare(b[0]))),
-          byResult: Object.fromEntries([...byResult.entries()].sort((a, b) => a[0].localeCompare(b[0]))),
-          topDevices: topNFromMap(byDevice, topN).map((item) => ({ deviceId: item.key, count: item.count })),
-          topRules: topNFromMap(byRule, topN).map((item) => ({ ruleName: item.key, count: item.count })),
-        };
-
-        return {
-          content: [{ type: 'text' as const, text: JSON.stringify(out, null, 2) }],
-          structuredContent: out,
-        };
-      } catch (err) {
-        return mcpError('usage', 2, err instanceof Error ? err.message : 'invalid audit stats options');
-      }
-    },
-  );
-
-  // ---- rule_notifications ---------------------------------------------------
-  if (!skip('rule_notifications'))
-  server.registerTool(
-    'rule_notifications',
-    {
-      title: 'Query rule notification delivery history',
-      description:
-        'Returns audit entries for notify actions (kind: rule-notify). ' +
-        'Useful for confirming whether a notification rule fired and whether delivery succeeded. ' +
-        'Filter by rule name, time range, result, or channel.',
-      _meta: { agentSafetyTier: 'read' },
-      inputSchema: z.object({
-        file: z.string().optional().describe('Optional audit log path; defaults to ~/.switchbot/audit.log.'),
-        rule: z.string().optional().describe('Filter by rule name (exact match).'),
-        since: z.string().optional().describe('Relative window ending now (e.g. "30m", "24h").'),
-        from: z.string().optional().describe('Range start (ISO-8601).'),
-        to: z.string().optional().describe('Range end (ISO-8601).'),
-        result: z.enum(['ok', 'error']).optional().describe('Filter by delivery result.'),
-        channel: z.enum(['webhook', 'openclaw', 'file']).optional().describe('Filter by notify channel.'),
-        limit: z.number().int().min(1).max(500).default(100).describe('Max entries to return (newest first).'),
-      }).strict(),
-      outputSchema: {
-        entries: z.array(z.unknown()).describe('Matching audit entries, newest first.'),
-        total: z.number().int().describe('Count after filtering.'),
-      },
-    },
-    ({ file, rule: ruleName, since, from, to, result: resultFilter, channel, limit }) => {
-      const filePath = file ?? DEFAULT_AUDIT_LOG_FILE;
-      let entries = readAudit(filePath).filter(e => e.kind === 'rule-notify');
-      if (ruleName) entries = entries.filter(e => e.rule?.name === ruleName);
-      if (resultFilter) entries = entries.filter(e => e.result === resultFilter);
-      if (channel) entries = entries.filter(e => e.notifyChannel === channel);
-      try {
-        entries = filterAuditEntries(entries, { since, from, to });
-      } catch (err) {
-        return mcpError('usage', 2, err instanceof Error ? err.message : 'invalid filter options');
-      }
-      const bounded = entries.slice(-limit).reverse();
-      const out = { entries: bounded, total: entries.length };
+  },
+  ({ file, since, from, to, kinds, device_id, rule_name, results, limit }) => {
+    const filePath = file ?? DEFAULT_AUDIT_LOG_FILE;
+    const entries = readAudit(filePath);
+    try {
+      const filtered = filterAuditEntries(entries, {
+        since,
+        from,
+        to,
+        kinds,
+        deviceId: device_id,
+        ruleName: rule_name,
+        results,
+      });
+      const bounded = filtered.slice(-Math.max(1, limit ?? 200));
+      const out = {
+        file: filePath,
+        totalMatched: filtered.length,
+        returned: bounded.length,
+        entries: bounded,
+      };
       return {
         content: [{ type: 'text' as const, text: JSON.stringify(out, null, 2) }],
         structuredContent: out,
       };
+    } catch (err) {
+      return mcpError('usage', 2, err instanceof Error ? err.message : 'invalid audit query options');
+    }
+  },)
+
+  // ---- audit_stats ----------------------------------------------------------
+  if (!skip('audit_stats')) registerTool('audit_stats',
+  {
+    title: 'Aggregate audit log counts for review dashboards',
+    description:
+      'Compute summary counters over the local audit log: by kind, by result, top devices, and top rules. ' +
+      'Supports the same filters as audit_query.',
+    _meta: { agentSafetyTier: 'read' },
+    inputSchema: z.object({
+      file: z.string().optional().describe('Optional audit log path; defaults to ~/.switchbot/audit.log.'),
+      since: z.string().optional().describe('Relative window ending now (e.g. "6h"). Mutually exclusive with from/to.'),
+      from: z.string().optional().describe('Range start (ISO-8601).'),
+      to: z.string().optional().describe('Range end (ISO-8601).'),
+      kinds: z.array(z.enum(['command', 'rule-fire', 'rule-fire-dry', 'rule-throttled', 'rule-webhook-rejected'])).optional().describe('Filter by entry kind.'),
+      device_id: z.string().optional().describe('Filter by deviceId.'),
+      rule_name: z.string().optional().describe('Filter by rule.name (rule-engine entries).'),
+      results: z.array(z.enum(['ok', 'error', 'dry-run'])).optional().describe('Filter by execution result.'),
+      top_n: z.number().int().min(1).max(100).optional().describe('Number of top device/rule rows to return (default 10).'),
+    }).strict(),
+    outputSchema: {
+      file: z.string(),
+      totalMatched: z.number().int(),
+      byKind: z.record(z.string(), z.number().int()),
+      byResult: z.record(z.string(), z.number().int()),
+      topDevices: z.array(z.object({ deviceId: z.string(), count: z.number().int() })),
+      topRules: z.array(z.object({ ruleName: z.string(), count: z.number().int() })),
     },
-  );
+  },
+  ({ file, since, from, to, kinds, device_id, rule_name, results, top_n }) => {
+    const filePath = file ?? DEFAULT_AUDIT_LOG_FILE;
+    const entries = readAudit(filePath);
+    try {
+      const filtered = filterAuditEntries(entries, {
+        since,
+        from,
+        to,
+        kinds,
+        deviceId: device_id,
+        ruleName: rule_name,
+        results,
+      });
+  
+      const byKind = new Map<string, number>();
+      const byResult = new Map<string, number>();
+      const byDevice = new Map<string, number>();
+      const byRule = new Map<string, number>();
+  
+      for (const entry of filtered) {
+        byKind.set(entry.kind, (byKind.get(entry.kind) ?? 0) + 1);
+        if (entry.result) byResult.set(entry.result, (byResult.get(entry.result) ?? 0) + 1);
+        if (entry.deviceId) byDevice.set(entry.deviceId, (byDevice.get(entry.deviceId) ?? 0) + 1);
+        if (entry.rule?.name) byRule.set(entry.rule.name, (byRule.get(entry.rule.name) ?? 0) + 1);
+      }
+  
+      const topN = top_n ?? 10;
+      const out = {
+        file: filePath,
+        totalMatched: filtered.length,
+        byKind: Object.fromEntries([...byKind.entries()].sort((a, b) => a[0].localeCompare(b[0]))),
+        byResult: Object.fromEntries([...byResult.entries()].sort((a, b) => a[0].localeCompare(b[0]))),
+        topDevices: topNFromMap(byDevice, topN).map((item) => ({ deviceId: item.key, count: item.count })),
+        topRules: topNFromMap(byRule, topN).map((item) => ({ ruleName: item.key, count: item.count })),
+      };
+  
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(out, null, 2) }],
+        structuredContent: out,
+      };
+    } catch (err) {
+      return mcpError('usage', 2, err instanceof Error ? err.message : 'invalid audit stats options');
+    }
+  },)
+
+  // ---- rule_notifications ---------------------------------------------------
+  if (!skip('rule_notifications')) registerTool('rule_notifications',
+  {
+    title: 'Query rule notification delivery history',
+    description:
+      'Returns audit entries for notify actions (kind: rule-notify). ' +
+      'Useful for confirming whether a notification rule fired and whether delivery succeeded. ' +
+      'Filter by rule name, time range, result, or channel.',
+    _meta: { agentSafetyTier: 'read' },
+    inputSchema: z.object({
+      file: z.string().optional().describe('Optional audit log path; defaults to ~/.switchbot/audit.log.'),
+      rule: z.string().optional().describe('Filter by rule name (exact match).'),
+      since: z.string().optional().describe('Relative window ending now (e.g. "30m", "24h").'),
+      from: z.string().optional().describe('Range start (ISO-8601).'),
+      to: z.string().optional().describe('Range end (ISO-8601).'),
+      result: z.enum(['ok', 'error']).optional().describe('Filter by delivery result.'),
+      channel: z.enum(['webhook', 'openclaw', 'file']).optional().describe('Filter by notify channel.'),
+      limit: z.number().int().min(1).max(500).default(100).describe('Max entries to return (newest first).'),
+    }).strict(),
+    outputSchema: {
+      entries: z.array(z.unknown()).describe('Matching audit entries, newest first.'),
+      total: z.number().int().describe('Count after filtering.'),
+    },
+  },
+  ({ file, rule: ruleName, since, from, to, result: resultFilter, channel, limit }) => {
+    const filePath = file ?? DEFAULT_AUDIT_LOG_FILE;
+    let entries = readAudit(filePath).filter(e => e.kind === 'rule-notify');
+    if (ruleName) entries = entries.filter(e => e.rule?.name === ruleName);
+    if (resultFilter) entries = entries.filter(e => e.result === resultFilter);
+    if (channel) entries = entries.filter(e => e.notifyChannel === channel);
+    try {
+      entries = filterAuditEntries(entries, { since, from, to });
+    } catch (err) {
+      return mcpError('usage', 2, err instanceof Error ? err.message : 'invalid filter options');
+    }
+    const bounded = entries.slice(-limit).reverse();
+    const out = { entries: bounded, total: entries.length };
+    return {
+      content: [{ type: 'text' as const, text: JSON.stringify(out, null, 2) }],
+      structuredContent: out,
+    };
+  },)
 
   // ---- rules_suggest --------------------------------------------------------
-  if (!skip('rules_suggest'))
-  server.registerTool(
-    'rules_suggest',
-    {
-      title: 'Draft a SwitchBot automation rule from intent',
-      description:
-        'Generate a candidate automation rule YAML from a natural language intent. ' +
-        'Uses keyword heuristics by default; pass llm to use an LLM backend (auto | openai | anthropic). ' +
-        'Always emits dry_run: true — the rule must be reviewed before arming. ' +
-        'Pass the returned rule_yaml to policy_add_rule to inject it into policy.yaml.',
-      _meta: { agentSafetyTier: 'read' },
-      inputSchema: z.object({
-        intent: z.string().min(1).describe('Natural language description (e.g. "turn off lights at 10pm").'),
-        trigger: z.enum(['mqtt', 'cron', 'webhook']).optional().describe('Trigger type (inferred from intent if omitted).'),
-        device_ids: z.array(z.string().min(1)).optional().describe('Device IDs; first is sensor for mqtt triggers, rest are action targets.'),
-        event: z.string().optional().describe('MQTT event name override (e.g. motion.detected).'),
-        schedule: z.string().optional().describe('5-field cron expression override (e.g. "0 22 * * *").'),
-        days: z.array(z.string()).optional().describe('Weekday filter (e.g. ["mon","tue","wed","thu","fri"]).'),
-        webhook_path: z.string().optional().describe('Webhook path override (default /action).'),
-        llm: z.enum(['auto', 'openai', 'anthropic']).optional().describe('LLM backend (auto | openai | anthropic). Omit to use keyword heuristics.'),
-      }).strict(),
-      outputSchema: {
-        rule: z.unknown().describe('Rule object matching the v0.2 policy schema.'),
-        rule_yaml: z.string().describe('YAML string ready to pipe to policy_add_rule.'),
-        warnings: z.array(z.string()).describe('Informational warnings (e.g. unrecognized intent defaulted).'),
-      },
+  if (!skip('rules_suggest')) registerTool('rules_suggest',
+  {
+    title: 'Draft a SwitchBot automation rule from intent',
+    description:
+      'Generate a candidate automation rule YAML from a natural language intent. ' +
+      'Uses keyword heuristics by default; pass llm to use an LLM backend (auto | openai | anthropic). ' +
+      'Always emits dry_run: true — the rule must be reviewed before arming. ' +
+      'Pass the returned rule_yaml to policy_add_rule to inject it into policy.yaml.',
+    _meta: { agentSafetyTier: 'read' },
+    inputSchema: z.object({
+      intent: z.string().min(1).describe('Natural language description (e.g. "turn off lights at 10pm").'),
+      trigger: z.enum(['mqtt', 'cron', 'webhook']).optional().describe('Trigger type (inferred from intent if omitted).'),
+      device_ids: z.array(z.string().min(1)).optional().describe('Device IDs; first is sensor for mqtt triggers, rest are action targets.'),
+      event: z.string().optional().describe('MQTT event name override (e.g. motion.detected).'),
+      schedule: z.string().optional().describe('5-field cron expression override (e.g. "0 22 * * *").'),
+      days: z.array(z.string()).optional().describe('Weekday filter (e.g. ["mon","tue","wed","thu","fri"]).'),
+      webhook_path: z.string().optional().describe('Webhook path override (default /action).'),
+      llm: z.enum(['auto', 'openai', 'anthropic']).optional().describe('LLM backend (auto | openai | anthropic). Omit to use keyword heuristics.'),
+    }).strict(),
+    outputSchema: {
+      rule: z.unknown().describe('Rule object matching the v0.2 policy schema.'),
+      rule_yaml: z.string().describe('YAML string ready to pipe to policy_add_rule.'),
+      warnings: z.array(z.string()).describe('Informational warnings (e.g. unrecognized intent defaulted).'),
     },
-    async ({ intent, trigger, device_ids, event, schedule, days, webhook_path, llm }) => {
-      const devices = (device_ids ?? []).map((id) => {
-        const cached = getCachedDevice(id);
-        return { id, name: cached?.name, type: cached?.type };
+  },
+  async ({ intent, trigger, device_ids, event, schedule, days, webhook_path, llm }) => {
+    const devices = (device_ids ?? []).map((id) => {
+      const cached = getCachedDevice(id);
+      return { id, name: cached?.name, type: cached?.type };
+    });
+    try {
+      const { rule, ruleYaml, warnings } = await suggestRule({
+        intent,
+        trigger,
+        devices,
+        event,
+        schedule,
+        days,
+        webhookPath: webhook_path,
+        llm,
       });
-      try {
-        const { rule, ruleYaml, warnings } = await suggestRule({
-          intent,
-          trigger,
-          devices,
-          event,
-          schedule,
-          days,
-          webhookPath: webhook_path,
-          llm,
-        });
-        return {
-          content: [{ type: 'text' as const, text: ruleYaml }],
-          structuredContent: { rule, rule_yaml: ruleYaml, warnings },
-        };
-      } catch (err) {
-        return apiErrorToMcpError(err);
-      }
-    },
-  );
+      return {
+        content: [{ type: 'text' as const, text: ruleYaml }],
+        structuredContent: { rule, rule_yaml: ruleYaml, warnings },
+      };
+    } catch (err) {
+      return apiErrorToMcpError(err);
+    }
+  },)
 
   // ---- rules_explain --------------------------------------------------------
-  if (!skip('rules_explain'))
-  server.registerTool(
-    'rules_explain',
-    {
-      title: 'Show why a rule evaluation fired or was blocked',
-      description:
-        'Read rule-evaluate trace records from the audit log and format them for inspection. ' +
-        'Pass fire_id to explain a specific evaluation; or pass rule_name with last:true for the ' +
-        'most recent evaluation; or pass rule_name + since for a window. ' +
-        'Returns trace records only when automation.audit.evaluate_trace is "sampled" or "full".',
-      _meta: { agentSafetyTier: 'read' },
-      inputSchema: z.object({
-        fire_id: z.string().optional().describe('Specific fireId to explain.'),
-        rule_name: z.string().optional().describe('Filter to this rule name.'),
-        since: z.string().optional().describe('Duration string (e.g. 1h, 7d) — show evaluations in this window.'),
-        last: z.boolean().optional().describe('Return only the most recent evaluation (requires rule_name).'),
-        audit_log: z.string().optional().describe(`Audit log path (default: ${pathJoin(os.homedir(), '.switchbot', 'audit.log')}).`),
-      }).strict(),
-      outputSchema: {
-        records: z.array(z.unknown()).describe('Array of trace + relatedAudit objects.'),
-        count: z.number().describe('Number of trace records returned.'),
-      },
+  if (!skip('rules_explain')) registerTool('rules_explain',
+  {
+    title: 'Show why a rule evaluation fired or was blocked',
+    description:
+      'Read rule-evaluate trace records from the audit log and format them for inspection. ' +
+      'Pass fire_id to explain a specific evaluation; or pass rule_name with last:true for the ' +
+      'most recent evaluation; or pass rule_name + since for a window. ' +
+      'Returns trace records only when automation.audit.evaluate_trace is "sampled" or "full".',
+    _meta: { agentSafetyTier: 'read' },
+    inputSchema: z.object({
+      fire_id: z.string().optional().describe('Specific fireId to explain.'),
+      rule_name: z.string().optional().describe('Filter to this rule name.'),
+      since: z.string().optional().describe('Duration string (e.g. 1h, 7d) — show evaluations in this window.'),
+      last: z.boolean().optional().describe('Return only the most recent evaluation (requires rule_name).'),
+      audit_log: z.string().optional().describe(`Audit log path (default: ${pathJoin(os.homedir(), '.switchbot', 'audit.log')}).`),
+    }).strict(),
+    outputSchema: {
+      records: z.array(z.unknown()).describe('Array of trace + relatedAudit objects.'),
+      count: z.number().describe('Number of trace records returned.'),
     },
-    async ({ fire_id, rule_name, since, last, audit_log }) => {
-      const DEFAULT_AUDIT_PATH = pathJoin(os.homedir(), '.switchbot', 'audit.log');
-      const auditFile = audit_log ?? DEFAULT_AUDIT_PATH;
-      const sinceIso = since
-        ? new Date(Date.now() - (parseDurationToMs(since) ?? 0)).toISOString()
-        : undefined;
-
-      let records = loadTraceRecords(auditFile, {
-        fireId: fire_id,
-        ruleName: rule_name,
-        since: sinceIso,
-      });
-
-      if (records.length === 0) {
-        return {
-          content: [{ type: 'text' as const, text: 'No rule-evaluate trace records found. Check that automation.audit.evaluate_trace is "sampled" or "full".' }],
-          structuredContent: { records: [], count: 0 },
-        };
-      }
-
-      if (last) {
-        records = [records[records.length - 1]];
-      }
-
-      const output = records.map((record) => {
-        const related = loadRelatedAudit(auditFile, record.fireId);
-        return JSON.parse(formatExplainJson(record, related)) as unknown;
-      });
-
+  },
+  async ({ fire_id, rule_name, since, last, audit_log }) => {
+    const DEFAULT_AUDIT_PATH = pathJoin(os.homedir(), '.switchbot', 'audit.log');
+    const auditFile = audit_log ?? DEFAULT_AUDIT_PATH;
+    const sinceIso = since
+      ? new Date(Date.now() - (parseDurationToMs(since) ?? 0)).toISOString()
+      : undefined;
+  
+    let records = loadTraceRecords(auditFile, {
+      fireId: fire_id,
+      ruleName: rule_name,
+      since: sinceIso,
+    });
+  
+    if (records.length === 0) {
       return {
-        content: [{ type: 'text' as const, text: JSON.stringify(output, null, 2) }],
-        structuredContent: { records: output, count: output.length },
+        content: [{ type: 'text' as const, text: 'No rule-evaluate trace records found. Check that automation.audit.evaluate_trace is "sampled" or "full".' }],
+        structuredContent: { records: [], count: 0 },
       };
-    },
-  );
+    }
+  
+    if (last) {
+      records = [records[records.length - 1]];
+    }
+  
+    const output = records.map((record) => {
+      const related = loadRelatedAudit(auditFile, record.fireId);
+      return JSON.parse(formatExplainJson(record, related)) as unknown;
+    });
+  
+    return {
+      content: [{ type: 'text' as const, text: JSON.stringify(output, null, 2) }],
+      structuredContent: { records: output, count: output.length },
+    };
+  },)
 
   // ---- rules_simulate -------------------------------------------------------
-  if (!skip('rules_simulate'))
-  server.registerTool(
-    'rules_simulate',
-    {
-      title: 'Simulate a rule against historical events',
-      description:
-        'Replay historical events from the audit log or a JSONL file against a rule definition ' +
-        'and report would-fire / blocked-by-condition / throttled outcomes. ' +
-        'Useful for validating a new or modified rule before deployment. ' +
-        'Pass rule_yaml to test an unpublished rule, or rule_name + policy_path to test a deployed rule.',
-      _meta: { agentSafetyTier: 'read' },
-      inputSchema: z.object({
-        rule_yaml: z.string().optional().describe('Standalone rule YAML (takes precedence over policy_path + rule_name).'),
-        policy_path: z.string().optional().describe('Path to policy.yaml (defaults to ~/.switchbot/policy.yaml).'),
-        rule_name: z.string().optional().describe('Name of the rule in policy.yaml to simulate.'),
-        since: z.string().optional().describe('Replay events from this window (e.g. 7d, 24h).'),
-        against: z.string().optional().describe('JSONL file path of EngineEvent objects to replay.'),
-        live_llm: z.boolean().optional().describe('Allow live LLM calls for llm conditions (default: skip and report as would-call).'),
-        audit_log: z.string().optional().describe(`Audit log path (default: ${pathJoin(os.homedir(), '.switchbot', 'audit.log')}).`),
-      }).strict(),
-      outputSchema: {
-        report: z.unknown().describe('SimulateReport object.'),
-      },
+  if (!skip('rules_simulate')) registerTool('rules_simulate',
+  {
+    title: 'Simulate a rule against historical events',
+    description:
+      'Replay historical events from the audit log or a JSONL file against a rule definition ' +
+      'and report would-fire / blocked-by-condition / throttled outcomes. ' +
+      'Useful for validating a new or modified rule before deployment. ' +
+      'Pass rule_yaml to test an unpublished rule, or rule_name + policy_path to test a deployed rule.',
+    _meta: { agentSafetyTier: 'read' },
+    inputSchema: z.object({
+      rule_yaml: z.string().optional().describe('Standalone rule YAML (takes precedence over policy_path + rule_name).'),
+      policy_path: z.string().optional().describe('Path to policy.yaml (defaults to ~/.switchbot/policy.yaml).'),
+      rule_name: z.string().optional().describe('Name of the rule in policy.yaml to simulate.'),
+      since: z.string().optional().describe('Replay events from this window (e.g. 7d, 24h).'),
+      against: z.string().optional().describe('JSONL file path of EngineEvent objects to replay.'),
+      live_llm: z.boolean().optional().describe('Allow live LLM calls for llm conditions (default: skip and report as would-call).'),
+      audit_log: z.string().optional().describe(`Audit log path (default: ${pathJoin(os.homedir(), '.switchbot', 'audit.log')}).`),
+    }).strict(),
+    outputSchema: {
+      report: z.unknown().describe('SimulateReport object.'),
     },
-    async ({ rule_yaml, policy_path, rule_name, since, against, live_llm, audit_log }) => {
-      const DEFAULT_AUDIT_PATH = pathJoin(os.homedir(), '.switchbot', 'audit.log');
-      const auditFile = audit_log ?? DEFAULT_AUDIT_PATH;
-
-      let rule: Record<string, unknown> | undefined;
-
-      if (rule_yaml) {
-        try {
-          rule = yamlParse(rule_yaml) as Record<string, unknown>;
-        } catch (err) {
-          return {
-            content: [{ type: 'text' as const, text: `Failed to parse rule_yaml: ${String(err)}` }],
-            structuredContent: { report: null },
-          };
-        }
-      } else if (policy_path || rule_name) {
-        const { loadPolicyFile } = await import('../policy/load.js');
-        const policyFile = policy_path ?? pathJoin(os.homedir(), '.switchbot', 'policy.yaml');
-        try {
-          const policy = loadPolicyFile(policyFile);
-          const data = (policy.data ?? {}) as { automation?: { rules?: Array<{ name: string }> } };
-          const found = data.automation?.rules?.find((r) => r.name === rule_name);
-          if (!found) {
-            return {
-              content: [{ type: 'text' as const, text: `Rule "${rule_name}" not found in ${policyFile}.` }],
-              structuredContent: { report: null },
-            };
-          }
-          rule = found as unknown as Record<string, unknown>;
-        } catch (err) {
-          return {
-            content: [{ type: 'text' as const, text: `Failed to load policy: ${String(err)}` }],
-            structuredContent: { report: null },
-          };
-        }
-      } else {
-        return {
-          content: [{ type: 'text' as const, text: 'Provide rule_yaml or (policy_path + rule_name) to specify the rule to simulate.' }],
-          structuredContent: { report: null },
-        };
-      }
-
+  },
+  async ({ rule_yaml, policy_path, rule_name, since, against, live_llm, audit_log }) => {
+    const DEFAULT_AUDIT_PATH = pathJoin(os.homedir(), '.switchbot', 'audit.log');
+    const auditFile = audit_log ?? DEFAULT_AUDIT_PATH;
+  
+    let rule: Record<string, unknown> | undefined;
+  
+    if (rule_yaml) {
       try {
-        const report = await simulateRule({
-          rule: rule as unknown as Parameters<typeof simulateRule>[0]['rule'],
-          since,
-          against,
-          auditLog: auditFile,
-          liveLlm: live_llm ?? false,
-        });
-        return {
-          content: [{ type: 'text' as const, text: JSON.stringify(report, null, 2) }],
-          structuredContent: { report },
-        };
+        rule = yamlParse(rule_yaml) as Record<string, unknown>;
       } catch (err) {
         return {
-          content: [{ type: 'text' as const, text: `Simulate error: ${String(err)}` }],
+          content: [{ type: 'text' as const, text: `Failed to parse rule_yaml: ${String(err)}` }],
           structuredContent: { report: null },
         };
       }
-    },
-  );
+    } else if (policy_path || rule_name) {
+      const { loadPolicyFile } = await import('../policy/load.js');
+      const policyFile = policy_path ?? pathJoin(os.homedir(), '.switchbot', 'policy.yaml');
+      try {
+        const policy = loadPolicyFile(policyFile);
+        const data = (policy.data ?? {}) as { automation?: { rules?: Array<{ name: string }> } };
+        const found = data.automation?.rules?.find((r) => r.name === rule_name);
+        if (!found) {
+          return {
+            content: [{ type: 'text' as const, text: `Rule "${rule_name}" not found in ${policyFile}.` }],
+            structuredContent: { report: null },
+          };
+        }
+        rule = found as unknown as Record<string, unknown>;
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: `Failed to load policy: ${String(err)}` }],
+          structuredContent: { report: null },
+        };
+      }
+    } else {
+      return {
+        content: [{ type: 'text' as const, text: 'Provide rule_yaml or (policy_path + rule_name) to specify the rule to simulate.' }],
+        structuredContent: { report: null },
+      };
+    }
+  
+    try {
+      const report = await simulateRule({
+        rule: rule as unknown as Parameters<typeof simulateRule>[0]['rule'],
+        since,
+        against,
+        auditLog: auditFile,
+        liveLlm: live_llm ?? false,
+      });
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(report, null, 2) }],
+        structuredContent: { report },
+      };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Simulate error: ${String(err)}` }],
+        structuredContent: { report: null },
+      };
+    }
+  },)
 
   // ---- policy_add_rule ------------------------------------------------------
-  if (!skip('policy_add_rule'))
-  server.registerTool(
-    'policy_add_rule',
-    {
-      title: 'Append a rule to automation.rules[] in policy.yaml',
-      description:
-        'Inject a rule YAML snippet (as produced by rules_suggest) into the automation.rules[] ' +
-        'array in policy.yaml. Preserves existing comments and formatting. ' +
-        'Always run with dry_run: true first so the agent can show the diff for user approval. ' +
-        'Never set enable_automation: true without explicitly informing the user.',
-      _meta: { agentSafetyTier: 'action' },
-      inputSchema: z.object({
-        rule_yaml: z.string().min(1).describe('YAML string of a single rule object (e.g. from rules_suggest).'),
-        policy_path: z.string().optional().describe('Path to policy.yaml (defaults to $SWITCHBOT_POLICY_PATH or ~/.switchbot/policy.yaml).'),
-        enable_automation: z.boolean().default(false).describe('If true, sets automation.enabled: true after inserting the rule.'),
-        dry_run: z.boolean().default(false).describe('If true, compute and return the diff without writing to disk.'),
-        force: z.boolean().default(false).describe('If true, overwrite an existing rule with the same name.'),
-      }).strict(),
-      outputSchema: {
-        policyPath: z.string().describe('Resolved path to the policy file.'),
-        ruleName: z.string().describe('Name of the rule that was (or would be) inserted.'),
-        written: z.boolean().describe('True when the file was actually written.'),
-        diff: z.string().describe('Unified-style diff showing lines added/removed.'),
-      },
+  if (!skip('policy_add_rule')) registerTool('policy_add_rule',
+  {
+    title: 'Append a rule to automation.rules[] in policy.yaml',
+    description:
+      'Inject a rule YAML snippet (as produced by rules_suggest) into the automation.rules[] ' +
+      'array in policy.yaml. Preserves existing comments and formatting. ' +
+      'Always run with dry_run: true first so the agent can show the diff for user approval. ' +
+      'Never set enable_automation: true without explicitly informing the user.',
+    _meta: { agentSafetyTier: 'action' },
+    inputSchema: z.object({
+      rule_yaml: z.string().min(1).describe('YAML string of a single rule object (e.g. from rules_suggest).'),
+      policy_path: z.string().optional().describe('Path to policy.yaml (defaults to $SWITCHBOT_POLICY_PATH or ~/.switchbot/policy.yaml).'),
+      enable_automation: z.boolean().default(false).describe('If true, sets automation.enabled: true after inserting the rule.'),
+      dry_run: z.boolean().default(false).describe('If true, compute and return the diff without writing to disk.'),
+      force: z.boolean().default(false).describe('If true, overwrite an existing rule with the same name.'),
+    }).strict(),
+    outputSchema: {
+      policyPath: z.string().describe('Resolved path to the policy file.'),
+      ruleName: z.string().describe('Name of the rule that was (or would be) inserted.'),
+      written: z.boolean().describe('True when the file was actually written.'),
+      diff: z.string().describe('Unified-style diff showing lines added/removed.'),
     },
-    ({ rule_yaml, policy_path, enable_automation, dry_run, force }) => {
-      const policyPath = resolvePolicyPath({ flag: policy_path });
-      try {
-        const result = addRuleToPolicyFile({
-          ruleYaml: rule_yaml,
-          policyPath,
-          enableAutomation: enable_automation,
-          dryRun: dry_run,
-          force,
-        });
-        const out = { policyPath, ruleName: result.ruleName, written: result.written, diff: result.diff };
-        return {
-          content: [{ type: 'text' as const, text: JSON.stringify(out, null, 2) }],
-          structuredContent: out,
-        };
-      } catch (err) {
-        if (err instanceof AddRuleError) {
-          return apiErrorToMcpError(new Error(`${err.code}: ${err.message}`));
-        }
-        return apiErrorToMcpError(err);
+  },
+  ({ rule_yaml, policy_path, enable_automation, dry_run, force }) => {
+    const policyPath = resolvePolicyPath({ flag: policy_path });
+    try {
+      const result = addRuleToPolicyFile({
+        ruleYaml: rule_yaml,
+        policyPath,
+        enableAutomation: enable_automation,
+        dryRun: dry_run,
+        force,
+      });
+      const out = { policyPath, ruleName: result.ruleName, written: result.written, diff: result.diff };
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(out, null, 2) }],
+        structuredContent: out,
+      };
+    } catch (err) {
+      if (err instanceof AddRuleError) {
+        return apiErrorToMcpError(new Error(`${err.code}: ${err.message}`));
       }
-    },
-  );
+      return apiErrorToMcpError(err);
+    }
+  },)
 
   return server;
 }
@@ -2615,9 +2608,10 @@ export function registerMcpCommand(program: Command): void {
     .command('mcp')
     .description('Run as a Model Context Protocol server so AI agents can call SwitchBot tools')
     .addHelpText('after', `
-  The MCP server exposes twenty-eight tools:
+  The MCP server exposes ${TOOL_PROFILES.all.size} tools including deprecated aliases:
   - list_devices            fetch all physical + IR devices
   - get_device_status       live status for a physical device
+  - device_diary            Kata diary reads over integer-millisecond windows up to 31 days
   - send_command            control a device (destructive commands need confirm:true)
   - list_scenes             list all manual scenes
   - run_scene               execute a manual scene
@@ -2625,7 +2619,7 @@ export function registerMcpCommand(program: Command): void {
   - describe_device         metadata + commands + (optionally) live status for one device
   - account_overview        single cold-start snapshot: devices + scenes + quota + cache + MQTT state
   - device_history          read locally-persisted device history (mode: "raw" | "query" | "aggregate")
-  - mindclip_recordings     AI MindClip recordings (action: "list" | "get" | "summary")
+  - mindclip_recordings     AI MindClip recordings (action: "list" | "get" | "summary" | "transcript")
   - mindclip_list_todos     list AI-extracted to-dos (filters: completion, category, source recording, time range)
   - mindclip_recall         AI-curated assistant views (period: "daily" | "weekly" | "urgent_todos")
   - policy_validate         check policy.yaml against the embedded schema + offline semantics
@@ -2722,13 +2716,13 @@ Examples:
             exitWithError('Refusing to listen on 0.0.0.0 without --auth-token. Pass --auth-token <token> or bind to localhost (default).');
           }
 
-          const { createServer } = await import('node:http');
           const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 
           // Initialize shared EventSubscriptionManager for event streaming.
           // Credentials are auto-provisioned from the SwitchBot API using the
           // account's token+secret — no extra MQTT env vars needed.
-          const eventManager = new EventSubscriptionManager();
+          const startupProfile = getActiveProfile() ?? 'default';
+          const eventManager = new EventSubscriptionManager(undefined, undefined, startupProfile);
           const mqttCreds = tryLoadConfig();
           if (mqttCreds) {
             eventManager.initialize(mqttCreds.token, mqttCreds.secret).catch((err: unknown) => {
@@ -2821,7 +2815,16 @@ process_uptime_seconds ${Math.floor(process.uptime())}
               const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
               profileQuery = url.searchParams.get('profile') ?? undefined;
             } catch { /* ignore */ }
-            const profile = profileHeader || profileQuery;
+            const profile = profileHeader ?? profileQuery;
+            try {
+              if (profile !== undefined) assertValidProfileName(profile);
+            } catch {
+              res.writeHead(400, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({
+                jsonrpc: '2.0', error: { code: -32602, message: 'Invalid profile name' }, id: null,
+              }));
+              return;
+            }
 
             // CORS preflight
             if (req.method === 'OPTIONS') {
@@ -2866,11 +2869,12 @@ process_uptime_seconds ${Math.floor(process.uptime())}
               }
             }
 
-            // Reject unknown profiles early: avoids confusing downstream credential
-            // errors and protects against probing for valid profile names.
+            // Resolve keychain-only profiles after authentication, before rejecting
+            // names that have neither credentials nor a profile configuration.
             if (profile) {
+              await primeCredentials(profile);
               const envCredsPresent = !!(process.env.SWITCHBOT_TOKEN && process.env.SWITCHBOT_SECRET);
-              if (!envCredsPresent && !fs.existsSync(profileFilePath(profile))) {
+              if (!envCredsPresent && !getPrimedCredentials(profile) && !fs.existsSync(profileFilePath(profile))) {
                 res.writeHead(401, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({
                   jsonrpc: '2.0',
@@ -2883,19 +2887,19 @@ process_uptime_seconds ${Math.floor(process.uptime())}
 
             // Stateless mode: fresh transport+server per request (SDK requirement).
             const reqTransport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-            const reqServer = createSwitchBotMcpServer({ eventManager, toolProfile });
+            let reqServer: McpServer | undefined;
             // Register cleanup before any async work so it fires on both normal
             // close and error-path close (after the 500 response ends).
             res.on('close', () => {
               reqTransport.close();
-              reqServer.close();
+              reqServer?.close();
             });
             // Route per-request credentials via AsyncLocalStorage so loadConfig()
             // picks up this request's profile instead of the process-global flag.
-            // Prime keychain credentials for this profile before entering context
-            // so loadConfig()'s synchronous getPrimedCredentials() can find them.
-            if (profile) await primeCredentials(profile);
             await withRequestContext({ profile: profile ?? undefined }, async () => {
+              await primeCredentials(getActiveProfile() ?? 'default');
+              if (res.destroyed) return;
+              reqServer = createSwitchBotMcpServer({ eventManager, eventManagerProfile: startupProfile, toolProfile });
               try {
                 await reqServer.connect(reqTransport);
                 await reqTransport.handleRequest(req, res);
@@ -2940,14 +2944,15 @@ process_uptime_seconds ${Math.floor(process.uptime())}
           return;
         }
 
-        const eventManager = new EventSubscriptionManager();
+        const startupProfile = getActiveProfile() ?? 'default';
+        const eventManager = new EventSubscriptionManager(undefined, undefined, startupProfile);
         const mqttCreds = tryLoadConfig();
         if (mqttCreds) {
           eventManager.initialize(mqttCreds.token, mqttCreds.secret).catch((err: unknown) => {
             console.error('MQTT initialization failed:', err instanceof Error ? err.message : String(err));
           });
         }
-        const server = createSwitchBotMcpServer({ eventManager, toolProfile });
+        const server = createSwitchBotMcpServer({ eventManager, eventManagerProfile: startupProfile, toolProfile });
         const transport = new StdioServerTransport();
         await server.connect(transport);
 

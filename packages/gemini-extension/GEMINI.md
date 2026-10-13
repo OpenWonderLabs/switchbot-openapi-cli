@@ -7,7 +7,7 @@ Drive the user's SwitchBot smart home through the `switchbot` CLI and MCP tools.
 ## Authority chain
 
 | Question | Authoritative source |
-|---|---|
+| --- | --- |
 | What can I do (cold start)? | `account_overview` MCP tool |
 | What commands exist? | `switchbot capabilities --json` |
 | What flags does this command take? | `switchbot <cmd> --help --json` |
@@ -15,7 +15,8 @@ Drive the user's SwitchBot smart home through the `switchbot` CLI and MCP tools.
 | What's this device doing right now? | `get_device_status` MCP tool |
 | What can I do with this specific device type? | `describe_device` MCP tool |
 | What scenes are configured? | `list_scenes` MCP tool |
-| What's on the user's AI MindClip (recordings, todos, daily/weekly summaries)? | `mindclip_recordings` (action: list/get/summary), `mindclip_list_todos`, `mindclip_recall` (period: daily/weekly/urgent_todos) MCP tools |
+| What's on the user's AI MindClip (recordings, transcript, todos, summaries)? | `mindclip_recordings` (action: list/get/summary/transcript), `mindclip_list_todos`, `mindclip_recall` MCP tools |
+| What's in a Kata Friends diary? | `device_diary` with integer-millisecond start/end, up to 31 days |
 | What's in the user's policy? | `switchbot policy validate --live --json` |
 | Is my quota OK? | `switchbot quota status --json` |
 | Is the setup healthy? | `switchbot doctor --json` |
@@ -31,7 +32,7 @@ Drive the user's SwitchBot smart home through the `switchbot` CLI and MCP tools.
 
 Call the `account_overview` MCP tool on first query:
 
-```
+```text
 account_overview → devices[], scenes[], quota, mqttConnected
 ```
 
@@ -77,7 +78,7 @@ When the user says "bedroom light", resolve in this order:
 ## Safety gates
 
 | Tier | Examples | Behaviour |
-|---|---|---|
+| --- | --- | --- |
 | `read` | status, list, quota | Run freely. |
 | `ir-fire-forget` | IR power/AC/TV via Hub | Run; warn there is no device-side confirmation. |
 | `mutation` | turnOn/Off, setBrightness, setColor | Run. Append to audit log. |
@@ -90,11 +91,11 @@ Policy overrides: `confirmations.always_confirm` forces confirmation; `confirmat
 
 ## Policy compliance
 
-1. Call `policy_validate` (with `live: true`) once per device-control session.
-2. Honour `quiet_hours`, `always_confirm`, and `never_confirm` from the validated policy.
-3. No policy file → proceed with default tiers.
+1. The default MCP profile does not expose policy validation. When live validation is needed, run switchbot policy validate --live --json through the CLI.
+2. Honour quiet_hours, always_confirm, and never_confirm from the validated policy.
+3. No policy file means proceeding with the default tiers.
 
-Never write to `policy.yaml` without showing a diff and getting explicit approval.
+Never write to policy.yaml without showing a diff and getting explicit approval.
 
 ---
 
@@ -106,11 +107,13 @@ Always use `--json` when parsing output. Use `--format=markdown` for user-facing
 
 ## Credentials
 
-Credentials come from one of two sources (checked in order):
-1. `SWITCHBOT_TOKEN` / `SWITCHBOT_SECRET` environment variables — set via Gemini CLI's extension settings at install time (stored in system keychain by Gemini CLI).
-2. OS keychain — populated by `switchbot auth login` (browser OAuth flow).
+The CLI resolves credentials in this order:
 
-Never ask the user for their token or secret directly. If credentials are missing, instruct them to run `switchbot auth login` or re-install the extension and complete the settings prompt.
+1. SWITCHBOT_TOKEN and SWITCHBOT_SECRET environment variables, including values configured for the Gemini extension.
+2. The OS keychain populated by switchbot auth login.
+3. The CLI configuration file when no environment or keychain credentials are available.
+
+Run switchbot auth login before installing or configuring extension settings when you prefer the keychain flow. Empty extension environment values do not replace keychain or configuration-file fallback. Never ask the user to copy a token or secret from a file.
 
 ---
 
@@ -145,4 +148,4 @@ Never retry `destructive` actions automatically.
 
 ## Version
 
-Targets `@switchbot/openapi-cli` ≥ 3.7.1. If `switchbot --version` is older: `npm update -g @switchbot/openapi-cli`.
+Targets `@switchbot/openapi-cli` ≥ 3.9.0. If `switchbot --version` is older: `npm update -g @switchbot/openapi-cli`.

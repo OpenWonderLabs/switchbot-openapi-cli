@@ -248,12 +248,12 @@ export function createClient(): AxiosInstance {
 
         if (status === 401) {
           throw new ApiError(
-            'Authentication failed: invalid token or daily 10,000-request quota exceeded',
+            'Authentication failed (HTTP 401): check token, secret, signature and system clock; inspect the provider response for account-limit details',
             401,
             {
               transient: false,
               retryable: false,
-              hint: 'Run `switchbot config set-token <token> <secret>` to re-enter credentials, or `switchbot quota status` to check today\'s local count.'
+              hint: 'Re-authenticate with `switchbot auth login` or verify the host credential environment; `switchbot quota status` is only a local request count.'
             }
           );
         }
@@ -261,13 +261,13 @@ export function createClient(): AxiosInstance {
           const retryAfter = error.response?.headers?.['retry-after'];
           const retryAfterMs = nextRetryDelayMs(maxRetries - 1, backoff, retryAfter);
           throw new ApiError(
-            'Request rate too high: daily 10,000-request quota exceeded (retries exhausted)',
+            'Request rate too high (HTTP 429; retries exhausted)',
             429,
             {
               retryable: true,
               transient: true,
               retryAfterMs,
-              hint: 'Use `switchbot quota status` to see today\'s usage; raise `--retry-on-429 <n>` for more retries.'
+              hint: 'Honor Retry-After and reduce request frequency. Check provider limits and `switchbot quota status`; HTTP 429 alone does not prove the daily allowance is exhausted.'
             }
           );
         }

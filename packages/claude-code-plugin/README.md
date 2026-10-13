@@ -1,49 +1,83 @@
 # @switchbot/claude-code-plugin
 
-SwitchBot plugin for [Claude Code](https://claude.ai/claude-code) — wires Claude Code to the SwitchBot OpenAPI CLI MCP server, exposing up to 28 smart-home tools (17 in the default profile, 28 with `--tools all`) with policy-based safety gates.
+SwitchBot plugin for [Claude Code](https://claude.ai/claude-code). The full plugin loads the SwitchBot skill and its default-profile MCP server. MCP-only setup registers only the server; it does not load the skill.
 
-## Installation
+## Full plugin installation
 
-```bash
-npm install -g @switchbot/claude-code-plugin
-```
+Use the marketplace path when you want the skill, its safety guidance, and the default MCP server together. Clone the repository, then register the package directory as the marketplace:
 
-Then register the MCP server with Claude Code:
+~~~bash
+git clone https://github.com/OpenWonderLabs/switchbot-openapi-cli.git
+claude plugin marketplace add ./switchbot-openapi-cli/packages/claude-code-plugin
+claude plugin install switchbot@switchbot
+~~~
 
-```bash
-claude mcp add switchbot -- switchbot mcp serve
-```
+Confirm that Claude Code discovered the plugin and its skill:
 
-To also expose the admin tools (policy / audit / automation rules), add `--tools all`:
+~~~bash
+claude plugin list
+claude plugin details switchbot
+~~~
 
-```bash
-claude mcp add switchbot -- switchbot mcp serve --tools all
-```
+For a temporary local development session, load the plugin directory directly:
 
-If SwitchBot credentials are not yet configured, run:
+~~~bash
+claude --plugin-dir ./switchbot-openapi-cli/packages/claude-code-plugin/plugins/switchbot
+~~~
 
-```bash
+The plugin never installs the CLI or starts authentication automatically. Install the CLI and authenticate explicitly before controlling devices:
+
+~~~bash
+npm install -g @switchbot/openapi-cli@^3.9.0
 switchbot auth login
-```
+~~~
 
-Or use the bundled helper at any time to re-authenticate:
+The bundled switchbot-claude-auth command is an explicit interactive credential check and login helper; run it only when you want that flow.
 
-```bash
-switchbot-claude-auth
-```
+## MCP-only setup
+
+Use this path when you want MCP tools without the plugin skill:
+
+~~~bash
+npm install -g @switchbot/openapi-cli@^3.9.0
+claude mcp add switchbot -- switchbot mcp serve
+switchbot auth login
+~~~
+
+The default MCP profile intentionally exposes the minimal read and action tool set. It does not enable every admin tool. Use CLI policy commands when a workflow needs policy validation, or consciously configure a separate MCP server with the required tool profile.
 
 ## Requirements
 
-- Node.js ≥ 18
-- `@switchbot/openapi-cli` ≥ 3.7.1 (installed globally or as a peer)
-- Claude Code ≥ 1.x
+- Node.js >= 18
+- @switchbot/openapi-cli >= 3.9.0
+- Claude Code with plugin marketplace or plugin-directory support for the full-plugin path
 
-## What it does
+## Verify
 
-Registers the `switchbot` MCP server (`switchbot mcp serve` — default profile) with Claude Code. Add `--tools all` to expose the policy/audit/rules tools alongside the core 17. The skill document (`plugins/switchbot/skills/switchbot/SKILL.md`) guides Claude Code in safely controlling devices, reading sensors, running scenes, and respecting policy-based safety tiers.
+~~~bash
+switchbot --version
+switchbot doctor
+~~~
+
+Restart Claude Code after installing or changing an MCP configuration. If credentials are missing, run switchbot auth login; do not paste tokens or secrets into a chat.
+
+## Uninstall
+
+~~~bash
+claude plugin uninstall switchbot@switchbot
+claude plugin marketplace remove switchbot
+~~~
+
+For MCP-only setup, remove the named SwitchBot MCP server with Claude Code's MCP management command. Removing the plugin or MCP registration does not remove CLI credentials; use switchbot auth logout only when you intend to remove them.
+
+## Release metadata
+
+Bump the npm package, packaged marketplace, embedded plugin manifest, and repository
+root marketplace versions together. `npm pack`/`npm publish` reject stale packaged
+metadata; the repository's `npm run verify:release` also checks the GitHub marketplace.
 
 ## Related packages
 
-- [`@switchbot/openapi-cli`](https://www.npmjs.com/package/@switchbot/openapi-cli) — the CLI and MCP server
-- [`@switchbot/codex-plugin`](https://www.npmjs.com/package/@switchbot/codex-plugin) — OpenAI Codex CLI variant
-- [`@switchbot/openclaw-skill`](https://www.npmjs.com/package/@switchbot/openclaw-skill) — OpenClaw / ClawhHub variant
+- [@switchbot/openapi-cli](https://www.npmjs.com/package/@switchbot/openapi-cli) — CLI and MCP server
+- [@switchbot/gemini-extension](https://www.npmjs.com/package/@switchbot/gemini-extension) — Gemini CLI extension
+- [@switchbot/codex-plugin](https://www.npmjs.com/package/@switchbot/codex-plugin) — OpenAI Codex CLI variant

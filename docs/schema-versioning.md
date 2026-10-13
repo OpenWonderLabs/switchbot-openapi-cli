@@ -1,99 +1,81 @@
 # Schema Versioning
 
-This document describes how `schemaVersion` evolves across SwitchBot CLI releases.
+SwitchBot CLI has separate machine-readable contracts. A version in one
+contract does not change the version of another contract.
 
-## Overview
+## Current versions for CLI 3.9.0
 
-The CLI emits structured JSON responses wrapped in a top-level envelope that carries a `schemaVersion` field. This field follows semantic versioning to signal compatibility:
+| Contract | Location | Version | What it versions |
+| --- | --- | --- | --- |
+| JSON envelope | top-level JSON success and error output | `1.2` | `{ schemaVersion, data }` and `{ schemaVersion, error }` |
+| Discovery export | `schema export` data `version` | `2.0` | the discoverable catalog payload, including resources |
+| Resource catalog | `schema export` data `resources.version` | `2.0` | scenes, webhooks, and keypad resource metadata |
+| Device entry shape | each item in `schema export` data `types` | `1.0` | device command and status-field descriptors |
+| Event payload | streaming event data `payloadVersion` | `1` | normalized event record inside the JSON envelope |
 
-- **Additive changes** (new optional fields) → minor version bump (1.1, 1.2)
-- **Breaking changes** (field removal, rename, type change) → major version bump (2.0)
-- **No compatibility shim** — parsers that pin schemaVersion "1" continue to work against 1.1, 1.2, etc. (backward-compatible)
+The top-level JSON envelope remains `1.2`. Its version does not mean that
+every command payload has the same version or shape.
 
-## Envelope shape (v2.0+)
+## Compatibility rules
 
-Every JSON response is one of:
+- Additive optional fields are compatible within the affected contract.
+- Removing, renaming, or changing the type or nesting of a field is breaking
+  for that contract and requires a major version change there.
+- Adding a REST endpoint does not by itself change the JSON envelope version.
+- `schema export` 2.0 is a clean cutover for resource discovery. Webhook
+  entries now describe the official outer `changeReport` envelope and a nested
+  `context`; consumers of export 1.0 must migrate rather than interpret the
+  new resource metadata as compatible.
+- Device descriptors in `types` retain their 1.0 shape. Resource changes do
+  not imply a device-entry change.
 
-```json
-{ "schemaVersion": "1.2", "data": { ... } }
-```
+## JSON envelope
 
-```json
-{ "schemaVersion": "1.2", "error": { "code": 1, "kind": "...", "message": "..." } }
-```
+Every non-streaming JSON success is shaped as follows:
 
-The payload your integration cares about is always nested under `data` (success) or `error` (failure). `schemaVersion` describes the *payload shape*, not the CLI version — the envelope itself is the structural signal introduced in CLI 2.0.
+~~~json
+{ "schemaVersion": "1.2", "data": { } }
+~~~
 
-### Historical nested location: `batch.summary.schemaVersion`
+Every non-streaming JSON error is shaped as follows:
 
-Before the top-level envelope existed, the `batch` command nested `schemaVersion` inside `summary`. That nested field is retained for back-compat — both of the following are set, and both equal `"1.2"`:
+~~~json
+{ "schemaVersion": "1.2", "error": { "code": 1, "kind": "runtime", "message": "..." } }
+~~~
 
-```json
+`schemaVersion` describes this wrapper only. Parse command-specific output
+from `data` after selecting the applicable command or discovery version.
+
+## Discovery export migration
+
+A 2.0 export has this version boundary:
+
+~~~json
 {
   "schemaVersion": "1.2",
   "data": {
-    "summary": { "schemaVersion": "1.2", "total": 3, "ok": 2, "error": 1, "skipped": 0 },
-    "succeeded": [ ... ],
-    "failed": [ ... ]
+    "version": "2.0",
+    "types": [],
+    "resources": { "version": "2.0" }
   }
 }
-```
+~~~
 
-Prefer the top-level `schemaVersion`. The nested copy may be removed in a future major.
+The resource catalog is descriptive metadata, not a JSON Schema validator.
+Fields describe documented webhook examples and can be absent when an official
+variant does not include them. In particular, consumers must not infer a
+universal MAC address, sample time, or primitive-only context shape.
 
-## Current Versions
+## Streaming events
 
-- **v3.4.1**: schemaVersion "1.2" (bug-fix release, no schema changes)
+Streaming commands first emit a lean header. `devices watch` uses envelope
+version `1.2`; `events tail` and `events mqtt-tail` use stream-header version
+`1`.
 
-- **v3.4.0**: schemaVersion "1.2"
-  - `catalog show <Type> --json`: `data` is now always an array (was bare object for single-type queries)
-  - `devices commands <Type> --json`: same change — `data` is always an array
-  - `fetchedAt` field renamed from `_fetchedAt` in `devices status` JSON output
+Subsequent event lines from `events tail` and `events mqtt-tail` are normal
+JSON envelopes at `schemaVersion` `1.2`. Their `data.payloadVersion` is `1`.
+The payload version applies to the normalized event record, not to the outer
+JSON envelope or the upstream raw payload.
 
-- **v2.0.0**: schemaVersion "1.1" inside a new top-level `{schemaVersion, data|error}` envelope
-  - Every `--json` response now has a top-level `schemaVersion` (previously only `batch.summary` had it)
-  - Payload lives under `data` for success, `error` for failure
-  - Existing payload shapes are unchanged — only the wrapper is new
-
-- **v1.7.0 – v1.12.x (unpublished)**: schemaVersion "1.1"
-  - `batch` command: added `failed[].error.retryAfterMs`, `failed[].error.transient`, `failed[].error.errorClass`
-  - All new fields are optional
-
-- **v1.0.0 – v1.6.x**: schemaVersion "1"
-  - Original unified JSON response structure (no top-level envelope)
-
-## Migration Path
-
-### From v1.x → v2.0
-
-**What changed:**
-1. Every `--json` response is now wrapped in `{schemaVersion, data}` (success) or `{schemaVersion, error}` (failure).
-2. `batch.failed[].error` is now an object instead of a string (richer error metadata).
-3. `switchbot mcp serve` defaults to binding `127.0.0.1`. Pass `--bind 0.0.0.0 --auth-token <token>` to restore external reachability.
-
-**How to update your integration:**
-- Unwrap the envelope once: `parsed.data.<field>` instead of `parsed.<field>`, `parsed.error.<field>` for failures.
-- For `batch`, read `failed[].error.message` for the previous string content; use `failed[].error.transient` / `retryAfterMs` for retry decisions.
-- For MCP HTTP deployments, add explicit `--bind` + `--auth-token` flags if external reachability is required.
-
-### From v1.6 → v1.7 (historical)
-
-**What changed:**
-- `batch` failed array entries now include richer error metadata
-- Old: `{deviceId, error: "string message"}`
-- New: `{deviceId, error: {code, kind, message, errorClass, transient, retryAfterMs, ...}}`
-
-**How to update your integration:**
-1. Check if your parser uses `failed[].error`
-2. If so, update to read `failed[].error.message` for the error string (same content)
-3. Optionally use `failed[].error.transient` to decide retry logic
-4. Optionally use `failed[].error.retryAfterMs` to wait before retry
-
-## Schema Pinning (Not Recommended)
-
-Some tools allow pinning to exact schema versions. We recommend against this for `schemaVersion`, since:
-- The CLI rarely ships breaking changes
-- Pinning to `"1"` means you stay on 1.0-1.9x even when security fixes land in 1.5+
-- Pinning to `"1.2"` works until a future v2 of the payload shape, at which point you'd need to update anyway
-
-Instead, test your integration against the current release and trust the semantic versioning signal.
+A historical `batch.summary.schemaVersion` remains a compatibility field.
+Prefer the top-level envelope version for CLI output parsing.

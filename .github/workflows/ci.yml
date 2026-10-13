@@ -45,6 +45,32 @@ jobs:
       - run: npm test
       - run: npm run test:workspaces
 
+  openclaw-bootstrap:
+    name: OpenClaw native bootstrap (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs: docs-lint
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Exercise packed peer outside plugin ancestry
+        run: npm run smoke:openclaw-bootstrap -- --evidence "${{ runner.temp }}/openclaw-bootstrap.json"
+      - name: Upload native bootstrap evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openclaw-bootstrap-${{ matrix.os }}
+          path: ${{ runner.temp }}/openclaw-bootstrap.json
+          if-no-files-found: error
+
   bundle-smoke:
     name: esbuild bundle smoke test (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest

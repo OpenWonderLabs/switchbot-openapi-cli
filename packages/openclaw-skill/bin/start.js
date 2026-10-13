@@ -4,19 +4,20 @@
 // Default entry point for the @switchbot/openclaw-skill plugin.
 //
 // Subcommands:
-//   setup       Interactive bootstrap: verify CLI installed + >=3.7.1,
+//   setup       Interactive bootstrap: verify CLI installed + >=3.9.0,
 //               run `switchbot doctor` to confirm auth.
 //   --version   Print the plugin version.
 //   --help      Print this help.
 //
-// Default (no args): bootstrap wrapper — auto-installs CLI, verifies credentials,
-// starts daemon if needed, then exec switchbot mcp serve (the CLI-owned MCP surface).
-// Only credential setup requires user action; everything else is automatic.
+// Default (no args): verify the installed CLI and credentials, start an enabled
+// automation daemon if needed, then run switchbot mcp serve.
+// Missing prerequisites require explicit user setup, never automatic installation.
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { switchbotInvocation } from '../setup/cli-invocation.js';
 
 const cmd = process.argv[2];
 
@@ -32,13 +33,13 @@ if (cmd === 'setup') {
 
 Usage:
   switchbot-openclaw             Start the stdio MCP server (default; used by MCP hosts).
-  switchbot-openclaw setup       Interactive CLI install + token bootstrap.
+  switchbot-openclaw setup       Verify the installed CLI version and credentials.
   switchbot-openclaw --version   Print the plugin version.
   switchbot-openclaw --help      Show this help.
 
 See https://github.com/OpenWonderLabs/switchbot-openapi-cli for full docs.`);
 } else {
-  // Default: bootstrap wrapper — auto-configure then hand off to switchbot mcp serve.
+  // Default: verify prerequisites, then hand off to switchbot mcp serve.
   // MCP mode must NOT write to stdout (it's the JSON-RPC channel); use stderr for logs.
 
   const { checkCli } = await import('../setup/check-cli.js');
@@ -47,11 +48,10 @@ See https://github.com/OpenWonderLabs/switchbot-openapi-cli for full docs.`);
 
   function setupRequired(message) {
     process.stderr.write(`[switchbot-channel] Setup required: ${message}\n`);
-    process.stdout.write(JSON.stringify({ setupRequired: true, message }) + '\n');
     process.exit(1);
   }
 
-  // [1] CLI installed? → auto-install if missing
+  // [1] The installed CLI must satisfy the minimum version.
   const cliCheck = await checkCli();
   if (!cliCheck.ok) setupRequired(cliCheck.message);
 
@@ -64,7 +64,8 @@ See https://github.com/OpenWonderLabs/switchbot-openapi-cli for full docs.`);
 
   // [4] Hand off to switchbot mcp serve — the CLI owns the MCP tool surface
   try {
-    execFileSync('switchbot', ['mcp', 'serve'], { stdio: 'inherit' });
+    const invocation = switchbotInvocation(['mcp', 'serve']);
+    execFileSync(invocation.command, invocation.args, { stdio: 'inherit' });
   } catch (err) {
     process.stderr.write(
       `[switchbot-channel] switchbot mcp serve exited: ${err instanceof Error ? err.message : String(err)}\n`,

@@ -1,8 +1,8 @@
 {
   "name": "@switchbot/gemini-extension",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "type": "module",
-  "description": "SwitchBot Gemini CLI extension — wires Gemini CLI to the SwitchBot MCP server (default 17 tools; `--tools all` for 28) via the native Extension system",
+  "description": "SwitchBot Gemini CLI extension \u2014 wires Gemini CLI to the SwitchBot MCP server using the default tool profile via the native Extension system",
   "homepage": "https://github.com/OpenWonderLabs/switchbot-openapi-cli/tree/main/packages/gemini-extension",
   "repository": {
     "type": "git",
@@ -11,13 +11,32 @@
   },
   "bugs": "https://github.com/OpenWonderLabs/switchbot-openapi-cli/issues",
   "license": "MIT",
-  "keywords": ["gemini", "gemini-cli", "switchbot", "smart-home", "iot", "mcp"],
-  "engines": { "node": ">=18" },
-  "files": ["gemini-extension.json", "GEMINI.md", "commands/", "README.md"],
-  "peerDependencies": {
-    "@switchbot/openapi-cli": ">=3.7.1"
+  "keywords": [
+    "gemini",
+    "gemini-cli",
+    "switchbot",
+    "smart-home",
+    "iot",
+    "mcp"
+  ],
+  "engines": {
+    "node": ">=18"
   },
-  "publishConfig": { "access": "public" },
+  "files": [
+    "gemini-extension.json",
+    "GEMINI.md",
+    "commands/",
+    "README.md"
+  ],
+  "peerDependencies": {
+    "@switchbot/openapi-cli": ">=3.9.0"
+  },
+  "devDependencies": {
+    "@switchbot/openapi-cli": "file:../.."
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "test": "node --test"
   }

@@ -39,7 +39,19 @@ const cacheMock = vi.hoisted(() => ({
     }
     return out;
   }),
-  updateCacheFromDeviceList: vi.fn(),
+  updateCacheFromDeviceList: vi.fn((body: {
+    deviceList: Array<{ deviceId: string; deviceName: string; deviceType?: string }>;
+    infraredRemoteList: Array<{ deviceId: string; deviceName: string; remoteType: string }>;
+  }) => {
+    for (const device of body.deviceList) {
+      if (device.deviceType) {
+        cacheMock.map.set(device.deviceId, { type: device.deviceType, name: device.deviceName, category: 'physical' });
+      }
+    }
+    for (const device of body.infraredRemoteList) {
+      cacheMock.map.set(device.deviceId, { type: device.remoteType, name: device.deviceName, category: 'ir' });
+    }
+  }),
   loadStatusCache: vi.fn(() => ({ entries: Object.fromEntries(cacheMock.statusMap) })),
 }));
 vi.mock('../../src/devices/cache.js', () => ({
@@ -77,6 +89,7 @@ const flagsMock = vi.hoisted(() => ({
 vi.mock('../../src/utils/flags.js', () => flagsMock);
 
 import { registerDevicesCommand } from '../../src/commands/devices.js';
+import { validatePlan } from '../../src/commands/plan.js';
 import { runCli } from '../helpers/cli.js';
 import { expectJsonEnvelopeContainingKeys } from '../helpers/contracts.js';
 
@@ -256,7 +269,7 @@ describe('devices batch', () => {
     expect(result.stderr.join('\n')).toMatch(/destructive/);
   });
 
-  it('allows destructive commands when --yes is passed', async () => {
+  it('blocks default-profile destructive commands even when --yes is passed', async () => {
     apiMock.__instance.get.mockResolvedValue({ data: { statusCode: 100, body: DEVICE_LIST_BODY } });
     apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body: {} } });
 
@@ -270,10 +283,31 @@ describe('devices batch', () => {
       '--yes',
     ]);
 
-    expect(result.exitCode).toBeNull();
-    expect(apiMock.__instance.post).toHaveBeenCalledTimes(1);
+    expect(result.exitCode).toBe(2);
+    expect(apiMock.__instance.post).not.toHaveBeenCalled();
     const parsed = JSON.parse(result.stdout[0]);
-    expect(parsed.data.summary.ok).toBe(1);
+    expect(parsed.error.kind).toBe('guard');
+    expect(parsed.error.context.requiredWorkflow).toBe('plan-approval');
+  });
+
+  it('validates every target before dispatching any batch command', async () => {
+    cacheMock.map.set('BOT1', { type: 'Bot', name: 'Kitchen', category: 'physical' });
+    cacheMock.map.set('METER1', { type: 'Meter', name: 'Office Meter', category: 'physical' });
+    apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body: {} } });
+
+    const result = await runCli(registerDevicesCommand, [
+      '--json',
+      'devices',
+      'batch',
+      'turnOn',
+      '--ids',
+      'BOT1,METER1',
+    ]);
+
+    expect(result.exitCode).toBe(2);
+    expect(apiMock.__instance.post).not.toHaveBeenCalled();
+    const parsed = JSON.parse(result.stdout[0]);
+    expect(parsed.error.context.validationKind).toBe('read-only-device');
   });
 
   it('--dry-run does not send POSTs and marks all as skipped', async () => {
@@ -422,6 +456,33 @@ describe('devices batch', () => {
     expect(parsed.data.summary.maxConcurrent).toBe(2);
   });
 
+  it('emits a schema-valid standard plan for destructive dry-run previews', async () => {
+    flagsMock.dryRun = true;
+    cacheMock.map.set('LOCK1', { type: 'Smart Lock', name: 'Front', category: 'physical' });
+
+    const result = await runCli(registerDevicesCommand, [
+      '--json',
+      'devices',
+      'batch',
+      'unlock',
+      '--ids',
+      'LOCK1',
+      '--emit-plan',
+    ]);
+
+    expect(result.exitCode).toBeNull();
+    expect(apiMock.__instance.post).not.toHaveBeenCalled();
+    const parsed = JSON.parse(result.stdout[0]);
+    const validation = validatePlan(parsed.data.plan);
+    expect(validation.ok).toBe(true);
+    expect(parsed.data.plan.steps[0]).toMatchObject({
+      type: 'command',
+      deviceId: 'LOCK1',
+      command: 'unlock',
+      commandType: 'command',
+    });
+  });
+
   it('C3: --dry-run --plan emits a plan document and does not call POST', async () => {
     flagsMock.dryRun = true;
     apiMock.__instance.get.mockResolvedValue({ data: { statusCode: 100, body: DEVICE_LIST_BODY } });
@@ -445,10 +506,10 @@ describe('devices batch', () => {
     const parsed = JSON.parse(result.stdout[0]);
     expect(parsed.data.dryRun).toBe(true);
     expect(parsed.data.schemaVersion).toBeUndefined();
-    expect(parsed.data.plan.command).toBe('turnOn');
-    expect(parsed.data.plan.maxConcurrent).toBe(3);
-    expect(parsed.data.plan.staggerMs).toBe(250);
-    expect(parsed.data.plan.stepCount).toBe(2);
+    expect(parsed.data.plan.version).toBe('1.0');
+    expect(parsed.data.batch.maxConcurrent).toBe(3);
+    expect(parsed.data.batch.staggerMs).toBe(250);
+    expect(parsed.data.batch.stepCount).toBe(2);
     expect(parsed.data.plan.steps.map((s: { deviceId: string }) => s.deviceId).sort()).toEqual(['BOT1', 'BOT2']);
   });
 
@@ -470,8 +531,8 @@ describe('devices batch', () => {
     expect(apiMock.__instance.post).not.toHaveBeenCalled();
     const parsed = JSON.parse(result.stdout[0]);
     expect(parsed.data.schemaVersion).toBeUndefined();
-    expect(parsed.data.plan.command).toBe('turnOn');
-    expect(parsed.data.plan.stepCount).toBe(2);
+    expect(parsed.data.plan.version).toBe('1.0');
+    expect(parsed.data.batch.stepCount).toBe(2);
     // --emit-plan must not trigger the deprecation warning.
     expect(result.stderr.join('\n')).not.toMatch(/deprecated/i);
   });
@@ -493,7 +554,7 @@ describe('devices batch', () => {
     expect(result.exitCode).toBeNull();
     // Plan JSON still emitted on stdout (contract unchanged).
     const parsed = JSON.parse(result.stdout[0]);
-    expect(parsed.data.plan.command).toBe('turnOn');
+    expect(parsed.data.plan.version).toBe('1.0');
     // Deprecation warning lands on stderr, not stdout.
     expect(result.stderr.join('\n')).toMatch(/--plan is deprecated/);
     expect(result.stderr.join('\n')).toMatch(/--emit-plan/);
@@ -535,7 +596,7 @@ describe('devices batch', () => {
 
     expect(result.exitCode).toBeNull();
     const parsed = JSON.parse(result.stdout[0]);
-    const keys = parsed.data.plan.steps.map((s: { idempotencyKey?: string }) => s.idempotencyKey).sort();
+    const keys = Object.values(parsed.data.batch.idempotencyKeys).sort();
     expect(keys).toEqual(['foo-BOT1', 'foo-BOT2']);
   });
 

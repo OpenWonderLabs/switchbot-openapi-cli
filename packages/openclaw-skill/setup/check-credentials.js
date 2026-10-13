@@ -1,25 +1,38 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { formatError } from '../lib/error-messages.js';
+import { switchbotInvocation } from './cli-invocation.js';
+
+function credentialsResult(stdout) {
+  const parsed = JSON.parse(stdout);
+  const data = parsed?.data ?? parsed;
+  const credentials = data?.checks?.find((check) => check?.name === 'credentials');
+  if (credentials?.status === 'ok') return { ok: true };
+  return { ok: false, reason: 'not-configured' };
+}
 
 async function tryDoctor(exec) {
   try {
-    const { stdout } = await exec('switchbot', ['doctor', '--json'], { timeout: 10000 });
-    const parsed = JSON.parse(stdout);
-    const data = parsed?.data ?? parsed;
-    return data?.credentials?.configured === true
-      ? { ok: true }
-      : { ok: false, reason: 'not-configured' };
+    const { stdout } = await exec('switchbot', ['doctor', '--section', 'credentials', '--json'], { timeout: 10000 });
+    return credentialsResult(stdout);
   } catch (err) {
     if (err?.code === 'ENOENT') throw err;
+    if (typeof err?.stdout === 'string') {
+      try {
+        return credentialsResult(err.stdout);
+      } catch {
+        // Fall through when a failing command did not return a doctor envelope.
+      }
+    }
     return { ok: false, reason: 'doctor-failed' };
   }
 }
 
-async function tryKeychainDescribe(exec) {
+async function tryKeychainGet(exec) {
   try {
-    await exec('switchbot', ['auth', 'keychain', 'describe', '--json'], { timeout: 8000 });
-    return true;
+    const { stdout } = await exec('switchbot', ['auth', 'keychain', 'get', '--json'], { timeout: 8000 });
+    const parsed = JSON.parse(stdout);
+    return (parsed?.data ?? parsed)?.present === true;
   } catch {
     return false;
   }
@@ -35,17 +48,21 @@ export function makeCheckCredentials(exec) {
       // CLI missing — fall through to keychain
     }
 
-    // Doctor ran but exited non-zero → likely token expired
+    // An unusable diagnostic does not establish that a token is expired.
     if (doctorResult?.reason === 'doctor-failed') {
-      return { ok: false, message: formatError('token-expired') };
+      return { ok: false, errorKey: 'doctor-check-failed', message: formatError('doctor-check-failed') };
     }
 
-    // Doctor says not configured, or CLI missing — try keychain as fallback
-    if (await tryKeychainDescribe(exec)) return { ok: true };
+    // A backend description is not proof that a credential is stored.
+    if (await tryKeychainGet(exec)) return { ok: true };
 
     return { ok: false, message: formatError('auth-not-configured') };
   };
 }
 
-const defaultExec = promisify(execFile);
+const exec = promisify(execFile);
+const defaultExec = (_command, args, options) => {
+  const invocation = switchbotInvocation(args);
+  return exec(invocation.command, invocation.args, options);
+};
 export const checkCredentials = makeCheckCredentials(defaultExec);

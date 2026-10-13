@@ -359,12 +359,12 @@ describe('events mqtt-tail', () => {
     expect(typeof parsed.t).toBe('string');
   });
 
-  it('wraps output in envelope with --json --max 1', async () => {
+  it('emits physically newline-delimited envelopes with --json --max 1', async () => {
     mqttMock.connectShouldFireMessage = true;
 
     const res = await runCli(registerEventsCommand, ['--json', 'events', 'mqtt-tail', '--max', '1']);
     expect(res.exitCode).toBe(null);
-    const jsonLines = res.stdout
+    const jsonLines = res.stdout.join('\n').trim().split('\n')
       .filter((l) => l.trim().startsWith('{'))
       .map(
         (l) =>

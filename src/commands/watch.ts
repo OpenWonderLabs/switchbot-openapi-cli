@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { printJson, isJsonMode, handleError, UsageError, emitStreamHeader } from '../utils/output.js';
+import { printJsonLine, isJsonMode, handleError, UsageError, emitStreamHeader } from '../utils/output.js';
 import { fetchDeviceStatus } from '../lib/devices.js';
 import { getCachedDevice } from '../devices/cache.js';
 import { parseDurationToMs, getFields } from '../utils/flags.js';
@@ -224,7 +224,7 @@ Examples:
                         snapshot: baseline,
                       };
                       if (isJsonMode()) {
-                        printJson(ev);
+                        printJsonLine(ev);
                       } else {
                         console.log(formatHumanLine(ev));
                       }
@@ -244,8 +244,7 @@ Examples:
                     changed,
                   };
                   if (isJsonMode()) {
-                    // JSONL: one event per line (printJson with newline).
-                    printJson(ev);
+                    printJsonLine(ev);
                   } else {
                     console.log(formatHumanLine(ev));
                   }
@@ -259,7 +258,7 @@ Examples:
                     error: err instanceof Error ? err.message : String(err),
                   };
                   if (isJsonMode()) {
-                    printJson(ev);
+                    printJsonLine(ev);
                   } else {
                     console.error(formatHumanLine(ev));
                   }

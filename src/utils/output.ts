@@ -14,6 +14,10 @@ export function printJson(data: unknown): void {
   console.log(JSON.stringify({ schemaVersion: SCHEMA_VERSION, data }, null, 2));
 }
 
+export function printJsonLine(data: unknown): void {
+  console.log(JSON.stringify({ schemaVersion: SCHEMA_VERSION, data }));
+}
+
 /**
  * Emit a structured JSON error envelope on stdout.
  *

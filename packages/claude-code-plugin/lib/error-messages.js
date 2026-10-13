@@ -30,7 +30,7 @@ export const ERRORS = {
     hint:   'After install, run `switchbot doctor` to confirm.',
   },
   'cli-version-too-low': {
-    reason: 'switchbot CLI version is below the required minimum (3.7.1).',
+    reason: 'switchbot CLI version is below the required minimum (3.9.0).',
     fix:    'npm install -g @switchbot/openapi-cli@latest',
     hint:   'After upgrade, re-run setup.',
   },

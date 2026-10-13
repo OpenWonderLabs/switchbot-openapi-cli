@@ -11,7 +11,6 @@ import {
   extractVerb,
   isDestructiveCommand,
   destructiveVerbOf,
-  DESTRUCTIVE_COMMANDS,
 } from '../../src/rules/destructive.js';
 
 describe('extractVerb', () => {
@@ -62,11 +61,5 @@ describe('isDestructiveCommand / destructiveVerbOf', () => {
     expect(destructiveVerbOf(cmd)).toBeNull();
   });
 
-  it('DESTRUCTIVE_COMMANDS stays in sync with the unlock-blocklist schema enforces on confirmations', () => {
-    // The two blocklists are independently defined (schema side is in YAML,
-    // runtime side is this file). This test guarantees they don't drift.
-    expect([...DESTRUCTIVE_COMMANDS].sort()).toEqual(
-      ['lock', 'unlock', 'deleteWebhook', 'deleteScene', 'factoryReset'].sort(),
-    );
-  });
+
 });

@@ -1,8 +1,8 @@
 {
   "name": "@switchbot/openclaw-skill",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "type": "module",
-  "description": "OpenClaw plugin that bootstraps and delegates to `switchbot mcp serve`, exposing the full SwitchBot MCP tool surface through @switchbot/openapi-cli >= 3.7.1.",
+  "description": "OpenClaw MCP bundle that verifies prerequisites and delegates to the default MCP profile of @switchbot/openapi-cli >= 3.9.0.",
   "homepage": "https://github.com/OpenWonderLabs/switchbot-openapi-cli/tree/main/packages/openclaw-skill",
   "repository": {
     "type": "git",
@@ -27,15 +27,24 @@
   "engines": {
     "node": ">=18"
   },
-  "dependencies": {},
+  "dependencies": {
+    "yaml": "^2.8.3"
+  },
+  "bundledDependencies": [
+    "yaml"
+  ],
   "optionalDependencies": {
     "open": "^10.0.0"
   },
   "peerDependencies": {
-    "@switchbot/openapi-cli": ">=3.7.1"
+    "@switchbot/openapi-cli": ">=3.9.0"
+  },
+  "devDependencies": {
+    "@switchbot/openapi-cli": "file:../.."
   },
   "files": [
     "index.js",
+    ".claude-plugin/",
     ".mcp.json",
     "bin/",
     "lib/",
@@ -47,6 +56,7 @@
     "access": "public"
   },
   "scripts": {
+    "prepack": "node ../../scripts/prepare-openclaw-bundle.mjs",
     "test": "node --test",
     "start": "node bin/start.js",
     "typecheck": "node --check bin/start.js && node --check bin/policy-edit.js && node --check index.js"

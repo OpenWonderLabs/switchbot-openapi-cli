@@ -82,7 +82,7 @@ export class DeviceNotFoundError extends Error {
 export class CommandValidationError extends Error {
   constructor(
     message: string,
-    public readonly kind: 'read-only-device' | 'unknown-command' | 'unexpected-parameter' | 'missing-parameter',
+    public readonly kind: 'read-only-device' | 'unknown-command' | 'unknown-device-type' | 'unexpected-parameter' | 'missing-parameter',
     public readonly hint?: string
   ) {
     super(message);
@@ -186,6 +186,45 @@ export async function fetchDeviceStatus(
   return res.data.body;
 }
 
+export const DEVICE_DIARY_MAX_WINDOW_MS = 31 * 24 * 60 * 60 * 1000;
+
+export class DeviceDiaryValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DeviceDiaryValidationError';
+  }
+}
+
+export function validateDeviceDiaryWindow(startTimestamp: number, endTimestamp: number): void {
+  if (!Number.isSafeInteger(startTimestamp) || !Number.isSafeInteger(endTimestamp)) {
+    throw new DeviceDiaryValidationError('Diary timestamps must be integer milliseconds.');
+  }
+  if (startTimestamp < 0 || endTimestamp < 0) {
+    throw new DeviceDiaryValidationError('Diary timestamps must be non-negative.');
+  }
+  if (startTimestamp >= endTimestamp) {
+    throw new DeviceDiaryValidationError('Diary --start must be earlier than --end.');
+  }
+  if (endTimestamp - startTimestamp > DEVICE_DIARY_MAX_WINDOW_MS) {
+    throw new DeviceDiaryValidationError('Diary time range must not exceed 31 days.');
+  }
+}
+
+export async function fetchDeviceDiary(
+  deviceId: string,
+  startTimestamp: number,
+  endTimestamp: number,
+  client?: AxiosInstance,
+): Promise<unknown> {
+  validateDeviceDiaryWindow(startTimestamp, endTimestamp);
+  const c = client ?? createClient();
+  const res = await c.get<{ body: unknown }>(
+    `/v1.1/devices/${encodeURIComponent(deviceId)}/diary`,
+    { params: { startTimestamp, endTimestamp } },
+  );
+  return res.data.body;
+}
+
 /**
  * Execute a command on a device. `parameter` is the fully-parsed value already
  * (JSON-object when applicable), not a raw CLI string — callers should parse
@@ -246,7 +285,7 @@ export async function executeCommand(
   const { result, replayed } = await idempotencyCache.run<unknown>(
     options?.idempotencyKey,
     execute,
-    { command: cmd, parameter },
+    { deviceId, command: cmd, commandType, parameter: body.parameter },
     getActiveProfile() ?? 'default',
   );
   if (!replayed) return result;
@@ -283,7 +322,19 @@ export function validateCommand(
   if (!cached) return { ok: true };
 
   const match = findCatalogEntry(cached.type);
-  if (!match || Array.isArray(match)) return { ok: true };
+  if (!match || Array.isArray(match)) {
+    if (cached.category === 'physical') {
+      return {
+        ok: false,
+        error: new CommandValidationError(
+          `Cannot validate built-in commands for ${cached.name} (${cached.type}) because no unambiguous catalog entry exists.`,
+          'unknown-device-type',
+          'Refresh the device list after upgrading the CLI, or use the documented command type for this device.',
+        ),
+      };
+    }
+    return { ok: true };
+  }
 
   const builtinCommands = match.commands.filter((c) => c.commandType !== 'customize');
   if (match.readOnly || builtinCommands.length === 0) {

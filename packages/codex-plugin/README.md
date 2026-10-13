@@ -6,13 +6,13 @@ Codex plugin for SwitchBot smart-home control through the authoritative
 ## What it installs
 
 - A Codex skill at `skills/switchbot/SKILL.md`
-- An MCP server definition that runs `switchbot mcp serve` (default profile, 17 tools; pass `--tools all` to add the policy/audit/rules tools for 28 total)
+- An MCP server definition that runs `switchbot mcp serve` (minimal read/action profile; use `--tools all` only for workflows needing policy/audit/rules administration)
 - Legacy helper binaries: `switchbot-codex-auth` and `switchbot-codex-install`
 
 ## Requirements
 
 - Node.js `>=18`
-- `@switchbot/openapi-cli >=3.7.1`
+- `@switchbot/openapi-cli >=3.9.0`
 - Codex with plugin marketplace support
 
 ## Install
@@ -99,7 +99,7 @@ switchbot devices list
 
 Expected result:
 
-- `switchbot --version` is `3.7.1` or newer
+- `switchbot --version` is `3.9.0` or newer
 - `switchbot doctor` completes without credential failures
 - `switchbot devices list` returns your devices
 - Codex can answer the device prompt without asking for secrets

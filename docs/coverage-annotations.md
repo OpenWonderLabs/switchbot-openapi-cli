@@ -9,7 +9,7 @@ These files are in `vitest.config.ts` `coverage.exclude` because they require
 live external infrastructure that cannot be mocked at unit-test level:
 
 | File | Reason |
-|------|--------|
+| --- | --- |
 | `src/mcp/device-history.ts` | MCP streaming protocol — requires live MCP server |
 | `src/mcp/events-subscription.ts` | MCP event subscription — requires live MCP server |
 | `src/mqtt/client.ts` | MQTT broker required; class constructor immediately connects |
@@ -22,7 +22,7 @@ These sections remain in the coverage denominator but cannot be covered by
 unit tests. They are accepted as permanent gaps.
 
 | File | Lines / Area | Reason |
-|------|-------------|--------|
+| --- | --- | --- |
 | `src/commands/mcp.ts` | ~2364–2633 | MCP tool-call / resource protocol handlers — live MCP client required |
 | `src/commands/rules.ts` | 800–985, 1001–1081 | `simulate` and `trace-explain` subcommands — full rules engine + LLM required |
 | `src/status-sync/manager.ts` | WebSocket push path | Live SwitchBot WebSocket connection required |

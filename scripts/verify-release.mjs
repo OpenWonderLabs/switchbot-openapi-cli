@@ -4,6 +4,7 @@
  * Pre-release verification gate — checks that documented counts and versions
  * match the actual codebase. Exits non-zero if any discrepancy is found.
  */
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,10 +14,6 @@ const ROOT = path.resolve(__dirname, '..');
 
 function readFile(rel) {
   return fs.readFileSync(path.join(ROOT, rel), 'utf-8');
-}
-
-function countMatches(content, regex) {
-  return (content.match(regex) || []).length;
 }
 
 let errors = 0;
@@ -38,19 +35,56 @@ function pass(msg) {
 
 console.error('verify-release: checking pre-release invariants\n');
 
-// 1. MCP tool count
-const mcpSrc = readFile('src/commands/mcp.ts');
-const mcpToolCount = countMatches(mcpSrc, /server\.registerTool\(/g);
+// 1. MCP tool count — query the built CLI directory, not registration source text.
 const agentGuide = readFile('docs/agent-guide.md');
-const agentGuideMatch = agentGuide.match(/Available tools \((\d+)\)/);
+const agentGuideMatch = agentGuide.match(/Available tools\s*\(\s*(\d+)(?:\s+tools)?(?:,|\))/i);
 const agentGuideCount = agentGuideMatch ? Number(agentGuideMatch[1]) : null;
+const profileMatch = agentGuide.match(/default profile exposes\s+(\d+)\s+tools;\s+`--tools readonly` exposes\s+(\d+)/i);
 
+function runtimeTools(profile) {
+  const cli = path.join(ROOT, 'dist', 'index.js');
+  if (!fs.existsSync(cli)) {
+    fail('dist/index.js is missing; run the release build before verify-release');
+    return new Set();
+  }
+  const result = spawnSync(process.execPath, [cli, '--json', 'mcp', 'tools', '--tools', profile], {
+    cwd: ROOT,
+    encoding: 'utf8',
+    env: { ...process.env, SWITCHBOT_TOKEN: '', SWITCHBOT_SECRET: '' },
+  });
+  if (result.status !== 0) {
+    fail(`Built CLI MCP directory failed for profile ${profile}: ${result.stderr.trim() || result.stdout.trim()}`);
+    return new Set();
+  }
+  try {
+    const parsed = JSON.parse(result.stdout);
+    const tools = parsed?.data?.tools;
+    if (!Array.isArray(tools) || tools.some((tool) => typeof tool?.name !== 'string')) {
+      fail(`Built CLI MCP directory returned an invalid tool list for profile ${profile}`);
+      return new Set();
+    }
+    const names = new Set(tools.map((tool) => tool.name));
+    if (names.size !== tools.length) fail(`Built CLI MCP directory returned duplicate tool names for profile ${profile}`);
+    return names;
+  } catch (error) {
+    fail(`Built CLI MCP directory returned invalid JSON for profile ${profile}: ${error instanceof Error ? error.message : String(error)}`);
+    return new Set();
+  }
+}
+
+const allTools = runtimeTools('all');
+const defaultTools = runtimeTools('default');
+const readonlyTools = runtimeTools('readonly');
 if (agentGuideCount === null) {
-  fail('docs/agent-guide.md: could not find "Available tools (N)" heading');
-} else if (mcpToolCount !== agentGuideCount) {
-  fail(`MCP tool count mismatch: code has ${mcpToolCount}, docs/agent-guide.md says ${agentGuideCount}`);
+  fail('docs/agent-guide.md: could not find the Available tools count');
+} else if (allTools.size !== agentGuideCount) {
+  fail(`MCP tool count mismatch: built CLI has ${allTools.size}, docs/agent-guide.md says ${agentGuideCount}`);
+} else if (![...defaultTools].every((name) => allTools.has(name)) || ![...readonlyTools].every((name) => allTools.has(name))) {
+  fail('MCP profile directory contains a tool absent from the built all-tools directory');
+} else if (profileMatch && (defaultTools.size !== Number(profileMatch[1]) || readonlyTools.size !== Number(profileMatch[2]))) {
+  fail(`MCP profile count mismatch: built default/readonly are ${defaultTools.size}/${readonlyTools.size}, docs say ${profileMatch[1]}/${profileMatch[2]}`);
 } else {
-  pass(`MCP tools: ${mcpToolCount} (code = docs/agent-guide.md)`);
+  pass(`MCP tools: all=${allTools.size}, default=${defaultTools.size}, readonly=${readonlyTools.size} (built CLI = docs)`);
 }
 
 // 2. Doctor check count
@@ -99,6 +133,17 @@ if (readmeTestMatch) {
   warn(`README says ${readmeTestCount} tests — run \`npm test\` and update if stale`);
 } else {
   warn('README.md: could not find test count pattern');
+}
+
+// 6. Claude's npm and GitHub installation routes must advertise the same version.
+const claudeMetadata = spawnSync(process.execPath, [
+  path.join(ROOT, 'packages/claude-code-plugin/lib/verify-release.js'),
+  path.join(ROOT, '.claude-plugin/marketplace.json'),
+], { cwd: ROOT, encoding: 'utf8' });
+if (claudeMetadata.status !== 0) {
+  fail(`Claude release metadata: ${claudeMetadata.stderr.trim() || claudeMetadata.error?.message || 'verification failed'}`);
+} else {
+  pass('Claude release metadata: npm package, both marketplaces, and plugin version agree');
 }
 
 // Summary

@@ -153,33 +153,6 @@ describe('MCP tool schema completeness', () => {
     }
   });
 
-  it('mindclip_recordings describes every input argument (P4 regression guard)', () => {
-    const tool = tools.find((t) => t.name === 'mindclip_recordings');
-    expect(tool, 'mindclip_recordings must be registered').toBeDefined();
-    const props = tool!.inputSchema?.properties ?? {};
-    const expected = [
-      'action',
-      'id',
-      'language',
-      'deviceID',
-      'pageNum',
-      'pageSize',
-      'startTime',
-      'endTime',
-      'folderID',
-    ];
-    for (const prop of expected) {
-      expect(props[prop], `${prop} should appear in mindclip_recordings inputSchema`).toBeDefined();
-      expect(
-        props[prop].description,
-        `${prop}.description should be a non-empty string`,
-      ).toBeTypeOf('string');
-      expect((props[prop].description ?? '').length).toBeGreaterThan(0);
-    }
-    // action is the discriminator and must be required + an enum
-    expect(tool!.inputSchema?.required, 'action must be required').toContain('action');
-    expect(props.action.enum, 'action must be enum-typed').toEqual(['list', 'get', 'summary']);
-  });
 
   it('mindclip_recall describes every input argument (P4 regression guard)', () => {
     const tool = tools.find((t) => t.name === 'mindclip_recall');

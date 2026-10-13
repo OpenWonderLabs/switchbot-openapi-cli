@@ -30,6 +30,7 @@ interface CacheEntry {
 
 const caches = new Map<string, CacheEntry>();
 const generations = new Map<string, number>();
+const inFlight = new Map<string, Promise<void>>();
 
 function isCacheValid(profile: string): boolean {
   const entry = caches.get(profile);
@@ -52,11 +53,7 @@ function genFor(profile: string): number {
  * flight — if the generation changed, we discard the stale result instead
  * of overwriting the now-empty cache.
  */
-export async function primeCredentials(profile: string): Promise<void> {
-  if (isCacheValid(profile)) return;
-  // Pre-register in generations before any await so the no-arg
-  // clearPrimedCredentials() iterating generations.keys() can always find this
-  // profile even while store.get() is still in-flight.
+async function refreshCredentials(profile: string): Promise<void> {
   if (!generations.has(profile)) generations.set(profile, 0);
   const gen = genFor(profile);
   try {
@@ -70,24 +67,41 @@ export async function primeCredentials(profile: string): Promise<void> {
   }
 }
 
+export async function primeCredentials(profile: string): Promise<void> {
+  // Complete env credentials take precedence; native-store latency must not gate them.
+  if (process.env.SWITCHBOT_TOKEN && process.env.SWITCHBOT_SECRET) return;
+  if (isCacheValid(profile)) return;
+  const existing = inFlight.get(profile);
+  if (existing) return existing;
+
+  const refresh = refreshCredentials(profile);
+  inFlight.set(profile, refresh);
+  try {
+    await refresh;
+  } finally {
+    if (inFlight.get(profile) === refresh) inFlight.delete(profile);
+  }
+}
+
 /**
  * Sync accessor for code paths that cannot be made async. Returns
  * null when the cache is empty or keyed against a different profile,
  * so existing file-based fallback stays the authoritative source.
+ * Values are a snapshot; expiry is enforced only by the asynchronous priming path.
  */
 export function getPrimedCredentials(profile: string): CredentialBundle | null {
   return caches.get(profile)?.creds ?? null;
 }
 
 /**
- * Test helper. Clears all cached and in-flight credential generations.
+ * Test helper. Invalidates all cached and in-flight credential generations.
  */
 export function __resetPrimedCredentials(): void {
   for (const p of generations.keys()) {
     generations.set(p, (generations.get(p) ?? 0) + 1);
   }
   caches.clear();
-  generations.clear();
+  inFlight.clear();
 }
 
 /**
@@ -102,6 +116,7 @@ export function clearPrimedCredentials(profile?: string): void {
   if (profile !== undefined) {
     generations.set(profile, (generations.get(profile) ?? 0) + 1);
     caches.delete(profile);
+    inFlight.delete(profile);
   } else {
     // Iterate generations.keys() rather than caches.keys() so profiles that
     // are currently in-flight (primeCredentials awaiting store.get()) also
@@ -110,5 +125,6 @@ export function clearPrimedCredentials(profile?: string): void {
       generations.set(p, (generations.get(p) ?? 0) + 1);
     }
     caches.clear();
+    inFlight.clear();
   }
 }

@@ -20,7 +20,7 @@ const osMock = vi.hoisted(() => ({
 vi.mock('node:fs', () => ({ default: fsMock, ...fsMock }));
 vi.mock('node:os', () => ({ default: osMock, ...osMock }));
 
-import { loadConfig, saveConfig, showConfig, listProfiles, tryLoadConfig } from '../src/config.js';
+import { configFilePath, loadConfig, saveConfig, showConfig, listProfiles, tryLoadConfig } from '../src/config.js';
 import { __resetPrimedCredentials, primeCredentials } from '../src/credentials/prime.js';
 
 const selectMock = vi.fn();
@@ -334,6 +334,26 @@ describe('config', () => {
       expect(cfg).toEqual({ token: 'work-t', secret: 'work-s' });
       const readPath = fsMock.readFileSync.mock.calls[0][0] as string;
       expect(readPath).toBe(path.join(FAKE_HOME, '.switchbot', 'profiles', 'work.json'));
+    });
+
+    it('rejects traversal names before resolving a credential path', () => {
+      process.argv = ['node', 'cli', '--profile', '../config'];
+
+      expect(() => configFilePath()).toThrow('Invalid profile name');
+      expect(fsMock.existsSync).not.toHaveBeenCalled();
+      expect(fsMock.readFileSync).not.toHaveBeenCalled();
+    });
+
+    it("treats an explicit default profile as the legacy credential scope", () => {
+      process.argv = ["node", "cli", "--profile", "default"];
+      fsMock.existsSync.mockReturnValue(true);
+      fsMock.readFileSync.mockImplementation((file: unknown) => JSON.stringify(
+        String(file) === CONFIG_FILE
+          ? { token: "legacy-token", secret: "legacy-secret" }
+          : { token: "named-token", secret: "named-secret" },
+      ));
+
+      expect(loadConfig()).toEqual({ token: "legacy-token", secret: "legacy-secret" });
     });
 
     it('saveConfig writes the profile file and creates profiles/ directory', () => {

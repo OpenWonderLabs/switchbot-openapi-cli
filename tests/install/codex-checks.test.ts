@@ -50,6 +50,10 @@ function makeSpawnResult(status: number, stdout: string, stderr = ''): ReturnTyp
   return { status, stdout, stderr, error: undefined } as ReturnType<typeof spawnSyncMock>;
 }
 
+function emptyMarketplaceRegistry() {
+  return makeSpawnResult(0, JSON.stringify({ marketplaces: [] }));
+}
+
 beforeEach(() => {
   spawnSyncMock.mockReset();
   existsSyncMock.mockReset();
@@ -191,6 +195,80 @@ describe('checkCodexPluginRegistered', () => {
 });
 
 describe('runCodexPluginRegistration', () => {
+  beforeEach(() => {
+    spawnSyncMock.mockReturnValueOnce(emptyMarketplaceRegistry());
+  });
+
+  it('preserves a same-name marketplace owned by another source', () => {
+    spawnSyncMock.mockReset();
+    spawnSyncMock
+      .mockImplementation(() => makeSpawnResult(0, ''))
+      .mockReturnValueOnce(makeSpawnResult(0, JSON.stringify({
+        marketplaces: [{ name: 'switchbot', root: '/third-party/switchbot-marketplace' }],
+      })));
+
+    const result = runCodexPluginRegistration('/known/switchbot-marketplace', 'switchbot@switchbot');
+
+    expect(result.ok).toBe(false);
+    expect(result.stage).toBe('marketplace-conflict');
+    expect(spawnSyncMock).toHaveBeenCalledWith(
+      'codex',
+      ['plugin', 'marketplace', 'list', '--json'],
+      expect.any(Object),
+    );
+    expect(spawnSyncMock.mock.calls.some(([, args]) => args.includes('remove'))).toBe(false);
+  });
+
+  it('restores an owned legacy plugin when replacement registration fails', () => {
+    spawnSyncMock.mockReset();
+    const marketplaceRoot = '/known/switchbot-marketplace';
+    const marketplaces = new Map([['codex-plugin', marketplaceRoot]]);
+    const installed = new Set(['switchbot@codex-plugin']);
+    let replacementAttempted = false;
+
+    spawnSyncMock.mockImplementation((cmd: string, args: string[]) => {
+      expect(cmd).toBe('codex');
+      if (args.join(' ') === 'plugin marketplace list --json') {
+        return makeSpawnResult(0, JSON.stringify({
+          marketplaces: [...marketplaces].map(([name, root]) => ({ name, root })),
+        }));
+      }
+      if (args.join(' ') === 'plugin list --available --json') {
+        return makeSpawnResult(0, JSON.stringify({
+          installed: [...installed].map((pluginId) => ({ pluginId, installed: true })),
+          available: [],
+        }));
+      }
+      if (args[0] === 'plugin' && args[1] === 'remove') {
+        installed.delete(args[2]);
+        return makeSpawnResult(0, '');
+      }
+      if (args.join(' ') === 'plugin marketplace remove ' + args[3]) {
+        marketplaces.delete(args[3]);
+        return makeSpawnResult(0, '');
+      }
+      if (args.join(' ') === 'plugin marketplace add ' + marketplaceRoot) {
+        marketplaces.set(replacementAttempted ? 'codex-plugin' : 'switchbot', marketplaceRoot);
+        return makeSpawnResult(0, '');
+      }
+      if (args[0] === 'plugin' && args[1] === 'add') {
+        if (args[2] === 'switchbot@switchbot') {
+          replacementAttempted = true;
+          return makeSpawnResult(1, '', 'plugin add failed');
+        }
+        installed.add(args[2]);
+        return makeSpawnResult(0, '');
+      }
+      throw new Error('Unexpected Codex command: ' + args.join(' '));
+    });
+
+    const result = runCodexPluginRegistration(marketplaceRoot, 'switchbot@switchbot');
+
+    expect(result.ok).toBe(false);
+    expect(marketplaces).toEqual(new Map([['codex-plugin', marketplaceRoot]]));
+    expect(installed).toEqual(new Set(['switchbot@codex-plugin']));
+  });
+
   it('returns ok when both marketplace add and plugin add succeed', () => {
     spawnSyncMock
       .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (current id: switchbot@pkg)
@@ -230,7 +308,9 @@ describe('runCodexPluginRegistration', () => {
       .mockReturnValueOnce(makeSpawnResult(0, ''))
       .mockReturnValueOnce(makeSpawnResult(0, ''))
       .mockReturnValueOnce(makeSpawnResult(0, ''))  // marketplace add
-      .mockReturnValueOnce(makeSpawnResult(1, '', 'plugin add error'));
+      .mockReturnValueOnce(makeSpawnResult(1, '', 'plugin add error'))
+      .mockReturnValueOnce(makeSpawnResult(0, ''))  // remove partial plugin
+      .mockReturnValueOnce(makeSpawnResult(0, '')); // remove partial marketplace
     const result = runCodexPluginRegistration('/some/path', 'switchbot@pkg');
     expect(result.ok).toBe(false);
     expect(result.stderr).toBe('plugin add error');
@@ -243,6 +323,7 @@ describe('registerCodexPlugin (shared helper)', () => {
     existsSyncMock.mockReturnValue(false); // no .codex-plugin/plugin.json
     spawnSyncMock
       .mockReturnValueOnce(makeSpawnResult(0, '/usr/local/lib/node_modules\n')) // npm root -g
+      .mockReturnValueOnce(emptyMarketplaceRegistry())
       .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (current id: switchbot@codex-plugin)
       .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (legacy id: switchbot@switchbot-skill)
       .mockReturnValueOnce(makeSpawnResult(0, ''))  // marketplace remove ×3
@@ -271,6 +352,7 @@ describe('registerCodexPlugin (shared helper)', () => {
     existsSyncMock.mockReturnValue(false);
     spawnSyncMock
       .mockReturnValueOnce(makeSpawnResult(0, '/usr/local/lib/node_modules\n')) // npm root -g
+      .mockReturnValueOnce(emptyMarketplaceRegistry())
       .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (current id)
       .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (legacy id)
       .mockReturnValueOnce(makeSpawnResult(0, ''))  // marketplace remove ×3
@@ -503,6 +585,96 @@ describe('resolveMarketplaceSourceRoot — Linux @-scoped path handling', () => 
 });
 
 describe('runCodexPluginRegistrationGit', () => {
+  beforeEach(() => {
+    spawnSyncMock.mockReturnValueOnce(emptyMarketplaceRegistry());
+  });
+
+  it('preserves a third-party legacy-named marketplace', () => {
+    spawnSyncMock.mockReset();
+    const marketplaces = new Map([['codex-plugin', '/third-party/codex-plugin-marketplace']]);
+
+    spawnSyncMock.mockImplementation((cmd: string, args: string[]) => {
+      expect(cmd).toBe('codex');
+      if (args.join(' ') === 'plugin marketplace list --json') {
+        return makeSpawnResult(0, JSON.stringify({
+          marketplaces: [...marketplaces].map(([name, root]) => ({ name, root })),
+        }));
+      }
+      if (args[0] === 'plugin' && args[1] === 'marketplace' && args[2] === 'remove') {
+        marketplaces.delete(args[3]);
+        return makeSpawnResult(0, '');
+      }
+      if (args[0] === 'plugin' && args[1] === 'marketplace' && args[2] === 'add') {
+        marketplaces.set('switchbot', 'OpenWonderLabs/switchbot-openapi-cli');
+        return makeSpawnResult(0, '');
+      }
+      return makeSpawnResult(0, '');
+    });
+
+    const result = runCodexPluginRegistrationGit('switchbot@switchbot');
+
+    expect(result.ok).toBe(false);
+    expect(marketplaces).toEqual(new Map([['codex-plugin', '/third-party/codex-plugin-marketplace']]));
+  });
+
+  it('restores an owned Git legacy plugin when replacement registration fails', () => {
+    spawnSyncMock.mockReset();
+    const sourceRepo = 'OpenWonderLabs/switchbot-openapi-cli';
+    const legacyMarketplace = {
+      root: '/codex/marketplaces/legacy',
+      sourceRepo,
+      sourceRef: 'legacy-release',
+    };
+    const marketplaces = new Map([['codex-plugin', legacyMarketplace]]);
+    const installed = new Set(['switchbot@codex-plugin']);
+    let replacementAttempted = false;
+
+    spawnSyncMock.mockImplementation((cmd: string, args: string[]) => {
+      expect(cmd).toBe('codex');
+      if (args.join(' ') === 'plugin marketplace list --json') {
+        return makeSpawnResult(0, JSON.stringify({
+          marketplaces: [...marketplaces].map(([name, marketplace]) => ({ name, ...marketplace })),
+        }));
+      }
+      if (args.join(' ') === 'plugin list --available --json') {
+        return makeSpawnResult(0, JSON.stringify({
+          installed: [...installed].map((pluginId) => ({ pluginId, installed: true })),
+          available: [],
+        }));
+      }
+      if (args[0] === 'plugin' && args[1] === 'remove') {
+        installed.delete(args[2]);
+        return makeSpawnResult(0, '');
+      }
+      if (args[0] === 'plugin' && args[1] === 'marketplace' && args[2] === 'remove') {
+        marketplaces.delete(args[3]);
+        return makeSpawnResult(0, '');
+      }
+      if (args[0] === 'plugin' && args[1] === 'marketplace' && args[2] === 'add') {
+        marketplaces.set(
+          replacementAttempted ? 'codex-plugin' : 'switchbot',
+          replacementAttempted ? legacyMarketplace : { root: '/codex/marketplaces/new', sourceRepo },
+        );
+        return makeSpawnResult(0, '');
+      }
+      if (args[0] === 'plugin' && args[1] === 'add') {
+        if (args[2] === 'switchbot@switchbot') {
+          replacementAttempted = true;
+          return makeSpawnResult(1, '', 'plugin add failed');
+        }
+        installed.add(args[2]);
+        return makeSpawnResult(0, '');
+      }
+      throw new Error('Unexpected Codex command: ' + args.join(' '));
+    });
+
+    const result = runCodexPluginRegistrationGit('switchbot@switchbot');
+
+    expect(result.ok).toBe(false);
+    expect(marketplaces).toEqual(new Map([['codex-plugin', legacyMarketplace]]));
+    expect(installed).toEqual(new Set(['switchbot@codex-plugin']));
+  });
+
   it('returns ok when marketplace add and plugin add both succeed', () => {
     spawnSyncMock
       .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (current id: switchbot@codex-plugin)
@@ -539,7 +711,9 @@ describe('runCodexPluginRegistrationGit', () => {
       .mockReturnValueOnce(makeSpawnResult(0, ''))
       .mockReturnValueOnce(makeSpawnResult(0, ''))
       .mockReturnValueOnce(makeSpawnResult(0, ''))  // marketplace add
-      .mockReturnValueOnce(makeSpawnResult(1, '', 'plugin add error'));
+      .mockReturnValueOnce(makeSpawnResult(1, '', 'plugin add error'))
+      .mockReturnValueOnce(makeSpawnResult(0, ''))  // remove partial plugin
+      .mockReturnValueOnce(makeSpawnResult(0, '')); // remove partial marketplace
     const r = runCodexPluginRegistrationGit('switchbot@codex-plugin');
     expect(r.ok).toBe(false);
     expect(r.stderr).toBe('plugin add error');
@@ -800,32 +974,14 @@ describe('runCodexPluginRegistrationGit', () => {
 });
 
 describe('registerCodexPluginAuto', () => {
-  // Helper: 3 plugin removes + 3 marketplace removes for Route B pre-clean
-  function routeBPreClean() {
-    return [
-      makeSpawnResult(0, ''),  // plugin remove (switchbot@switchbot)
-      makeSpawnResult(0, ''),  // plugin remove (switchbot@codex-plugin)
-      makeSpawnResult(0, ''),  // plugin remove (switchbot@switchbot-skill)
-      makeSpawnResult(0, ''),  // marketplace remove (switchbot)
-      makeSpawnResult(0, ''),  // marketplace remove (codex-plugin)
-      makeSpawnResult(0, ''),  // marketplace remove (switchbot-skill)
-    ] as const;
-  }
-  // Helper: 2 plugin removes + 3 marketplace removes for Route A pre-clean
-  // (pluginId=switchbot@codex-plugin deduplicates with LEGACY_IDS[0] → 2 plugin removes)
-  function routeAPreClean() {
-    return [
-      makeSpawnResult(0, ''),  // plugin remove (switchbot@codex-plugin)
-      makeSpawnResult(0, ''),  // plugin remove (switchbot@switchbot-skill)
-      makeSpawnResult(0, ''),  // marketplace remove (switchbot)
-      makeSpawnResult(0, ''),  // marketplace remove (codex-plugin)
-      makeSpawnResult(0, ''),  // marketplace remove (switchbot-skill)
-    ] as const;
+  function mockAbsentCodexPlugin() {
+    return spawnSyncMock
+      .mockReturnValueOnce(makeSpawnResult(1, ''))
+      .mockReturnValueOnce(emptyMarketplaceRegistry());
   }
 
   it('returns git result when Route B succeeds', () => {
-    spawnSyncMock
-      .mockReturnValueOnce(makeSpawnResult(1, ''))  // where/which codex: not found → idempotency guard skips
+    mockAbsentCodexPlugin()
       .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (switchbot@switchbot — current)
       .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (switchbot@codex-plugin — legacy)
       .mockReturnValueOnce(makeSpawnResult(0, ''))  // plugin remove (switchbot@switchbot-skill — legacy)
@@ -841,8 +997,7 @@ describe('registerCodexPluginAuto', () => {
 
   it('falls back to local npm path when Route B fails', () => {
     existsSyncMock.mockReturnValue(true);
-    spawnSyncMock
-      .mockReturnValueOnce(makeSpawnResult(1, ''))                               // where/which codex: not found → idempotency guard skips
+    mockAbsentCodexPlugin()
       .mockReturnValueOnce(makeSpawnResult(0, ''))                               // Route B: plugin remove ×3
       .mockReturnValueOnce(makeSpawnResult(0, ''))
       .mockReturnValueOnce(makeSpawnResult(0, ''))
@@ -851,6 +1006,7 @@ describe('registerCodexPluginAuto', () => {
       .mockReturnValueOnce(makeSpawnResult(0, ''))
       .mockReturnValueOnce(makeSpawnResult(1, '', 'git clone failed'))           // Route B: marketplace add — fails
       .mockReturnValueOnce(makeSpawnResult(0, '/usr/local/lib/node_modules\n')) // npm root -g (Route A)
+      .mockReturnValueOnce(emptyMarketplaceRegistry())
       .mockReturnValueOnce(makeSpawnResult(0, ''))                               // Route A: plugin remove ×2
       .mockReturnValueOnce(makeSpawnResult(0, ''))
       .mockReturnValueOnce(makeSpawnResult(0, ''))                               // Route A: marketplace remove ×3
@@ -866,7 +1022,7 @@ describe('registerCodexPluginAuto', () => {
   it('installs on demand and retries Route A when Route B and initial Route A both fail', () => {
     existsSyncMock.mockReturnValue(true);
     const installedJson = JSON.stringify({ dependencies: { '@switchbot/codex-plugin': { version: '1.0.0' } } });
-    spawnSyncMock
+    mockAbsentCodexPlugin()
       .mockReturnValueOnce(makeSpawnResult(0, ''))                               // Route B: plugin remove ×3
       .mockReturnValueOnce(makeSpawnResult(0, ''))
       .mockReturnValueOnce(makeSpawnResult(0, ''))
@@ -879,6 +1035,7 @@ describe('registerCodexPluginAuto', () => {
       .mockReturnValueOnce(makeSpawnResult(0, '', ''))                           // npm install -g: succeeds
       .mockReturnValueOnce(makeSpawnResult(0, installedJson, ''))                // post-install npm list: package found
       .mockReturnValueOnce(makeSpawnResult(0, '/usr/local/lib/node_modules\n')) // npm root -g (retry)
+      .mockReturnValueOnce(emptyMarketplaceRegistry())
       .mockReturnValueOnce(makeSpawnResult(0, ''))                               // Route A retry: plugin remove ×2
       .mockReturnValueOnce(makeSpawnResult(0, ''))
       .mockReturnValueOnce(makeSpawnResult(0, ''))                               // Route A retry: marketplace remove ×3
@@ -892,8 +1049,7 @@ describe('registerCodexPluginAuto', () => {
   });
 
   it('returns failure when Route B fails, Route A fails, and on-demand install also fails', () => {
-    spawnSyncMock
-      .mockReturnValueOnce(makeSpawnResult(1, ''))                   // where/which codex: not found → idempotency guard skips
+    mockAbsentCodexPlugin()
       .mockReturnValueOnce(makeSpawnResult(0, ''))                   // Route B: plugin remove ×3
       .mockReturnValueOnce(makeSpawnResult(0, ''))
       .mockReturnValueOnce(makeSpawnResult(0, ''))
@@ -913,8 +1069,7 @@ describe('registerCodexPluginAuto', () => {
 
   it('returns failure when on-demand install succeeds but Route A retry still fails', () => {
     const installedJson = JSON.stringify({ dependencies: { '@switchbot/codex-plugin': { version: '1.0.0' } } });
-    spawnSyncMock
-      .mockReturnValueOnce(makeSpawnResult(1, ''))                    // where/which codex: not found → idempotency guard skips
+    mockAbsentCodexPlugin()
       .mockReturnValueOnce(makeSpawnResult(0, ''))                    // Route B: plugin remove ×3
       .mockReturnValueOnce(makeSpawnResult(0, ''))
       .mockReturnValueOnce(makeSpawnResult(0, ''))
@@ -938,7 +1093,7 @@ describe('registerCodexPluginAuto', () => {
       'npm warn config optional\nnpm warn config another\n' +
       '{"dependencies":{"@switchbot/codex-plugin":{"version":"1.0.0"}}}';
     existsSyncMock.mockReturnValue(true);
-    spawnSyncMock
+    mockAbsentCodexPlugin()
       .mockReturnValueOnce(makeSpawnResult(0, ''))                               // Route B: plugin remove ×3
       .mockReturnValueOnce(makeSpawnResult(0, ''))
       .mockReturnValueOnce(makeSpawnResult(0, ''))
@@ -949,6 +1104,7 @@ describe('registerCodexPluginAuto', () => {
       .mockReturnValueOnce(makeSpawnResult(1, '', 'npm root error'))             // Route A fails
       .mockReturnValueOnce(makeSpawnResult(0, npmListWithWarnings, ''))          // npm list → found
       .mockReturnValueOnce(makeSpawnResult(0, '/usr/local/lib/node_modules\n'))  // npm root -g retry
+      .mockReturnValueOnce(emptyMarketplaceRegistry())
       .mockReturnValueOnce(makeSpawnResult(0, ''))                               // Route A retry: plugin remove ×2
       .mockReturnValueOnce(makeSpawnResult(0, ''))
       .mockReturnValueOnce(makeSpawnResult(0, ''))                               // Route A retry: marketplace remove ×3
@@ -966,7 +1122,7 @@ describe('registerCodexPluginAuto', () => {
   it('skips npm install when npm list exits non-zero but JSON output shows package is installed', () => {
     const installedJson = JSON.stringify({ dependencies: { '@switchbot/codex-plugin': { version: '1.0.0' } } });
     existsSyncMock.mockReturnValue(true);
-    spawnSyncMock
+    mockAbsentCodexPlugin()
       .mockReturnValueOnce(makeSpawnResult(0, ''))                                // Route B: plugin remove ×3
       .mockReturnValueOnce(makeSpawnResult(0, ''))
       .mockReturnValueOnce(makeSpawnResult(0, ''))
@@ -977,6 +1133,7 @@ describe('registerCodexPluginAuto', () => {
       .mockReturnValueOnce(makeSpawnResult(1, '', 'npm root error'))              // Route A fails
       .mockReturnValueOnce(makeSpawnResult(1, installedJson, 'peer-dep warning')) // npm list exits 1 but JSON shows package
       .mockReturnValueOnce(makeSpawnResult(0, '/usr/local/lib/node_modules\n'))   // npm root -g retry
+      .mockReturnValueOnce(emptyMarketplaceRegistry())
       .mockReturnValueOnce(makeSpawnResult(0, ''))                                // Route A retry: plugin remove ×2
       .mockReturnValueOnce(makeSpawnResult(0, ''))
       .mockReturnValueOnce(makeSpawnResult(0, ''))                                // Route A retry: marketplace remove ×3
@@ -992,8 +1149,7 @@ describe('registerCodexPluginAuto', () => {
   });
 
   it('returns npm-prefix-mismatch error when post-install npm list still shows package absent', () => {
-    spawnSyncMock
-      .mockReturnValueOnce(makeSpawnResult(1, ''))                          // where/which codex: not found → idempotency guard skips
+    mockAbsentCodexPlugin()
       .mockReturnValueOnce(makeSpawnResult(0, ''))                          // Route B: plugin remove ×3
       .mockReturnValueOnce(makeSpawnResult(0, ''))
       .mockReturnValueOnce(makeSpawnResult(0, ''))
@@ -1010,29 +1166,8 @@ describe('registerCodexPluginAuto', () => {
     expect(r.error).toMatch(/npm prefix mismatch/i);
   });
 
-  it('error says "already present" (not "installed") when package existed before and Route A retry fails (Fix 3)', () => {
-    const installedJson = JSON.stringify({ dependencies: { '@switchbot/codex-plugin': { version: '1.0.0' } } });
-    spawnSyncMock
-      .mockReturnValueOnce(makeSpawnResult(1, ''))                         // where/which codex: not found → idempotency guard skips
-      .mockReturnValueOnce(makeSpawnResult(0, ''))                         // Route B: plugin remove ×3
-      .mockReturnValueOnce(makeSpawnResult(0, ''))
-      .mockReturnValueOnce(makeSpawnResult(0, ''))
-      .mockReturnValueOnce(makeSpawnResult(0, ''))                         // Route B: marketplace remove ×3
-      .mockReturnValueOnce(makeSpawnResult(0, ''))
-      .mockReturnValueOnce(makeSpawnResult(0, ''))
-      .mockReturnValueOnce(makeSpawnResult(1, '', 'git clone failed'))     // Route B fails
-      .mockReturnValueOnce(makeSpawnResult(1, '', 'npm root error'))       // Route A: npm root -g fails
-      .mockReturnValueOnce(makeSpawnResult(0, installedJson, ''))          // npm list: ALREADY installed (no install ran)
-      .mockReturnValueOnce(makeSpawnResult(1, '', 'npm root error 2'));    // npm root -g fails (retry)
-    const r = registerCodexPluginAuto();
-    expect(r.ok).toBe(false);
-    expect(r.error).not.toMatch(/installed @switchbot/i);
-    expect(r.error).toMatch(/already present|was present/i);
-  });
-
   it('returns error when post-install verify spawnSync times out (status null)', () => {
-    spawnSyncMock
-      .mockReturnValueOnce(makeSpawnResult(1, ''))                          // where/which codex: not found → idempotency guard skips
+    mockAbsentCodexPlugin()
       .mockReturnValueOnce(makeSpawnResult(0, ''))                          // Route B: plugin remove ×3
       .mockReturnValueOnce(makeSpawnResult(0, ''))
       .mockReturnValueOnce(makeSpawnResult(0, ''))
@@ -1052,8 +1187,7 @@ describe('registerCodexPluginAuto', () => {
   it('falls through to npm install when initial npm list stdout is invalid JSON', () => {
     const installedJson = JSON.stringify({ dependencies: { '@switchbot/codex-plugin': { version: '1.0.0' } } });
     existsSyncMock.mockReturnValue(true);
-    spawnSyncMock
-      .mockReturnValueOnce(makeSpawnResult(1, ''))                               // where/which codex: not found → idempotency guard skips
+    mockAbsentCodexPlugin()
       .mockReturnValueOnce(makeSpawnResult(0, ''))                               // Route B: plugin remove ×3
       .mockReturnValueOnce(makeSpawnResult(0, ''))
       .mockReturnValueOnce(makeSpawnResult(0, ''))
@@ -1066,6 +1200,7 @@ describe('registerCodexPluginAuto', () => {
       .mockReturnValueOnce(makeSpawnResult(0, '', ''))                           // npm install -g succeeds
       .mockReturnValueOnce(makeSpawnResult(0, installedJson, ''))                // post-install npm list: ok
       .mockReturnValueOnce(makeSpawnResult(0, '/usr/local/lib/node_modules\n')) // npm root -g retry
+      .mockReturnValueOnce(emptyMarketplaceRegistry())
       .mockReturnValueOnce(makeSpawnResult(0, ''))                               // Route A retry: plugin remove ×2
       .mockReturnValueOnce(makeSpawnResult(0, ''))
       .mockReturnValueOnce(makeSpawnResult(0, ''))                               // Route A retry: marketplace remove ×3
@@ -1082,7 +1217,7 @@ describe('registerCodexPluginAuto', () => {
 
   it('proceeds to Route A retry when post-install verify stdout is unparseable (inconclusive)', () => {
     existsSyncMock.mockReturnValue(true);
-    spawnSyncMock
+    mockAbsentCodexPlugin()
       .mockReturnValueOnce(makeSpawnResult(0, ''))                               // Route B: plugin remove ×3
       .mockReturnValueOnce(makeSpawnResult(0, ''))
       .mockReturnValueOnce(makeSpawnResult(0, ''))
@@ -1095,6 +1230,7 @@ describe('registerCodexPluginAuto', () => {
       .mockReturnValueOnce(makeSpawnResult(0, '', ''))                           // npm install -g succeeds
       .mockReturnValueOnce(makeSpawnResult(0, 'garbage\n', ''))                 // post-install verify: invalid JSON
       .mockReturnValueOnce(makeSpawnResult(0, '/usr/local/lib/node_modules\n')) // npm root -g retry
+      .mockReturnValueOnce(emptyMarketplaceRegistry())
       .mockReturnValueOnce(makeSpawnResult(0, ''))                               // Route A retry: plugin remove ×2
       .mockReturnValueOnce(makeSpawnResult(0, ''))
       .mockReturnValueOnce(makeSpawnResult(0, ''))                               // Route A retry: marketplace remove ×3
@@ -1124,8 +1260,7 @@ describe('registerCodexPluginAuto', () => {
     const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     existsSyncMock.mockReturnValue(true);
     try {
-      spawnSyncMock
-        .mockReturnValueOnce(makeSpawnResult(1, '', 'not found'))     // where codex → idempotency skips
+      mockAbsentCodexPlugin()
         // Route B pre-clean
         .mockReturnValueOnce(makeSpawnResult(0, ''))                  // plugin remove (switchbot@switchbot)
         .mockReturnValueOnce(makeSpawnResult(0, ''))                  // plugin remove (switchbot@codex-plugin)
@@ -1139,6 +1274,7 @@ describe('registerCodexPluginAuto', () => {
         .mockReturnValueOnce(makeSpawnResult(0, '/usr/local/lib/node_modules\n'))  // npm root -g: Route A available → skip retries
         // Route A: npm root -g (resolveCodexPackageRoot in registerCodexPlugin)
         .mockReturnValueOnce(makeSpawnResult(0, '/usr/local/lib/node_modules\n'))
+        .mockReturnValueOnce(emptyMarketplaceRegistry())
         // Route A pre-clean
         .mockReturnValueOnce(makeSpawnResult(0, ''))                  // plugin remove ×2
         .mockReturnValueOnce(makeSpawnResult(0, ''))
@@ -1176,6 +1312,7 @@ describe('stepRegisterCodexPlugin', () => {
   it('sets codexPluginRegistered and codexPluginIdentifier on success', async () => {
     spawnSyncMock
       .mockReturnValueOnce({ status: 1, stdout: '', stderr: '' })  // where/which codex: not found → idempotency guard skips
+      .mockReturnValueOnce(emptyMarketplaceRegistry())
       .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' })  // plugin remove (switchbot@switchbot — current)
       .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' })  // plugin remove (switchbot@codex-plugin — legacy)
       .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' })  // plugin remove (switchbot@switchbot-skill — legacy)
@@ -1194,6 +1331,7 @@ describe('stepRegisterCodexPlugin', () => {
   it('throws when runCodexPluginRegistration fails', async () => {
     spawnSyncMock
       .mockReturnValueOnce({ status: 1, stdout: '', stderr: '' })               // where/which codex: not found → idempotency guard skips
+      .mockReturnValueOnce(emptyMarketplaceRegistry())
       .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' })               // plugin remove (Route B pre-clean ×3)
       .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' })
       .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' })

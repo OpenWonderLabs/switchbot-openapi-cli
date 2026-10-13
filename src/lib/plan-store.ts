@@ -3,15 +3,42 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { Plan } from '../commands/plan.js';
+import { getActiveProfile } from './request-context.js';
+import { getConfigPath } from '../utils/flags.js';
 
 export const PLANS_DIR = path.join(os.homedir(), '.switchbot', 'plans');
 
 export type PlanStatus = 'pending' | 'approved' | 'rejected' | 'executed' | 'failed';
 
+export type PlanCredentialScope =
+  | { kind: 'profile'; profile: string }
+  | { kind: 'config'; path: string };
+
+export function currentPlanCredentialScope(): PlanCredentialScope {
+  const configPath = getConfigPath();
+  if (configPath) return { kind: 'config', path: path.resolve(configPath) };
+  return { kind: 'profile', profile: getActiveProfile() ?? 'default' };
+}
+
+export function isCurrentPlanCredentialScope(scope: PlanCredentialScope | undefined): boolean {
+  if (!scope) return false;
+  const current = currentPlanCredentialScope();
+  if (scope.kind === 'profile' && current.kind === 'profile') {
+    return scope.profile === current.profile;
+  }
+  if (scope.kind === 'config' && current.kind === 'config') {
+    return scope.path === current.path;
+  }
+  return false;
+}
+
+
 export interface PlanRecord {
   planId: string;
   createdAt: string;
   status: PlanStatus;
+  /** Credential selector that was active when this plan was saved. */
+  credentialScope?: PlanCredentialScope;
   approvedAt?: string;
   executedAt?: string;
   /** Set when status transitions to 'failed'. */
@@ -43,6 +70,7 @@ export function savePlanRecord(plan: Plan): PlanRecord {
     planId: randomUUID(),
     createdAt: new Date().toISOString(),
     status: 'pending',
+    credentialScope: currentPlanCredentialScope(),
     plan,
   };
   fs.writeFileSync(planPath(record.planId), JSON.stringify(record, null, 2), { mode: 0o600 });

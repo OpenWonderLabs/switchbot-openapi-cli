@@ -7,6 +7,52 @@ All notable changes to `@switchbot/openapi-cli` are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.9.0]
+
+### Added
+
+- MindClip transcript CLI/MCP reads preserve transcription state and encoded detail strings.
+- Kata diary CLI/MCP reads support integer-millisecond windows up to 31 days without decoding details or inventing image URLs.
+
+### Changed
+
+- Discovery exports and resource metadata use version 2.0; the JSON envelope remains 1.2.
+- Plugins/extensions 0.2.0 require CLI ≥3.9.0 and retain the minimal default MCP profile.
+- Release candidates publish to `next`; exact artifact and required-host gates must pass before `latest` promotion.
+- MindClip CLI/library/MCP queries now require the device, pagination, completion and date/week fields specified by the official API.
+
+### Fixed
+
+- Rules suppress repeated on/off actions using the REST `power` status field.
+- Door-releasing `deadbolt` commands require destructive approval and cannot be pre-approved or run by automation rules.
+- Idempotency keys bind device ID, command type and actual wire parameters; cross-device reuse fails instead of replaying another device's result.
+- Batch and plans validate every target before dispatch; cold caches and ambiguous names cannot bypass approval.
+- Saved plans freeze target IDs and credential selectors. Dry-run previews never sleep, mutate devices or consume approval.
+- Named profiles isolate HTTP credentials, MQTT snapshots and device history; long-running MCP processes refresh credentials.
+- Fan, Art Frame, vacuum, AC, RGBICWW and Keypad contracts now enforce documented model-specific parameters.
+- Device discovery separates CO2, regional plugs and relay variants; webhook descriptions preserve nested upstream envelopes.
+- Codex migration preserves third-party registrations and restores owned installations when registration fails.
+- Plugin bootstrap diagnostics use the actual credentials-section envelope; OpenClaw keeps setup text off MCP stdout.
+- Policy editor merges YAML safely, validates before atomic save and survives malformed intermediate raw edits.
+- Completion uses the actual Commander tree and rejects JSON mode instead of emitting an invalid envelope.
+- JSON event and watch streams emit one complete envelope per physical line instead of pretty-printed multiline records.
+- OpenClaw tarballs bundle the policy editor's YAML dependency; required host gates reject failed loads and unregister failed candidates.
+- OpenClaw bootstrap never installs global packages automatically, resolves Windows npm CLI entries from PATH, and routes daemon diagnostics to stderr.
+- Required host gates execute a local readonly tool with isolated dummy credentials, never forward user secrets, and bind evidence to exact CLI/plugin versions.
+- Keypad Vision/Pro enforce their documented passcode contract without applying those field restrictions to Lock Vision.
+- MindClip discovery no longer asserts unverified server defaults; first-day policy samples use supported v0.2.
+- Copied CLI help filters use the JSON envelope's `data` field; doctor help reflects successful exits for warnings.
+- Block night-latch unlock and key creation/deletion in automation and policy preapproval; check model-specific safety before live rule mutations, including garage open/close.
+- Add 45 documented webhook contexts, repair REST/webhook field separation, and expose missing relay power and device connectivity fields.
+- Accept the documented spaced Blind Tilt position; Gemini curtain/blind commands now use model-specific directions and wire formats.
+- Keep Claude npm/plugin/GitHub marketplace versions aligned with fail-closed pack and release guards (#68).
+- Verify both Codex archive layouts are hook-free, remove the obsolete hook assertion, and exercise installed manual helpers and isolated native prefix registration (#74, #75).
+- Oversized local webhooks now receive HTTP 413 before graceful connection closure, with a bounded grace period for peers that keep streaming.
+- Track executable permissions for Git commit/push hooks so Git runs the configured verification gates.
+- Complete environment credentials no longer wait for native keychain reads during CLI startup or credential diagnostics.
+- Repair Windows Codex `.cmd` discovery, OpenClaw credential execution boundaries, and npm/old-CLI regression fixtures.
+- HTTP MCP accepts named profiles stored only in the keychain while still rejecting unknown profiles and invalid bearer tokens.
+
 ## [3.8.1]
 
 ### Fixed
