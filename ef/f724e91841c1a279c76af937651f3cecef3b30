@@ -1,0 +1,30 @@
+.github/workflows/npm-published-smoke.yml
+  h_dab4e149c2c598 17-51,53,57,84,197-200,204,208,235-238,242,246
+.github/workflows/publish.yml
+  h_dab4e149c2c598 8-11,24-25,36-38,40-49,57-61,67-83
+CHANGELOG.md
+  h_dab4e149c2c598 55
+README.md
+  h_dab4e149c2c598 449
+docs/openapi-alignment-and-code-review.md
+  h_dab4e149c2c598 526-533
+docs/release-pipeline.md
+  h_dab4e149c2c598 113-132
+scripts/resolve-release-source.mjs
+  h_dab4e149c2c598 1-51
+tests/build/release-publication-workflow.test.ts
+  h_dab4e149c2c598 1,3,16-47
+tests/build/release-source.test.ts
+  h_dab4e149c2c598 1-115
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "eff724e91841c1a279c76af937651f3cecef3b30",
+  "prompts": {},
+  "humans": {
+    "h_dab4e149c2c598": {
+      "author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
