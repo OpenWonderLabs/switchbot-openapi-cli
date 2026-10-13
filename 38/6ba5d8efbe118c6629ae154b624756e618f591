@@ -1,0 +1,36 @@
+CHANGELOG.md
+  h_dab4e149c2c598 52-53
+README.md
+  h_dab4e149c2c598 449
+docs/host-compatibility.md
+  h_dab4e149c2c598 9-11,31-32,39-45
+docs/openapi-alignment-and-code-review.md
+  h_dab4e149c2c598 505-517
+packages/codex-plugin/setup/check-cli.js
+  h_dab4e149c2c598 56-58
+packages/openclaw-skill/setup/check-credentials.js
+  h_dab4e149c2c598 16,33,63-67
+packages/openclaw-skill/tests/packed-editor.test.js
+  h_dab4e149c2c598 13-15,19
+packages/openclaw-skill/tests/start.test.js
+  h_dab4e149c2c598 3,5,18-26,54-62,77-80,86,91-92
+src/commands/doctor.ts
+  h_dab4e149c2c598 52-58
+src/credentials/prime.ts
+  h_dab4e149c2c598 71-72
+tests/commands/doctor.test.ts
+  h_dab4e149c2c598 75-101
+tests/credentials/prime.test.ts
+  h_dab4e149c2c598 23-24,30-31,35-51
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "386ba5d8efbe118c6629ae154b624756e618f591",
+  "prompts": {},
+  "humans": {
+    "h_dab4e149c2c598": {
+      "author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
