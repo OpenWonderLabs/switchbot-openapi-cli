@@ -74,7 +74,7 @@ defaults.
 | `confirmations` | Override per-action confirmation policy | Default tier behaviour (see [Safety tiers](./audit-log.md)) |
 | `quiet_hours` | Require confirmation during a daily window | No quiet hours |
 | `audit` | Where to write and how long to keep the audit log | `~/.switchbot/audit.log`, retention `90d` |
-| `automation` | **Reserved** for the Phase 4 rule engine | `enabled: false` |
+| `automation` | Configure the v0.2 rule engine and its triggers, conditions, and actions | `enabled: false` |
 | `cli` | CLI-level overrides (profile, cache TTL) | CLI defaults |
 
 ---
