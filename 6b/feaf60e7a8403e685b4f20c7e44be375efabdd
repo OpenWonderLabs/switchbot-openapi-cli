@@ -1,0 +1,14 @@
+CHANGELOG.md
+  h_dab4e149c2c598 51
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6bfeaf60e7a8403e685b4f20c7e44be375efabdd",
+  "prompts": {},
+  "humans": {
+    "h_dab4e149c2c598": {
+      "author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
