@@ -1,0 +1,14 @@
+docs/policy-reference.md
+  h_dab4e149c2c598 77
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ff679afc5894614d2a67c5e1a809382938d24d87",
+  "prompts": {},
+  "humans": {
+    "h_dab4e149c2c598": {
+      "author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
