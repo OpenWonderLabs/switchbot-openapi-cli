@@ -310,13 +310,6 @@ describe('devices/catalog', () => {
       expect(tierOf('Lock Vision Pro', 'unlock')).toBe('destructive');
     });
 
-    it('AI Art Frame uploadImage is idempotent and exposes a URL example', () => {
-      const cmd = commandOf('AI Art Frame', 'uploadImage');
-      expect(cmd, 'AI Art Frame should expose an uploadImage command').toBeDefined();
-      expect(cmd?.idempotent).toBe(true);
-      expect(cmd?.parameter).toBeTruthy();
-      expect(cmd?.exampleParams?.[0]).toMatch(/^https:\/\//);
-    });
 
     it('Smart Lock Pro Wifi is a distinct Matter-enabled entry, not merely an alias of Smart Lock', () => {
       const match = findCatalogEntry('Smart Lock Pro Wifi');

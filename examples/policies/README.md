@@ -1,20 +1,19 @@
 # Example policy files
 
-Five annotated `policy.yaml` shapes for common setups. The first four
-validate against v0.1 (the current default for `switchbot policy new`).
-`automation.yaml` is v0.2 — it's the shape you migrate to when you want
-the `switchbot rules run` engine (preview). Every file documents *why*
-the particular shape fits its use case, not just *what* the fields mean.
+Five annotated `policy.yaml` shapes for common setups. All use v0.2,
+the schema accepted by the current CLI. The first four leave automation off;
+`automation.yaml` demonstrates enabled rules in dry-run mode. Every file
+documents *why* the shape fits its use case, not just *what* the fields mean.
 Field-level reference lives in
 [`../../docs/policy-reference.md`](../../docs/policy-reference.md).
 
 | File | Schema | Use case | Confirm posture |
-|---|---|---|---|
-| [`minimal.yaml`](./minimal.yaml) | v0.1 | Trust the defaults; just declare "policy is here" | CLI defaults (destructive always confirms) |
-| [`cautious.yaml`](./cautious.yaml) | v0.1 | Shared household; confirm every mutation | Aggressive — turnOn/Off also confirm |
-| [`permissive.yaml`](./permissive.yaml) | v0.1 | Solo power user; speed over prompts | Loose — reversible actions pre-approved |
-| [`rental.yaml`](./rental.yaml) | v0.1 | Short-term rental / guest environment | Guest-safe — HVAC + scenes all confirm |
-| [`automation.yaml`](./automation.yaml) | v0.2 | Rule engine preview (`switchbot rules run`) | Defaults; every rule in `dry_run` mode |
+| --- | --- | --- | --- |
+| [`minimal.yaml`](./minimal.yaml) | v0.2 | Trust the defaults; just declare "policy is here" | CLI defaults; native destructive approval still applies |
+| [`cautious.yaml`](./cautious.yaml) | v0.2 | Shared household; ask before mutations | Agent preference — turnOn/Off also confirm |
+| [`permissive.yaml`](./permissive.yaml) | v0.2 | Solo power user; speed over prompts | Agent preference — reversible actions pre-approved |
+| [`rental.yaml`](./rental.yaml) | v0.2 | Short-term rental / guest environment | Agent preference — HVAC + scenes all confirm |
+| [`automation.yaml`](./automation.yaml) | v0.2 | Rule engine (`switchbot rules run`) | Defaults; every rule in `dry_run` mode |
 
 ## Picking one
 
@@ -22,7 +21,8 @@ Start with the closest match, then edit in your own `aliases` from
 `switchbot devices list --format=tsv`. Validate before you rely on it:
 
 ```bash
-cp examples/policies/cautious.yaml ~/.config/switchbot/policy.yaml
+mkdir -p ~/.config/openclaw/switchbot
+cp examples/policies/cautious.yaml ~/.config/openclaw/switchbot/policy.yaml
 # open in your editor, fill in aliases
 switchbot policy validate
 ```
@@ -34,12 +34,11 @@ validate explicitly.
 
 ## The destructive shortcut does not exist
 
-Every file leaves `lock` / `unlock` / `deleteWebhook` / `deleteScene` /
-`factoryReset` under the default confirmation gate. The schema forbids
-putting those actions in `never_confirm`, and this isn't a restriction
-we intend to lift — no YAML edit should be able to silently disable
-the unlock prompt. If you want an agent to unlock the front door
-without a prompt, type "yes" at the prompt.
+Every file leaves destructive actions outside `never_confirm`; schema
+preferences cannot disable the native guard. Quiet hours and extra confirmation
+preferences are honored by agents, not blanket native CLI/MCP gates.
+For destructive work in the default production profile, use the reviewed flow:
+`plan save` → `plan review` → `plan approve` → `plan execute`.
 
 ## See also
 

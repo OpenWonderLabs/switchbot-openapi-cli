@@ -4,16 +4,12 @@ This guide covers everything an LLM agent (Claude, GPT, Cursor, Zed, a homegrown
 
 If you're a human looking for a tour, start with the [top-level README](../README.md). This file assumes you're writing code that *calls* the CLI or embeds the MCP server.
 
-> **Skill packaging.** This CLI is the authoritative machine-readable surface.
-> The conversational skill that wraps it (Claude Desktop / third-party agent
-> entry points) is tracked as Phase 3B and published out of a separate repo
-> — the skill has no private contract with the CLI, only the documented
-> surfaces below (`mcp serve`, `agent-bootstrap`, `schema export`,
-> `capabilities --json`). To detect CLI ↔ agent-bootstrap schema drift before
-> a session starts, run
-> `switchbot doctor --json | jq '.checks[] | select(.name=="catalog-schema")'`
-> — any status other than `ok` means the skill and CLI have diverged and
-> should be upgraded in lockstep.
+> **Skill packaging.** This repository distributes OpenClaw, Claude Code,
+> Gemini and Codex integrations. The Codex plugin (`switchbot`) retains
+> its Skill + MCP architecture and existing startup contract.
+> The documented CLI/MCP surfaces are the shared contract. Check offline
+> catalog/bootstrap compatibility with
+> `switchbot doctor --json | jq '.data.checks[] | select(.name=="catalog-schema")'`.
 
 ---
 
@@ -76,12 +72,15 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 }
 ```
 
-### Available tools (28)
+### Available tools (29, including 3 deprecated aliases)
+
+The default profile exposes 18 tools; `--tools readonly` exposes 15. Policy, audit and rule-administration tools require `--tools all`. Installations keep the safe default rather than enabling all tools merely for onboarding.
 
 | Tool | Purpose | Safety tier |
 | --- | --- | --- |
 | `list_devices` | Enumerate physical devices + IR remotes | read |
 | `get_device_status` | Live status for one device | read |
+| `device_diary` | Read Kata diary/AI diary/comic diary over a millisecond window of at most 31 days; detail strings and image storage keys remain raw | read |
 | `send_command` | Dispatch a built-in or customize command | action (destructive needs `confirm: true` and still defaults to reviewed execution) |
 | `list_scenes` | Enumerate saved manual scenes | read |
 | `run_scene` | Execute a saved manual scene | action |
@@ -89,7 +88,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 | `describe_device` | Catalog-derived capabilities + optional live status | read |
 | `account_overview` | Cold-start snapshot (devices/scenes/quota/cache/MQTT) | read |
 | `device_history` | Read locally-persisted history. mode: "raw" (latest + ring) / "query" (time-range JSONL) / "aggregate" (bucketed stats) | read |
-| `mindclip_recordings` | Browse/fetch AI MindClip recordings. action: `"list"` paginated browse / `"get"` single recording by id / `"summary"` AI-generated summary | read |
+| `mindclip_recordings` | AI MindClip recordings. action: `"list"`, `"get"` metadata, `"summary"`, or `"transcript"` transcription status/result | read |
 | `mindclip_list_todos` | List AI-extracted to-dos pulled from voice recordings | read |
 | `mindclip_recall` | AI-curated recall views. period: `"daily"` daily recall / `"weekly"` weekly summary / `"urgent_todos"` urgent to-dos | read |
 | `policy_validate` | Validate policy.yaml | read |
@@ -106,7 +105,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 | `rules_simulate` | Simulate a rule against historical events | read |
 | `policy_add_rule` | Inject rule YAML into `automation.rules[]` with diff | action |
 
-The MCP server refuses destructive commands (Smart Lock `unlock`, Garage Door `open`, etc.) unless the tool call includes `confirm: true`, and the default safety profile still blocks direct destructive execution in favor of the reviewed CLI flow (`plan save` → `plan review` → `plan approve` → `plan execute`). The allowed list is the `destructive: true` commands in the catalog — `switchbot schema export | jq '[.data.types[].commands[] | select(.destructive)]'` shows every one.
+The MCP server refuses destructive commands (Smart Lock `unlock` or `deadbolt`, Garage Door `open`, etc.) unless the tool call includes `confirm: true`, and the default safety profile still blocks direct destructive execution in favor of the reviewed CLI flow (`plan save` → `plan review` → `plan approve` → `plan execute`). `deadbolt` releases the latch; it does not lock the door. Discover destructive classifications with `switchbot schema export | jq '[.data.types[].commands[] | select(.safetyTier=="destructive")]'`; classification is not permission to execute.
 
 ### Deprecated aliases (scheduled for removal in 4.0.0)
 
@@ -118,7 +117,7 @@ These names continue to work in 3.x but are thin wrappers over `device_history`.
 
 ### `device_history` — zero-cost state lookup
 
-Reads `~/.switchbot/device-history/<deviceId>.json` (mode="raw") or `<deviceId>.jsonl` (mode="query"/"aggregate") written by `events mqtt-tail`. Requires no API call and costs zero quota.
+Reads the selected credential profile's local history (mode="raw" snapshots or mode="query"/"aggregate" JSONL). Default and explicit `--profile default` use `~/.switchbot/device-history/`; named profiles use `~/.switchbot/profiles/<name>/device-history/`. Requires no API call and costs zero quota.
 
 ```json
 // mode=raw, no deviceId — list all devices with stored history
@@ -143,7 +142,7 @@ Reads `~/.switchbot/device-history/<deviceId>.json` (mode="raw") or `<deviceId>.
 
 #### Device-history directory layout
 
-After `events mqtt-tail` runs on a device, `~/.switchbot/device-history/` contains up to three companion files per device:
+After `events mqtt-tail` runs on a device, the selected profile's history directory contains up to three companion files per device:
 
 - `<deviceId>.jsonl`: append-only, authoritative event log.
   Source of truth for `history range` and `history aggregate`.
@@ -160,7 +159,15 @@ The `.json` file is **not** the source of truth for historical queries — use `
 
 Read-only snapshot of recent MQTT shadow-update events from the ring buffer. Returns `{state, count, events[]}`.
 
-Enabled when `SWITCHBOT_MQTT_HOST` / `SWITCHBOT_MQTT_USERNAME` / `SWITCHBOT_MQTT_PASSWORD` env vars are set; returns `{state:"disabled", count:0, events:[]}` otherwise. To enable real-time events, add those three env vars to the MCP server config alongside `SWITCHBOT_TOKEN` / `SWITCHBOT_SECRET`.
+MQTT credentials are auto-provisioned from the startup profile's SwitchBot token and secret via the cloud IoT-credential endpoint. No separate `SWITCHBOT_MQTT_*` variables are required. Without SwitchBot credentials, the subscription is disabled. Startup may fail if cloud provisioning is unavailable; local history remains separately readable.
+
+### Profiles and credential refresh
+
+HTTP profile selection uses `x-switchbot-profile` before `?profile=...`; names must start with a letter/digit and contain only letters, digits, `_` and `-`. Traversal and explicit empty names are rejected before filesystem access. Named history queries, aggregates, simulations and resets cannot read or remove another profile's history.
+
+MQTT subscriptions belong to the startup profile. A request for a different profile cannot read that subscription's `switchbot://events` ring or receive its MQTT account-overview fields. Start a separate subscription/server for a different account.
+
+MCP refreshes credentials at request/tool boundaries with a five-second cache and per-profile single-flight loading. Credential changes are picked up after that cache expires; asynchronous stale loads cannot overwrite a later invalidation. Environment credentials still take precedence over keychain and files.
 
 ---
 
@@ -219,9 +226,11 @@ cat plan.json | switchbot --json plan run -         # machine-readable outcome
 
 - Steps execute sequentially. A failed step stops the run (exit 1) unless you pass `--continue-on-error`.
 - `wait` uses `setTimeout`; `ms` is capped at 600 000 so a malformed plan can't hang the agent.
-- Destructive commands are **skipped** (not failed) without `--yes`, so an agent that omits the flag gets a clean preview summary.
+- Every command target is resolved and validated before the first mutation. Destructive direct runs without approval fail as a whole; they are not a successful skipped preview.
 - `plan run --yes` is reserved for explicit dev profiles. The default production path for destructive work is `plan save` → `plan review` → `plan approve` → `plan execute`.
 - `--require-approval` enables per-step TTY confirmation for destructive steps during execution. Non-TTY environments (CI, pipes) auto-reject.
+- `--dry-run` previews commands, scenes and waits without mutations or sleeping. Approved saved plans remain approved. MCP previews report `ran: false`, step `status: "dry-run"` and `summary.dryRun`.
+- Saved plans bind the credential selector used at save time: the profile or absolute `--config` path. Approve and execute with that same selector. Legacy unbound records require review and re-saving; changing accounts does not reuse approval.
 - Every successful/failed step lands in `--audit-log` (see [Observability](#observability)).
 
 ---
@@ -239,20 +248,51 @@ cat plan.json | switchbot --json plan run -         # machine-readable outcome
 
 `--json` and `--format=json` differ only in output shape — they share the same HTTP client and auth.
 
-Errors follow the same envelope on both paths (stderr):
+Errors use the same versioned envelope on both JSON output paths, written to stdout:
 
 ```json
-{ "error": { "code": 152, "kind": "api", "message": "...", "hint": "...", "retryable": false } }
+{ "schemaVersion": "1.2", "error": { "code": 152, "kind": "api", "message": "...", "hint": "...", "retryable": false } }
 ```
 
 Error `kind` values: `api` (SwitchBot API error), `runtime` (network/auth failure), `usage` (bad flag or unknown field), `guard` (destructive command blocked without `confirm:true`).
 
 ```bash
-switchbot --json devices list | jq '.deviceList[] | select(.deviceType=="Bot") | .deviceId'
+switchbot --json devices list | jq '.data.deviceList[] | select(.deviceType=="Bot") | .deviceId'
 switchbot --json devices describe <id>
 switchbot --json --dry-run devices command <id> turnOff
 switchbot --json scenes execute <sceneId>
 ```
+
+### Transcript and pet diary reads
+
+```bash
+switchbot --json mindclip transcript <recordingId>
+switchbot --json devices diary <kataId> --start <unix-ms> --end <unix-ms>
+```
+
+MCP equivalents: `mindclip_recordings(action="transcript", id=...)` and `device_diary(deviceId=..., startTimestamp=..., endTimestamp=...)`. Transcript requests use `/recordings/{id}/transcript`, not recording metadata, and do not send an undocumented language query. Inspect the returned transcription status; pending/failed states are not completed empty transcripts. JSON-encoded detail fields remain strings. Comic/thumbnail keys are storage identifiers, not constructed download URLs.
+
+For `mindclip_recordings(action="list")`, supply `deviceID`, `pageNum`, and
+`pageSize`. `mindclip_list_todos` requires `completedNum`, `pageNum`, and
+`pageSize`. Recall requires `date` for daily/urgent views or `week` for weekly;
+the client never chooses a server-default date or page.
+
+For Keypad/Keypad Touch/Keypad Vision/Keypad Vision Pro `createKey`, both
+scheduled and single-use passcodes require ordered 10-digit Unix-second
+`startTime` and `endTime` values.
+A successful POST acknowledges acceptance, not completed passcode creation;
+correlate its `commandId` with webhook `eventName`, `commandId` and `result`.
+Lock Vision's less-specific object template is not assigned these restrictions.
+
+### Idempotent command retries
+
+`send_command` / `devices command` accept an idempotency key. Within the same
+running process and credential profile, reusing it for the same device, command
+type and wire parameters replays the result instead of sending another request.
+Changing any of those values returns an idempotency conflict; use a new key for
+a different operation. Omitted parameters and `"default"` represent the same
+wire request. The cache is process-local and expires after 60 seconds: separate
+CLI invocations do not share it.
 
 ### `--fields` — strict column filter
 
@@ -301,13 +341,13 @@ Every device, command, and parameter the CLI knows about lives in the **catalog*
 
 ```bash
 switchbot schema export > catalog.json
-switchbot schema export --type 'Smart Lock' | jq '.types[0].commands'
+switchbot schema export --type 'Smart Lock' | jq '.data.types[0].commands'
 ```
 
 Each command entry carries:
 
 - `idempotent` — safe to retry
-- `destructive` — requires explicit confirmation
+- `safetyTier` — exported command classification; `destructive` requires the reviewed approval path
 - `parameter` / `exampleParams` — what the agent should fill in
 - `commandType` (`command` vs `customize`) — built-in vs user-defined IR button
 
@@ -318,10 +358,10 @@ Use `switchbot doctor` to confirm the CLI is healthy before orchestrating anythi
 ## Safety rails
 
 1. **Destructive-command guard**: Smart Lock `unlock`, Garage Door `open`, and anything else tagged `destructive: true` in the catalog **refuses to run** directly in the default profile. Use the reviewed plan workflow by default; only explicit dev profiles may pair direct execution with `--yes` / `confirm: true`.
-2. **Dry-run**: Global `--dry-run` short-circuits every mutating HTTP request. GETs still execute. Command names are validated against the device catalog — unknown commands exit 2 when the device type has a known catalog entry, as do commands on read-only sensors. Use it for any "what would this do?" flow before letting the agent commit.
-3. **Quota**: The SwitchBot API has a per-account daily quota. `--retry-on-429 <n>` and `--backoff <linear|exponential>` handle throttling; `~/.switchbot/quota.json` tracks daily counts.
-4. **Audit log**: `--audit-log [path]` appends every mutating command (including dry-runs) to JSONL for post-hoc review.
-5. **Non-zero exit codes are stable**: `0` success, `1` runtime error, `2` usage error (bad flag, invalid plan schema).
+2. **Dry-run**: Global `--dry-run` short-circuits mutating requests; GETs still execute. Unknown physical device types and unsupported commands fail closed. Explicit custom IR buttons remain available through `commandType: "customize"`.
+3. **Quota**: The API applies account limits and throttling. `--retry-on-429 <n>` and `--backoff <linear|exponential>` handle throttling; `~/.switchbot/quota.json` is a local counter, not the authoritative server quota.
+4. **Audit log**: `--audit-log` enables JSONL mutation records; `--audit-log-path <path>` selects a custom file.
+5. **Exit codes**: Most commands use `0` success, `1` runtime error, `2` usage error. Policy commands have documented additional codes; see [Policy reference](./policy-reference.md#validation-flow).
 
 ---
 
@@ -334,7 +374,7 @@ and confirmation overrides the user wants honoured.
 
 ```bash
 switchbot policy validate            # exit 0 if the file is healthy
-switchbot policy validate --json     # machine-readable error envelope
+switchbot policy validate --json     # data.valid + data.errors; schema failure exits 1
 ```
 
 Do **not** attempt to parse the YAML directly; let `policy validate`
@@ -390,7 +430,7 @@ pipeline without shell access.
 - **Never** set `automation.enabled: true` without explicitly informing the user.
 - **Always** start a new rule with `dry_run: true` (the generator does this automatically).
 - **Never** arm a rule (`dry_run: false`) on first author — require the user to confirm firings look correct via `switchbot rules tail --follow`.
-- **Never** use destructive commands (`unlock`, `deleteScene`, etc.) in rule `then[]`.
+- **Never** use destructive commands (`unlock`, `deadbolt`, `deleteScene`, etc.) in rule `then[]`.
 
 ### Dry-run → arm transition
 
@@ -413,7 +453,7 @@ switchbot --audit-log devices command <id> turnOff        # writes ~/.switchbot/
 switchbot --audit-log=/tmp/agent.log plan run plan.json   # custom path
 switchbot history show --limit 20                         # pretty-print recent entries
 switchbot history replay 7                                # re-run entry #7
-switchbot --json history show --limit 50 | jq '.entries[] | select(.result=="error")'
+switchbot --json history show --limit 50 | jq '.data.entries[] | select(.result=="error")'
 ```
 
 The audit format is JSONL with this shape:
@@ -438,4 +478,4 @@ Agent contexts are expensive; the CLI is designed to be frugal.
 - `switchbot devices describe <id> --live` returns **both** the static catalog entry and live status in one call — prefer it over separate `status` + `commands <type>` calls.
 - Use `--cache=5m` when polling the same device repeatedly in a session; it caches live status locally so you don't burn the daily quota.
 
-If you're seeing token pressure, `switchbot doctor --json | jq .checks` will also show you how big the bundled catalog is, whether cache is active, and whether credentials round-trip cleanly.
+If you're seeing token pressure, `switchbot doctor --json | jq '.data.checks'` shows the bundled catalog, cache state and credential diagnostics.

@@ -1,131 +1,110 @@
 # JSON Output Contract
 
-`switchbot-cli` emits machine-readable output on **stdout** whenever you pass
-`--json` (or the `--format=json` alias once P13 lands). Stderr is reserved for
-human-facing progress / warnings and is never part of the contract.
+Pass `--json` to write machine-readable output to stdout. Stderr is not part
+of this contract.
 
-There are two output shapes. You pick the right parser by the shape of the
-**first line** emitted on stdout.
+## 1. Non-streaming commands
 
----
+Commands such as `devices list`, `schema export`, `scenes list`, and `webhook
+query` emit one JSON envelope.
 
-## 1. Single-object / array commands (non-streaming)
+### Success
 
-Most commands — `devices list`, `devices status`, `devices describe`,
-`capabilities`, `schema export`, `doctor`, `catalog show`, `history list`,
-`scenes list`, `webhook query`, etc. — emit **exactly one** JSON envelope on
-stdout.
-
-### Success envelope
-
-```json
+~~~json
 {
   "schemaVersion": "1.2",
-  "data": <command-specific payload>
+  "data": { }
 }
-```
+~~~
 
-- `schemaVersion` tracks the envelope shape, not the inner payload shape.
-  The envelope version only bumps when `data` moves or is renamed; inner
-  payload changes get called out in `CHANGELOG.md` on a per-command basis.
-- `data` is always present on success (never `null`).
+### Error
 
-### Error envelope
-
-```json
+~~~json
 {
   "schemaVersion": "1.2",
   "error": {
     "code": 2,
-    "kind": "usage" | "guard" | "api" | "runtime",
-    "subKind": "ambiguous-name-match" | "device-not-found" | "device-offline" | ... ,
-    "message": "human-readable description",
-    "hint": "optional remediation string",
-    "resolutionHint": "structured remediation for agent/script consumers",
-    "candidateMatches": [{ "deviceId": "...", "name": "..." }],
-    "context": { "optional, command-specific": true }
+    "kind": "usage",
+    "message": "human-readable message"
   }
 }
-```
+~~~
 
-- Both success and error envelopes are written to **stdout** so a single
-  `cli --json ... | jq` pipe can decode either shape (SYS-1 contract).
-- `code` is the process exit code. `2` = usage / guard, `1` = runtime / api.
-- `subKind` classifies the specific error within its `kind`. Known values:
-  - `ambiguous-name-match` — `--name` matched more than one device; check `candidateMatches`
-  - `device-not-found` — device ID does not exist in the account
-  - `device-offline` — device is BLE-only or hub is offline
-  - `command-not-supported` — device does not support the requested command
-  - `auth-failed` — invalid token or secret
-  - `quota-exceeded` — daily API quota reached
-  - `device-internal-error` — API code 190 generic device error
-- `resolutionHint` is a machine-stable remediation string agents can surface
-  directly (e.g. "Narrow with --type / --room, or use the deviceId directly").
-- `candidateMatches` is populated on `ambiguous-name-match` errors; each
-  entry has at least `name` and one of `deviceId` / `sceneId`.
-- Additional fields may appear on specific error classes
-  (`retryable`, `retryAfterMs`, `transient`, `errorClass`).
+`schemaVersion` is the version of the outer envelope. It changes only if the
+outer success or error shape changes. A command payload can have an additional
+version inside `data`.
 
----
+For example, schema discovery in CLI 3.9.0 is an envelope at `1.2`, an export
+at `2.0`, and a resource catalog at `2.0`:
 
-## 2. Streaming / NDJSON commands
-
-Three commands emit one JSON document per line (NDJSON) instead of a single
-envelope:
-
-| Command             | `eventKind` | `cadence` |
-|---------------------|-------------|-----------|
-| `devices watch`     | `tick`      | `poll`    |
-| `events tail`       | `event`     | `push`    |
-| `events mqtt-tail`  | `event`     | `push`    |
-
-### Stream header (always the first line under `--json`)
-
-```json
-{ "schemaVersion": "1.2", "stream": true, "eventKind": "tick" | "event", "cadence": "poll" | "push" }
-```
-
-- **Must always be the first line** on stdout under `--json`. Consumers
-  should read one line, parse, and key on `{ "stream": true }` to confirm
-  they are reading from a streaming command.
-- `schemaVersion` is `"1.2"` for `devices watch` and `"1"` for
-  `events tail` / `events mqtt-tail`.
-- `eventKind` picks the downstream parser. `tick` → `devices watch` shape
-  with `{ t, tick, deviceId, changed, ... }`. `event` → unified event
-  envelope (see below).
-- `cadence`:
-  - `poll` — the CLI drives timing. One line per `--interval`.
-  - `push` — broker/webhook drives timing. Quiet gaps are normal.
-
-### Event envelope (subsequent lines on `events tail` / `events mqtt-tail`)
-
-```json
+~~~json
 {
-  "schemaVersion": "1",
-  "source": "webhook" | "mqtt",
-  "kind":   "event" | "control",
-  "t":      "2026-04-21T14:23:45.012Z",
-  "eventId": "uuid-v4-or-null",
-  "deviceId": "BOT1" | null,
-  "topic":   "/webhook" | "$aws/things/.../shadow/update/accepted",
-  "payload": { /* source-specific */ },
-  "matchedKeys": ["deviceId", "type"]
+  "schemaVersion": "1.2",
+  "data": {
+    "version": "2.0",
+    "types": [],
+    "resources": { "version": "2.0" }
+  }
 }
-```
+~~~
 
-- `source` and `kind` together tell a consumer how to treat the record.
-  Control events (`kind: "control"`) carry a `controlKind` like
-  `"connect"`, `"reconnect"`, `"disconnect"`, `"heartbeat"`.
-- `matchedKeys` is only populated on webhook events when `--filter` was
-  supplied — it lists which filter clauses hit.
-- Legacy fields (`body`, `remote`, `path`, `matched`, `type`, `at`) are
-  still emitted alongside the unified fields for one minor window. They
-  are **deprecated** and will be removed in the next major release; new
-  consumers should read only the unified fields above.
+The webhook resource catalog is descriptive discovery metadata. It models the
+upstream outer envelope separately from `context.deviceType`, and may describe
+nested context objects. It is not a validator or a promise that every listed
+field appears in every payload variant.
 
-### Tick envelope (subsequent lines on `devices watch`)
+## 2. Streaming commands
 
-```json
+`devices watch`, `events tail`, and `events mqtt-tail` emit NDJSON. The first
+line is always a lean stream header.
+
+| Command | Header schemaVersion | eventKind | cadence |
+| --- | --- | --- | --- |
+| `devices watch` | `1.2` | `tick` | `poll` |
+| `events tail` | `1` | `event` | `push` |
+| `events mqtt-tail` | `1` | `event` | `push` |
+
+~~~json
+{ "schemaVersion": "1", "stream": true, "eventKind": "event", "cadence": "push" }
+~~~
+
+The header is not a normal success envelope. Route it by `stream: true`.
+
+### Event lines
+
+After an `events tail` or `events mqtt-tail` header, each normalized event line
+is a normal envelope at `1.2`. The event record has its own payload version:
+
+~~~json
+{
+  "schemaVersion": "1.2",
+  "data": {
+    "payloadVersion": "1",
+    "source": "webhook",
+    "kind": "event",
+    "t": "2026-04-21T14:23:45.012Z",
+    "eventId": null,
+    "deviceId": "BOT1",
+    "topic": "/webhook",
+    "payload": { },
+    "matchedKeys": ["deviceId"]
+  }
+}
+~~~
+
+`payload` preserves the source-specific raw webhook or MQTT payload. The CLI
+does not rewrite a webhook `context`. `payloadVersion` versions the normalized
+record inside `data`; it is not the raw SwitchBot webhook event version.
+
+Control records from `events mqtt-tail` use the same outer and payload
+versions, with `kind: "control"` and a `controlKind` such as `connect` or
+`disconnect`.
+
+### Watch lines
+
+After the `devices watch` header, each tick is a normal `1.2` envelope:
+
+~~~json
 {
   "schemaVersion": "1.2",
   "data": {
@@ -136,72 +115,22 @@ envelope:
     "changed": { "power": { "from": null, "to": "on" } }
   }
 }
-```
+~~~
 
-Watch records reuse the single-object envelope (`{ schemaVersion, data }`)
-— only the header uses the lean streaming shape. That keeps the existing
-watch consumers working: they only need to add a filter that skips the
-first header line.
+### Streaming errors
 
-### Errors from a streaming command
+A fatal streaming error is emitted as the normal `1.2` error envelope and the
+process exits nonzero. Consumers must accept a header followed by an error
+envelope.
 
-If a streaming command hits a fatal error mid-stream, it emits the
-**error envelope** (section 1) on stdout and exits non-zero. Consumers
-should be prepared to see either `{ stream: true }` or `{ error: ... }`
-on any line.
+## 3. Consumer guidance
 
----
+1. Parse the first line. If `stream` is true, select a stream parser.
+2. For non-streaming output, inspect the `1.2` envelope and read `data` or
+   `error`.
+3. For event streams, unwrap `data` and use `payloadVersion` for the normalized
+   event record.
+4. For schema discovery, select on `data.version` and
+   `data.resources.version`, not on the outer envelope version.
 
-## 3. Consumer patterns
-
-**Route by shape** on line 1:
-
-```bash
-# generic: peek at line 1, pick parser
-first=$(head -n 1)
-if echo "$first" | jq -e '.stream == true' >/dev/null; then
-  # streaming — subsequent lines are event envelopes
-  while IFS= read -r line; do
-    echo "$line" | jq 'select(.kind == "event")'
-  done
-else
-  # single-object / array — $first already has the whole payload
-  echo "$first" | jq '.data'
-fi
-```
-
-**Skip the stream header** if you only want events:
-
-```bash
-switchbot events mqtt-tail --json | jq -c 'select(.stream != true)'
-```
-
-**Detect the error envelope** from any command:
-
-```bash
-switchbot devices status BOT1 --json | jq -e '.error' && exit 1
-```
-
----
-
-## 4. Versioning
-
-- The non-streaming envelope is versioned as `schemaVersion: "1.2"`.
-- The streaming header and event envelope are versioned as
-  `schemaVersion: "1"` for `events tail` / `events mqtt-tail`, and
-  `"1.2"` for `devices watch`.
-- The two axes are deliberately separate: adding a field inside `data`
-  does **not** bump the envelope, but renaming / removing `data` would.
-- Breaking changes land on a major release. Additive fields land on a
-  minor release and are listed under `### Added` in `CHANGELOG.md`.
-
----
-
-## 5. What this contract does NOT cover
-
-- Human-readable (`--format=table` or default) output — may change at any
-  time.
-- Stderr output — progress strings, deprecation warnings, TTY hints. Do
-  not parse stderr.
-- In-file history records under `~/.switchbot/device-history/` — see
-  `docs/schema-versioning.md`.
+Human-readable output and stderr are not versioned machine contracts.

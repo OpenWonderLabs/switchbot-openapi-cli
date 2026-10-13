@@ -30,7 +30,7 @@
 #
 # ============================================================================
 
-version: "0.1"
+version: "0.2"
 
 aliases:
   # Replace these with your real deviceIds. `switchbot devices list --format=tsv`

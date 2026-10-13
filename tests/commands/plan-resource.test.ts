@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readAudit } from '../../src/utils/audit.js';
+import { currentPlanCredentialScope, type PlanCredentialScope } from '../../src/lib/plan-store.js';
 
 // ── api client mock ─────────────────────────────────────────────────────────
 const apiMock = vi.hoisted(() => {
@@ -44,7 +45,11 @@ vi.mock('../../src/api/client.js', () => ({
 const cacheMock = vi.hoisted(() => ({
   map: new Map<string, { type: string; name: string; category: 'physical' | 'ir' }>(),
   getCachedDevice: vi.fn((id: string) => cacheMock.map.get(id) ?? null),
-  updateCacheFromDeviceList: vi.fn(),
+  updateCacheFromDeviceList: vi.fn((body: { deviceList: Array<{ deviceId: string; deviceName: string; deviceType?: string }> }) => {
+    for (const device of body.deviceList) {
+      if (device.deviceType) cacheMock.map.set(device.deviceId, { type: device.deviceType, name: device.deviceName, category: 'physical' });
+    }
+  }),
 }));
 vi.mock('../../src/devices/cache.js', () => ({
   getCachedDevice: cacheMock.getCachedDevice,
@@ -89,6 +94,7 @@ interface PlanRecord {
   executedAt?: string;
   failedAt?: string;
   failureReason?: string;
+  credentialScope: PlanCredentialScope;
   plan: StoredPlan;
 }
 
@@ -98,7 +104,7 @@ const planStore = vi.hoisted(() => {
     store,
     PLANS_DIR: '/mock/plans',
     savePlanRecord: vi.fn((plan: StoredPlan): PlanRecord => {
-      const record: PlanRecord = { planId: randomUUID(), createdAt: new Date().toISOString(), status: 'pending', plan };
+      const record: PlanRecord = { planId: randomUUID(), createdAt: new Date().toISOString(), status: 'pending', credentialScope: currentPlanCredentialScope(), plan };
       store.set(record.planId, record);
       return record;
     }),
@@ -113,7 +119,10 @@ const planStore = vi.hoisted(() => {
     listPlanRecords: vi.fn((): PlanRecord[] => [...store.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt))),
   };
 });
-vi.mock('../../src/lib/plan-store.js', () => planStore);
+vi.mock('../../src/lib/plan-store.js', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../../src/lib/plan-store.js')>();
+  return { ...real, ...planStore };
+});
 
 import { registerPlanCommand } from '../../src/commands/plan.js';
 import { runCli } from '../helpers/cli.js';
@@ -151,6 +160,19 @@ describe('plan resource model', () => {
     planStore.loadPlanRecord.mockClear();
     planStore.updatePlanRecord.mockClear();
     apiMock.__instance.post.mockReset();
+    apiMock.__instance.get.mockReset();
+    apiMock.__instance.get.mockResolvedValue({
+      data: {
+        statusCode: 100,
+        body: {
+          deviceList: [
+            { deviceId: 'BOT1', deviceName: 'Bot 1', deviceType: 'Bot' },
+            { deviceId: 'LOCK1', deviceName: 'Front', deviceType: 'Smart Lock' },
+          ],
+          infraredRemoteList: [],
+        },
+      },
+    });
     cacheMock.map.clear();
     flagsMock.dryRun = false;
     flagsMock.getAuditLog.mockReturnValue(null);

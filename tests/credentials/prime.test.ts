@@ -54,6 +54,24 @@ describe('primeCredentials', () => {
     expect(getPrimedCredentials('work')).toBeNull();
   });
 
+  it("shares one keychain lookup for concurrent refreshes of a profile", async () => {
+    let resolveGet!: (creds: { token: string; secret: string }) => void;
+    const pending = new Promise<{ token: string; secret: string }>((resolve) => { resolveGet = resolve; });
+    const get = vi.fn().mockReturnValue(pending);
+    selectMock.mockResolvedValue({ name: "keychain", get } as any);
+
+    const first = primeCredentials("default");
+    const second = primeCredentials("default");
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(get).toHaveBeenCalledOnce();
+    resolveGet({ token: "fresh-token", secret: "fresh-secret" });
+    await Promise.all([first, second]);
+
+    expect(getPrimedCredentials("default")).toEqual({ token: "fresh-token", secret: "fresh-secret" });
+  });
+
   it('repriming the same profile short-circuits (no extra store selection)', async () => {
     const get = vi.fn().mockResolvedValue(null);
     selectMock.mockResolvedValue({ name: 'file', get } as any);

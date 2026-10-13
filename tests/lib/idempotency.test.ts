@@ -132,17 +132,17 @@ describe('IdempotencyCache', () => {
 
   it('C4: raises IdempotencyConflictError when same key is used with different shape within TTL', async () => {
     const cache = new IdempotencyCache(60000);
-    await cache.run('k', async () => 'ok', { command: 'turnOn', parameter: undefined });
+    await cache.run('k', async () => 'ok', { deviceId: 'BOT1', commandType: 'command', command: 'turnOn', parameter: undefined });
     await expect(
-      cache.run('k', async () => 'ok', { command: 'turnOff', parameter: undefined }),
+      cache.run('k', async () => 'ok', { deviceId: 'BOT1', commandType: 'command', command: 'turnOff', parameter: undefined }),
     ).rejects.toBeInstanceOf(IdempotencyConflictError);
   });
 
   it('C4: same key with same shape replays without conflict', async () => {
     const cache = new IdempotencyCache(60000);
     const fn = vi.fn().mockResolvedValue('result');
-    await cache.run('k', fn, { command: 'turnOn', parameter: undefined });
-    const r2 = await cache.run('k', fn, { command: 'turnOn', parameter: undefined });
+    await cache.run('k', fn, { deviceId: 'BOT1', commandType: 'command', command: 'turnOn', parameter: undefined });
+    const r2 = await cache.run('k', fn, { deviceId: 'BOT1', commandType: 'command', command: 'turnOn', parameter: undefined });
     expect(r2.replayed).toBe(true);
     expect(fn).toHaveBeenCalledTimes(1);
   });
@@ -160,35 +160,35 @@ describe('IdempotencyCache — shapeSignature distinguishes undefined from "defa
   it('treats parameter=undefined differently from parameter="default"', async () => {
     const cache = new IdempotencyCache(60000);
     // Seed with undefined parameter
-    await cache.run('k', async () => 'ok', { command: 'press', parameter: undefined });
+    await cache.run('k', async () => 'ok', { deviceId: 'BOT1', commandType: 'command', command: 'press', parameter: undefined });
     // Same key, different parameter ('default' literal) should conflict
     await expect(
-      cache.run('k', async () => 'ok', { command: 'press', parameter: 'default' }),
+      cache.run('k', async () => 'ok', { deviceId: 'BOT1', commandType: 'command', command: 'press', parameter: 'default' }),
     ).rejects.toBeInstanceOf(IdempotencyConflictError);
   });
 
   it('treats parameter=undefined differently from parameter=null', async () => {
     const cache = new IdempotencyCache(60000);
-    await cache.run('k', async () => 'ok', { command: 'cmd', parameter: undefined });
+    await cache.run('k', async () => 'ok', { deviceId: 'BOT1', commandType: 'command', command: 'cmd', parameter: undefined });
     await expect(
-      cache.run('k', async () => 'ok', { command: 'cmd', parameter: null }),
+      cache.run('k', async () => 'ok', { deviceId: 'BOT1', commandType: 'command', command: 'cmd', parameter: null }),
     ).rejects.toBeInstanceOf(IdempotencyConflictError);
   });
 
   it('two undefined parameters produce the same shape (no conflict)', async () => {
     const cache = new IdempotencyCache(60000);
     const fn = vi.fn().mockResolvedValue('v');
-    await cache.run('k', fn, { command: 'cmd', parameter: undefined });
-    const r = await cache.run('k', fn, { command: 'cmd', parameter: undefined });
+    await cache.run('k', fn, { deviceId: 'BOT1', commandType: 'command', command: 'cmd', parameter: undefined });
+    const r = await cache.run('k', fn, { deviceId: 'BOT1', commandType: 'command', command: 'cmd', parameter: undefined });
     expect(r.replayed).toBe(true);
   });
 
   it('object parameter with different key order produces same shape (canonical JSON)', async () => {
     const cache = new IdempotencyCache(60000);
     const fn = vi.fn().mockResolvedValue('v');
-    await cache.run('k', fn, { command: 'setColor', parameter: { hue: 120, saturation: 100 } });
+    await cache.run('k', fn, { deviceId: 'BOT1', commandType: 'command', command: 'setColor', parameter: { hue: 120, saturation: 100 } });
     // Same object but different insertion order — should NOT conflict (same canonical form)
-    const r = await cache.run('k', fn, { command: 'setColor', parameter: { saturation: 100, hue: 120 } });
+    const r = await cache.run('k', fn, { deviceId: 'BOT1', commandType: 'command', command: 'setColor', parameter: { saturation: 100, hue: 120 } });
     expect(r.replayed).toBe(true);
     expect(fn).toHaveBeenCalledTimes(1);
   });

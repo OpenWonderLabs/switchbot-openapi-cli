@@ -1,124 +1,78 @@
 # SwitchBot Gemini CLI Extension
 
-Gemini CLI native extension for SwitchBot smart-home control through the authoritative
-`switchbot` CLI MCP server (default 17 tools, `--tools all` for 28, policy-based safety gates).
+Gemini CLI extension for SwitchBot smart-home control through the SwitchBot MCP server. The extension supplies context and slash commands in addition to the default MCP tool profile.
 
-## Install
+## Install the full extension
 
-### Option A: Extension link (local/development)
+Gemini CLI installs extensions from a local directory or Git repository source, not from an npm package specifier. For a local installation, clone the repository and pass the directory that contains gemini-extension.json:
 
-```bash
-npm install -g @switchbot/openapi-cli
+~~~bash
 git clone https://github.com/OpenWonderLabs/switchbot-openapi-cli.git
+npm install -g @switchbot/openapi-cli@^3.9.0
+gemini extensions install ./switchbot-openapi-cli/packages/gemini-extension
+~~~
+
+For iterative local development, use a link instead of a copied installation:
+
+~~~bash
 gemini extensions link ./switchbot-openapi-cli/packages/gemini-extension
-```
+~~~
 
-Gemini CLI prompts you to set `SWITCHBOT_TOKEN` and `SWITCHBOT_SECRET` during install.
-Get both from the SwitchBot app: **Profile → Preferences → Developer Options → Open API**.
+Restart Gemini CLI after installing, updating, or changing the extension. Confirm that it is active:
 
-### Option B: MCP-only setup (no extension install)
+~~~bash
+gemini extensions list
+switchbot gemini doctor
+~~~
 
-If you only want the MCP tools without slash commands or context file:
+## MCP-only setup
 
-```bash
-npm install -g @switchbot/openapi-cli
+Use MCP-only setup when you want SwitchBot tools without the extension context or slash commands:
+
+~~~bash
+npm install -g @switchbot/openapi-cli@^3.9.0
 switchbot gemini setup
-```
+~~~
 
-This writes the MCP server entry directly to `~/.gemini/settings.json`.
+This adds SwitchBot to the Gemini settings MCP configuration. It intentionally does not install the extension and does not enable every admin tool.
 
-> **Note:** MCP-only mode does not load `GEMINI.md` — the AI model will lack safety-tier
-> awareness and slash commands. For the full experience, use Option A or follow the upgrade
-> hint shown after setup completes.
-
-> **Local development:** If testing an unreleased version, use `npm link` in the repo root
-> instead of `npm install -g`, then run `switchbot gemini setup`.
-
-## What the extension provides
-
-- Up to 28 MCP tools for device control, scene execution, automation rules, and diagnostics (17 in the default profile; the rest are admin tools — policy/audit/rules — gated behind `--tools all`)
-- `GEMINI.md` context file (auto-loaded) with safety tiers, name resolution, authority chain
-- 23 slash commands:
-
-  **Discovery & Diagnostics:**
-  - `/switchbot:overview` — full account snapshot (devices, scenes, quota, MQTT)
-  - `/switchbot:list-devices` — list all devices with live status
-  - `/switchbot:status <name>` — live status for a named device
-  - `/switchbot:describe <name>` — device capabilities and supported commands
-  - `/switchbot:history <name>` — device state history and trends
-  - `/switchbot:doctor` — integration health check
-
-  **Device Control:**
-  - `/switchbot:turn-on <name>` — turn on a device
-  - `/switchbot:turn-off <name>` — turn off a device
-  - `/switchbot:toggle <name>` — toggle power state
-  - `/switchbot:press <name>` — press a Bot button
-  - `/switchbot:open <name>` — open a Curtain/Blind
-  - `/switchbot:close <name>` — close a Curtain/Blind
-  - `/switchbot:pause <name>` — pause movement
-  - `/switchbot:lock <name>` — lock a Smart Lock
-  - `/switchbot:unlock <name>` — unlock a Smart Lock (destructive, requires confirmation)
-  - `/switchbot:set-brightness <name> <0-100>` — set light brightness
-  - `/switchbot:set-color <name> <color>` — set light RGB color
-  - `/switchbot:set-color-temp <name> <2700-6500>` — set color temperature
-  - `/switchbot:set-position <name> <0-100>` — set curtain/blind position
-
-  **Scenes & Automation:**
-  - `/switchbot:run-scene <name>` — execute a scene
-  - `/switchbot:plan <intent>` — generate an execution plan from natural language
-  - `/switchbot:rule <intent>` — create an automation rule from natural language
-  - `/switchbot:audit [--since 1h]` — query command/rule execution history
-
-## Requirements
-
-- Node.js ≥ 18
-- `@switchbot/openapi-cli` ≥ 3.7.1 (global install provides the `switchbot` binary)
-- Gemini CLI ≥ 0.2.x (https://github.com/google-gemini/gemini-cli) — required for `settings` / keychain support
-
-## Verify
-
-```bash
-switchbot --version              # must be ≥ 3.7.1
-switchbot doctor                 # credentials + MCP health
-gemini extensions list           # confirm "switchbot" appears
-switchbot gemini doctor          # full integration health check
-```
-
-Restart Gemini CLI after install, then ask: **"List my SwitchBot devices."**
+If an active SwitchBot extension already provides the server, Gemini settings take precedence only when they define the same server name. The doctor command reports an active extension as configured and does not add a competing MCP-only entry. Disable or remove the extension before choosing MCP-only setup, or remove the MCP-only entry before using the extension as the provider.
 
 ## Credentials
 
-The extension uses `SWITCHBOT_TOKEN` and `SWITCHBOT_SECRET` environment variables. When
-installed via the extension system, Gemini CLI stores these securely in the system keychain
-and injects them at runtime. As a fallback the `switchbot` CLI reads from the OS keychain
-if you previously ran `switchbot auth login`.
+Prefer the explicit login flow before configuring extension settings:
 
-To re-authenticate:
-
-```bash
-switchbot auth logout
+~~~bash
 switchbot auth login
-```
+~~~
+
+The CLI resolves credentials in this order: environment variables, OS keychain, then its configuration file. Gemini extension settings provide the environment-variable values when configured. Leaving those settings empty does not prevent the CLI from using keychain or configuration-file credentials. Never copy a token or secret from a configuration file into chat.
+
+## Requirements
+
+- Node.js >= 18
+- @switchbot/openapi-cli >= 3.9.0
+- A currently supported Gemini CLI installation with extension support
+
+## Verify
+
+~~~bash
+switchbot --version
+switchbot doctor
+gemini extensions list
+switchbot gemini doctor
+~~~
 
 ## Uninstall
 
-```bash
-# If installed via extension link:
+~~~bash
 gemini extensions uninstall switchbot
+~~~
 
-# If installed via switchbot gemini setup (MCP-only):
-# Manually remove "switchbot" from mcpServers in ~/.gemini/settings.json
-```
-
-To also remove the CLI and stored credentials:
-
-```bash
-npm uninstall -g @switchbot/openapi-cli
-switchbot auth logout      # removes keychain entry
-```
+For MCP-only setup, remove the named SwitchBot entry from mcpServers in the Gemini settings file. Removing an extension or MCP server does not remove CLI credentials; run switchbot auth logout only when you intend to remove them.
 
 ## Related packages
 
-- [`@switchbot/openapi-cli`](https://www.npmjs.com/package/@switchbot/openapi-cli) — the CLI and MCP server
-- [`@switchbot/claude-code-plugin`](https://www.npmjs.com/package/@switchbot/claude-code-plugin) — Claude Code variant
-- [`@switchbot/codex-plugin`](https://www.npmjs.com/package/@switchbot/codex-plugin) — OpenAI Codex CLI variant
+- [@switchbot/openapi-cli](https://www.npmjs.com/package/@switchbot/openapi-cli) — CLI and MCP server
+- [@switchbot/claude-code-plugin](https://www.npmjs.com/package/@switchbot/claude-code-plugin) — Claude Code variant
+- [@switchbot/codex-plugin](https://www.npmjs.com/package/@switchbot/codex-plugin) — OpenAI Codex CLI variant

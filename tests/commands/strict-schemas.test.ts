@@ -280,50 +280,50 @@ describe('G7: boundary values on consolidated tool filters', () => {
   // ── pageSize / pageNum on mindclip_recordings (action=list) and mindclip_list_todos
   it('mindclip_list_todos rejects pageSize=0', async () => {
     const { client } = await pair();
-    await assertSchemaReject(client, 'mindclip_list_todos', { pageSize: 0 });
+    await assertSchemaReject(client, 'mindclip_list_todos', { completedNum: 0, pageNum: 1, pageSize: 0 });
   });
 
   it('mindclip_list_todos rejects pageSize=101', async () => {
     const { client } = await pair();
-    await assertSchemaReject(client, 'mindclip_list_todos', { pageSize: 101 });
+    await assertSchemaReject(client, 'mindclip_list_todos', { completedNum: 0, pageNum: 1, pageSize: 101 });
   });
 
   it('mindclip_list_todos accepts pageSize=1 (min boundary)', async () => {
     apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {} } });
     const { client } = await pair();
-    const res = await client.callTool({ name: 'mindclip_list_todos', arguments: { pageSize: 1 } });
+    const res = await client.callTool({ name: 'mindclip_list_todos', arguments: { completedNum: 0, pageNum: 1, pageSize: 1 } });
     expect(res.isError).toBeFalsy();
   });
 
   it('mindclip_list_todos accepts pageSize=100 (max boundary)', async () => {
     apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {} } });
     const { client } = await pair();
-    const res = await client.callTool({ name: 'mindclip_list_todos', arguments: { pageSize: 100 } });
+    const res = await client.callTool({ name: 'mindclip_list_todos', arguments: { completedNum: 0, pageNum: 1, pageSize: 100 } });
     expect(res.isError).toBeFalsy();
   });
 
   it('mindclip_list_todos rejects pageNum=0', async () => {
     const { client } = await pair();
-    await assertSchemaReject(client, 'mindclip_list_todos', { pageNum: 0 });
+    await assertSchemaReject(client, 'mindclip_list_todos', { completedNum: 0, pageNum: 0, pageSize: 20 });
   });
 
   it('mindclip_list_todos rejects completedNum=3', async () => {
     const { client } = await pair();
-    await assertSchemaReject(client, 'mindclip_list_todos', { completedNum: 3 });
+    await assertSchemaReject(client, 'mindclip_list_todos', { completedNum: 3, pageNum: 1, pageSize: 20 });
   });
 
   it('mindclip_list_todos accepts completedNum=0..2', async () => {
     apiMock.__instance.get.mockResolvedValue({ data: { body: {} } });
     const { client } = await pair();
     for (const v of [0, 1, 2]) {
-      const res = await client.callTool({ name: 'mindclip_list_todos', arguments: { completedNum: v } });
+      const res = await client.callTool({ name: 'mindclip_list_todos', arguments: { completedNum: v, pageNum: 1, pageSize: 20 } });
       expect(res.isError, `completedNum=${v}`).toBeFalsy();
     }
   });
 
   it('mindclip_list_todos rejects category=6', async () => {
     const { client } = await pair();
-    await assertSchemaReject(client, 'mindclip_list_todos', { category: 6 });
+    await assertSchemaReject(client, 'mindclip_list_todos', { completedNum: 0, pageNum: 1, pageSize: 20, category: 6 });
   });
 
   // ── date / week regex on mindclip_recall

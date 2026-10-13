@@ -1,8 +1,8 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.dirname(scriptDir);
@@ -19,7 +19,7 @@ function runNpm(args, options = {}) {
 }
 
 function pack(args) {
-  const out = runNpm(['pack', '--json', ...args], {
+  const out = runNpm(['pack', '--json', ...(args.length === 0 ? ['--ignore-scripts'] : []), ...args], {
     cwd: repoRoot,
     encoding: 'utf-8',
   });
@@ -44,7 +44,7 @@ try {
     cwd: workDir,
     stdio: 'ignore',
   });
-  runNpm(['install', cliTarball, pluginTarball], {
+  runNpm(['install', '--ignore-scripts', '--no-audit', '--no-fund', cliTarball, pluginTarball], {
     cwd: workDir,
     stdio: 'inherit',
   });
@@ -75,6 +75,16 @@ try {
       throw new Error(`codex plugin tarball missing ${requiredPath}`);
     }
   }
+  for (const layout of ['', 'plugins/switchbot']) {
+    const manifestDirectory = path.join(pluginRoot, layout, '.codex-plugin');
+    const manifest = readJson(path.join(manifestDirectory, 'plugin.json'));
+    if (Object.hasOwn(manifest, 'hooks')) {
+      throw new Error(`codex plugin ${layout || 'package root'} manifest must not contain hooks`);
+    }
+    if (existsSync(path.join(manifestDirectory, 'hooks.json'))) {
+      throw new Error(`codex plugin ${layout || 'package root'} must not ship .codex-plugin/hooks.json`);
+    }
+  }
 
   const pluginManifest = readJson(path.join(pluginRoot, '.codex-plugin', 'plugin.json'));
   if (pluginManifest?.interface?.displayName !== 'SwitchBot') {
@@ -90,113 +100,55 @@ try {
     throw new Error(`marketplace switchbot plugin source must be './plugins/switchbot', got ${switchbotEntry?.source ?? '<missing>'}`);
   }
 
-  const switchbotBin = process.platform === 'win32'
-    ? path.join(workDir, 'node_modules', '.bin', 'switchbot.cmd')
-    : path.join(workDir, 'node_modules', '.bin', 'switchbot');
+  const home = path.join(workDir, 'home');
+  mkdirSync(home);
+  const runtimeEnv = {
+    PATH: `${path.join(workDir, 'node_modules', '.bin')}${path.delimiter}${process.env.PATH ?? ''}`,
+    HOME: home, USERPROFILE: home,
+    XDG_CONFIG_HOME: path.join(home, '.config'),
+    XDG_CACHE_HOME: path.join(home, '.cache'),
+    XDG_DATA_HOME: path.join(home, '.local', 'share'),
+    APPDATA: path.join(home, 'AppData', 'Roaming'),
+    LOCALAPPDATA: path.join(home, 'AppData', 'Local'),
+    TMPDIR: workDir, TMP: workDir, TEMP: workDir,
+    SystemRoot: process.env.SystemRoot, ComSpec: process.env.ComSpec,
+    SWITCHBOT_TOKEN: 'local-smoke-only-token',
+    SWITCHBOT_SECRET: 'local-smoke-only-secret',
+  };
+  const cliEntrypoint = path.join(workDir, 'node_modules', '@switchbot', 'openapi-cli', installedCliPkg.bin.switchbot);
   const setupOut = execFileSync(
-    switchbotBin,
-    ['codex', 'setup', '--dry-run', '--json'],
-    {
-      cwd: workDir,
-      encoding: 'utf-8',
-      shell: process.platform === 'win32',
-    },
+    process.execPath,
+    [cliEntrypoint, 'codex', 'setup', '--dry-run', '--json'],
+    { cwd: workDir, env: runtimeEnv, encoding: 'utf-8' },
   );
   const setup = JSON.parse(setupOut);
-  const steps = setup.data?.steps ?? setup.steps ?? [];
-  const names = steps.map((s) => s.name);
+  const names = (setup.data?.steps ?? []).map((step) => step.name);
   for (const expected of [
-    'check-codex-cli',
-    'install-switchbot-cli',
-    'register-plugin',
-    'auth',
-    'doctor-verify',
+    'check-codex-cli', 'install-switchbot-cli', 'register-plugin', 'auth', 'doctor-verify',
   ]) {
     if (!names.includes(expected)) {
       throw new Error(`codex setup dry-run missing step ${expected}; got ${names.join(', ')}`);
     }
   }
-
-  const envPath = `${path.join(workDir, 'node_modules', '.bin')}${path.delimiter}${process.env.PATH ?? ''}`;
   const setupHelper = spawnSync(
     process.execPath,
-    [path.join(pluginRoot, 'bin', 'auth.js'), '--hook'],
+    [path.join(pluginRoot, pluginPkg.bin['switchbot-codex-auth'])],
     {
       cwd: workDir,
-      env: { ...process.env, PATH: envPath },
+      env: runtimeEnv,
       encoding: 'utf-8',
-      shell: process.platform === 'win32',
       timeout: 30_000,
     },
   );
-  if ((setupHelper.status ?? 1) !== 0) {
+  if (setupHelper.status !== 0 || setupHelper.stdout !== '') {
     throw new Error(
-      `codex plugin setup helper must exit 0; got ${setupHelper.status ?? 1}\nstderr:\n${setupHelper.stderr}`,
+      `codex manual auth helper failed isolated credential discovery; exit ${setupHelper.status}\nstdout:\n${setupHelper.stdout}\nstderr:\n${setupHelper.stderr}`,
     );
   }
 
-  const { makeInstall, resolvePluginIdentifier, resolveMarketplaceSourceRoot } = await import(
-    pathToFileURL(path.join(pluginRoot, 'bin', 'install.js')).href
-  );
-  const registrationCalls = [];
-  const installCode = await makeInstall({
-    checkCli: async () => ({ ok: false, message: 'CLI not found' }),
-    runInherit: async (cmd, args) => {
-      registrationCalls.push({ cmd, args });
-      return 0;
-    },
-    packageRoot: pluginRoot,
-    runAuth: async () => 0,
-  })();
-  if (installCode !== 0) {
-    throw new Error(`installed codex plugin makeInstall returned ${installCode}`);
-  }
-
-  const pluginIdentifier = resolvePluginIdentifier(pluginRoot);
-  if (pluginIdentifier !== 'switchbot@switchbot') {
-    throw new Error(`resolved plugin identifier must be switchbot@switchbot, got ${pluginIdentifier}`);
-  }
-  const marketplaceSourceRoot = resolveMarketplaceSourceRoot(pluginRoot);
-  const registrationSequence = registrationCalls.map(({ cmd, args }) => `${cmd} ${args.join(' ')}`);
-  for (const expected of [
-    'npm install -g @switchbot/openapi-cli@latest',
-    'codex plugin remove switchbot@switchbot',
-    'codex plugin remove switchbot@codex-plugin',
-    'codex plugin remove switchbot@switchbot-skill',
-    'codex plugin marketplace remove switchbot',
-    'codex plugin marketplace remove codex-plugin',
-    'codex plugin marketplace remove switchbot-skill',
-    `codex plugin marketplace add ${marketplaceSourceRoot}`,
-    'codex plugin add switchbot@switchbot',
-    'switchbot doctor',
-  ]) {
-    if (!registrationSequence.includes(expected)) {
-      throw new Error(`installed codex plugin registration flow missing "${expected}"\nactual:\n${registrationSequence.join('\n')}`);
-    }
-  }
-
-  // Verify ordering: all plugin removes must come before marketplace add
-  const marketplaceAddIdx = registrationSequence.indexOf(
-    `codex plugin marketplace add ${marketplaceSourceRoot}`
-  );
-  const pluginAddIdx = registrationSequence.indexOf('codex plugin add switchbot@switchbot');
-  const pluginRemoveIds = ['switchbot@switchbot', 'switchbot@codex-plugin', 'switchbot@switchbot-skill'];
-  for (const id of pluginRemoveIds) {
-    const removeIdx = registrationSequence.indexOf(`codex plugin remove ${id}`);
-    if (removeIdx === -1 || removeIdx >= marketplaceAddIdx) {
-      throw new Error(
-        `codex plugin remove ${id} must happen before marketplace add (remove idx: ${removeIdx}, marketplace add idx: ${marketplaceAddIdx})`
-      );
-    }
-  }
-  if (pluginAddIdx <= marketplaceAddIdx) {
-    throw new Error(
-      `codex plugin add must happen after marketplace add (add idx: ${pluginAddIdx}, marketplace add idx: ${marketplaceAddIdx})`
-    );
-  }
 
   console.log(
-    'codex pack-install smoke ok: tarballs install, setup dry-run and helper are present, fresh install registration uses switchbot@switchbot',
+    'codex pack-install smoke ok: both installed layouts are hook-free; setup dry-run and manual auth work without real credentials or host registration',
   );
 } finally {
   for (const tarball of packed) {

@@ -1241,12 +1241,11 @@ export function registerDoctorCommand(program: Command): void {
     .option('--probe', 'Perform live-probe variant of checks that support it (mqtt)')
     .option('-q, --quiet', 'Only show warn/fail checks, hide passing checks')
     .addHelpText('after', `
-Runs a battery of local sanity checks and exits with code 0 only when every
-check is 'ok'. 'warn' → exit 0 (informational); 'fail' → exit 1.
+Runs diagnostic checks. 'ok' and 'warn' exit 0; 'fail' exits 1.
 
 Examples:
   $ switchbot doctor
-  $ switchbot --json doctor | jq '.checks[] | select(.status != "ok")'
+  $ switchbot --json doctor | jq '.data.checks[] | select(.status != "ok")'
   $ switchbot doctor --list
   $ switchbot doctor --section credentials,mcp --json
   $ switchbot doctor --section daemon,health --json

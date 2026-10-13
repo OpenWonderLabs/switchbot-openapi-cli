@@ -3,7 +3,7 @@
     "switchbot": {
       "command": "switchbot",
       "args": ["mcp", "serve"],
-      "description": "SwitchBot smart-home MCP server (default 17 tools; `--tools all` for 28)"
+      "description": "SwitchBot smart-home MCP server (minimal read/action profile; `--tools all` opts into administration)"
     }
   }
 }

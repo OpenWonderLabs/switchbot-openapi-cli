@@ -1,68 +1,40 @@
-// setup/check-cli.js — verify switchbot CLI is installed; auto-install via npm if missing
-import { execFile, execFileSync } from 'node:child_process';
+// setup/check-cli.js — verify the installed CLI; leave installation to the user.
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { formatError } from '../lib/error-messages.js';
+import { switchbotInvocation } from './cli-invocation.js';
 
 const exec = promisify(execFile);
 
-const SHELL = process.platform === 'win32';
+export const REQUIRED_CLI_VERSION = '3.9.0';
 
-async function cliExists() {
-  try {
-    await exec('switchbot', ['--version'], { timeout: 8000, shell: SHELL });
-    return true;
-  } catch {
-    return false;
+export function versionAtLeast(have, need = REQUIRED_CLI_VERSION) {
+  const actual = have.split('.').map((part) => Number.parseInt(part, 10) || 0);
+  const required = need.split('.').map((part) => Number.parseInt(part, 10) || 0);
+  for (let index = 0; index < Math.max(actual.length, required.length); index += 1) {
+    if ((actual[index] ?? 0) !== (required[index] ?? 0)) {
+      return (actual[index] ?? 0) > (required[index] ?? 0);
+    }
   }
+  return true;
 }
 
-function npmExists() {
+async function cliVersion() {
   try {
-    execFileSync('npm', ['--version'], { timeout: 8000, stdio: 'pipe', shell: SHELL });
-    return true;
+    const invocation = switchbotInvocation(['--version']);
+    const { stdout } = await exec(invocation.command, invocation.args, { timeout: 8000 });
+    return stdout.match(/\d+\.\d+\.\d+/)?.[0] ?? null;
   } catch {
-    return false;
+    return null;
   }
 }
 
 export async function checkCli() {
-  if (await cliExists()) return { ok: true };
-
-  if (!npmExists()) {
-    return {
-      ok: false,
-      message:
-        'Error: Node.js / npm is not installed.\n' +
-        '  Fix:  Install Node.js from https://nodejs.org, then reopen the SwitchBot channel.\n' +
-        '  Hint: Node 18 or later is required.',
-    };
-  }
-
-  process.stderr.write('[switchbot-channel] CLI not found — auto-installing @switchbot/openapi-cli…\n');
-  try {
-    execFileSync('npm', ['install', '-g', '@switchbot/openapi-cli'], {
-      stdio: 'inherit',
-      timeout: 120_000,
-      shell: SHELL,
-    });
-  } catch (err) {
-    return {
-      ok: false,
-      message:
-        `Error: CLI installation failed: ${err instanceof Error ? err.message : String(err)}\n` +
-        `  Fix:  npm install -g @switchbot/openapi-cli\n` +
-        `  Hint: Check your network connection and npm permissions.`,
-    };
-  }
-
-  if (!(await cliExists())) {
-    return {
-      ok: false,
-      message: formatError('cli-not-installed') +
-        '\n  (CLI was installed but `switchbot` is still not on PATH — reopen your terminal.)',
-    };
-  }
-
-  process.stderr.write('[switchbot-channel] CLI installed.\n');
-  return { ok: true };
+  const installedVersion = await cliVersion();
+  if (!installedVersion) return { ok: false, message: formatError('cli-not-installed') };
+  if (versionAtLeast(installedVersion)) return { ok: true };
+  return {
+    ok: false,
+    message: `${formatError('cli-version-too-low')}\n  Detected: ${installedVersion}; required: >=${REQUIRED_CLI_VERSION}.`,
+  };
 }

@@ -14,8 +14,8 @@ function defaultRunInherit(cmd, args) {
   });
 }
 
-export function makeRunOnInstall({ checkCli, checkCredentials, runInherit }) {
-  return async function runOnInstall() {
+export function makeRunAuthSetup({ checkCli, checkCredentials, runInherit }) {
+  return async function runAuthSetup() {
     const cliCheck = await checkCli();
     if (!cliCheck.ok) {
       process.stderr.write(`[switchbot-claude] ${cliCheck.message}\n`);
@@ -50,7 +50,7 @@ export function makeRunOnInstall({ checkCli, checkCredentials, runInherit }) {
 const isMain = !!process.argv[1] &&
   path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) {
-  const run = makeRunOnInstall({
+  const run = makeRunAuthSetup({
     checkCli: defaultCheckCli,
     checkCredentials: defaultCheckCredentials,
     runInherit: defaultRunInherit,

@@ -224,7 +224,7 @@ describe('WebhookListener', () => {
     const port = await startListener([webhookRule('big', '/big')]);
     const socketClosed = await new Promise<boolean>((resolve, reject) => {
       const sock = net.createConnection({ host: '127.0.0.1', port });
-      let got413 = false;
+      let response = '';
       sock.once('connect', () => {
         sock.write(
           'POST /big HTTP/1.1\r\n' +
@@ -238,10 +238,16 @@ describe('WebhookListener', () => {
           sock.write(`${piece.length.toString(16)}\r\n${piece}\r\n`);
         }
       });
-      sock.on('data', (d: Buffer) => { if (d.toString().includes('413')) got413 = true; });
-      sock.on('close', () => resolve(got413));
+      sock.on('data', (data: Buffer) => { response += data.toString(); });
+      const deadline = setTimeout(() => {
+        sock.destroy();
+        reject(new Error('server did not close socket within 3s'));
+      }, 3000);
+      sock.on('close', () => {
+        clearTimeout(deadline);
+        resolve(response.startsWith('HTTP/1.1 413 ') && response.includes('\r\n\r\n'));
+      });
       sock.on('error', reject);
-      setTimeout(() => reject(new Error('server did not close socket within 3s')), 3000);
     });
     expect(socketClosed).toBe(true);
   });

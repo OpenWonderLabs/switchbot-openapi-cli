@@ -68,20 +68,27 @@ function classifyDoctorFailure(text, hasKeychain) {
 }
 
 async function tryDoctor(exec) {
+  let stdout;
+  let failureDetail = '';
   try {
-    const { stdout } = await exec('switchbot', ['doctor', '--json'], { timeout: 10000 });
-    const parsed = JSON.parse(stdout);
-    const data = parsed?.data ?? parsed;
-    return data?.credentials?.configured === true
-      ? { ok: true }
-      : { ok: false, reason: 'not-configured' };
+    ({ stdout } = await exec('switchbot', ['doctor', '--section', 'credentials', '--json'], { timeout: 10000 }));
   } catch (err) {
     if (err?.code === 'ENOENT') throw err;
-    return {
-      ok: false,
-      reason: 'doctor-failed',
-      detail: normalizeErrorText(err),
-    };
+    stdout = err?.stdout;
+    failureDetail = normalizeErrorText(err);
+    if (!stdout) return { ok: false, reason: 'doctor-failed', detail: failureDetail };
+  }
+
+  try {
+    const parsed = JSON.parse(Buffer.isBuffer(stdout) ? stdout.toString('utf8') : String(stdout));
+    const data = parsed?.data ?? parsed;
+    const checks = Array.isArray(data?.checks) ? data.checks : [];
+    const credentialsCheck = checks.find((check) => check?.name === 'credentials');
+    return credentialsCheck?.status === 'ok' || credentialsCheck?.status === 'warn'
+      ? { ok: true }
+      : { ok: false, reason: 'not-configured' };
+  } catch {
+    return { ok: false, reason: 'doctor-failed', detail: failureDetail || String(stdout) };
   }
 }
 

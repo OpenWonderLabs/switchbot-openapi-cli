@@ -15,6 +15,7 @@ import { DryRunSignal } from '../api/client.js';
 import { getCachedTypeMap, getCachedDevice, loadStatusCache } from '../devices/cache.js';
 import { allowsDirectDestructiveExecution, destructiveExecutionHint } from '../lib/destructive-mode.js';
 import { parseParameterForWire } from '../devices/param-validator.js';
+import { preflightCommandTargets } from '../lib/command-preflight.js';
 
 interface BatchStepTiming {
   startedAt: string;
@@ -52,6 +53,11 @@ interface BatchResult {
 
 const DEFAULT_CONCURRENCY = 5;
 const COMMAND_TYPES = ['command', 'customize'] as const;
+
+export interface ResolvedBatchTargets {
+  ids: string[];
+  typeMap: Map<string, string>;
+}
 
 /**
  * Run `task(x)` for every element with at most `concurrency` running at once.
@@ -92,7 +98,7 @@ async function resolveTargetIds(options: {
   filter?: string;
   ids?: string;
   readStdin: boolean;
-}, getClient?: () => AxiosInstance): Promise<{ ids: string[]; typeMap: Map<string, string> }> {
+}, getClient?: () => AxiosInstance): Promise<ResolvedBatchTargets> {
   const explicit: string[] = [];
 
   if (options.ids) {
@@ -250,7 +256,7 @@ Examples:
         let client: AxiosInstance | undefined;
         const getClient = (): AxiosInstance => (client ??= createClient());
 
-        let resolved: Awaited<ReturnType<typeof resolveTargetIds>>;
+        let resolved: ResolvedBatchTargets;
         try {
           resolved = await resolveTargetIds({
             filter: options.filter,
@@ -300,74 +306,82 @@ Examples:
           resolved = { ...resolved, ids: kept };
         }
 
-        // Pre-flight: identify destructive targets before spending API calls.
-        const blockedForDestructive: Array<{ deviceId: string; reason: string }> = [];
-        for (const id of resolved.ids) {
-          const t = resolved.typeMap.get(id);
-          if (isDestructiveCommand(t, cmd, effectiveType) && !options.yes) {
-            blockedForDestructive.push({
-              deviceId: id,
-              reason: `destructive command "${cmd}" on ${t ?? 'unknown'} requires --yes`,
-            });
-          }
-        }
-
-        if (blockedForDestructive.length > 0 && !options.yes) {
-          const deviceIds = blockedForDestructive.map((b) => b.deviceId);
+        const preflight = preflightCommandTargets(resolved.ids, cmd, parameter, effectiveType);
+        if (!preflight.ok) {
           exitWithError({
             code: 2,
-            kind: 'guard',
-            message: `Refusing to run destructive command "${cmd}" on ${blockedForDestructive.length} device(s) without --yes: ${deviceIds.join(', ')}`,
-            hint: 'Re-issue the call with --yes only from an explicit dev profile, or use the reviewed plan flow.',
-            context: { command: cmd, deviceIds },
+            kind: 'usage',
+            message: preflight.message,
+            hint: preflight.hint,
+            context: {
+              deviceId: preflight.deviceId,
+              validationKind: preflight.kind,
+            },
+          });
+        }
+        cmd = preflight.command;
+        const targetParameters = new Map(
+          preflight.targets.map((target) => [target.deviceId, parseParameterForWire(target.parameter)])
+        );
+        const dryRun = isDryRun();
+
+        // Pre-flight: identify destructive targets independently of whether the
+        // caller supplied --yes, so authorization is evaluated on every target.
+        const destructiveTargets = resolved.ids.filter((id) =>
+          isDestructiveCommand(resolved.typeMap.get(id), cmd, effectiveType)
+        );
+
+        if (destructiveTargets.length > 0 && !dryRun && !options.yes) {
+          exitWithError({
+            code: 2,
+            kind: "guard",
+            message: `Refusing to run destructive command "${cmd}" on ${destructiveTargets.length} device(s) without --yes: ${destructiveTargets.join(", ")}`,
+            hint: "Re-issue the call with --yes only from an explicit dev profile, or use the reviewed plan flow.",
+            context: { command: cmd, deviceIds: destructiveTargets },
           });
         }
 
-        if (blockedForDestructive.length > 0 && options.yes && !allowsDirectDestructiveExecution()) {
+        if (destructiveTargets.length > 0 && !dryRun && options.yes && !allowsDirectDestructiveExecution()) {
           exitWithError({
             code: 2,
-            kind: 'guard',
+            kind: "guard",
             message: `Direct destructive execution is disabled for batch command "${cmd}".`,
             hint: destructiveExecutionHint(),
             context: {
               command: cmd,
-              blockedCount: blockedForDestructive.length,
-              deviceIds: blockedForDestructive.map((item) => item.deviceId),
-              requiredWorkflow: 'plan-approval',
+              blockedCount: destructiveTargets.length,
+              deviceIds: destructiveTargets,
+              requiredWorkflow: "plan-approval",
             },
           });
         }
 
-        // Mirror single-command dispatch: scalar parameters remain strings;
-        // JSON object/array parameter shapes are parsed for object-based commands.
-        const parsedParam = parseParameterForWire(parameter);
-
         const maxConcurrentRaw = options.maxConcurrent ?? options.concurrency;
         const concurrency = Math.max(1, Number.parseInt(maxConcurrentRaw, 10) || DEFAULT_CONCURRENCY);
         const staggerMs = Math.max(0, Number.parseInt(options.stagger, 10) || 0);
-        const dryRun = isDryRun();
 
         // --dry-run --emit-plan (or legacy --plan): emit a plan document and return without executing.
         if (dryRun && emitPlan) {
           const steps = resolved.ids.map((id) => ({
+            type: 'command' as const,
             deviceId: id,
             command: cmd,
-            parameter: parsedParam,
-            type: effectiveType,
-            idempotencyKey: options.idempotencyKeyPrefix
-              ? `${options.idempotencyKeyPrefix}-${id}`
-              : undefined,
+            parameter: targetParameters.get(id),
+            commandType: effectiveType,
           }));
           const planDoc = {
             dryRun: true,
             plan: {
-              command: cmd,
-              parameter: parsedParam,
-              type: effectiveType,
+              version: '1.0' as const,
+              steps,
+            },
+            batch: {
               maxConcurrent: concurrency,
               staggerMs,
               stepCount: steps.length,
-              steps,
+              idempotencyKeys: options.idempotencyKeyPrefix
+                ? Object.fromEntries(resolved.ids.map((id) => [id, `${options.idempotencyKeyPrefix}-${id}`]))
+                : undefined,
             },
           };
           if (isJsonMode()) {
@@ -394,7 +408,7 @@ Examples:
             const idempotencyKey = options.idempotencyKeyPrefix
               ? `${options.idempotencyKeyPrefix}-${id}`
               : undefined;
-            const result = await executeCommand(id, cmd, parsedParam, effectiveType, getClient(), {
+            const result = await executeCommand(id, cmd, targetParameters.get(id), effectiveType, getClient(), {
               idempotencyKey,
             });
             const finishedIso = new Date().toISOString();

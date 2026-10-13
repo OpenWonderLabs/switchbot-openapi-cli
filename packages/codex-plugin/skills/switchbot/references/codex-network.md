@@ -23,7 +23,7 @@ network_access = true
 
 Then **restart Codex** and re-run setup:
 
-```
+```bash
 switchbot codex setup
 ```
 

@@ -4,6 +4,7 @@ import { printJson, handleError } from '../utils/output.js';
 import {
   listRecordings,
   getRecording,
+  getTranscript,
   getSummary,
   listTodos,
   getDailyRecall,
@@ -19,8 +20,9 @@ export function registerMindclipCommand(program: Command): void {
       'after',
       `
 Subcommands:
-  recordings      List recordings across all AI MindClip devices
-  recording <id>  Get a single recording's metadata and transcript
+  recordings      List recordings for an AI MindClip device
+  recording <id>  Get a single recording's metadata
+  transcript <id> Get a recording's transcript and transcription status
   summary <id>    Get AI summary for a recording
   todos           List AI-extracted to-do items
   daily           Get daily recall summary
@@ -28,18 +30,18 @@ Subcommands:
   urgent-todos    Get urgent to-dos for a date
 
 Examples:
-  switchbot mindclip recordings --device AABBCCDDEEFF --size 10
-  switchbot mindclip todos --completed 1
+  switchbot mindclip recordings --device AABBCCDDEEFF --page 1 --size 10
+  switchbot mindclip todos --completed 1 --page 1 --size 10
   switchbot mindclip daily --date 2026-06-10
-  switchbot mindclip weekly`,
+  switchbot mindclip weekly --week 2026-W23`,
     );
 
   mindclip
     .command('recordings')
     .description('List recordings for AI MindClip devices')
-    .option('--device <id>', 'Filter by device ID', stringArg('--device'))
-    .option('--page <n>', 'Page number (>= 1)', intArg('--page', { min: 1 }))
-    .option('--size <n>', 'Results per page (1-100)', intArg('--size', { min: 1, max: 100 }))
+    .requiredOption('--device <id>', 'Device ID', stringArg('--device'))
+    .requiredOption('--page <n>', 'Page number (>= 1)', intArg('--page', { min: 1 }))
+    .requiredOption('--size <n>', 'Results per page (1-100)', intArg('--size', { min: 1, max: 100 }))
     .option('--start <ms>', 'Start timestamp in milliseconds', intArg('--start', { min: 0 }))
     .option('--end <ms>', 'End timestamp in milliseconds', intArg('--end', { min: 0 }))
     .option('--folder <n>', 'Folder ID', intArg('--folder', { min: 0 }))
@@ -47,20 +49,17 @@ Examples:
       'after',
       `
 Examples:
-  switchbot mindclip recordings
   switchbot mindclip recordings --device AABBCCDDEEFF --page 2 --size 10`,
     )
     .action(async (options) => {
-      const params = Object.fromEntries(
-        Object.entries({
-          deviceID: options.device,
-          pageNum: options.page !== undefined ? Number(options.page) : undefined,
-          pageSize: options.size !== undefined ? Number(options.size) : undefined,
-          startTime: options.start !== undefined ? Number(options.start) : undefined,
-          endTime: options.end !== undefined ? Number(options.end) : undefined,
-          folderID: options.folder !== undefined ? Number(options.folder) : undefined,
-        }).filter(([, v]) => v !== undefined),
-      );
+      const params = {
+        deviceID: options.device,
+        pageNum: Number(options.page),
+        pageSize: Number(options.size),
+        startTime: options.start,
+        endTime: options.end,
+        folderID: options.folder,
+      };
       try {
         const data = await listRecordings(params);
         printJson(data);
@@ -72,7 +71,7 @@ Examples:
   mindclip
     .command('recording <id>')
     .description('Get details of a single recording')
-    .option('--language <lang>', 'Language code for response (e.g. en, zh)', stringArg('--language'))
+    .option('--language <lang>', 'Legacy language filter; upstream support is unverified', stringArg('--language'))
     .addHelpText(
       'after',
       `
@@ -83,6 +82,28 @@ Examples:
     .action(async (id: string, options) => {
       try {
         const data = await getRecording(id, options.language);
+        printJson(data);
+      } catch (err) {
+        handleError(err);
+      }
+    });
+
+  mindclip
+    .command('transcript <id>')
+    .description('Get the transcript and transcription status for a recording')
+    .addHelpText(
+      'after',
+      `
+The response is returned unchanged: transcribeStatus remains the upstream status
+(1=in progress, 2=successful, 3=failed, 4=timed out, 5=speech-to-text failed),
+and transcribeResult remains its original string alongside speakers.
+
+Examples:
+  switchbot mindclip transcript 5f3a1c2e9b7d`,
+    )
+    .action(async (id: string) => {
+      try {
+        const data = await getTranscript(id);
         printJson(data);
       } catch (err) {
         handleError(err);
@@ -110,43 +131,39 @@ Examples:
   mindclip
     .command('todos')
     .description('List AI-extracted to-do items')
-    .option(
+    .requiredOption(
       '--completed <n>',
-      'Filter: 0=all, 1=incomplete, 2=completed [default: 0]',
+      'Completion filter (legacy range 0-2; upstream value meanings are unverified)',
       enumArg('--completed', ['0', '1', '2']),
     )
-    .option('--page <n>', 'Page number (>= 1)', intArg('--page', { min: 1 }))
-    .option('--size <n>', 'Results per page (1-100)', intArg('--size', { min: 1, max: 100 }))
+    .requiredOption('--page <n>', 'Page number (>= 1)', intArg('--page', { min: 1 }))
+    .requiredOption('--size <n>', 'Results per page (1-100)', intArg('--size', { min: 1, max: 100 }))
     .option('--device <id>', 'Filter by device ID', stringArg('--device'))
     .option('--file <id>', 'Filter by recording file ID', stringArg('--file'))
     .option('--start <ms>', 'Start timestamp in milliseconds', intArg('--start', { min: 0 }))
     .option('--end <ms>', 'End timestamp in milliseconds', intArg('--end', { min: 0 }))
     .option(
       '--category <n>',
-      'Category: 0=any, 1=work, 2=life, 3=hobby, 4=holiday, 5=other',
+      'Legacy category filter (0-5); upstream support and value meanings are unverified',
       intArg('--category', { min: 0, max: 5 }),
     )
     .addHelpText(
       'after',
       `
 Examples:
-  switchbot mindclip todos
-  switchbot mindclip todos --completed 1 --size 5
-  switchbot mindclip todos --category 1`,
+  switchbot mindclip todos --completed 1 --page 1 --size 5`,
     )
     .action(async (options) => {
-      const params = Object.fromEntries(
-        Object.entries({
-          completedNum: options.completed !== undefined ? Number(options.completed) : undefined,
-          pageNum: options.page !== undefined ? Number(options.page) : undefined,
-          pageSize: options.size !== undefined ? Number(options.size) : undefined,
-          deviceID: options.device,
-          fileID: options.file,
-          startTime: options.start !== undefined ? Number(options.start) : undefined,
-          endTime: options.end !== undefined ? Number(options.end) : undefined,
-          category: options.category !== undefined ? Number(options.category) : undefined,
-        }).filter(([, v]) => v !== undefined),
-      );
+      const params = {
+        completedNum: Number(options.completed),
+        pageNum: Number(options.page),
+        pageSize: Number(options.size),
+        deviceID: options.device,
+        fileID: options.file,
+        startTime: options.start,
+        endTime: options.end,
+        category: options.category,
+      };
       try {
         const data = await listTodos(params);
         printJson(data);
@@ -157,13 +174,12 @@ Examples:
 
   mindclip
     .command('daily')
-    .description('Get daily recall summary (omit --date to get the most recent)')
-    .option('--date <YYYY-MM-DD>', 'Date [default: most recent record on server]', dateArg('--date'))
+    .description('Get daily recall summary for a date')
+    .requiredOption('--date <YYYY-MM-DD>', 'Date', dateArg('--date'))
     .addHelpText(
       'after',
       `
 Examples:
-  switchbot mindclip daily
   switchbot mindclip daily --date 2026-06-10`,
     )
     .action(async (options) => {
@@ -177,13 +193,12 @@ Examples:
 
   mindclip
     .command('weekly')
-    .description('Get weekly summary (omit --week to get the most recent)')
-    .option('--week <YYYY-Www>', 'ISO week [default: most recent record on server]', weekArg('--week'))
+    .description('Get weekly summary for an ISO week')
+    .requiredOption('--week <YYYY-Www>', 'ISO week', weekArg('--week'))
     .addHelpText(
       'after',
       `
 Examples:
-  switchbot mindclip weekly
   switchbot mindclip weekly --week 2026-W23`,
     )
     .action(async (options) => {
@@ -197,13 +212,12 @@ Examples:
 
   mindclip
     .command('urgent-todos')
-    .description("Get urgent to-dos for a date (omit --date to use yesterday's)")
-    .option('--date <YYYY-MM-DD>', 'Date [default: yesterday on server]', dateArg('--date'))
+    .description('Get urgent to-dos for a date')
+    .requiredOption('--date <YYYY-MM-DD>', 'Date', dateArg('--date'))
     .addHelpText(
       'after',
       `
 Examples:
-  switchbot mindclip urgent-todos
   switchbot mindclip urgent-todos --date 2026-06-10`,
     )
     .action(async (options) => {

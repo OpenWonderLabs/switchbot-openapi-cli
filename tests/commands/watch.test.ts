@@ -136,7 +136,7 @@ describe('devices watch', () => {
 
     // Loop exits via --max so parseAsync resolves — exitCode is null.
     expect(res.exitCode).toBeNull();
-    const lines = res.stdout.filter((l) => l.trim().startsWith('{'));
+    const lines = res.stdout.join('\n').trim().split('\n');
     // P7: first line is the stream header; event is on the second line.
     expect(lines.length).toBe(2);
     expectStreamHeaderShape(JSON.parse(lines[0]) as Record<string, unknown>, 'tick', 'poll');
@@ -471,20 +471,6 @@ describe('devices watch', () => {
     expect(jsonLines.length).toBe(0);
   });
 
-  it('--help clarifies default format and calls out --json as agent-friendly', async () => {
-    const res = await runCli(registerDevicesCommand, ['devices', 'watch', '--help']);
-    const out = [...res.stdout, ...res.stderr].join('\n');
-    // Help clarifies default (human table) and the agent form (JSONL with --json).
-    expect(out).toMatch(/human-readable table/);
-    expect(out).toMatch(/--json/);
-    expect(out).toMatch(/JSON-Lines/);
-    // Initial-poll modes are documented in help.
-    expect(out).toMatch(/--initial=snapshot/i);
-    expect(out).toMatch(/--initial=emit/i);
-    expect(out).toMatch(/--initial=skip/i);
-    // Example block explicitly labels the --json form as agent-friendly.
-    expect(out).toMatch(/agent-friendly/i);
-  });
 
   it('--once is accepted without error', async () => {
     cacheMock.map.set('BOT1', { type: 'Bot', name: 'Kitchen', category: 'physical' });

@@ -1,8 +1,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { makeRunOnInstall } from '../bin/auth.js';
+import { makeRunAuthSetup } from '../bin/auth.js';
 
-function makeOkCliCheck(version = '3.7.1') {
+function makeOkCliCheck(version = '3.9.0') {
   return async () => ({ ok: true, version });
 }
 function makeFailCliCheck(msg = 'switchbot CLI not found. Install with: npm install -g @switchbot/openapi-cli@latest') {
@@ -39,10 +39,10 @@ async function captureStderr(fn) {
   }
 }
 
-describe('runOnInstall', () => {
+describe('runAuthSetup', () => {
   it('exits 1 when CLI is missing', async () => {
     const { spawn, calls } = makeSpawn(0);
-    const run = makeRunOnInstall({
+    const run = makeRunAuthSetup({
       checkCli: makeFailCliCheck(),
       checkCredentials: makeOkCredCheck(),
       runInherit: spawn,
@@ -55,7 +55,7 @@ describe('runOnInstall', () => {
 
   it('exits 0 when credentials are already present', async () => {
     const { spawn, calls } = makeSpawn(0);
-    const run = makeRunOnInstall({
+    const run = makeRunAuthSetup({
       checkCli: makeOkCliCheck(),
       checkCredentials: makeOkCredCheck('doctor'),
       runInherit: spawn,
@@ -74,7 +74,7 @@ describe('runOnInstall', () => {
       if (credCallCount === 1) return { ok: false, errorKey: 'auth-not-configured', message: 'not configured' };
       return { ok: true, source: 'keychain' };
     };
-    const run = makeRunOnInstall({
+    const run = makeRunAuthSetup({
       checkCli: makeOkCliCheck(),
       checkCredentials,
       runInherit: spawn,
@@ -89,7 +89,7 @@ describe('runOnInstall', () => {
 
   it('exits with login exit code when auth login fails', async () => {
     const { spawn, calls } = makeSpawn(1);
-    const run = makeRunOnInstall({
+    const run = makeRunAuthSetup({
       checkCli: makeOkCliCheck(),
       checkCredentials: makeFailCredCheck(),
       runInherit: spawn,
@@ -108,7 +108,7 @@ describe('runOnInstall', () => {
       credCallCount++;
       return { ok: false, errorKey: 'auth-not-configured', message: 'Error: still not configured' };
     };
-    const run = makeRunOnInstall({
+    const run = makeRunAuthSetup({
       checkCli: makeOkCliCheck(),
       checkCredentials,
       runInherit: spawn,

@@ -13,7 +13,7 @@ export interface RegistrationResult {
   ok: boolean;
   exitCode: number;
   stderr: string;
-  stage: 'marketplace-add' | 'plugin-add';
+  stage: 'marketplace-conflict' | 'marketplace-add' | 'plugin-add';
 }
 
 export interface RegisterCodexPluginResult {
@@ -267,26 +267,133 @@ export function checkCodexPluginRegistered(): Check {
   return { name: 'codex-plugin-registered', status: 'ok', detail: { pluginName } };
 }
 
+interface OwnedCodexRegistration {
+  marketplaces: Array<{ name: string; root: string }>;
+  pluginIds: string[];
+}
+
+function registryConflict(exitCode: number, stderr: string): RegistrationResult {
+  return { ok: false, exitCode, stderr, stage: 'marketplace-conflict' };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function parseRegistryArray(stdout: string, field: string): unknown[] | null {
+  try {
+    const parsed: unknown = JSON.parse(stdout);
+    if (!isRecord(parsed)) return null;
+    const value = parsed[field];
+    return Array.isArray(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function captureOwnedRegistration(
+  marketplaceRoot: string,
+  pluginIds: string[],
+): OwnedCodexRegistration | RegistrationResult {
+  const listed = spawnStr('codex', ['plugin', 'marketplace', 'list', '--json']);
+  if (listed.status !== 0) {
+    return registryConflict(listed.status, 'Cannot determine Codex marketplace ownership: ' + listed.stderr);
+  }
+
+  const marketplaces = parseRegistryArray(listed.stdout, 'marketplaces');
+  if (!marketplaces) {
+    return registryConflict(-1, 'Cannot determine Codex marketplace ownership: invalid registry response');
+  }
+
+  const candidateNames = new Set(CODEX_MARKETPLACE_LEGACY_NAMES);
+  const ownedMarketplaces: Array<{ name: string; root: string }> = [];
+  for (const marketplace of marketplaces) {
+    if (!isRecord(marketplace)) continue;
+    const name = marketplace.name;
+    const root = marketplace.root;
+    if (typeof name !== 'string' || typeof root !== 'string' || !candidateNames.has(name)) continue;
+    if (path.resolve(root) !== path.resolve(marketplaceRoot)) {
+      return registryConflict(1, 'Marketplace ' + name + ' belongs to ' + root + ', not ' + marketplaceRoot + '; preserving the existing registration');
+    }
+    ownedMarketplaces.push({ name, root });
+  }
+
+  if (ownedMarketplaces.length === 0) {
+    return { marketplaces: [], pluginIds: [] };
+  }
+
+  const plugins = spawnStr('codex', ['plugin', 'list', '--available', '--json']);
+  if (plugins.status !== 0) {
+    return registryConflict(plugins.status, 'Cannot snapshot installed Codex plugins: ' + plugins.stderr);
+  }
+
+  const installed = parseRegistryArray(plugins.stdout, 'installed');
+  if (!installed) {
+    return registryConflict(-1, 'Cannot snapshot installed Codex plugins: invalid registry response');
+  }
+
+  const candidateIds = new Set(pluginIds);
+  const ownedPluginIds = installed.flatMap((plugin) => {
+    if (!isRecord(plugin)) return [];
+    const pluginId = plugin.pluginId;
+    return typeof pluginId === 'string' && candidateIds.has(pluginId)
+      ? [pluginId]
+      : [];
+  });
+  return { marketplaces: ownedMarketplaces, pluginIds: ownedPluginIds };
+}
+
+function restoreOwnedRegistration(snapshot: OwnedCodexRegistration): string[] {
+  const failures: string[] = [];
+  for (const marketplace of snapshot.marketplaces) {
+    const restored = spawnStr('codex', ['plugin', 'marketplace', 'add', marketplace.root]);
+    if (restored.status !== 0) failures.push('marketplace ' + marketplace.name + ': ' + restored.stderr);
+  }
+  for (const pluginId of snapshot.pluginIds) {
+    const restored = spawnStr('codex', ['plugin', 'add', pluginId]);
+    if (restored.status !== 0) failures.push('plugin ' + pluginId + ': ' + restored.stderr);
+  }
+  return failures;
+}
+
 export function runCodexPluginRegistration(packageRoot: string, pluginId: string): RegistrationResult {
   const marketplaceRoot = resolveMarketplaceSourceRoot(packageRoot);
-  // Pre-clean before marketplace add: removing the last plugin from a marketplace
-  // causes Codex to auto-delete the marketplace entry, so removes must happen
-  // before we register the new marketplace — not after.
-  for (const id of [...new Set([pluginId, ...CODEX_PLUGIN_LEGACY_IDS])]) {
+  const candidatePluginIds = [...new Set([pluginId, ...CODEX_PLUGIN_LEGACY_IDS])];
+  const snapshotOrConflict = captureOwnedRegistration(marketplaceRoot, candidatePluginIds);
+  if ('stage' in snapshotOrConflict) return snapshotOrConflict;
+
+  for (const id of candidatePluginIds) {
     spawnStr('codex', ['plugin', 'remove', id]);
   }
-  // Also remove the marketplace records: when plugin remove deletes the last plugin,
-  // Codex removes the directory but leaves a stale DB record. The next `marketplace add`
-  // then says "already added" without recreating the directory, causing `plugin add` to fail.
   for (const name of CODEX_MARKETPLACE_LEGACY_NAMES) {
     spawnStr('codex', ['plugin', 'marketplace', 'remove', name]);
   }
   const mkt = spawnStr('codex', ['plugin', 'marketplace', 'add', marketplaceRoot]);
   if (mkt.status !== 0) {
-    return { ok: false, exitCode: mkt.status, stderr: mkt.stderr, stage: 'marketplace-add' };
+    const rollbackFailures = restoreOwnedRegistration(snapshotOrConflict);
+    return {
+      ok: false,
+      exitCode: mkt.status,
+      stderr: rollbackFailures.length === 0
+        ? mkt.stderr
+        : mkt.stderr + '; rollback failed: ' + rollbackFailures.join('; '),
+      stage: 'marketplace-add',
+    };
   }
   const add = spawnStr('codex', ['plugin', 'add', pluginId]);
-  return { ok: add.status === 0, exitCode: add.status, stderr: add.stderr, stage: 'plugin-add' };
+  if (add.status === 0) return { ok: true, exitCode: add.status, stderr: add.stderr, stage: 'plugin-add' };
+
+  spawnStr('codex', ['plugin', 'remove', pluginId]);
+  spawnStr('codex', ['plugin', 'marketplace', 'remove', pluginId.slice(pluginId.lastIndexOf('@') + 1)]);
+  const rollbackFailures = restoreOwnedRegistration(snapshotOrConflict);
+  return {
+    ok: false,
+    exitCode: add.status,
+    stderr: rollbackFailures.length === 0
+      ? add.stderr
+      : add.stderr + '; rollback failed: ' + rollbackFailures.join('; '),
+    stage: 'plugin-add',
+  };
 }
 
 export function resolveCodexPackageRoot(): { ok: true; packageRoot: string } | { ok: false; error: string } {
@@ -340,6 +447,81 @@ export const CODEX_PLUGIN_LEGACY_IDS = ['switchbot@codex-plugin', 'switchbot@swi
 // causing the next `marketplace add` to say "already added" without recreating the directory.
 export const CODEX_MARKETPLACE_LEGACY_NAMES = ['switchbot', 'codex-plugin', 'switchbot-skill'];
 
+interface OwnedGitCodexRegistration {
+  marketplaces: Array<{ name: string; sourceRepo: string; sourceRef: string }>;
+  pluginIds: string[];
+}
+
+function captureOwnedGitRegistration(pluginIds: string[]): OwnedGitCodexRegistration | RegistrationResult {
+  const listed = spawnStr('codex', ['plugin', 'marketplace', 'list', '--json']);
+  if (listed.status !== 0) {
+    return registryConflict(listed.status, 'Cannot determine Codex marketplace ownership: ' + listed.stderr);
+  }
+
+  const marketplaces = parseRegistryArray(listed.stdout, 'marketplaces');
+  if (!marketplaces) {
+    return registryConflict(-1, 'Cannot determine Codex marketplace ownership: invalid registry response');
+  }
+
+  const candidateNames = new Set(CODEX_MARKETPLACE_LEGACY_NAMES);
+  const ownedMarketplaces: Array<{ name: string; sourceRepo: string; sourceRef: string }> = [];
+  for (const marketplace of marketplaces) {
+    if (!isRecord(marketplace)) continue;
+    const name = marketplace.name;
+    if (typeof name !== 'string' || !candidateNames.has(name)) continue;
+    const root = marketplace.root;
+    const sourceRepo = marketplace.sourceRepo;
+    const sourceRef = marketplace.sourceRef;
+    if (sourceRepo !== CODEX_GIT_MARKETPLACE_REPO) {
+      return registryConflict(1, 'Marketplace ' + name + ' is not an owned SwitchBot Git source; preserving the existing registration');
+    }
+    if (typeof root !== 'string' || root.length === 0 || typeof sourceRef !== 'string' || sourceRef.length === 0) {
+      return registryConflict(1, 'Marketplace ' + name + ' is owned but lacks the source root or ref required for rollback; preserving the existing registration');
+    }
+    ownedMarketplaces.push({ name, sourceRepo, sourceRef });
+  }
+
+  if (ownedMarketplaces.length === 0) return { marketplaces: [], pluginIds: [] };
+
+  const plugins = spawnStr('codex', ['plugin', 'list', '--available', '--json']);
+  if (plugins.status !== 0) {
+    return registryConflict(plugins.status, 'Cannot snapshot installed Codex plugins: ' + plugins.stderr);
+  }
+
+  const installed = parseRegistryArray(plugins.stdout, 'installed');
+  if (!installed) {
+    return registryConflict(-1, 'Cannot snapshot installed Codex plugins: invalid registry response');
+  }
+
+  const candidateIds = new Set(pluginIds);
+  const ownedPluginIds = installed.flatMap((plugin) => {
+    if (!isRecord(plugin)) return [];
+    const pluginId = plugin.pluginId;
+    return typeof pluginId === 'string' && candidateIds.has(pluginId)
+      ? [pluginId]
+      : [];
+  });
+  return { marketplaces: ownedMarketplaces, pluginIds: ownedPluginIds };
+}
+
+function restoreOwnedGitRegistration(snapshot: OwnedGitCodexRegistration, timeout: number): string[] {
+  const failures: string[] = [];
+  for (const marketplace of snapshot.marketplaces) {
+    const restored = spawnStr('codex', [
+      'plugin', 'marketplace', 'add', marketplace.sourceRepo,
+      '--sparse', CODEX_GIT_MARKETPLACE_SPARSE,
+      '--sparse', CODEX_GIT_MARKETPLACE_SPARSE2,
+      '--ref', marketplace.sourceRef,
+    ], timeout);
+    if (restored.status !== 0) failures.push('marketplace ' + marketplace.name + ': ' + restored.stderr);
+  }
+  for (const pluginId of snapshot.pluginIds) {
+    const restored = spawnStr('codex', ['plugin', 'add', pluginId]);
+    if (restored.status !== 0) failures.push('plugin ' + pluginId + ': ' + restored.stderr);
+  }
+  return failures;
+}
+
 function isCodexProcessRunning(): boolean {
   if (process.platform !== 'win32') return false;
   const r = spawnStr('tasklist', ['/FI', 'IMAGENAME eq Codex.exe', '/NH', '/FO', 'CSV'], 5000);
@@ -357,10 +539,13 @@ export function runCodexPluginRegistrationGit(pluginId: string): RegistrationRes
     );
   }
   const timeout = _timeoutValid ? _parsedTimeout : 60000;
+  const candidatePluginIds = [...new Set([pluginId, ...CODEX_PLUGIN_LEGACY_IDS])];
+  const snapshotOrConflict = captureOwnedGitRegistration(candidatePluginIds);
+  if ('stage' in snapshotOrConflict) return snapshotOrConflict;
   // Pre-clean before marketplace add: removing the last plugin from a marketplace
   // causes Codex to auto-delete the marketplace entry, so removes must happen
   // before we register the new marketplace — not after.
-  for (const id of [...new Set([pluginId, ...CODEX_PLUGIN_LEGACY_IDS])]) {
+  for (const id of candidatePluginIds) {
     spawnStr('codex', ['plugin', 'remove', id]);
   }
   // Also remove the marketplace records to clear stale Codex DB state (see Route A counterpart).
@@ -397,10 +582,30 @@ export function runCodexPluginRegistrationGit(pluginId: string): RegistrationRes
     }
   }
   if (mkt.status !== 0) {
-    return { ok: false, exitCode: mkt.status, stderr: mkt.stderr, stage: 'marketplace-add' };
+    const rollbackFailures = restoreOwnedGitRegistration(snapshotOrConflict, timeout);
+    return {
+      ok: false,
+      exitCode: mkt.status,
+      stderr: rollbackFailures.length === 0
+        ? mkt.stderr
+        : mkt.stderr + '; rollback failed: ' + rollbackFailures.join('; '),
+      stage: 'marketplace-add',
+    };
   }
   const add = spawnStr('codex', ['plugin', 'add', pluginId]);
-  return { ok: add.status === 0, exitCode: add.status, stderr: add.stderr, stage: 'plugin-add' };
+  if (add.status === 0) return { ok: true, exitCode: add.status, stderr: add.stderr, stage: 'plugin-add' };
+
+  spawnStr('codex', ['plugin', 'remove', pluginId]);
+  spawnStr('codex', ['plugin', 'marketplace', 'remove', pluginId.slice(pluginId.lastIndexOf('@') + 1)]);
+  const rollbackFailures = restoreOwnedGitRegistration(snapshotOrConflict, timeout);
+  return {
+    ok: false,
+    exitCode: add.status,
+    stderr: rollbackFailures.length === 0
+      ? add.stderr
+      : add.stderr + '; rollback failed: ' + rollbackFailures.join('; '),
+    stage: 'plugin-add',
+  };
 }
 
 export function registerCodexPluginGit(): RegisterCodexPluginResult {

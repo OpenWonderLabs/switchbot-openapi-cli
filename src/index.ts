@@ -42,7 +42,7 @@ Environment:
 Examples:
   $ switchbot config set-token <token> <secret>
   $ switchbot devices list
-  $ switchbot devices list --json | jq '.deviceList[].deviceId'
+  $ switchbot devices list --json | jq '.data.deviceList[].deviceId'
   $ switchbot devices describe <deviceId>         # what commands does this device support?
   $ switchbot devices commands <type>             # offline lookup, e.g. Bot / Curtain / "Smart Lock"
   $ switchbot devices status <deviceId>           # live state: battery, position, temperature, …

@@ -4,12 +4,27 @@
  * Validates: manifest schema, GEMINI.md existence, command file count, MCP server config.
  * The Gemini extension is installed via `gemini extensions link`, not npm, so no tarball test applies.
  */
+import { spawnSync } from 'node:child_process';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const extDir = resolve(__dirname, '../packages/gemini-extension');
+
+function hasCommand(command) {
+  const result = spawnSync(
+    process.platform === 'win32' ? 'where' : 'which',
+    [command],
+    { encoding: 'utf8', shell: false },
+  );
+  return result.status === 0;
+}
+
+if (process.argv.includes('--require-host') && !hasCommand('gemini')) {
+  console.error('Gemini host is required for release verification but is not on PATH.');
+  process.exit(1);
+}
 
 function fail(msg) {
   console.error(`FAIL: ${msg}`);

@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeRunAuth, makeRunOnInstall } from '../bin/auth.js';
 
-function makeOkCliCheck(version = '3.7.1') {
+function makeOkCliCheck(version = '3.9.0') {
   return async () => ({ ok: true, version });
 }
 function makeFailCliCheck(msg = 'not found') {

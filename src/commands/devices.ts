@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { enumArg, stringArg } from '../utils/arg-parsers.js';
+import { enumArg, intArg, stringArg } from '../utils/arg-parsers.js';
 import { printTable, printKeyValue, printJson, isJsonMode, handleError, UsageError, StructuredUsageError, exitWithError } from '../utils/output.js';
 import { resolveFormat, resolveFields, renderRows } from '../utils/format.js';
 import {
@@ -15,7 +15,9 @@ import { resolveDeviceId, NameResolveStrategy, ALL_STRATEGIES } from '../utils/n
 import {
   fetchDeviceList,
   fetchDeviceStatus,
+  fetchDeviceDiary,
   executeCommand,
+  DeviceDiaryValidationError,
   describeDevice,
   validateCommand,
   isDestructiveCommand,
@@ -91,6 +93,7 @@ Typical workflow:
 Online subcommands (hit the SwitchBot API):
   list        List all physical + IR remote devices on your account
   status      Query a device's real-time status values
+  diary       Read a Kata Friends diary for an explicit millisecond time range
   command     Send a control command (turnOn, setColor, setAll, startClean, …)
   describe    Show one device's metadata + its supported commands + status fields
 
@@ -131,8 +134,8 @@ Examples:
   $ switchbot devices list
   $ switchbot devices list --wide
   $ switchbot devices list --format tsv --fields deviceId,deviceName,type,category
-  $ switchbot devices list --json | jq '.deviceList[] | select(.familyName == "home")'
-  $ switchbot devices list --json | jq '[.deviceList[], .infraredRemoteList[]] | group_by(.familyName)'
+  $ switchbot devices list --json | jq '.data.deviceList[] | select(.familyName == "home")'
+  $ switchbot devices list --json | jq '[.data.deviceList[], .data.infraredRemoteList[]] | group_by(.familyName)'
   $ switchbot devices list --filter type="Air Conditioner"
   $ switchbot devices list --filter category=ir
   $ switchbot devices list --filter name=living,category=physical
@@ -458,6 +461,45 @@ Cache note:
         printKeyValue(body);
         console.error(`\nfetched at ${fetchedAt}`);
       } catch (error) {
+        handleError(error);
+      }
+    });
+
+  // switchbot devices diary <deviceId> --start <ms> --end <ms>
+  devices
+    .command('diary [deviceId]')
+    .description('Read a Kata Friends diary over a time range')
+    .option('--name <query>', 'Resolve device by fuzzy name instead of deviceId', stringArg('--name'))
+    .option('--name-strategy <s>', `Name match strategy: ${ALL_STRATEGIES.join('|')} (default: fuzzy)`, stringArg('--name-strategy'))
+    .option('--name-type <type>', 'Narrow --name by device type', stringArg('--name-type'))
+    .option('--name-category <cat>', 'Narrow --name by category: physical|ir', enumArg('--name-category', ['physical', 'ir'] as const))
+    .option('--name-room <room>', 'Narrow --name by room name (substring match)', stringArg('--name-room'))
+    .requiredOption('--start <ms>', 'Inclusive start timestamp in integer milliseconds', intArg('--start', { min: 0 }))
+    .requiredOption('--end <ms>', 'Exclusive end timestamp in integer milliseconds', intArg('--end', { min: 0 }))
+    .addHelpText(
+      'after',
+      `
+The range is [start, end) and may be at most 31 days. Diary content is returned
+unchanged, including diary, diaryAI, comicDiaryAI, and their string detail fields.
+comicKey and thumbnailKey remain storage keys; this command does not generate download URLs.
+
+Examples:
+  switchbot devices diary KATA_DEVICE_ID --start 1714521600000 --end 1717200000000`,
+    )
+    .action(async (deviceIdArg: string | undefined, options: { name?: string; nameStrategy?: string; nameType?: string; nameCategory?: 'physical' | 'ir'; nameRoom?: string; start: string; end: string }) => {
+      try {
+        const deviceId = resolveDeviceId(deviceIdArg, options.name, {
+          strategy: (options.nameStrategy as NameResolveStrategy | undefined) ?? 'fuzzy',
+          type: options.nameType,
+          category: options.nameCategory,
+          room: options.nameRoom,
+        });
+        const diary = await fetchDeviceDiary(deviceId, Number(options.start), Number(options.end));
+        printJson(diary);
+      } catch (error) {
+        if (error instanceof DeviceDiaryValidationError) {
+          handleError(new UsageError(error.message));
+        }
         handleError(error);
       }
     });

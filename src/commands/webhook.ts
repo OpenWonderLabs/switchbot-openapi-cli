@@ -34,7 +34,7 @@ export function registerWebhookCommand(program: Command): void {
     .description('Manage SwitchBot Webhook configuration')
     .addHelpText('after', `
 A webhook lets SwitchBot POST device state-change events to a URL you host.
-Only one webhook URL can be active per account; "setup" registers it for ALL devices.
+The Cloud API accepts a URL and delivers events for ALL devices; it does not document an account-level URL count or URL-length limit.
 `);
 
   // switchbot webhook setup <url>

@@ -1,18 +1,18 @@
 /**
- * Live Route B smoke: sparse-clone the repo locally, then run actual Codex CLI
- * commands against the clone to verify that:
+ * Live Route B smoke: copy the current candidate content locally, then run actual
+ * Codex CLI commands against the copy to verify that:
  *   1. `codex plugin marketplace add <local-clone>` succeeds (manifest found at root)
  *   2. `codex plugin add switchbot@switchbot` succeeds
  *   3. `codex plugin list` output contains `switchbot@switchbot`
  *
- * Uses a local clone (no GitHub network call) and an isolated CODEX_HOME so the
+ * Uses a local candidate fixture (no GitHub network call) and an isolated CODEX_HOME so the
  * test never touches the user's real Codex installation.
  *
  * Skips gracefully when `codex` is not on PATH — the test is optional and only
  * meaningful where Codex Desktop / CLI is installed.
  */
-import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { cpSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,10 +29,6 @@ function which(cmd) {
   return r.status === 0 ? r.stdout.trim().split(/\r?\n/)[0] : null;
 }
 
-function runGit(args, options = {}) {
-  return execFileSync('git', args, { cwd: repoRoot, encoding: 'utf-8', ...options });
-}
-
 function runCodex(args, options = {}) {
   return spawnSync('codex', args, {
     encoding: 'utf-8',
@@ -43,41 +39,52 @@ function runCodex(args, options = {}) {
 
 const codexPath = which('codex');
 if (!codexPath) {
+  if (process.argv.includes('--require-host')) {
+    console.error('Codex host is required for release verification but is not on PATH.');
+    process.exit(1);
+  }
   console.log('smoke-codex-route-b-live: codex not on PATH — skipped (optional)');
   process.exit(0);
 }
 
 const workDir = mkdtempSync(path.join(os.tmpdir(), 'switchbot-route-b-live-'));
-const cloneDir = path.join(workDir, 'sparse-clone');
+const candidateDir = path.join(workDir, 'candidate');
 const codexHome = path.join(workDir, 'codex-home');
+
+function isolatedEnvironment() {
+  const env = {
+    ...process.env,
+    HOME: path.join(workDir, 'home'),
+    USERPROFILE: path.join(workDir, 'home'),
+    XDG_CONFIG_HOME: path.join(workDir, 'xdg-config'),
+    XDG_CACHE_HOME: path.join(workDir, 'xdg-cache'),
+    XDG_DATA_HOME: path.join(workDir, 'xdg-data'),
+    CODEX_HOME: codexHome,
+  };
+  for (const name of [
+    'SWITCHBOT_TOKEN', 'SWITCHBOT_SECRET', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY',
+    'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN',
+  ]) delete env[name];
+  return env;
+}
 
 try {
   mkdirSync(codexHome, { recursive: true });
 
-  // Determine the ref to clone (current branch or SHA)
-  let ref;
-  try {
-    const abbrev = runGit(['rev-parse', '--abbrev-ref', 'HEAD']).trim();
-    ref = abbrev === 'HEAD' ? runGit(['rev-parse', 'HEAD']).trim() : abbrev;
-  } catch (err) {
-    throw new Error(`Failed to determine git ref: ${err.message}`);
-  }
+  // Copy the current worktree content rather than cloning HEAD: release candidates can
+  // include uncommitted package changes that must be what the host actually loads.
+  cpSync(path.join(repoRoot, '.agents'), path.join(candidateDir, '.agents'), { recursive: true });
+  cpSync(
+    path.join(repoRoot, 'packages', 'codex-plugin'),
+    path.join(candidateDir, 'packages', 'codex-plugin'),
+    { recursive: true },
+  );
 
-  // Sparse clone: include the two directories Codex needs
-  if (ref.match(/^[0-9a-fA-F]{40}$/)) {
-    runGit(['clone', '--no-checkout', repoRoot, cloneDir], { cwd: workDir });
-  } else {
-    runGit(['clone', '--no-checkout', '--branch', ref, repoRoot, cloneDir], { cwd: workDir });
-  }
-  runGit(['-C', cloneDir, 'sparse-checkout', 'init', '--cone'], { cwd: workDir });
-  runGit(['-C', cloneDir, 'sparse-checkout', 'set', '.agents/plugins', 'packages/codex-plugin'], { cwd: workDir });
-  runGit(['-C', cloneDir, 'checkout', ref], { cwd: workDir });
+  const env = isolatedEnvironment();
 
-  const env = { ...process.env, CODEX_HOME: codexHome };
-
-  // Step 1: marketplace add against the local clone
+  // Step 1: marketplace add against the current candidate fixture
   const mktAdd = runCodex(
-    ['plugin', 'marketplace', 'add', cloneDir],
+    ['plugin', 'marketplace', 'add', candidateDir],
     { env, timeout: 30000 },
   );
   if (mktAdd.status !== 0) {
@@ -109,7 +116,7 @@ try {
     );
   }
 
-  console.log(`smoke-codex-route-b-live ok: Route B local clone → marketplace add + plugin add + list verified (ref ${ref})`);
+  console.log(`smoke-codex-route-b-live ok: Route B current candidate fixture → marketplace add + plugin add + list verified`);
 } finally {
   try {
     rmSync(workDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });

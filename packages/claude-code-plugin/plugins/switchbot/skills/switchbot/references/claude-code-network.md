@@ -8,7 +8,7 @@ configuration file changes are required.
 
 The MCP server requires outbound HTTPS to `api.switch-bot.com`. Check:
 
-1. **CLI installed:** `switchbot --version` — should print `3.7.1` or later
+1. **CLI installed:** `switchbot --version` — should print `3.9.0` or later
 2. **Credentials configured:** `switchbot doctor` — should exit 0
 3. **Network connectivity:** outbound HTTPS to `api.switch-bot.com` must be allowed
 

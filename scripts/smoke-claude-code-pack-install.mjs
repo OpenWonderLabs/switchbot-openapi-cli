@@ -1,8 +1,8 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.dirname(scriptDir);
@@ -19,7 +19,7 @@ function runNpm(args, options = {}) {
 }
 
 function pack(args) {
-  const out = runNpm(['pack', '--json', ...args], {
+  const out = runNpm(['pack', '--json', ...(args.length === 0 ? ['--ignore-scripts'] : []), ...args], {
     cwd: repoRoot,
     encoding: 'utf-8',
   });
@@ -44,7 +44,7 @@ try {
     cwd: workDir,
     stdio: 'ignore',
   });
-  runNpm(['install', cliTarball, pluginTarball], {
+  runNpm(['install', '--ignore-scripts', '--no-audit', '--no-fund', cliTarball, pluginTarball], {
     cwd: workDir,
     stdio: 'inherit',
   });
@@ -63,10 +63,9 @@ try {
   }
 
   for (const requiredPath of [
-    '.claude-plugin/hooks.json',
     '.claude-plugin/marketplace.json',
     'bin/auth.js',
-    'plugins/switchbot/.claude-plugin/hooks.json',
+    'lib/verify-release.js',
     'plugins/switchbot/.claude-plugin/plugin.json',
     'plugins/switchbot/.mcp.json',
     'plugins/switchbot/skills/switchbot/SKILL.md',  // must be packed: plugin.json declares skills: ./skills/
@@ -86,39 +85,21 @@ try {
     throw new Error(`marketplace switchbot plugin source must be './plugins/switchbot', got ${switchbotEntry?.source ?? '<missing>'}`);
   }
 
-  const hooks = readJson(path.join(pluginRoot, '.claude-plugin', 'hooks.json'));
-  if (hooks?.onInstall?.command !== 'node') {
-    throw new Error(`onInstall command must be 'node', got ${hooks?.onInstall?.command ?? '<missing>'}`);
+  // Run the same version guard against the installed artifact, not checkout copies.
+  execFileSync(process.execPath, [path.join(pluginRoot, 'lib', 'verify-release.js')], {
+    encoding: 'utf-8',
+  });
+  for (const layout of ['', 'plugins/switchbot']) {
+    if (existsSync(path.join(pluginRoot, layout, '.claude-plugin', 'hooks.json'))) {
+      throw new Error(`claude-code plugin ${layout || 'package root'} must not ship unsupported onInstall hooks`);
+    }
   }
-  const hookArgs = hooks?.onInstall?.args ?? [];
-  if (!Array.isArray(hookArgs) || hookArgs.length === 0) {
-    throw new Error(`onInstall args must be a non-empty array, got ${JSON.stringify(hookArgs)}`);
-  }
-  const hookScript = path.resolve(path.join(pluginRoot, '.claude-plugin'), hookArgs[0]);
-  if (!existsSync(hookScript)) {
-    throw new Error(`onInstall args[0] resolves to a non-existent file: ${hookScript}`);
-  }
-
-  // Verify plugin-level hooks (the ones Claude Code actually executes, since source → ./plugins/switchbot)
   const pluginJson = readJson(path.join(pluginRoot, 'plugins', 'switchbot', '.claude-plugin', 'plugin.json'));
-  if (pluginJson?.skills !== './skills/') {
-    throw new Error(`plugin.json skills must be './skills/', got ${pluginJson?.skills ?? '<missing>'}`);
+  if (Object.hasOwn(pluginJson, 'hooks')) {
+    throw new Error('Claude plugin manifest must not declare unsupported install hooks');
   }
-
-  const pluginHooks = readJson(path.join(pluginRoot, 'plugins', 'switchbot', '.claude-plugin', 'hooks.json'));
-  if (pluginHooks?.onInstall?.command !== 'node') {
-    throw new Error(`plugin-level onInstall command must be 'node', got ${pluginHooks?.onInstall?.command ?? '<missing>'}`);
-  }
-  const pluginHookArgs = pluginHooks?.onInstall?.args ?? [];
-  if (!Array.isArray(pluginHookArgs) || pluginHookArgs.length === 0) {
-    throw new Error(`plugin-level onInstall args must be a non-empty array, got ${JSON.stringify(pluginHookArgs)}`);
-  }
-  const pluginHookScript = path.resolve(
-    path.join(pluginRoot, 'plugins', 'switchbot', '.claude-plugin'),
-    pluginHookArgs[0],
-  );
-  if (!existsSync(pluginHookScript)) {
-    throw new Error(`plugin-level onInstall args[0] resolves to a non-existent file: ${pluginHookScript}`);
+  if (pluginJson.skills !== './skills/') {
+    throw new Error(`plugin.json skills must be './skills/', got ${pluginJson.skills ?? '<missing>'}`);
   }
 
   // Verify auth.js syntax is valid
@@ -126,21 +107,28 @@ try {
     encoding: 'utf-8',
   });
 
-  // Verify auth.js exports makeRunOnInstall and behaves correctly with mock deps
-  const { makeRunOnInstall } = await import(
-    pathToFileURL(path.join(pluginRoot, 'bin', 'auth.js')).href
+  const home = path.join(workDir, 'home');
+  mkdirSync(home);
+  const runtimeEnv = {
+    PATH: `${path.join(workDir, 'node_modules', '.bin')}${path.delimiter}${process.env.PATH ?? ''}`,
+    HOME: home, USERPROFILE: home,
+    XDG_CONFIG_HOME: path.join(home, '.config'),
+    XDG_CACHE_HOME: path.join(home, '.cache'),
+    XDG_DATA_HOME: path.join(home, '.local', 'share'),
+    APPDATA: path.join(home, 'AppData', 'Roaming'),
+    LOCALAPPDATA: path.join(home, 'AppData', 'Local'),
+    TMPDIR: workDir, TMP: workDir, TEMP: workDir,
+    SystemRoot: process.env.SystemRoot, ComSpec: process.env.ComSpec,
+    SWITCHBOT_TOKEN: 'local-smoke-only-token',
+    SWITCHBOT_SECRET: 'local-smoke-only-secret',
+  };
+  const output = execFileSync(
+    process.execPath,
+    [path.join(pluginRoot, pluginPkg.bin['switchbot-claude-auth'])],
+    { cwd: workDir, env: runtimeEnv, encoding: 'utf-8', timeout: 30_000 },
   );
-  const runOnInstall = makeRunOnInstall({
-    checkCli: async () => ({ ok: false, message: 'CLI not found' }),
-    checkCredentials: async () => ({ ok: false, message: 'No credentials' }),
-    runInherit: async () => 0,
-  });
-  const exitCode = await runOnInstall();
-  if (exitCode !== 1) {
-    throw new Error(`makeRunOnInstall with missing CLI must return 1 (non-blocking), got ${exitCode}`);
-  }
-
-  console.log('claude-code pack-install smoke ok: tarballs install, required files present, marketplace and hooks valid, auth.js non-blocking');
+  if (output !== '') throw new Error(`Claude manual auth helper emitted unexpected stdout: ${output}`);
+  console.log('claude-code pack-install smoke ok: installed metadata versions match; unsupported install hooks are absent; manual setup works with isolated dummy credentials');
 } finally {
   for (const tarball of packed) {
     rmSync(tarball, { force: true });

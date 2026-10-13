@@ -16,14 +16,14 @@ The JSON Schema that backs this document lives at
 ## File location
 
 | OS | Default path |
-|---|---|
-| Linux / macOS | `~/.config/switchbot/policy.yaml` |
-| Windows | `%USERPROFILE%\.config\switchbot\policy.yaml` |
+| --- | --- |
+| Linux / macOS | `~/.config/openclaw/switchbot/policy.yaml` |
+| Windows | `%USERPROFILE%\.config\openclaw\switchbot\policy.yaml` |
 
 Override order (first hit wins):
 
-1. `--policy <path>` flag on the `policy` subcommands
-2. `$SWITCHBOT_POLICY` environment variable
+1. The explicit positional policy path (or `policy new --output <path>`)
+2. `$SWITCHBOT_POLICY_PATH` environment variable
 3. The default path above
 
 `switchbot policy new` writes to the resolved path; `switchbot policy
@@ -34,11 +34,10 @@ memory, and writes back.
 
 ## Schema version
 
-The top-level `version` field is **required**. The CLI currently
-supports two schemas:
+The top-level `version` field is **required**. This CLI validates only v0.2; v0.1 is a legacy migration prerequisite:
 
 | Version | Status | What it adds |
-|---|---|---|
+| --- | --- | --- |
 | `"0.1"` | **Removed in v3.0** — migrate with `policy migrate` (CLI ≤2.15) | aliases, confirmations, quiet_hours, audit, cli |
 | `"0.2"` | **Current (required)** | typed `automation.rules[]` for the rules engine |
 
@@ -48,7 +47,8 @@ by `switchbot policy new`. Existing v0.1 files must be migrated using
 CLI ≤2.15 before upgrading to v3.0+:
 
 ```bash
-switchbot policy migrate   # in-place upgrade, preserves comments
+# On a temporary legacy CLI <=2.15, before upgrading:
+switchbot policy migrate
 ```
 
 `policy migrate` applies additive changes only (new optional fields,
@@ -69,7 +69,7 @@ set to `null` (e.g. a commented-out body), the CLI falls back to safe
 defaults.
 
 | Block | Purpose | Default when missing |
-|---|---|---|
+| --- | --- | --- |
 | `aliases` | Map user-spoken names to deviceIds | No aliases — name resolution falls through to the CLI's match strategies |
 | `confirmations` | Override per-action confirmation policy | Default tier behaviour (see [Safety tiers](./audit-log.md)) |
 | `quiet_hours` | Require confirmation during a daily window | No quiet hours |
@@ -104,8 +104,8 @@ Rules:
 
 ### `confirmations`
 
-Override the default confirmation policy derived from each action's
-`safetyTier`.
+Agent-facing confirmation preferences derived from each action's `safetyTier`.
+They do not bypass the native CLI's destructive approval workflow.
 
 ```yaml
 confirmations:
@@ -118,7 +118,7 @@ confirmations:
 ```
 
 | Subkey | Meaning | Constraints |
-|---|---|---|
+| --- | --- | --- |
 | `always_confirm` | Action names that always require explicit confirmation, even when the tier would auto-run | List of strings, unique |
 | `never_confirm` | Action names that normally confirm but the user has pre-approved | List of strings, unique. **MUST NOT include destructive actions** |
 
@@ -126,6 +126,10 @@ The destructive blocklist the schema enforces on `never_confirm`:
 
 - `lock`
 - `unlock`
+- `deadbolt` (releases the door latch)
+- `nightLatchUnlock`
+- `createKey`
+- `deleteKey`
 - `deleteWebhook`
 - `deleteScene`
 - `factoryReset`
@@ -138,8 +142,9 @@ confirmation gate.
 
 ### `quiet_hours`
 
-Window during which every mutation (not just destructive ones)
-requires explicit confirmation.
+Agent preference for a time window in which mutations should require explicit
+confirmation. It is enforced by agents that honor the policy, not a blanket
+native CLI/MCP mutation gate; native destructive-command checks still apply.
 
 ```yaml
 quiet_hours:
@@ -157,8 +162,7 @@ quiet_hours:
 
 ### `audit`
 
-Controls the JSONL audit log the CLI writes when you pass
-`--audit-log` to a mutating command.
+Agent-facing audit preferences. The native CLI does not automatically apply `audit.log_path`; pass `--audit-log --audit-log-path <path>` explicitly for a custom log, or `--audit-log` for the default path.
 
 ```yaml
 audit:
@@ -167,7 +171,7 @@ audit:
 ```
 
 | Field | Format | Default |
-|---|---|---|
+| --- | --- | --- |
 | `log_path` | Absolute or `~`-prefixed path | `~/.switchbot/audit.log` |
 | `retention` | `never` or `<N>d / <N>w / <N>m` | `90d` |
 
@@ -179,10 +183,7 @@ PowerShell scheduled task, etc.) should honour the value.
 
 ### `automation`
 
-Rule engine block. Available in **v0.2** — set `enabled: true` to activate
-`switchbot rules run`. In **v0.1** this block is a reserved stub; flip
-`enabled: true` on v0.1 and the CLI prints a warning and skips the block.
-Run `switchbot policy migrate` first to unlock the rules engine.
+Rule engine block. Available in **v0.2** — set `enabled: true` to activate `switchbot rules run`. This CLI rejects v0.1 policies rather than ignoring their automation block. Migrate with CLI <=2.15 before upgrading.
 
 ```yaml
 automation:
@@ -221,13 +222,17 @@ automation:
       dry_run: true                   # default true in v0.2; writes audit but skips the API call
 ```
 
+`suppressIfAlreadyDesired` checks the target's REST status `power` value,
+case-insensitively, before `turnOn` or `turnOff`. An unknown power state or
+failed status request keeps the existing best-effort behavior: the action proceeds.
+
 **Trigger sources (v0.2).**
 
-| `source`  | Required fields        | Status                           |
-|-----------|------------------------|----------------------------------|
-| `mqtt`    | `event` (+ `device?`)  | **active** — fires on shadow MQTT |
-| `cron`    | `schedule` (5-field)   | **active** — local time, optional `days` weekday filter |
-| `webhook` | `path`                 | **active** — bearer-token HTTP ingest |
+| `source` | Required fields | Status |
+| --- | --- | --- |
+| `mqtt` | `event` (+ `device?`) | **active** — fires on shadow MQTT |
+| `cron` | `schedule` (5-field) | **active** — local time, optional `days` weekday filter |
+| `webhook` | `path` | **active** — bearer-token HTTP ingest |
 
 MQTT event names classified today: `motion.detected`,
 `motion.cleared`, `contact.opened`, `contact.closed`. Unmatched
@@ -236,15 +241,15 @@ too.
 
 **Conditions (v0.2).**
 
-| Keyword         | Meaning                                                       | Status |
-|-----------------|---------------------------------------------------------------|--------|
-| `time_between`  | `[HH:MM, HH:MM]` local-time window, `start > end` → overnight | active |
-| `device_state`  | `{ device, field, op, value }` read device status inline      | active |
-| `event_count`   | Count events in a rolling window over device history          | active |
-| `all`           | AND-join multiple sub-conditions                               | active |
-| `any`           | OR-join multiple sub-conditions                                | active |
-| `not`           | Negate a sub-condition                                         | active |
-| `llm`           | AI judgement — prompt an LLM before firing (see below)         | active |
+| Keyword | Meaning | Status |
+| --- | --- | --- |
+| `time_between` | `[HH:MM, HH:MM]` local-time window, `start > end` → overnight | active |
+| `device_state` | `{ device, field, op, value }` read device status inline | active |
+| `event_count` | Count events in a rolling window over device history | active |
+| `all` | AND-join multiple sub-conditions | active |
+| `any` | OR-join multiple sub-conditions | active |
+| `not` | Negate a sub-condition | active |
+| `llm` | AI judgement — prompt an LLM before firing (see below) | active |
 
 **`event_count` condition fields:**
 
@@ -258,8 +263,7 @@ conditions:
       max: 10                      # optional upper bound (count <= max)
 ```
 
-Reads `~/.switchbot/device-history/<deviceId>.jsonl` (the same ring
-buffer `events mqtt-tail` writes). Lints flag a missing history file
+Reads the selected profile's device-history JSONL: `~/.switchbot/device-history/` for default and `~/.switchbot/profiles/<name>/device-history/` for a named profile. This is the same log `events mqtt-tail` writes. Lints flag a missing history file
 (`condition-event-count-no-history` — likely typo) and a `max < min`
 inversion (`condition-event-count-max-below-min`). For the LLM-free
 path: an "alarm if motion ≥3 times in 5m" guard does not need a model.
@@ -312,11 +316,14 @@ automation:
     max_cost_per_day_usd: 10.00   # optional
 ```
 
-**Destructive verbs are refused upstream.** The v0.2 validator
-rejects `lock`, `unlock`, `deleteWebhook`, `deleteScene`,
-`factoryReset` in any `then[].command`. The engine re-checks at fire
-time as a defence-in-depth — you cannot bypass this with aliases or
-manual runtime invocation.
+**Destructive commands are refused.** The v0.2 validator rejects `lock`,
+`unlock`, `deadbolt`, `nightLatchUnlock`, `createKey`, `deleteKey`,
+`deleteWebhook`, `deleteScene`, and `factoryReset` in any `then[].command`.
+Inventory-aware validation also rejects device-specific destructive actions,
+including Garage Door Opener `turnOn`/`turnOff`; ordinary light power actions remain allowed.
+Before a live rule mutation, the executor resolves missing device metadata and
+checks the catalog safety tier. Unknown devices/commands fail closed. Dry-run
+does not fetch inventory or mutate devices.
 
 **Hot-path behaviour.** Every fire is serialised through a dispatch
 queue so two MQTT events arriving in the same tick respect throttle
@@ -332,7 +339,7 @@ for a working walkthrough.
 
 ### `cli`
 
-Optional CLI-level overrides.
+Optional agent-facing CLI preferences; pass the chosen profile/cache flags explicitly.
 
 ```yaml
 cli:
@@ -341,7 +348,7 @@ cli:
 ```
 
 | Field | Format | Default |
-|---|---|---|
+| --- | --- | --- |
 | `profile` | Non-empty string | `"default"` |
 | `cache_ttl` | `<N>s`, `<N>m`, or `<N>h` | CLI default (typically 5 minutes) |
 
@@ -349,7 +356,7 @@ cli:
 `switchbot config set-token --profile <name>`.
 
 > **Note:** the policy file path is **not** profile-aware today —
-> every profile shares the same `~/.config/switchbot/policy.yaml`.
+> every profile shares the same `~/.config/openclaw/switchbot/policy.yaml`.
 > If you need separate policies per profile, point each to its own
 > file via the `$SWITCHBOT_POLICY_PATH` environment variable when you
 > run the CLI. Tracking profile-scoped paths as a future enhancement.
@@ -365,7 +372,7 @@ switchbot policy validate
 Exit codes:
 
 | Code | Meaning |
-|---|---|
+| --- | --- |
 | 0 | File is valid and matches schema v0.2 |
 | 1 | Schema violation (line-accurate error with hint) |
 | 2 | File is missing |
@@ -374,7 +381,7 @@ Exit codes:
 
 Every non-zero exit prints a compiler-style block:
 
-```
+```text
 policy.yaml:12:14  error  lowercase deviceId
    |
 12 |   "bedroom ac": "02-202502111234-abc123"
@@ -382,20 +389,33 @@ policy.yaml:12:14  error  lowercase deviceId
    = hint: SwitchBot deviceIds are uppercase. Try "ABC123".
 ```
 
-For machine consumption, pass `--json`. The envelope is the standard
-`{schemaVersion, data|error}` shape:
+For machine consumption, pass `--json`. Schema violations exit `1` with
+`data.valid: false` and `data.errors[]`; file/parse/internal failures use
+the standard `{schemaVersion, error}` envelope. Validation is offline unless
+live inventory validation is explicitly requested.
 
 ```json
 {
   "schemaVersion": "1.2",
-  "error": {
-    "kind": "usage",
-    "message": "lowercase deviceId at policy.yaml:12:14",
-    "hint": "SwitchBot deviceIds are uppercase.",
-    "file": "/home/you/.config/switchbot/policy.yaml",
-    "line": 12,
-    "column": 14,
-    "rule": "aliases-deviceId-pattern"
+  "data": {
+    "policyPath": "/home/you/.config/openclaw/switchbot/policy.yaml",
+    "schemaVersion": "0.2",
+    "validationScope": "schema+offline-semantics",
+    "limitations": [
+      "Does not resolve aliases against the live device inventory.",
+      "Does not verify commands against the real target device, live capabilities, or current firmware."
+    ],
+    "valid": false,
+    "errors": [
+      {
+        "path": "",
+        "line": 2,
+        "col": 1,
+        "keyword": "additionalProperties",
+        "message": "unknown property \"unknown\"",
+        "schemaPath": "#/additionalProperties"
+      }
+    ]
   }
 }
 ```
@@ -405,10 +425,10 @@ For machine consumption, pass `--json`. The envelope is the standard
 ## Common errors
 
 | Error | Trigger | Fix |
-|---|---|---|
+| --- | --- | --- |
 | `missing version` | Top-level `version` is absent | Add `version: "0.2"` |
-| `unsupported version` | `version` is not `"0.1"` or `"0.2"` | Check spelling; run `switchbot policy migrate` to upgrade from v0.1 |
-| `wrong version` | `version: "0.1"` on a CLI that requires v0.2 | Run `switchbot policy migrate` |
+| `unsupported version` | `version` is not `"0.2"` | Use a supported policy schema; v0.1 requires a legacy CLI <=2.15 for migration |
+| `wrong version` | `version: "0.1"` on this CLI | Migrate with CLI <=2.15, then upgrade back |
 | `lowercase deviceId` | `aliases` value doesn't match the accepted patterns | Copy the exact ID from `devices list` |
 | `destructive in never_confirm` | `lock`/`unlock`/etc in `confirmations.never_confirm` | Remove it; intentional by design |
 | `quiet_hours.start without end` | Only one of the two times is set | Set both, or remove the block |
@@ -422,11 +442,11 @@ machine-readable `rule` field so tooling can suggest fixes.
 
 ## Migrating between schema versions
 
-v0.2 is the current required schema. If you have a v0.1 file from an
-earlier release, upgrade it:
+v0.2 is the current required schema. This CLI cannot migrate v0.1. Use CLI <=2.15 to migrate the old file first, then return to the current release:
 
 ```bash
-switchbot policy migrate   # in-place upgrade, preserves comments
+# Run with the legacy CLI, not the current release:
+switchbot policy migrate
 ```
 
 `policy migrate`:

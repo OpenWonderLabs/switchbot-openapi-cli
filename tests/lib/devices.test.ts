@@ -116,4 +116,37 @@ describe('executeCommand audit semantics', () => {
     expect(entries[0].idempotencyKeyFingerprint).toBe(fingerprintIdempotencyKey('K1'));
     expect(entries[1].idempotencyKeyFingerprint).toBe(fingerprintIdempotencyKey('K1'));
   });
+
+  it('rejects an idempotency key reused for a different device', async () => {
+    apiMock.__instance.post.mockResolvedValue({ data: { body: { statusCode: 100 } } });
+
+    await executeCommand('BOT1', 'turnOn', undefined, 'command', undefined, { idempotencyKey: 'K1' });
+
+    await expect(
+      executeCommand('BOT2', 'turnOn', undefined, 'command', undefined, { idempotencyKey: 'K1' }),
+    ).rejects.toMatchObject({ name: 'IdempotencyConflictError' });
+    expect(apiMock.__instance.post).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects an idempotency key reused with a different command type', async () => {
+    apiMock.__instance.post.mockResolvedValue({ data: { body: { statusCode: 100 } } });
+
+    await executeCommand('BOT1', 'turnOn', undefined, 'command', undefined, { idempotencyKey: 'K1' });
+
+    await expect(
+      executeCommand('BOT1', 'turnOn', undefined, 'customize', undefined, { idempotencyKey: 'K1' }),
+    ).rejects.toMatchObject({ name: 'IdempotencyConflictError' });
+    expect(apiMock.__instance.post).toHaveBeenCalledTimes(1);
+  });
+
+  it('replays an idempotency key for equivalent default wire parameters', async () => {
+    apiMock.__instance.post.mockResolvedValue({ data: { body: { statusCode: 100 } } });
+
+    const first = await executeCommand('BOT1', 'turnOn', undefined, 'command', undefined, { idempotencyKey: 'K1' });
+    const second = await executeCommand('BOT1', 'turnOn', 'default', 'command', undefined, { idempotencyKey: 'K1' });
+
+    expect(first).toEqual({ statusCode: 100 });
+    expect(second).toEqual({ statusCode: 100, replayed: true });
+    expect(apiMock.__instance.post).toHaveBeenCalledTimes(1);
+  });
 });

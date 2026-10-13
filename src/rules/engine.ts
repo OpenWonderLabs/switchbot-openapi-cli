@@ -1009,14 +1009,15 @@ export class RulesEngine {
         const targetId = firstCmd?.device ? (this.aliases[firstCmd.device] ?? firstCmd.device) : event.deviceId!;
         try {
           const deviceStatus = await fetchStatus(targetId);
-          const powerState = deviceStatus['powerState'] as string | undefined;
-          if ((verb === 'turnOn' && powerState === 'on') || (verb === 'turnOff' && powerState === 'off')) {
+          const power = deviceStatus['power'];
+          const normalizedPower = typeof power === 'string' ? power.toLowerCase() : undefined;
+          if ((verb === 'turnOn' && normalizedPower === 'on') || (verb === 'turnOff' && normalizedPower === 'off')) {
             emitTrace('throttled');
             writeAudit({
               t: event.t.toISOString(), kind: 'rule-throttled',
               deviceId: targetId, command: verb ?? '',
               parameter: null, commandType: 'command', dryRun: true, result: 'ok',
-              rule: { name: rule.name, triggerSource: rule.when.source, matchedDevice: event.deviceId, fireId, reason: `suppressIfAlreadyDesired — powerState already "${powerState}"` },
+              rule: { name: rule.name, triggerSource: rule.when.source, matchedDevice: event.deviceId, fireId, reason: `suppressIfAlreadyDesired — power already "${power}"` },
             });
             this.opts.onFire?.({ ruleName: rule.name, fireId, status: 'throttled', deviceId: event.deviceId, reason: 'already-desired' });
             return;

@@ -132,7 +132,7 @@ export function registerConfigCommand(program: Command): void {
 Credential priority:
   1. Environment variables: SWITCHBOT_TOKEN and SWITCHBOT_SECRET
   2. --config <path> (explicit file override)
-  3. --profile <name> → ~/.switchbot/profiles/<name>.json
+  3. --profile <name> → ~/.switchbot/profiles/<name>.json (except default, which uses config.json)
   4. ~/.switchbot/config.json (default)
 
 Obtain your token/secret from the SwitchBot mobile app:
@@ -166,7 +166,7 @@ Examples:
   $ switchbot config set-token <token> <secret>
   $ switchbot --profile work config set-token <token> <secret>
 
-Files are written with mode 0600. Profiles live under ~/.switchbot/profiles/<name>.json.
+Files are written with mode 0600. Named profiles live under ~/.switchbot/profiles/<name>.json; --profile default uses ~/.switchbot/config.json.
 `)
     .action(async (
       tokenArg: string | undefined,

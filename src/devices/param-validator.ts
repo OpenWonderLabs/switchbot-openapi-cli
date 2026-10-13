@@ -191,6 +191,11 @@ export function validateParameter(
     return validateSetColorTemperature(raw);
   }
 
+  // --- AI Art Frame ---
+  if (dt === "AI Art Frame" && command === "uploadImage") {
+    return validateArtFrameUploadImage(raw);
+  }
+
   // --- Humidifier ---
   if (dt === 'Humidifier' && command === 'setMode') {
     return validateHumidifierSetMode(raw);
@@ -200,6 +205,29 @@ export function validateParameter(
   }
   if (dt === 'Humidifier2' && command === 'setChildLock') {
     return validateEnum(raw, 'setChildLock', ['true', 'false']);
+  }
+
+  // --- RGBICWW Ceiling Light ---
+  if (dt === "RGBICWW Ceiling Light" && command === "setMainLightBrightness") {
+    return validateIntRange(raw, "setMainLightBrightness", 1, 100, "main-light brightness percentage");
+  }
+
+  if (dt === "RGBICWW Ceiling Light" && command === "setMainLightColorTemp") {
+    return validateIntRange(raw, "setMainLightColorTemp", 2700, 6500, "main-light color temperature in Kelvin");
+  }
+  if (dt === "RGBICWW Ceiling Light" && command === "setColorLightBrightness") {
+    return validateIntRange(raw, "setColorLightBrightness", 1, 100, "color-light brightness percentage");
+  }
+  if (dt === "RGBICWW Ceiling Light" && command === "setColorLightRGB") {
+    return validateRgbTriplet(raw, "setColorLightRGB");
+  }
+
+  // --- Kata Friends ---
+  if (dt === "Kata Friends" && command === "mode") {
+    return validateExactEnum(raw, "mode", ["Normal", "Standby", "Sleep"]);
+  }
+  if (dt === "Kata Friends" && command === "childLock") {
+    return validateExactEnum(raw, "childLock", ["on", "off"]);
   }
 
   // --- Air Purifier VOC ---
@@ -214,13 +242,13 @@ export function validateParameter(
   if (isPowLevelVacuum(dt) && command === 'PowLevel') {
     return validateIntRange(raw, 'PowLevel', 0, 3, 'suction level (0=Quiet 1=Standard 2=Strong 3=Max)');
   }
-  if ((isComboVacuum(dt) || isFloorCleaningVacuum(dt)) && command === 'startClean') {
+  if ((isComboVacuum(dt) || isWaterLevelVacuum(dt) || isFloorCleaningVacuum(dt)) && command === 'startClean') {
     return validateVacuumStartClean(raw, dt);
   }
-  if ((isComboVacuum(dt) || isFloorCleaningVacuum(dt)) && command === 'setVolume') {
+  if ((isComboVacuum(dt) || isWaterLevelVacuum(dt) || isFloorCleaningVacuum(dt)) && command === 'setVolume') {
     return validateIntRange(raw, 'setVolume', 0, 100, 'volume percentage');
   }
-  if ((isComboVacuum(dt) || isFloorCleaningVacuum(dt)) && command === 'changeParam') {
+  if ((isComboVacuum(dt) || isWaterLevelVacuum(dt) || isFloorCleaningVacuum(dt)) && command === 'changeParam') {
     return validateVacuumChangeParam(raw, dt);
   }
   if (isFloorCleaningVacuum(dt) && command === 'selfClean') {
@@ -258,11 +286,11 @@ export function validateParameter(
     return validateIntRange(raw, 'setManualModeTemperature', 4, 35, 'temperature in °C');
   }
 
-  // --- Keypad / Lock Vision (same passcode command shape) ---
-  if ((dt.startsWith('Keypad') || dt.startsWith('Lock Vision')) && command === 'createKey') {
-    return validateKeypadCreateKey(raw);
+  // --- Keypad / Lock Vision ---
+  if ((dt === "Keypad" || dt === "Keypad Vision" || dt.startsWith("Lock Vision")) && command === "createKey") {
+    return validatePasscodeCreateKey(raw, dt === "Keypad" || dt === "Keypad Vision");
   }
-  if ((dt.startsWith('Keypad') || dt.startsWith('Lock Vision')) && command === 'deleteKey') {
+  if ((dt === "Keypad" || dt === "Keypad Vision" || dt.startsWith("Lock Vision")) && command === "deleteKey") {
     return validateKeypadDeleteKey(raw);
   }
 
@@ -365,12 +393,17 @@ function isPowLevelVacuum(deviceType: string): boolean {
 }
 
 function isComboVacuum(deviceType: string): boolean {
+  return deviceType === 'K10+ Pro Combo' || deviceType === 'Robot Vacuum Cleaner K10+ Pro Combo';
+}
+
+function isWaterLevelVacuum(deviceType: string): boolean {
   return (
-    deviceType === 'K10+ Pro Combo' ||
-    deviceType === 'Robot Vacuum Cleaner K10+ Pro Combo' ||
     deviceType === 'K20+ Pro' ||
+    deviceType === 'Robot Vacuum Cleaner K20+ Pro' ||
+    deviceType === 'Robot Vacuum Cleaner K20 Plus Pro' ||
     deviceType === 'K11+' ||
-    deviceType === 'Robot Vacuum Cleaner K11+'
+    deviceType === 'Robot Vacuum Cleaner K11+' ||
+    deviceType === 'Robot Vacuum Cleaner K11 Plus'
   );
 }
 
@@ -576,10 +609,10 @@ function validateAcSetAll(raw: string | undefined): ValidateResult {
   }
   const temp = tempP.value;
   const modeP = parseStrictInt(modeStr);
-  if (!modeP.ok || modeP.value < 1 || modeP.value > 5) {
+  if (!modeP.ok || modeP.value < 0 || modeP.value > 5) {
     return {
       ok: false,
-      error: `setAll field 2 (mode) must be 1-5 (1=auto 2=cool 3=dry 4=fan 5=heat), got "${modeStr}". Example: "26,2,2,on".`,
+      error: `setAll field 2 (mode) must be 0-5 (0/1=auto 2=cool 3=dry 4=fan 5=heat), got "${modeStr}". Example: "26,2,2,on".`,
     };
   }
   const mode = modeP.value;
@@ -668,14 +701,14 @@ function validateBlindTiltSetPosition(raw: string | undefined): ValidateResult {
       error: `Blind Tilt setPosition expects "<up|down>;<angle>", got ${JSON.stringify(raw)}. Example: "up;50".`,
     };
   }
-  const dir = parts[0].toLowerCase();
+  const dir = parts[0].trim().toLowerCase();
   if (!BLIND_DIRECTION.has(dir)) {
     return {
       ok: false,
       error: `Blind Tilt setPosition direction must be "up" or "down", got "${parts[0]}".`,
     };
   }
-  const angleP = parseStrictInt(parts[1]);
+  const angleP = parseStrictInt(parts[1].trim());
   if (!angleP.ok || angleP.value < 0 || angleP.value > 100) {
     return {
       ok: false,
@@ -815,6 +848,72 @@ function validateEnum(
     };
   }
   return { ok: true, normalized: match };
+}
+
+function validateRgbTriplet(raw: string | undefined, command: string): ValidateResult {
+  if (raw === undefined || raw === "" || raw === "default") {
+    return { ok: false, error: `${command} requires an R:G:B parameter with components 0-255.` };
+  }
+  const parts = stripQuotes(raw.trim()).split(":");
+  if (parts.length !== 3) {
+    return { ok: false, error: `${command} requires an R:G:B parameter with components 0-255.` };
+  }
+  const rgb: number[] = [];
+  for (const part of parts) {
+    const value = parseStrictInt(part);
+    if (!value.ok) {
+      return { ok: false, error: `${command} requires integer RGB components 0-255.` };
+    }
+    rgb.push(value.value);
+  }
+  if (rgb.some((part) => part < 0 || part > 255)) {
+    return { ok: false, error: `${command} requires RGB components 0-255.` };
+  }
+  return { ok: true, normalized: rgb.join(":") };
+}
+
+function validateExactEnum(
+  raw: string | undefined,
+  command: string,
+  allowed: readonly string[],
+): ValidateResult {
+  if (raw === undefined || raw === "" || raw === "default") {
+    return { ok: false, error: `${command} requires a parameter: ${allowed.join(" | ")}.` };
+  }
+  const value = stripQuotes(raw.trim());
+  if (!allowed.includes(value)) {
+    return { ok: false, error: `${command} must be exactly one of: ${allowed.join(", ")}. Got ${JSON.stringify(raw)}.` };
+  }
+  return { ok: true, normalized: value };
+}
+
+// ---- AI Art Frame -----------------------------------------------------------
+
+function validateArtFrameUploadImage(raw: string | undefined): ValidateResult {
+  if (raw === undefined || raw === "" || raw === "default") {
+    return { ok: false, error: "uploadImage requires a JSON object with exactly one non-empty imageUrl or imageBase64 field." };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { ok: false, error: "uploadImage expects a JSON object with exactly one non-empty imageUrl or imageBase64 field." };
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return { ok: false, error: "uploadImage expects a JSON object with exactly one non-empty imageUrl or imageBase64 field." };
+  }
+
+  const hasImageUrl = "imageUrl" in parsed
+    && typeof parsed.imageUrl === "string"
+    && parsed.imageUrl.trim().length > 0;
+  const hasImageBase64 = "imageBase64" in parsed
+    && typeof parsed.imageBase64 === "string"
+    && parsed.imageBase64.trim().length > 0;
+  if (hasImageUrl === hasImageBase64) {
+    return { ok: false, error: "uploadImage requires exactly one non-empty imageUrl or imageBase64 field." };
+  }
+  return { ok: true };
 }
 
 // ---- Humidifier -------------------------------------------------------------
@@ -1047,32 +1146,57 @@ function validateVacuumChangeParam(raw: string | undefined, deviceType: string):
 
 // ---- Keypad -----------------------------------------------------------------
 
-function validateKeypadCreateKey(raw: string | undefined): ValidateResult {
-  if (raw === undefined || raw === '' || raw === 'default') {
+function validatePasscodeCreateKey(raw: string | undefined, enforceKeypadContract: boolean): ValidateResult {
+  if (raw === undefined || raw === "" || raw === "default") {
     return {
       ok: false,
-      error: `createKey requires a JSON parameter: {"name":"...","type":"permanent|timeLimit|disposable|urgent","password":"6-12 digits",...}.`,
+      error: "createKey requires a JSON object parameter.",
     };
   }
   let obj: unknown;
-  try { obj = JSON.parse(raw); } catch {
+  try {
+    obj = JSON.parse(raw);
+  } catch {
     return { ok: false, error: `createKey expects a JSON object. Got ${JSON.stringify(raw)}.` };
   }
-  if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) {
-    return { ok: false, error: `createKey expects a JSON object.` };
+  if (typeof obj !== "object" || obj === null || Array.isArray(obj)) {
+    return { ok: false, error: "createKey expects a JSON object." };
   }
-  const o = obj as Record<string, unknown>;
-  if (typeof o.name !== 'string' || o.name.length === 0) {
-    return { ok: false, error: `createKey "name" is required and must be a non-empty string.` };
+  if (!enforceKeypadContract) return { ok: true };
+
+  const name = "name" in obj ? obj.name : undefined;
+  if (typeof name !== "string" || name.length === 0) {
+    return { ok: false, error: "createKey \"name\" is required and must be a non-empty string." };
   }
-  const validTypes = ['permanent', 'timeLimit', 'disposable', 'urgent'];
-  if (typeof o.type !== 'string' || !validTypes.includes(o.type)) {
-    return { ok: false, error: `createKey "type" must be one of: ${validTypes.join(', ')}. Got ${JSON.stringify(o.type)}.` };
+  const type = "type" in obj ? obj.type : undefined;
+  const validTypes = ["permanent", "timeLimit", "disposable", "urgent"];
+  if (typeof type !== "string" || !validTypes.includes(type)) {
+    return { ok: false, error: `createKey \"type\" must be one of: ${validTypes.join(", ")}. Got ${JSON.stringify(type)}.` };
   }
-  if (typeof o.password !== 'string' || !/^\d{6,12}$/.test(o.password)) {
-    return { ok: false, error: `createKey "password" must be a 6-12 digit string. Got ${JSON.stringify(o.password)}.` };
+  const password = "password" in obj ? obj.password : undefined;
+  if (typeof password !== "string" || !/^\d{6,12}$/.test(password)) {
+    return { ok: false, error: `createKey \"password\" must be a 6-12 digit string. Got ${JSON.stringify(password)}.` };
+  }
+  if (type !== "timeLimit" && type !== "disposable") {
+    return { ok: true };
+  }
+
+  const startTime = "startTime" in obj ? obj.startTime : undefined;
+  const endTime = "endTime" in obj ? obj.endTime : undefined;
+  if (!isKeypadUnixSeconds(startTime) || !isKeypadUnixSeconds(endTime)) {
+    return { ok: false, error: "createKey timeLimit and disposable passcodes require 10-digit Unix-second startTime and endTime values." };
+  }
+  if (startTime >= endTime) {
+    return { ok: false, error: "createKey startTime must be before endTime." };
   }
   return { ok: true };
+}
+
+function isKeypadUnixSeconds(value: unknown): value is number {
+  return typeof value === "number"
+    && Number.isSafeInteger(value)
+    && value >= 1_000_000_000
+    && value <= 9_999_999_999;
 }
 
 function validateKeypadDeleteKey(raw: string | undefined): ValidateResult {

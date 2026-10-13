@@ -1,15 +1,15 @@
 import { describe, it, expect } from 'vitest';
 import {
   RESOURCE_CATALOG,
-  listWebhookEventTypes,
+  listWebhookContextDeviceTypes,
   listKeyTypes,
 } from '../../src/devices/resources.js';
 
 describe('RESOURCE_CATALOG', () => {
   describe('scenes', () => {
-    it('declares list / execute / describe operations', () => {
+    it('declares documented list and execute REST operations', () => {
       const verbs = RESOURCE_CATALOG.scenes.operations.map((o) => o.verb).sort();
-      expect(verbs).toEqual(['describe', 'execute', 'list']);
+      expect(verbs).toEqual(['execute', 'list']);
     });
 
     it('list is read-tier GET; execute is mutation POST', () => {
@@ -21,13 +21,11 @@ describe('RESOURCE_CATALOG', () => {
       expect(exec.method).toBe('POST');
     });
 
-    it('execute + describe both require sceneId', () => {
-      for (const verb of ['execute', 'describe'] as const) {
-        const op = RESOURCE_CATALOG.scenes.operations.find((o) => o.verb === verb)!;
-        const sceneId = op.params.find((p) => p.name === 'sceneId');
-        expect(sceneId, `${verb} should declare sceneId param`).toBeDefined();
-        expect(sceneId!.required).toBe(true);
-      }
+    it('execute requires sceneId', () => {
+      const operation = RESOURCE_CATALOG.scenes.operations.find((op) => op.verb === 'execute')!;
+      const sceneId = operation.params.find((param) => param.name === 'sceneId');
+      expect(sceneId).toBeDefined();
+      expect(sceneId!.required).toBe(true);
     });
   });
 
@@ -54,38 +52,27 @@ describe('RESOURCE_CATALOG', () => {
       expect(byVerb.query).toBe('read');
     });
 
-    it('exposes ~15 event types covering the common device surface', () => {
-      const events = RESOURCE_CATALOG.webhooks.events;
-      expect(events.length).toBeGreaterThanOrEqual(10);
-      const types = events.map((e) => e.eventType);
-      for (const wanted of ['WoMeter', 'WoPresence', 'WoContact', 'WoLock', 'WoPlug', 'WoDoorbell', 'WoKeypad']) {
-        expect(types, `missing webhook event ${wanted}`).toContain(wanted);
+
+    it('places device types and fields inside a changeReport context', () => {
+      for (const event of RESOURCE_CATALOG.webhooks.events) {
+        expect(event.eventType).toBe('changeReport');
+        expect(event.eventVersion).toBe('1');
+        expect(event.context.deviceType.length).toBeGreaterThan(0);
+        expect(event.context.fields.length).toBeGreaterThan(0);
       }
     });
 
-    it('every event declares deviceType, deviceMac, timeOfSample', () => {
-      for (const ev of RESOURCE_CATALOG.webhooks.events) {
-        const names = ev.fields.map((f) => f.name);
-        expect(names, `${ev.eventType} missing deviceType`).toContain('deviceType');
-        expect(names, `${ev.eventType} missing deviceMac`).toContain('deviceMac');
-        expect(names, `${ev.eventType} missing timeOfSample`).toContain('timeOfSample');
-      }
-    });
-
-    it('every field has a non-empty description + valid type', () => {
-      const allowed = new Set(['string', 'number', 'boolean', 'timestamp']);
-      for (const ev of RESOURCE_CATALOG.webhooks.events) {
-        for (const f of ev.fields) {
-          expect(allowed.has(f.type), `${ev.eventType}.${f.name} has invalid type ${f.type}`).toBe(true);
-          expect(f.description.length).toBeGreaterThan(0);
+    it('describes nested webhook fields with supported types', () => {
+      const allowed = new Set(['string', 'number', 'boolean', 'timestamp', 'object']);
+      for (const event of RESOURCE_CATALOG.webhooks.events) {
+        for (const field of event.context.fields) {
+          expect(allowed.has(field.type)).toBe(true);
+          expect(field.description.length).toBeGreaterThan(0);
+          if (field.type === 'object') expect(field.fields?.length).toBeGreaterThan(0);
         }
       }
     });
 
-    it('constraints expose URL + per-account limits', () => {
-      expect(RESOURCE_CATALOG.webhooks.constraints.maxUrlLength).toBeGreaterThan(0);
-      expect(RESOURCE_CATALOG.webhooks.constraints.maxWebhooksPerAccount).toBeGreaterThan(0);
-    });
   });
 
   describe('keys', () => {
@@ -111,9 +98,9 @@ describe('RESOURCE_CATALOG', () => {
   });
 
   describe('helper exports', () => {
-    it('listWebhookEventTypes mirrors the events array', () => {
-      expect(listWebhookEventTypes()).toEqual(
-        RESOURCE_CATALOG.webhooks.events.map((e) => e.eventType),
+    it('listWebhookContextDeviceTypes mirrors the events array', () => {
+      expect(listWebhookContextDeviceTypes()).toEqual(
+        RESOURCE_CATALOG.webhooks.events.map((e) => e.context.deviceType),
       );
     });
   });

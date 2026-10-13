@@ -6,7 +6,7 @@ import { getCachedDevice } from '../devices/cache.js';
 import type { AxiosInstance } from 'axios';
 import { createClient } from '../api/client.js';
 import { log } from '../logger.js';
-import { deviceHistoryStore } from './device-history.js';
+import { DeviceHistoryStore, deviceHistoryStore } from "./device-history.js";
 
 export interface ShadowEvent {
   kind: 'shadow.updated';
@@ -32,6 +32,7 @@ export interface EventSubscriber {
 }
 
 export class EventSubscriptionManager {
+  private readonly historyStore: DeviceHistoryStore;
   private mqttClient: SwitchBotMqttClient | null = null;
   private subscribers: Map<string, EventSubscriber> = new Map();
   private ringBuffer: RawEvent[] = [];
@@ -42,7 +43,8 @@ export class EventSubscriptionManager {
   private getClient?: () => AxiosInstance;
   private lastRefreshAttempt = 0;
 
-  constructor(mqttClient?: SwitchBotMqttClient, getClient?: () => AxiosInstance) {
+  constructor(mqttClient?: SwitchBotMqttClient, getClient?: () => AxiosInstance, historyProfile?: string) {
+    this.historyStore = historyProfile === undefined ? deviceHistoryStore : new DeviceHistoryStore(historyProfile);
     this.mqttClient = mqttClient || null;
     this.getClient = getClient;
   }
@@ -73,7 +75,7 @@ export class EventSubscriptionManager {
           const payloadData = context ?? data.state;
           const deviceType = String(context?.deviceType ?? 'Unknown');
           if (deviceId && payloadData) {
-            deviceHistoryStore.record(deviceId, topic, deviceType, payloadData);
+            this.historyStore.record(deviceId, topic, deviceType, payloadData);
             this.addEvent({
               kind: 'shadow.updated',
               deviceId,

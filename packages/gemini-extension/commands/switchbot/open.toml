@@ -1,9 +1,11 @@
 description = "Open a SwitchBot Curtain, Blind Tilt, or Roller Shade"
 prompt = """
 Open the SwitchBot Curtain, Blind Tilt, or Roller Shade the user names. Resolve the name to a
-deviceId (alias → exact → prefix → substring → fuzzy). Verify the device supports "open" or
-"setPosition" via describe_device. This is a mutation-tier command. Use the send_command MCP
-tool — prefer setPosition with parameter "0" (fully open) if supported, otherwise use command
-"open". Report the result.
+deviceId (alias → exact → prefix → substring → fuzzy). Read describe_device before choosing
+the command. For Blind Tilt use fullyOpen with parameter "default". For Curtain/Curtain 3,
+use setPosition with "0,ff,0"; for Roller Shade use setPosition with "0".
+Do not send a scalar position to Blind Tilt or invent an "open" command.
+Use the send_command MCP tool only when the described device supports the selected command.
+This is a mutation-tier command. Report the result.
 User input: {{args}}
 """

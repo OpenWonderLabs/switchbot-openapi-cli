@@ -1,6 +1,5 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { evaluateConditions } from './matcher.js';
 import { ThrottleGate, parseMaxPerMs } from './throttle.js';
@@ -8,6 +7,7 @@ import { ruleVersion } from './trace.js';
 import { filterTraceRecords } from './trace.js';
 import { matchesMqttTrigger } from './matcher.js';
 import { defaultEventWindowFetcher } from './engine.js';
+import { resolveDeviceHistoryDir } from "../mcp/device-history.js";
 import type { Rule, EngineEvent } from './types.js';
 import type { RuleEvaluateRecord } from './trace.js';
 
@@ -46,7 +46,6 @@ export interface SimulateReport {
 }
 
 const HOUR_MS = 60 * 60 * 1000;
-const DEVICE_HISTORY_DIR = path.join(os.homedir(), '.switchbot', 'device-history');
 
 export async function simulateRule(opts: SimulateOptions): Promise<SimulateReport> {
   const { rule, aliases = {}, liveLlm = false } = opts;
@@ -234,7 +233,7 @@ function parseSince(since: string): number {
 
 function buildStatusFetcher(asOf: Date): (deviceId: string) => Promise<Record<string, unknown>> {
   return async (deviceId: string) => {
-    const histFile = path.join(DEVICE_HISTORY_DIR, `${deviceId}.jsonl`);
+    const histFile = path.join(resolveDeviceHistoryDir(), `${deviceId}.jsonl`);
     if (!fs.existsSync(histFile)) return {};
     const lines = fs.readFileSync(histFile, 'utf-8').split(/\r?\n/);
     const asOfMs = asOf.getTime();

@@ -197,9 +197,16 @@ export class WebhookListener {
     const body = await readLimitedBody(req, MAX_BODY_BYTES);
     if (body === null) {
       res.writeHead(413);
-      // Destroy the socket after the 413 response has flushed so the connection
-      // is not held open indefinitely by a client that keeps streaming.
-      res.on('finish', () => req.destroy());
+      // End the writable side after flushing instead of resetting a socket
+      // with unread request data. Bound the grace period for streaming peers.
+      const socket = req.socket;
+      res.once('finish', () => {
+        if (socket.destroyed) return;
+        const deadline = setTimeout(() => socket.destroy(), 1000);
+        deadline.unref();
+        socket.once('close', () => clearTimeout(deadline));
+        socket.end();
+      });
       res.end();
       return;
     }

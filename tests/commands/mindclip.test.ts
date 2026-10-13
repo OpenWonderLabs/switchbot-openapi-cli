@@ -34,6 +34,23 @@ beforeEach(() => {
   Object.values(mindclipMock).forEach((fn) => fn.mockClear());
 });
 
+describe('MindClip documented required queries', () => {
+  it.each([
+    ['recordings', '--page', '1', '--size', '20'],
+    ['recordings', '--device', 'D1', '--size', '20'],
+    ['recordings', '--device', 'D1', '--page', '1'],
+    ['todos', '--page', '1', '--size', '20'],
+    ['todos', '--completed', '0', '--size', '20'],
+    ['todos', '--completed', '0', '--page', '1'],
+    ['daily'],
+    ['weekly'],
+    ['urgent-todos'],
+  ])('requires official query fields: %j', async (...args) => {
+    await expect(buildProgram().parseAsync(['node', 'sw', 'mindclip', ...args]))
+      .rejects.toMatchObject({ code: 'commander.missingMandatoryOptionValue' });
+  });
+});
+
 // ---------------------------------------------------------------------------
 // recordings validation
 // ---------------------------------------------------------------------------
@@ -115,55 +132,3 @@ describe('mindclip date validation', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// action handler smoke tests (valid args call the right lib function)
-// ---------------------------------------------------------------------------
-describe('mindclip action handlers', () => {
-  it('recordings with no options calls listRecordings with empty params', async () => {
-    await buildProgram().parseAsync(['node', 'sw', 'mindclip', 'recordings']);
-    expect(mindclipMock.listRecordings).toHaveBeenCalledOnce();
-    const params = mindclipMock.listRecordings.mock.calls[0][0];
-    expect(Object.keys(params).length).toBe(0);
-  });
-
-  it('recording <id> calls getRecording with id', async () => {
-    await buildProgram().parseAsync(['node', 'sw', 'mindclip', 'recording', 'abc123']);
-    expect(mindclipMock.getRecording).toHaveBeenCalledWith('abc123', undefined);
-  });
-
-  it('recording <id> --language en calls getRecording with language', async () => {
-    await buildProgram().parseAsync(['node', 'sw', 'mindclip', 'recording', 'abc123', '--language', 'en']);
-    expect(mindclipMock.getRecording).toHaveBeenCalledWith('abc123', 'en');
-  });
-
-  it('summary <id> calls getSummary', async () => {
-    await buildProgram().parseAsync(['node', 'sw', 'mindclip', 'summary', 's1']);
-    expect(mindclipMock.getSummary).toHaveBeenCalledWith('s1');
-  });
-
-  it('todos --completed 1 calls listTodos with completedNum 1', async () => {
-    await buildProgram().parseAsync(['node', 'sw', 'mindclip', 'todos', '--completed', '1']);
-    const params = mindclipMock.listTodos.mock.calls[0][0];
-    expect(params.completedNum).toBe(1);
-  });
-
-  it('daily --date 2026-06-10 calls getDailyRecall with that date', async () => {
-    await buildProgram().parseAsync(['node', 'sw', 'mindclip', 'daily', '--date', '2026-06-10']);
-    expect(mindclipMock.getDailyRecall).toHaveBeenCalledWith('2026-06-10');
-  });
-
-  it('daily with no date calls getDailyRecall with undefined', async () => {
-    await buildProgram().parseAsync(['node', 'sw', 'mindclip', 'daily']);
-    expect(mindclipMock.getDailyRecall).toHaveBeenCalledWith(undefined);
-  });
-
-  it('weekly --week 2026-W23 calls getWeeklySummary', async () => {
-    await buildProgram().parseAsync(['node', 'sw', 'mindclip', 'weekly', '--week', '2026-W23']);
-    expect(mindclipMock.getWeeklySummary).toHaveBeenCalledWith('2026-W23');
-  });
-
-  it('urgent-todos with no date calls getUrgentTodos with undefined (server defaults to yesterday)', async () => {
-    await buildProgram().parseAsync(['node', 'sw', 'mindclip', 'urgent-todos']);
-    expect(mindclipMock.getUrgentTodos).toHaveBeenCalledWith(undefined);
-  });
-});

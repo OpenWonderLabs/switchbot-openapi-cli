@@ -13,7 +13,7 @@ import {
   isSupportedPolicySchemaVersion,
   type PolicySchemaVersion,
 } from './schema.js';
-import { findCatalogEntry, getEffectiveCatalog } from '../devices/catalog.js';
+import { deriveSafetyTier, findCatalogEntry, getEffectiveCatalog } from '../devices/catalog.js';
 import { parseRuleCommand } from '../rules/action.js';
 import { destructiveVerbOf, DESTRUCTIVE_COMMANDS } from '../rules/destructive.js';
 import type { DeviceListBody } from '../lib/devices.js';
@@ -193,7 +193,7 @@ function hintFor(err: ErrorObject): string | undefined {
     return 'paste the deviceId from `switchbot devices list --format=tsv`, e.g. 01-202407090924-26354212';
   }
   if (err.keyword === 'not' && err.instancePath.startsWith('/confirmations/never_confirm/')) {
-    return 'destructive actions (lock/unlock/delete*/factoryReset) cannot be pre-approved in policy.yaml';
+    return `destructive actions (${DESTRUCTIVE_COMMANDS.join(', ')}) cannot be pre-approved in policy.yaml`;
   }
   if (err.keyword === 'const' && err.instancePath === '/version') {
     const supported = SUPPORTED_POLICY_SCHEMA_VERSIONS.map((v) => `"${v}"`).join(' / ');
@@ -676,19 +676,22 @@ export function validateLoadedPolicyAgainstInventory(
         const match = target.typeName ? findCatalogEntry(target.typeName) : null;
         const entry = !match || Array.isArray(match) ? null : match;
         if (!entry) continue;
-        const supported = entry.commands
-          .filter((spec) => spec.commandType !== 'customize')
-          .some((spec) => spec.command === parsed.verb);
-        if (supported) continue;
+        const spec = entry.commands.find((command) => command.commandType !== 'customize' && command.command === parsed.verb);
+        const destructive = spec !== undefined && deriveSafetyTier(spec, entry) === 'destructive';
+        if (spec && !destructive) continue;
 
         const { line, col } = locateInstancePath(loaded.doc, loaded.lineCounter, commandPath);
         errors.push({
           path: commandPath,
           line,
           col,
-          keyword: 'rule-live-unsupported-command',
-          message: `rule "${ruleName}" action #${ai} uses command "${parsed.verb}" but live target "${effectiveDeviceId}" is type "${target.typeName}"`,
-          hint: `supported offline verbs for ${target.typeName}: ${entry.commands.filter((spec) => spec.commandType !== 'customize').map((spec) => spec.command).join(', ')}`,
+          keyword: destructive ? 'rule-destructive-action' : 'rule-live-unsupported-command',
+          message: destructive
+            ? `rule "${ruleName}" action #${ai} uses destructive command "${parsed.verb}" on ${target.typeName}`
+            : `rule "${ruleName}" action #${ai} uses command "${parsed.verb}" but live target "${effectiveDeviceId}" is type "${target.typeName}"`,
+          hint: destructive
+            ? 'destructive device commands cannot run in automation rules; use an explicitly approved interactive command'
+            : `supported offline verbs for ${target.typeName}: ${entry.commands.filter((spec) => spec.commandType !== 'customize').map((spec) => spec.command).join(', ')}`,
           schemaPath: '#/properties/automation/properties/rules/items/properties/then/items/properties/command',
         });
       }

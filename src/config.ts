@@ -3,7 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { createHash } from 'node:crypto';
 import { getConfigPath } from './utils/flags.js';
-import { getActiveProfile } from './lib/request-context.js';
+import { assertValidProfileName, getActiveProfile } from './lib/request-context.js';
 import { emitJsonError, isJsonMode } from './utils/output.js';
 import { getPrimedCredentials, clearPrimedCredentials } from './credentials/prime.js';
 
@@ -48,12 +48,14 @@ export function configFilePath(): string {
   if (override) return path.resolve(override);
   const profile = getActiveProfile();
   if (profile) {
-    return path.join(os.homedir(), '.switchbot', 'profiles', `${profile}.json`);
+    return profileFilePath(profile);
   }
   return path.join(os.homedir(), '.switchbot', 'config.json');
 }
 
 export function profileFilePath(profile: string): string {
+  assertValidProfileName(profile);
+  if (profile === "default") return path.join(os.homedir(), ".switchbot", "config.json");
   return path.join(os.homedir(), '.switchbot', 'profiles', `${profile}.json`);
 }
 

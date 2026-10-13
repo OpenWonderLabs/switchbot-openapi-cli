@@ -9,10 +9,10 @@ export const ERRORS = {
     fix:    'switchbot auth login',
     hint:   'Check your network connection and try again.',
   },
-  'token-expired': {
-    reason: 'Credentials exist but doctor check failed — token may be expired.',
-    fix:    'switchbot auth logout && switchbot auth login',
-    hint:   'After re-login, run `switchbot doctor` to verify.',
+  'doctor-check-failed': {
+    reason: 'The CLI credential diagnostic failed; token expiry has not been established.',
+    fix:    'switchbot doctor --section credentials --json',
+    hint:   'Resolve the reported CLI or configuration error without deleting valid credentials.',
   },
   'cli-not-installed': {
     reason: 'switchbot CLI is not installed or not in PATH.',
@@ -20,7 +20,7 @@ export const ERRORS = {
     hint:   'After install, run `switchbot doctor` to confirm.',
   },
   'cli-version-too-low': {
-    reason: 'switchbot CLI version is below the required minimum (3.7.1).',
+    reason: 'switchbot CLI version is below the required minimum (3.9.0).',
     fix:    'npm install -g @switchbot/openapi-cli@latest',
     hint:   'After upgrade, re-run setup.',
   },

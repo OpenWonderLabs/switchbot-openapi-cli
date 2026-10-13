@@ -3,6 +3,7 @@ export type ToolProfile = 'default' | 'readonly' | 'all';
 const CORE_READ = [
   'list_devices',
   'get_device_status',
+  'device_diary',
   'device_history',
   'list_scenes',
   'search_catalog',

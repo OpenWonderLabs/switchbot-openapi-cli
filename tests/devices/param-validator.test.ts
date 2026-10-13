@@ -209,6 +209,11 @@ describe('validateParameter (raw wire-format validator)', () => {
     if (r.ok) expect(r.normalized).toBe('up;50');
   });
 
+  it('normalizes the documented spaced Blind Tilt position', () => {
+    expect(validateParameter('Blind Tilt', 'setPosition', 'up; 36'))
+      .toEqual({ ok: true, normalized: 'up;36' });
+  });
+
   it('rejects Blind Tilt setPosition bad direction', () => {
     const r = validateParameter('Blind Tilt', 'setPosition', 'left;50');
     expect(r.ok).toBe(false);
@@ -617,12 +622,9 @@ describe('validateParameter — Vacuum changeParam', () => {
     expect(validateParameter('Floor Cleaning Robot S10', 'changeParam', '{"waterLevel":3}').ok).toBe(false);
   });
 
-  it('rejects waterLevel for all combo vacuum aliases', () => {
-    expect(validateParameter('K10+ Pro Combo', 'changeParam', '{"waterLevel":1}').ok).toBe(false);
-    expect(validateParameter('Robot Vacuum Cleaner K10+ Pro Combo', 'changeParam', '{"waterLevel":1}').ok).toBe(false);
-    expect(validateParameter('K20+ Pro', 'changeParam', '{"waterLevel":1}').ok).toBe(false);
-    expect(validateParameter('K11+', 'changeParam', '{"waterLevel":1}').ok).toBe(false);
-    expect(validateParameter('Robot Vacuum Cleaner K11+', 'changeParam', '{"waterLevel":1}').ok).toBe(false);
+  it("rejects waterLevel for K10 Combo aliases", () => {
+    expect(validateParameter("K10+ Pro Combo", "changeParam", "{\"waterLevel\":1}").ok).toBe(false);
+    expect(validateParameter("Robot Vacuum Cleaner K10+ Pro Combo", "changeParam", "{\"waterLevel\":1}").ok).toBe(false);
   });
 
   it('rejects non-numeric field types (boolean, array)', () => {
@@ -769,15 +771,28 @@ describe('validateParameter — Keypad', () => {
   });
 });
 
-describe('validateParameter — Lock Vision / Lock Vision Pro (same passcode shape as Keypad)', () => {
+describe('validateParameter — Keypad Vision scheduling', () => {
+  it('rejects a one-time passcode without its documented validity window', () => {
+    const result = validateParameter('Keypad Vision', 'createKey', JSON.stringify({
+      name: 'temporary guest',
+      type: 'disposable',
+      password: '123456',
+    }));
+    expect(result.ok).toBe(false);
+  });
+});
+
+describe('validateParameter — Lock Vision object contract', () => {
   it('validates createKey', () => {
     const valid = '{"name":"test","type":"permanent","password":"123456"}';
     expect(validateParameter('Lock Vision', 'createKey', valid).ok).toBe(true);
     expect(validateParameter('Lock Vision Pro', 'createKey', valid).ok).toBe(true);
   });
 
-  it('rejects createKey with invalid password length', () => {
-    expect(validateParameter('Lock Vision', 'createKey', '{"name":"test","type":"permanent","password":"123"}').ok).toBe(false);
+  it('does not apply undocumented Keypad password restrictions to Lock Vision', () => {
+    const body = JSON.stringify({ name: 'guest', type: 'permanent', password: '123' });
+    expect(validateParameter('Lock Vision', 'createKey', body).ok).toBe(true);
+    expect(validateParameter('Lock Vision Pro', 'createKey', body).ok).toBe(true);
   });
 
   it('validates deleteKey', () => {

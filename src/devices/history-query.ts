@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import readline from 'node:readline';
+import { resolveDeviceHistoryDir } from "../mcp/device-history.js";
 
 export interface HistoryRecord {
   t: string;
@@ -31,9 +31,6 @@ export interface HistoryStats {
 
 const DEFAULT_LIMIT = 1000;
 
-function historyDir(): string {
-  return path.join(os.homedir(), '.switchbot', 'device-history');
-}
 
 /**
  * Parse a duration shortcut like "7d", "12h", "30m", "45s" into milliseconds.
@@ -86,7 +83,7 @@ export function resolveRange(opts: QueryOptions): { fromMs: number; toMs: number
 }
 
 /** Return jsonl candidate files for a device, oldest-first. */
-export function jsonlFilesForDevice(deviceId: string, baseDir = historyDir()): string[] {
+export function jsonlFilesForDevice(deviceId: string, baseDir = resolveDeviceHistoryDir()): string[] {
   const out: string[] = [];
   if (!fs.existsSync(baseDir)) return out;
   // Oldest-first so range walks can bail early once a line overshoots `toMs`.
@@ -159,7 +156,7 @@ export async function queryDeviceHistory(
 }
 
 export function queryDeviceHistoryStats(deviceId: string): HistoryStats {
-  const dir = historyDir();
+  const dir = resolveDeviceHistoryDir();
   const files = jsonlFilesForDevice(deviceId);
   let totalBytes = 0;
   let oldest: number | null = null;

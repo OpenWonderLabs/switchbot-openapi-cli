@@ -2495,6 +2495,21 @@ describe('devices command', () => {
         { command: 'anyCommand', parameter: 'default', commandType: 'command' }
       );
     });
+
+    it('rejects a built-in command for a cached physical device with no catalog type', async () => {
+      updateCacheFromDeviceList({
+        deviceList: [
+          { deviceId: DID, deviceName: 'New Device', deviceType: 'Uncatalogued Physical Device' },
+        ],
+        infraredRemoteList: [],
+      });
+
+      const res = await runCmd('turnOn');
+
+      expect(res.exitCode).toBe(2);
+      expect(res.stderr.join('\n')).toMatch(/cannot validate.*catalog/i);
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
+    });
   });
 
   // =====================================================================
@@ -2510,6 +2525,9 @@ describe('devices command', () => {
       updateCacheFromDeviceList({
         deviceList: [
           { deviceId: LOCK_ID, deviceName: 'Front Door', deviceType: 'Smart Lock' },
+          { deviceId: 'LOCK-LITE-1', deviceName: 'Back Door', deviceType: 'Lock Lite' },
+          { deviceId: 'LOCK-ULTRA-1', deviceName: 'Garage Door', deviceType: 'Lock Ultra' },
+          { deviceId: 'LOCK-PRO-1', deviceName: 'Side Door', deviceType: 'Lock Pro Matter Enabled' },
           { deviceId: 'BULB-1', deviceName: 'Lamp', deviceType: 'Color Bulb' },
         ],
         infraredRemoteList: [],
@@ -2529,6 +2547,21 @@ describe('devices command', () => {
       expect(apiMock.__instance.post).not.toHaveBeenCalled();
       expect(res.stderr.join('\n')).toMatch(/destructive command "unlock"/);
       expect(res.stderr.join('\n')).toMatch(/plan/);
+    });
+
+    it.each([
+      ["Lock", LOCK_ID],
+      ["Lock Lite", "LOCK-LITE-1"],
+      ["Lock Ultra", "LOCK-ULTRA-1"],
+      ["Lock Pro Matter Enabled", "LOCK-PRO-1"],
+    ])("blocks deadbolt through the destructive approval gate for %s", async (deviceType, deviceId) => {
+      const res = await runCli(registerDevicesCommand, [
+        "devices", "command", deviceId, "deadbolt",
+      ]);
+      expect(res.exitCode).toBe(2);
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
+      expect(res.stderr.join("\n")).toMatch(/destructive command "deadbolt"/);
+      expect(res.stderr.join("\n")).toContain(deviceType);
     });
 
     it('allows Smart Lock unlock when --yes is passed', async () => {
@@ -2606,6 +2639,15 @@ describe('devices command', () => {
     const AC_ID = 'AC-VAL';
     const CURTAIN_ID = 'CURTAIN-VAL';
     const BLIND_ID = 'BLIND-VAL';
+    const FAN_ID = "FAN-VAL";
+    const ART_FRAME_ID = "ART-FRAME-VAL";
+    const K10_ID = "K10-VAL";
+    const K11_ID = "K11-VAL";
+    const K20_ID = "K20-VAL";
+    const KATA_ID = "KATA-VAL";
+    const RGBIC_CEILING_ID = "RGBIC-CEILING-VAL";
+    const KEYPAD_ID = "KEYPAD-VAL";
+    const KEYPAD_VISION_ID = "KEYPAD-VISION-VAL";
     const RELAY_ID = 'RELAY-VAL';
 
     beforeEach(() => {
@@ -2615,6 +2657,15 @@ describe('devices command', () => {
         deviceList: [
           { deviceId: CURTAIN_ID, deviceName: 'Living Curtain', deviceType: 'Curtain' },
           { deviceId: BLIND_ID, deviceName: 'Bedroom Blind', deviceType: 'Blind Tilt' },
+          { deviceId: FAN_ID, deviceName: 'Desk Fan', deviceType: 'Standing Fan' },
+          { deviceId: ART_FRAME_ID, deviceName: 'Gallery', deviceType: 'AI Art Frame' },
+          { deviceId: K10_ID, deviceName: 'K10', deviceType: 'Robot Vacuum Cleaner K10+ Pro Combo' },
+          { deviceId: K11_ID, deviceName: 'K11', deviceType: 'Robot Vacuum Cleaner K11+' },
+          { deviceId: K20_ID, deviceName: 'K20', deviceType: 'Robot Vacuum Cleaner K20 Plus Pro' },
+          { deviceId: KATA_ID, deviceName: 'Kata', deviceType: 'Kata Friends' },
+          { deviceId: RGBIC_CEILING_ID, deviceName: 'Ceiling', deviceType: 'RGBICWW Ceiling Light' },
+          { deviceId: KEYPAD_ID, deviceName: 'Keypad', deviceType: 'Keypad' },
+          { deviceId: KEYPAD_VISION_ID, deviceName: 'Vision', deviceType: 'Keypad Vision' },
           { deviceId: RELAY_ID, deviceName: 'Relay', deviceType: 'Relay Switch 2PM' },
         ],
         infraredRemoteList: [
@@ -2626,6 +2677,137 @@ describe('devices command', () => {
     afterEach(() => {
       vi.restoreAllMocks();
       fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it.each([
+      ["rejects a scalar URL", "https://example.com/art.jpg", false],
+      ["sends an imageUrl object", "{\"imageUrl\":\"https://example.com/art.jpg\"}", true],
+      ["sends an imageBase64 object", "{\"imageBase64\":\"data:image/png;base64,AAAA\"}", true],
+    ])("uploadImage %s", async (_label, parameter, accepted) => {
+      const res = await runCli(registerDevicesCommand, [
+        "devices", "command", ART_FRAME_ID, "uploadImage", parameter,
+      ]);
+      if (accepted) {
+        expect(res.exitCode).toBeNull();
+        expect(apiMock.__instance.post).toHaveBeenCalledWith(
+          `/v1.1/devices/${ART_FRAME_ID}/commands`,
+          { command: "uploadImage", parameter: JSON.parse(parameter), commandType: "command" },
+        );
+        return;
+      }
+      expect(res.exitCode).toBe(2);
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["accepts K11 waterLevel 1", K11_ID, 1, true],
+      ["accepts K20 waterLevel 2", K20_ID, 2, true],
+      ["rejects K11 waterLevel 0", K11_ID, 0, false],
+      ["rejects K20 waterLevel 3", K20_ID, 3, false],
+      ["rejects K10 waterLevel 1", K10_ID, 1, false],
+    ] as const)("changeParam %s", async (_label, deviceId, waterLevel, accepted) => {
+      const res = await runCli(registerDevicesCommand, [
+        "devices", "command", deviceId, "changeParam", JSON.stringify({ waterLevel }),
+      ]);
+      if (accepted) {
+        expect(res.exitCode).toBeNull();
+        expect(apiMock.__instance.post).toHaveBeenCalledWith(
+          `/v1.1/devices/${deviceId}/commands`,
+          { command: "changeParam", parameter: { waterLevel }, commandType: "command" },
+        );
+        return;
+      }
+      expect(res.exitCode).toBe(2);
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["accepts main color temperature 2700", "setMainLightColorTemp", "2700", true],
+      ["rejects main color temperature 2699", "setMainLightColorTemp", "2699", false],
+      ["accepts color-light brightness 1", "setColorLightBrightness", "1", true],
+      ["rejects color-light brightness 101", "setColorLightBrightness", "101", false],
+      ["accepts RGB component boundaries", "setColorLightRGB", "0:255:10", true],
+      ["rejects RGB component overflow", "setColorLightRGB", "0:256:10", false],
+    ] as const)("validates RGBICWW Ceiling Light boundaries: %s", async (_label, command, parameter, accepted) => {
+      const res = await runCli(registerDevicesCommand, [
+        "devices", "command", RGBIC_CEILING_ID, command, parameter,
+      ]);
+      if (accepted) {
+        expect(res.exitCode).toBeNull();
+        expect(apiMock.__instance.post).toHaveBeenCalledWith(
+          `/v1.1/devices/${RGBIC_CEILING_ID}/commands`,
+          { command, parameter, commandType: "command" },
+        );
+        return;
+      }
+      expect(res.exitCode).toBe(2);
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["rejects lowercase Kata mode", KATA_ID, "mode", "normal", false],
+      ["accepts canonical Kata mode", KATA_ID, "mode", "Normal", true],
+      ["rejects uppercase Kata child lock", KATA_ID, "childLock", "ON", false],
+      ["accepts canonical Kata child lock", KATA_ID, "childLock", "on", true],
+      ["rejects zero RGBICWW main-light brightness", RGBIC_CEILING_ID, "setMainLightBrightness", "0", false],
+      ["accepts RGBICWW main-light brightness 100", RGBIC_CEILING_ID, "setMainLightBrightness", "100", true],
+    ] as const)("validates Kata and RGBICWW command parameters: %s", async (_label, deviceId, command, parameter, accepted) => {
+      const res = await runCli(registerDevicesCommand, [
+        "devices", "command", deviceId, command, parameter,
+      ]);
+      if (accepted) {
+        expect(res.exitCode).toBeNull();
+        expect(apiMock.__instance.post).toHaveBeenCalledWith(
+          `/v1.1/devices/${deviceId}/commands`,
+          { command, parameter, commandType: "command" },
+        );
+        return;
+      }
+      expect(res.exitCode).toBe(2);
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["rejects a time-limit code without timestamps", KEYPAD_ID, { name: "Temp", type: "timeLimit", password: "123456" }, false],
+      ["rejects a disposable code with millisecond timestamps", KEYPAD_ID, { name: "Guest", type: "disposable", password: "123456", startTime: 1700000000000, endTime: 1700003600000 }, false],
+      ["rejects reversed Keypad timestamps", KEYPAD_ID, { name: "Temp", type: "timeLimit", password: "123456", startTime: 1700003600, endTime: 1700000000 }, false],
+      ["accepts a disposable code with second timestamps", KEYPAD_ID, { name: "Guest", type: "disposable", password: "123456", startTime: 1700000000, endTime: 1700003600 }, true],
+      ["rejects a scheduled Vision code without timestamps", KEYPAD_VISION_ID, { name: "Vision", type: "timeLimit", password: "123456" }, false],
+      ["accepts a scheduled Vision code with second timestamps", KEYPAD_VISION_ID, { name: "Vision", type: "timeLimit", password: "123456", startTime: 1700000000, endTime: 1700003600 }, true],
+    ] as const)("validates Keypad scheduled passcodes: %s", async (_label, deviceId, payload, accepted) => {
+      const res = await runCli(registerDevicesCommand, [
+        "--dry-run", "devices", "command", deviceId, "createKey", JSON.stringify(payload),
+      ]);
+      if (accepted) {
+        expect(res.exitCode).toBeNull();
+        expect(apiMock.__instance.post).toHaveBeenCalledWith(
+          `/v1.1/devices/${deviceId}/commands`,
+          { command: "createKey", parameter: payload, commandType: "command" },
+        );
+        return;
+      }
+      expect(res.exitCode).toBe(2);
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
+    });
+
+    it("accepts raw Air Conditioner auto mode 0", async () => {
+      const res = await runCli(registerDevicesCommand, [
+        "devices", "command", AC_ID, "setAll", "26,0,1,on",
+      ]);
+      expect(res.exitCode).toBeNull();
+      expect(apiMock.__instance.post).toHaveBeenCalledWith(
+        `/v1.1/devices/${AC_ID}/commands`,
+        { command: "setAll", parameter: "26,0,1,on", commandType: "command" },
+      );
+    });
+
+    it("rejects Standing Fan setWindSpeed 0 before POST", async () => {
+      const res = await runCli(registerDevicesCommand, [
+        "devices", "command", FAN_ID, "setWindSpeed", "0",
+      ]);
+      expect(res.exitCode).toBe(2);
+      expect(res.stderr.join("\n")).toMatch(/1.*100/);
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
     });
 
     it('rejects malformed setAll ("on,2,2,30") before POST', async () => {
@@ -2714,6 +2896,20 @@ describe('devices command', () => {
       expect(res.stderr.join('\n')).toMatch(/1 or 2/);
       expect(apiMock.__instance.post).not.toHaveBeenCalled();
     });
+  });
+
+  it.each([
+    ["MeterPro(CO2)", "CO2", null],
+    ["Garage Door Opener", "doorStatus", "switchStatus"],
+    ["Relay Switch 2PM", "switch1Voltage", "voltage"],
+  ] as const)("exports isolated status metadata for %s", async (deviceType, expected, absent) => {
+    const res = await runCli(registerDevicesCommand, [
+      "--json", "devices", "commands", deviceType,
+    ]);
+    expect(res.exitCode).toBeNull();
+    const parsed = JSON.parse(res.stdout.join("\n"));
+    expect(parsed.data[0].statusFields).toContain(expected);
+    if (absent !== null) expect(parsed.data[0].statusFields).not.toContain(absent);
   });
 
   // =====================================================================

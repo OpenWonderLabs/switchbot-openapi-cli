@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import { intArg, stringArg, enumArg } from './utils/arg-parsers.js';
 import { parseDurationToMs } from './utils/flags.js';
 import { isJsonMode } from './utils/output.js';
+import { assertValidProfileName } from './lib/request-context.js';
 import { PRODUCT_TAGLINE } from './commands/identity.js';
 import { registerConfigCommand } from './commands/config.js';
 import { registerDevicesCommand } from './commands/devices.js';
@@ -43,6 +44,8 @@ export const TOP_LEVEL_COMMANDS = [
   'history', 'plan', 'capabilities', 'agent-bootstrap', 'install', 'uninstall', 'status-sync',
   'health', 'upgrade-check', 'daemon', 'reset', 'codex', 'claude-code', 'gemini', 'mindclip',
 ] as const;
+
+const profileStringArg = stringArg('--profile', { disallow: TOP_LEVEL_COMMANDS });
 
 const cacheModeArg = (value: string): string => {
   if (value.startsWith('-')) {
@@ -93,7 +96,15 @@ export function buildProgram(): Command {
     .option('--cache <mode>', 'Cache mode: "off" | "auto" (default: list 1h, status off) | duration like 5m, 1h, 30s (enables both stores)', cacheModeArg)
     .option('--no-cache', 'Disable cache reads (equivalent to --cache off)')
     .option('--config <path>', 'Override credential file location (default: ~/.switchbot/config.json)', stringArg('--config', { disallow: TOP_LEVEL_COMMANDS }))
-    .option('--profile <name>', 'Use a named profile: ~/.switchbot/profiles/<name>.json', stringArg('--profile', { disallow: TOP_LEVEL_COMMANDS }))
+    .option('--profile <name>', 'Use a named profile: ~/.switchbot/profiles/<name>.json', (value: string) => {
+      const name = profileStringArg(value);
+      try {
+        assertValidProfileName(name);
+      } catch {
+        throw new InvalidArgumentError('Invalid profile name: use letters, digits, "_" or "-"');
+      }
+      return name;
+    })
     .option('--audit-log', 'Append every mutating command to JSONL audit log (default path: ~/.switchbot/audit.log)')
     .option('--audit-log-path <path>', 'Custom audit log file path; use together with --audit-log', stringArg('--audit-log-path', { disallow: TOP_LEVEL_COMMANDS }))
     .showHelpAfterError('(run with --help to see usage)')

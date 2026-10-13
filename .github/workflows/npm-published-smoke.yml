@@ -7,10 +7,10 @@ on:
   workflow_dispatch:
     inputs:
       package:
-        description: 'Package to verify (defaults: matrix runs all published packages)'
+        description: 'Package to verify (defaults: matrix runs all release packages)'
         required: false
       version:
-        description: 'Published npm version to verify (defaults to package.json from checked-out commit)'
+        description: 'Exact published version to verify'
         required: false
 
 jobs:
@@ -22,6 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      actions: read
     strategy:
       fail-fast: false
       matrix:
@@ -35,218 +36,191 @@ jobs:
           - package: '@switchbot/openclaw-skill'
             version_path: 'packages/openclaw-skill/package.json'
             kind: plugin
+          - package: '@switchbot/claude-code-plugin'
+            version_path: 'packages/claude-code-plugin/package.json'
+            kind: plugin
+          - package: '@switchbot/gemini-extension'
+            version_path: 'packages/gemini-extension/package.json'
+            kind: plugin
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
-
       - uses: actions/setup-node@v4
         with:
           node-version: 20.x
           registry-url: https://registry.npmjs.org
 
+      - name: Download authoritative candidate outcomes
+        if: github.event_name == 'workflow_run'
+        uses: actions/download-artifact@v4
+        with:
+          name: release-candidate-outcomes
+          path: ${{ runner.temp }}/release-candidate
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve candidate outcome
+        id: candidate
+        env:
+          PACKAGE: ${{ matrix.package }}
+          VERSION_PATH: ${{ matrix.version_path }}
+          INPUT_PACKAGE: ${{ inputs.package }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          VERSION=$(node -p "require('./$VERSION_PATH').version")
+          if [ "${{ github.event_name }}" = workflow_dispatch ]; then
+            if [ -n "$INPUT_PACKAGE" ] && [ "$INPUT_PACKAGE" != "$PACKAGE" ]; then
+              echo 'skip=true' >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            if [ -n "$INPUT_VERSION" ]; then VERSION="$INPUT_VERSION"; fi
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+            echo 'skip=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          node scripts/release-candidate.mjs candidate --outcomes "$RUNNER_TEMP/release-candidate/release-candidate-outcomes.json" --package "$PACKAGE" --version "$VERSION" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
       - name: Verify npm token present
+        if: steps.candidate.outputs.skip != 'true'
         env:
           TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           if [ -z "$TOKEN" ]; then
-            echo "NPM_TOKEN not set in repo secrets"
+            echo 'NPM_TOKEN is required for release verification'
             exit 1
           fi
 
-      - name: Verify SwitchBot credentials present (cli only)
-        if: matrix.kind == 'cli'
-        env:
-          TOKEN: ${{ secrets.SWITCHBOT_TOKEN }}
-          SECRET: ${{ secrets.SWITCHBOT_SECRET }}
-        run: |
-          if [ -z "$TOKEN" ] || [ -z "$SECRET" ]; then
-            echo "SWITCHBOT_TOKEN / SWITCHBOT_SECRET not set in repo secrets (required for cli live smoke)"
-            exit 1
-          fi
 
-      - name: Resolve target version
-        id: version
-        env:
-          VERSION_PATH: ${{ matrix.version_path }}
-          INPUT_VERSION: ${{ inputs.version }}
-          INPUT_PACKAGE: ${{ inputs.package }}
-          MATRIX_PACKAGE: ${{ matrix.package }}
-        run: |
-          # workflow_dispatch with explicit package: skip other matrix entries.
-          if [ -n "$INPUT_PACKAGE" ] && [ "$INPUT_PACKAGE" != "$MATRIX_PACKAGE" ]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "Skipping $MATRIX_PACKAGE — workflow_dispatch targeted $INPUT_PACKAGE"
-            exit 0
-          fi
-          if [ -n "$INPUT_VERSION" ] && [ -n "$INPUT_PACKAGE" ]; then
-            VERSION="$INPUT_VERSION"
-          else
-            VERSION=$(node -p "require('./$VERSION_PATH').version")
-          fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "skip=false" >> "$GITHUB_OUTPUT"
-          echo "target_version=$VERSION ($MATRIX_PACKAGE)"
-
-      - name: Resolve current latest dist-tag
-        if: steps.version.outputs.skip != 'true'
-        id: latest
+      - name: Verify exact npm candidate is available
+        if: steps.candidate.outputs.skip != 'true'
         env:
           PACKAGE: ${{ matrix.package }}
+          VERSION: ${{ steps.candidate.outputs.version }}
         run: |
-          LATEST=$(npm view "$PACKAGE" dist-tags.latest 2>/dev/null || echo "")
-          echo "version=$LATEST" >> "$GITHUB_OUTPUT"
-          echo "current_latest=$LATEST"
-
-      - name: Wait for npm package to become available
-        if: steps.version.outputs.skip != 'true'
-        id: wait_package
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-          PACKAGE: ${{ matrix.package }}
-        run: |
-          for i in $(seq 1 24); do
-            if [ "${{ github.event_name }}" = "workflow_run" ]; then
-              FOUND=$(npm view "${PACKAGE}@next" version 2>/dev/null || true)
-              if [ "$FOUND" = "$VERSION" ]; then
-                echo "npm package is available on next: $FOUND"
-                exit 0
-              fi
-              # Tolerate the case where this matrix entry's package wasn't republished
-              # in this release (publish.yml's detect-versions step skipped it).
-              FOUND_AT_VERSION=$(npm view "${PACKAGE}@${VERSION}" version 2>/dev/null || true)
-              if [ "$FOUND_AT_VERSION" = "$VERSION" ]; then
-                echo "npm package version already exists (not republished this release): $FOUND_AT_VERSION — skipping smoke"
-                echo "skip=true" >> "$GITHUB_OUTPUT"
-                exit 0
-              fi
-              echo "waiting for ${PACKAGE}@${VERSION} on npm dist-tag next ($i/24); current next=$FOUND"
-            else
-              FOUND=$(npm view "${PACKAGE}@${VERSION}" version 2>/dev/null || true)
-              if [ "$FOUND" = "$VERSION" ]; then
-                echo "npm package version is available: $FOUND"
-                exit 0
-              fi
-              echo "waiting for ${PACKAGE}@${VERSION} to appear on npm ($i/24)"
+          for attempt in $(seq 1 24); do
+            found=$(npm view "${PACKAGE}@${VERSION}" version 2>/dev/null || true)
+            if [ "$found" = "$VERSION" ]; then
+              echo "Exact candidate is available: ${PACKAGE}@${VERSION}"
+              exit 0
             fi
+            echo "Waiting for exact candidate ${PACKAGE}@${VERSION} ($attempt/24)"
             sleep 10
           done
-          echo "Timed out waiting for ${PACKAGE}@${VERSION} on npm"
+          echo "Exact candidate did not become available: ${PACKAGE}@${VERSION}"
           exit 1
 
-      - name: Install published package in a clean temp project
-        if: steps.version.outputs.skip != 'true' && steps.wait_package.outputs.skip != 'true'
-        id: install_package
+      - name: Install exact candidate in a clean project
+        if: steps.candidate.outputs.skip != 'true'
         env:
-          VERSION: ${{ steps.version.outputs.version }}
           PACKAGE: ${{ matrix.package }}
+          VERSION: ${{ steps.candidate.outputs.version }}
         run: |
-          TMPDIR=$(mktemp -d)
-          echo "TMPDIR=$TMPDIR" >> "$GITHUB_ENV"
-          cd "$TMPDIR"
+          TEMP_PROJECT=$(mktemp -d)
+          echo "TEMP_PROJECT=$TEMP_PROJECT" >> "$GITHUB_ENV"
+          cd "$TEMP_PROJECT"
           npm init -y >/dev/null 2>&1
           npm install "${PACKAGE}@${VERSION}"
 
-      - name: Binary and offline smoke (cli only)
-        if: matrix.kind == 'cli' && steps.version.outputs.skip != 'true' && steps.wait_package.outputs.skip != 'true'
-        id: offline_smoke
+      - name: Offline CLI artifact gate
+        if: matrix.kind == 'cli' && steps.candidate.outputs.skip != 'true'
         env:
-          TMPDIR: ${{ env.TMPDIR }}
-          VERSION: ${{ steps.version.outputs.version }}
+          TEMP_PROJECT: ${{ env.TEMP_PROJECT }}
+          VERSION: ${{ steps.candidate.outputs.version }}
         run: |
-          cd "$TMPDIR"
-          ACTUAL=$(npx --no-install switchbot --version)
-          test "$ACTUAL" = "$VERSION"
+          cd "$TEMP_PROJECT"
+          test "$(npx --no-install switchbot --version)" = "$VERSION"
           npx --no-install switchbot --help >/dev/null
           npx --no-install switchbot schema export --compact >/dev/null
           npx --no-install switchbot capabilities --json | jq -e '.data.commandMeta != null' >/dev/null
 
-      - name: Live smoke with configured credentials (cli only)
-        if: matrix.kind == 'cli' && steps.version.outputs.skip != 'true' && steps.wait_package.outputs.skip != 'true'
-        id: live_smoke
-        env:
-          TMPDIR: ${{ env.TMPDIR }}
-          SWITCHBOT_TOKEN: ${{ secrets.SWITCHBOT_TOKEN }}
-          SWITCHBOT_SECRET: ${{ secrets.SWITCHBOT_SECRET }}
-        run: |
-          cd "$TMPDIR"
-          npx --no-install switchbot doctor --json | jq -e '.data.summary != null' >/dev/null
-          npx --no-install switchbot devices list --json | jq -e '.data.deviceList != null or .data.infraredRemoteList != null' >/dev/null
 
-      - name: Plugin tarball-shape smoke (plugins only)
-        if: matrix.kind == 'plugin' && steps.version.outputs.skip != 'true' && steps.wait_package.outputs.skip != 'true'
-        id: plugin_smoke
+      - name: Plugin artifact gate
+        if: matrix.kind == 'plugin' && steps.candidate.outputs.skip != 'true'
         env:
-          TMPDIR: ${{ env.TMPDIR }}
+          TEMP_PROJECT: ${{ env.TEMP_PROJECT }}
           PACKAGE: ${{ matrix.package }}
-          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          cd "$TMPDIR"
-          MANIFEST="node_modules/${PACKAGE}/package.json"
-          if [ ! -f "$MANIFEST" ]; then
-            echo "FAIL: $MANIFEST missing"
+          manifest="$TEMP_PROJECT/node_modules/$PACKAGE/package.json"
+          test -f "$manifest"
+          peer=$(node -p "require('$manifest').peerDependencies?.['@switchbot/openapi-cli'] || ''")
+          if [ -z "$peer" ] || echo "$peer" | grep -q 'workspace:'; then
+            echo "Invalid published peer dependency for $PACKAGE: $peer"
             exit 1
           fi
-          # peerDep must be a concrete range, not a workspace:* leak
-          PEER=$(node -p "require('./$MANIFEST').peerDependencies?.['@switchbot/openapi-cli'] || ''")
-          if [ -z "$PEER" ] || echo "$PEER" | grep -q "workspace:"; then
-            echo "FAIL: $PACKAGE peerDep missing or unrewritten — got: '$PEER'"
-            exit 1
-          fi
-          echo "OK: $PACKAGE peerDep = '$PEER'"
-          # All declared bin entries must point to readable files
-          node -e "
-            const pkg = require('./$MANIFEST');
-            const fs = require('fs');
-            const path = require('path');
-            const root = path.dirname('$MANIFEST');
-            const bins = pkg.bin || {};
-            for (const [name, target] of Object.entries(bins)) {
-              const p = path.join(root, target);
-              fs.accessSync(p);
-              console.log('OK: bin ' + name + ' -> ' + target);
-            }
-          "
 
-      - name: Promote verified version to latest
-        if: success() && steps.version.outputs.skip != 'true' && steps.wait_package.outputs.skip != 'true'
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-          PACKAGE: ${{ matrix.package }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          npm dist-tag add "${PACKAGE}@${VERSION}" latest
-          echo "Promoted ${PACKAGE}@${VERSION} to dist-tag latest"
-
-      - name: Deprecate failed version
-        if: >
-          failure() &&
-          steps.wait_package.outcome == 'success' &&
-          steps.wait_package.outputs.skip != 'true' &&
-          (
-            steps.install_package.outcome == 'failure' ||
-            steps.offline_smoke.outcome == 'failure' ||
-            steps.plugin_smoke.outcome == 'failure'
-          )
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-          PREVIOUS_LATEST: ${{ steps.latest.outputs.version }}
-          PACKAGE: ${{ matrix.package }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          if [ -n "$PREVIOUS_LATEST" ]; then
-            MSG="Published to dist-tag next but failed package smoke tests. Install ${PACKAGE}@${PREVIOUS_LATEST} or use dist-tag latest."
-          else
-            MSG="Published to dist-tag next but failed package smoke tests. No prior latest exists; investigate before re-publishing."
-          fi
-          npm deprecate "${PACKAGE}@${VERSION}" "$MSG"
-          echo "Deprecated ${PACKAGE}@${VERSION} after package smoke failure"
-
-      - name: Cleanup temp project
+      - name: Remove temporary project
         if: always()
         env:
-          TMPDIR: ${{ env.TMPDIR }}
+          TEMP_PROJECT: ${{ env.TEMP_PROJECT }}
         run: |
-          if [ -n "$TMPDIR" ] && [ -d "$TMPDIR" ]; then
-            rm -rf "$TMPDIR"
-          fi
+          if [ -n "$TEMP_PROJECT" ] && [ -d "$TEMP_PROJECT" ]; then rm -rf "$TEMP_PROJECT"; fi
+
+  required-hosts:
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'release'
+    needs: smoke
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+          registry-url: https://registry.npmjs.org
+      - name: Install pinned release hosts
+        run: npm install --global @openai/codex@0.162.1 @anthropic-ai/claude-code@2.1.238 @google/gemini-cli@0.44.1 openclaw@2026.10.2
+      - name: Download authoritative candidate outcomes
+        uses: actions/download-artifact@v4
+        with:
+          name: release-candidate-outcomes
+          path: ${{ runner.temp }}/release-candidate
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify all required hosts load exact published candidates
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm run smoke:release-host -- --outcomes "$RUNNER_TEMP/release-candidate/release-candidate-outcomes.json" --require-host --evidence "$RUNNER_TEMP/release-host-evidence.json"
+      - name: Upload required host evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-host-evidence
+          path: ${{ runner.temp }}/release-host-evidence.json
+          if-no-files-found: error
+
+  promote:
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'release'
+    needs: [smoke, required-hosts]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          registry-url: https://registry.npmjs.org
+      - name: Download authoritative candidate outcomes
+        uses: actions/download-artifact@v4
+        with:
+          name: release-candidate-outcomes
+          path: ${{ runner.temp }}/release-candidate
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download required host evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: release-host-evidence
+          path: ${{ runner.temp }}/release-host
+      - name: Mark completed artifact and local readonly host gates
+        run: node scripts/release-candidate.mjs create-gates --outcomes "$RUNNER_TEMP/release-candidate/release-candidate-outcomes.json" --host-evidence "$RUNNER_TEMP/release-host/release-host-evidence.json" --gates "$RUNNER_TEMP/release-candidate/gates.json"
+      - name: Promote verified candidates
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: node scripts/release-candidate.mjs promote --outcomes "$RUNNER_TEMP/release-candidate/release-candidate-outcomes.json" --gates "$RUNNER_TEMP/release-candidate/gates.json"
