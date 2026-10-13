@@ -20,14 +20,35 @@ vi.mock('../../src/credentials/keychain.js', async () => {
 
 beforeEach(() => {
   selectMock.mockReset();
+  vi.stubEnv('SWITCHBOT_TOKEN', undefined);
+  vi.stubEnv('SWITCHBOT_SECRET', undefined);
   __resetPrimedCredentials();
 });
 
 afterEach(() => {
   __resetPrimedCredentials();
+  vi.unstubAllEnvs();
+  vi.useRealTimers();
 });
 
 describe('primeCredentials', () => {
+  it('does not wait for a stalled keychain when complete env credentials are present', async () => {
+    vi.useFakeTimers();
+    vi.stubEnv('SWITCHBOT_TOKEN', 'env-token');
+    vi.stubEnv('SWITCHBOT_SECRET', 'env-secret');
+    selectMock.mockResolvedValue({
+      name: 'keychain',
+      get: () => new Promise(() => {}),
+    });
+
+    const outcome = Promise.race([
+      primeCredentials('default').then(() => 'ready'),
+      new Promise((resolve) => setTimeout(resolve, 10_000, 'timed-out')),
+    ]);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(await outcome).toBe('ready');
+  });
+
   it('caches a successful keychain read and makes it accessible via getPrimedCredentials', async () => {
     const get = vi.fn().mockResolvedValue({ token: 'T', secret: 'S' });
     selectMock.mockResolvedValue({ name: 'keychain', get } as any);

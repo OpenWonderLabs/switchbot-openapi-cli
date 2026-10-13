@@ -49,11 +49,13 @@ async function checkCredentials(): Promise<Check> {
     backendName = store.name;
     backendLabel = desc.backend;
     writable = desc.writable;
-    try {
-      const creds = await store.get(profile);
-      keychainHasProfile = Boolean(creds && creds.token && creds.secret);
-    } catch {
-      keychainHasProfile = false;
+    if (!envOk) {
+      try {
+        const creds = await store.get(profile);
+        keychainHasProfile = Boolean(creds && creds.token && creds.secret);
+      } catch {
+        keychainHasProfile = false;
+      }
     }
   } catch {
     // selectCredentialStore falls back to file; a throw here is unexpected but

@@ -49,6 +49,8 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Verify both Codex archive layouts are hook-free, remove the obsolete hook assertion, and exercise installed manual helpers and isolated native prefix registration (#74, #75).
 - Oversized local webhooks now receive HTTP 413 before graceful connection closure, with a bounded grace period for peers that keep streaming.
 - Track executable permissions for Git commit/push hooks so Git runs the configured verification gates.
+- Complete environment credentials no longer wait for native keychain reads during CLI startup or credential diagnostics.
+- Repair Windows Codex `.cmd` discovery, OpenClaw credential execution boundaries, and npm/old-CLI regression fixtures.
 
 ## [3.8.1]
 

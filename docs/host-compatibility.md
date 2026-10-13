@@ -6,9 +6,9 @@ CLI 3.9.0 is the minimum for plugin/extension 0.2.0. The MCP profiles expose
 15 readonly, 18 default and 29 all-profile tools, including three retained
 3.x history aliases. Default installations do not enable administrative tools.
 
-Verification below used Linux x64 / WSL2, Ubuntu 24.04.4 and Node 24.18.0.
-The package's Node `>=18` engine declaration is not evidence of native Windows,
-macOS or every host's Node-version compatibility.
+The original host verification used Linux x64 / WSL2, Ubuntu 24.04.4 and Node
+24.18.0. The CI repair additionally exercised native Windows 10.0.26200 with
+Node 24.19.0. These runs do not establish every host or Node-version combination.
 
 ## Observed host layers
 
@@ -28,16 +28,21 @@ published version was not exercised. No model turn or device mutation was run.
 The production launcher still rejects absent credentials without emitting a
 fabricated RPC frame. Local verification injects explicitly dummy credentials
 and never forwards user secrets; cloud authentication is outside its scope.
-Keychain backend availability is not a stored credential. Native Windows/macOS
-execution remains unobserved; Linux Windows-selection proofs are not native runs.
+Keychain backend availability is not a stored credential. Native Windows
+bootstrap verification below does not establish model-driven host execution.
 
 The native bootstrap smoke now packs the CLI/plugin and exercises both local
 `.bin` and isolated global-prefix installations outside plugin module ancestry,
 including paths with spaces. It uses explicitly dummy credentials and calls
 only local `device_history`; no cloud-authentication result is claimed.
 CI defines Ubuntu, Windows and macOS jobs with Node 24.18.0 and evidence upload.
-Only the Linux execution has been observed here; configured CI is not native
-Windows/macOS evidence.
+In [run 38354238458](https://github.com/OpenWonderLabs/switchbot-openapi-cli/actions/runs/38354238458),
+Ubuntu/macOS bootstrap passed; Windows exposed unnecessary native keychain reads
+ahead of complete env credentials. After the repair, native Windows local/global
+bootstrap listed 18 tools and returned empty local history on both routes.
+Windows workspace tests and exact CLI/Codex/Claude installation smokes also passed.
+Codex native registration was skipped in the Windows fixture because the host
+was absent; that fixture does not establish Windows Codex host compatibility.
 
 The exact OpenClaw archive initially failed host loading because its required
 YAML dependency was absent. The corrected tarball carries that dependency;

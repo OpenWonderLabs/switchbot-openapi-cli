@@ -68,6 +68,8 @@ async function refreshCredentials(profile: string): Promise<void> {
 }
 
 export async function primeCredentials(profile: string): Promise<void> {
+  // Complete env credentials take precedence; native-store latency must not gate them.
+  if (process.env.SWITCHBOT_TOKEN && process.env.SWITCHBOT_SECRET) return;
   if (isCacheValid(profile)) return;
   const existing = inFlight.get(profile);
   if (existing) return existing;

@@ -13,8 +13,7 @@ function credentialsResult(stdout) {
 
 async function tryDoctor(exec) {
   try {
-    const invocation = switchbotInvocation(['doctor', '--section', 'credentials', '--json']);
-    const { stdout } = await exec(invocation.command, invocation.args, { timeout: 10000 });
+    const { stdout } = await exec('switchbot', ['doctor', '--section', 'credentials', '--json'], { timeout: 10000 });
     return credentialsResult(stdout);
   } catch (err) {
     if (err?.code === 'ENOENT') throw err;
@@ -31,8 +30,7 @@ async function tryDoctor(exec) {
 
 async function tryKeychainGet(exec) {
   try {
-    const invocation = switchbotInvocation(['auth', 'keychain', 'get', '--json']);
-    const { stdout } = await exec(invocation.command, invocation.args, { timeout: 8000 });
+    const { stdout } = await exec('switchbot', ['auth', 'keychain', 'get', '--json'], { timeout: 8000 });
     const parsed = JSON.parse(stdout);
     return (parsed?.data ?? parsed)?.present === true;
   } catch {
@@ -62,5 +60,9 @@ export function makeCheckCredentials(exec) {
   };
 }
 
-const defaultExec = promisify(execFile);
+const exec = promisify(execFile);
+const defaultExec = (_command, args, options) => {
+  const invocation = switchbotInvocation(args);
+  return exec(invocation.command, invocation.args, options);
+};
 export const checkCredentials = makeCheckCredentials(defaultExec);

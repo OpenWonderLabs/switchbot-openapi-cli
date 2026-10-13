@@ -10,10 +10,13 @@ it('can edit policy after archive extraction without installing dependencies', a
   const work = await mkdtemp(join(tmpdir(), 'switchbot-packed-editor-'));
   let server;
   try {
-    const output = execFileSync('npm', ['pack', '--json', '--pack-destination', work], {
+    const npmEntry = process.env.npm_execpath;
+    const args = ['pack', '--json', '--pack-destination', work];
+    const output = execFileSync(npmEntry ? process.execPath : 'npm', npmEntry ? [npmEntry, ...args] : args, {
       cwd: fileURLToPath(new URL('..', import.meta.url)),
       encoding: 'utf8',
       timeout: 60_000,
+      shell: !npmEntry && process.platform === 'win32',
     });
     const [{ filename }] = JSON.parse(output);
     execFileSync('tar', ['-xzf', join(work, filename), '-C', work], { timeout: 10_000 });

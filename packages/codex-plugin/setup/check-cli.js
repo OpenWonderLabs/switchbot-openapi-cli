@@ -53,5 +53,7 @@ export function makeCheckCli(exec) {
   };
 }
 
-const defaultExec = promisify(execFile);
+const exec = promisify(execFile);
+const defaultExec = (cmd, args, options) =>
+  exec(cmd, args, { ...options, shell: process.platform === 'win32' });
 export const checkCli = makeCheckCli(defaultExec);

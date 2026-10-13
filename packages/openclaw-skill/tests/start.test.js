@@ -1,8 +1,8 @@
 import { after, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { spawn } from 'node:child_process';
 
 const emptyPaths = [];
@@ -15,7 +15,15 @@ function runBootstrap(pathValue, env = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ['bin/start.js'], {
       cwd: new URL('..', import.meta.url),
-      env: { ...process.env, ...env, PATH: pathValue },
+      env: {
+        ...process.env,
+        HOME: pathValue,
+        USERPROFILE: pathValue,
+        SWITCHBOT_TOKEN: '',
+        SWITCHBOT_SECRET: '',
+        ...env,
+        PATH: pathValue,
+      },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '';
@@ -43,13 +51,15 @@ describe('MCP bootstrap', () => {
     const binDir = await mkdtemp(join(tmpdir(), 'switchbot-openclaw-npm-only-'));
     emptyPaths.push(binDir);
     const installMarker = join(binDir, 'global-install-attempt');
-    const npmPath = join(binDir, 'npm');
-    await writeFile(npmPath, [
-      '#!' + process.execPath,
-      "const fs = require('node:fs');",
-      "if (process.argv[2] === '--version') process.stdout.write('11.0.0\\n');",
-      "else { fs.writeFileSync(process.env.INSTALL_MARKER, 'attempted'); process.stdout.write('npm install progress\\n'); process.exitCode = 1; }",
-    ].join('\n'));
+    const npmPath = join(binDir, process.platform === 'win32' ? 'npm.cmd' : 'npm');
+    await writeFile(npmPath, process.platform === 'win32'
+      ? '@echo off\r\nif "%1"=="--version" (echo 11.0.0) else (echo attempted > "%INSTALL_MARKER%" & exit /b 1)\r\n'
+      : [
+        '#!' + process.execPath,
+        "const fs = require('node:fs');",
+        "if (process.argv[2] === '--version') process.stdout.write('11.0.0\\n');",
+        "else { fs.writeFileSync(process.env.INSTALL_MARKER, 'attempted'); process.stdout.write('npm install progress\\n'); process.exitCode = 1; }",
+      ].join('\n'));
     await chmod(npmPath, 0o755);
 
     const result = await runBootstrap(binDir, { INSTALL_MARKER: installMarker });
@@ -64,16 +74,22 @@ describe('MCP bootstrap', () => {
     const binDir = await mkdtemp(join(tmpdir(), 'switchbot-openclaw-old-cli-'));
     emptyPaths.push(binDir);
     const tracePath = join(binDir, 'trace');
-    const cliPath = join(binDir, 'switchbot');
+    const cliPath = process.platform === 'win32'
+      ? join(binDir, 'node_modules', '@switchbot', 'openapi-cli', 'dist', 'index.js')
+      : join(binDir, 'switchbot');
+    await mkdir(dirname(cliPath), { recursive: true });
     await writeFile(cliPath, [
       '#!' + process.execPath,
       "const fs = require('node:fs'); fs.appendFileSync(process.env.TRACE_FILE, process.argv.slice(2).join(' ') + '\\n'); process.stdout.write('3.8.9\\n');",
     ].join('\n'));
     await chmod(cliPath, 0o755);
+    if (process.platform === 'win32') await writeFile(join(binDir, 'switchbot.cmd'), '@echo off\r\n');
 
     const result = await runBootstrap(binDir, { TRACE_FILE: tracePath });
 
     assert.notEqual(result.code, 0);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /Detected: 3\.8\.9; required: >=3\.9\.0/);
     assert.deepEqual((await readFile(tracePath, 'utf8')).trim().split('\n'), ['--version']);
   });
 });

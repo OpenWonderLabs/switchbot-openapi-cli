@@ -502,4 +502,16 @@ Markdown：使用现有 `.gitignore` 排除依赖和本地文件，修复报告�
 | 原生 Gemini 0.44.1 | 隔离 link/list/update、18 工具 catalog、本地 readonly history 和卸载通过；不发送模型 prompt |
 | HTTP/MCP/设备参数 smoke | 5 类 MindClip 查询的缺参/有效路径、真实 stdio、目录/资源导出、Blind Tilt/Curtain/Roller 参数与规则执行边界均通过 |
 
-没有关闭 GitHub issue、提交、推送、创建 PR、发布候选或修改 dist-tag。修复仍在独立分支；Skills-only/ADR WIP 留在原 worktree。本轮结论为文档对齐与离线/本地运行验收，不声称真实云端、设备或原生 Windows/macOS 已验证。
+以上为提交前的复查记录：当时尚未关闭 issue、提交、推送、创建 PR、发布候选或修改 dist-tag，也未验证真实云端、设备或原生 Windows/macOS。随后在独立修复分支创建 PR #76；Skills-only/ADR WIP 仍留在原 worktree。后续 CI 验收见下节。
+
+## PR #76 的 Windows CI 修复
+
+[CI run 38354238458](https://github.com/OpenWonderLabs/switchbot-openapi-cli/actions/runs/38354238458) 在 `6bfeaf6` 上报告三个 Windows 失败；Node 18/20/22 回归、Ubuntu/macOS OpenClaw bootstrap 和其余检查通过。
+
+- CLI preAction priming 和 doctor 在完整 env 凭据存在时仍读取系统钥匙串。改为跳过低优先级读取，保留 doctor 后端元数据；未增大超时，也未关闭诊断。
+- OpenClaw `makeCheckCredentials(exec)` 保留逻辑命令边界，Windows npm 参数转换只在默认运行时 adapter 中进行。既有 healthy/missing/keychain 断言在 Windows 通过。
+- 打包 editor 测试通过 Node 执行 npm entry；旧版 CLI 测试创建 Windows npm 布局和 shim，并验证仅调用 version、拒绝旧版本且 stdout 为空。测试不继承调用者凭据。
+- 原生 Windows 验收继续发现 Codex version helper 直接执行 npm shim 的 ENOENT；与既有 credential helper 一致，Windows 默认执行器启用 cmd 解析。
+- 隔离的 Windows Node 24.19.0 / Windows 10.0.26200 中，以假的慢钥匙串子进程重现诊断 10 秒超时；修复后约 316 ms 返回健康、零钥匙串读取。未访问真实 Credential Manager 条目。
+- 全量 Linux CLI 168 文件、3085 passed、0 failed，包含两条 failing-before/passing-after 凭据优先级回归。Windows 工作区 169 tests、CLI/Codex/Claude 精确归档安装、editor、CLI 版本拦截、sparse checkout 通过；原生 OpenClaw local/global 两路均列出 18 工具并调用本地 readonly history。
+- Windows fixture 没有安装 Codex host，原生注册被明确跳过；不把 npm 包安装成功当作宿主兼容证明。所有运行使用隔离目录和 dummy credentials，未登录、调用云端或操作设备。
