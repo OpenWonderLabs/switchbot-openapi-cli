@@ -51,6 +51,7 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Track executable permissions for Git commit/push hooks so Git runs the configured verification gates.
 - Complete environment credentials no longer wait for native keychain reads during CLI startup or credential diagnostics.
 - Repair Windows Codex `.cmd` discovery, OpenClaw credential execution boundaries, and npm/old-CLI regression fixtures.
+- HTTP MCP accepts named profiles stored only in the keychain while still rejecting unknown profiles and invalid bearer tokens.
 
 ## [3.8.1]
 

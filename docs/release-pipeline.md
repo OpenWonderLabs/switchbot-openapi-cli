@@ -131,6 +131,13 @@ this run is never converted into a smoke skip. Independently
 already-published packages remain distinct in the outcome artifact and are
 not promoted again.
 
+Recovery limitation: after a partially successful publication, a rerun can
+classify a version stranded on `next` as `already-published`, so it will not
+automatically advance to `latest`. A GitHub Actions rerun retains the original
+release event, but does not change that outcome rule. Inspect the original
+outcomes and exact-version evidence before recovery; never relabel outcomes or
+bypass host gates merely to advance a tag.
+
 The candidate smoke gates verify the exact installed tarball. CLI candidates
 run offline checks; plugins run tarball/peer-dependency checks. Required hosts
 then execute a local readonly MCP call. No gate uses real SwitchBot credentials,

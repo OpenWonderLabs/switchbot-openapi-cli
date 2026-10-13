@@ -59,7 +59,7 @@ import {
 import { todayUsage } from '../utils/quota.js';
 import { describeCache } from '../devices/cache.js';
 import { assertValidProfileName, getActiveProfile, withRequestContext } from '../lib/request-context.js';
-import { primeCredentials } from '../credentials/prime.js';
+import { getPrimedCredentials, primeCredentials } from '../credentials/prime.js';
 import { profileFilePath, tryLoadConfig } from '../config.js';
 import {
   loadPolicyFile,
@@ -2869,11 +2869,12 @@ process_uptime_seconds ${Math.floor(process.uptime())}
               }
             }
 
-            // Reject unknown profiles early: avoids confusing downstream credential
-            // errors and protects against probing for valid profile names.
+            // Resolve keychain-only profiles after authentication, before rejecting
+            // names that have neither credentials nor a profile configuration.
             if (profile) {
+              await primeCredentials(profile);
               const envCredsPresent = !!(process.env.SWITCHBOT_TOKEN && process.env.SWITCHBOT_SECRET);
-              if (!envCredsPresent && !fs.existsSync(profileFilePath(profile))) {
+              if (!envCredsPresent && !getPrimedCredentials(profile) && !fs.existsSync(profileFilePath(profile))) {
                 res.writeHead(401, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({
                   jsonrpc: '2.0',

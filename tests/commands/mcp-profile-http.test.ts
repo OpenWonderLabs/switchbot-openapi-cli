@@ -5,6 +5,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 const children: ChildProcess[] = [];
 const homes: string[] = [];
 afterEach(() => {
@@ -12,7 +14,7 @@ afterEach(() => {
   for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
 });
 
-async function startIsolatedMcp(): Promise<number> {
+async function startIsolatedMcp(keychainOnly = false): Promise<number> {
   const home = mkdtempSync(join(tmpdir(), 'switchbot-http-profile-'));
   homes.push(home);
   // Run the real CLI HTTP handler. Only listen-port allocation is adapted:
@@ -21,6 +23,30 @@ async function startIsolatedMcp(): Promise<number> {
     const http = (await import('node:http')).default;
     const { syncBuiltinESMExports } = await import('node:module');
     const originalCreateServer = http.createServer;
+    ${keychainOnly ? `
+    // Simulate the external credential-store boundary, never the HTTP handler.
+    Object.defineProperty(process, 'platform', { value: 'linux' });
+    const childProcess = (await import('node:child_process')).default;
+    const originalSpawn = childProcess.spawn;
+    childProcess.spawn = (command, args, options) => {
+      let output;
+      if (command === 'which' && args[0] === 'secret-tool') output = 'isolated-secret-tool';
+      if (command === 'secret-tool') {
+        const account = args[args.indexOf('account') + 1];
+        output = account === 'work:token' ? 'work-token' : account === 'work:secret' ? 'work-secret' : '';
+      }
+      if (output !== undefined) {
+        return originalSpawn(process.execPath, ['-e', 'process.stdout.write(' + JSON.stringify(output) + ')'], options);
+      }
+      return originalSpawn(command, args, options);
+    };
+    const axios = (await import('axios')).default;
+    axios.defaults.adapter = async (config) => ({
+      status: 200, statusText: 'OK', headers: {}, config,
+      data: { statusCode: 100, body: { deviceId: 'BOT1', deviceType: 'Bot',
+        power: config.headers.Authorization === 'work-token' ? 'ON' : 'OFF' } },
+    });
+    ` : ''}
     http.createServer = (...args) => {
       const server = originalCreateServer(...args);
       const listen = server.listen.bind(server);
@@ -31,14 +57,14 @@ async function startIsolatedMcp(): Promise<number> {
       return server;
     };
     syncBuiltinESMExports();
-    process.argv = ['node', 'switchbot', '--config', ${JSON.stringify(join(home, 'absent.json'))}, '--no-quota', 'mcp', 'serve', '--port', '1'];
+    process.argv = ['node', 'switchbot', ${keychainOnly ? '' : `'--config', ${JSON.stringify(join(home, 'absent.json'))},`} '--no-quota', 'mcp', 'serve', '--port', '1'];
     process.execArgv = [];
     await import('./src/index.ts');
   `;
   const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '--eval', source], {
     cwd: process.cwd(),
-    env: { ...process.env, HOME: home, XDG_CONFIG_HOME: home, PATH: '',
-      SWITCHBOT_TOKEN: '', SWITCHBOT_SECRET: '', SWITCHBOT_MCP_TOKEN: '' },
+    env: { ...process.env, HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: home, PATH: '',
+      SWITCHBOT_TOKEN: '', SWITCHBOT_SECRET: '', SWITCHBOT_MCP_TOKEN: 'isolated-profile-bearer' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   children.push(child);
@@ -58,6 +84,32 @@ async function startIsolatedMcp(): Promise<number> {
 }
 
 describe('HTTP MCP profile validation', () => {
+  it('accepts keychain-only profiles without authorizing unknown profiles', async () => {
+    const port = await startIsolatedMcp(true);
+    const client = new Client({ name: 'keychain-profile-test', version: '1' });
+    const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`), {
+      requestInit: { headers: { Authorization: 'Bearer isolated-profile-bearer', 'x-switchbot-profile': 'work' } },
+    });
+    try {
+      await client.connect(transport);
+      const result = await client.callTool({ name: 'get_device_status', arguments: { deviceId: 'BOT1' } });
+      expect(result.structuredContent).toMatchObject({ status: { deviceId: 'BOT1', power: 'ON' } });
+
+      const unknown = await fetch(`http://127.0.0.1:${port}/mcp`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer isolated-profile-bearer', 'x-switchbot-profile': 'missing',
+          'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {
+          protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'profile-test', version: '1' },
+        } }),
+      });
+      expect(unknown.status).toBe(401);
+      expect(await unknown.json()).toMatchObject({ error: { code: -32001 } });
+    } finally {
+      await client.close();
+    }
+  });
+
   it('rejects an unsafe CLI profile even when a config override is supplied', () => {
     const home = mkdtempSync(join(tmpdir(), 'switchbot-cli-profile-'));
     homes.push(home);

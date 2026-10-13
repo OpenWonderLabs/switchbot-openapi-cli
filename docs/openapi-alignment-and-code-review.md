@@ -515,3 +515,11 @@ Markdown：使用现有 `.gitignore` 排除依赖和本地文件，修复报告�
 - 隔离的 Windows Node 24.19.0 / Windows 10.0.26200 中，以假的慢钥匙串子进程重现诊断 10 秒超时；修复后约 316 ms 返回健康、零钥匙串读取。未访问真实 Credential Manager 条目。
 - 全量 Linux CLI 168 文件、3085 passed、0 failed，包含两条 failing-before/passing-after 凭据优先级回归。Windows 工作区 169 tests、CLI/Codex/Claude 精确归档安装、editor、CLI 版本拦截、sparse checkout 通过；原生 OpenClaw local/global 两路均列出 18 工具并调用本地 readonly history。
 - Windows fixture 没有安装 Codex host，原生注册被明确跳过；不把 npm 包安装成功当作宿主兼容证明。所有运行使用隔离目录和 dummy credentials，未登录、调用云端或操作设备。
+
+## 合并前双轴审查
+
+- Standards 审查发现 HTTP MCP 将合法的 keychain-only profile 错判为未知 profile。新增真实 HTTP/MCP 回归，修复前返回 401；修复后使用请求 profile 的凭据读取状态，未知 profile 仍为 401。profile 语法检查和 bearer 验证保持在钥匙串读取之前。
+- 实际构建后的二进制配合隔离 fake secret-tool 验证：没有 profile JSON 的 `work` 成功 initialize（200），`missing` 返回 401，错误 bearer 返回 401。未访问真实凭据或云端。
+- 最终全量 CLI 回归 168 文件、3086 passed、0 failed；新增的 keychain-only HTTP 回归同时证明请求凭据隔离与未知 profile 的拒绝边界。
+- Spec 审查确认正常首次发布的五包 `next` → exact artifact/required-host gates → `latest` 流程满足规划。部分发布失败后，重跑发现的 `already-published` 版本不会自动提升，是发布恢复限制，不得通过伪造 outcome 或跳过 host gate 规避。
+- GitHub release 使用独立的四条精简说明，不把完整 CHANGELOG 直接复制为 release 正文。Skills-only/ADR WIP 继续隔离。

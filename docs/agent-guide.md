@@ -165,6 +165,8 @@ MQTT credentials are auto-provisioned from the startup profile's SwitchBot token
 
 HTTP profile selection uses `x-switchbot-profile` before `?profile=...`; names must start with a letter/digit and contain only letters, digits, `_` and `-`. Traversal and explicit empty names are rejected before filesystem access. Named history queries, aggregates, simulations and resets cannot read or remove another profile's history.
 
+Named HTTP profiles may store credentials only in the OS keychain; a profile JSON file is not required. Profile lookup happens after bearer authentication, and names without credentials or a configuration file are rejected.
+
 MQTT subscriptions belong to the startup profile. A request for a different profile cannot read that subscription's `switchbot://events` ring or receive its MQTT account-overview fields. Start a separate subscription/server for a different account.
 
 MCP refreshes credentials at request/tool boundaries with a five-second cache and per-profile single-flight loading. Credential changes are picked up after that cache expires; asynchronous stale loads cannot overwrite a later invalidation. Environment credentials still take precedence over keychain and files.
