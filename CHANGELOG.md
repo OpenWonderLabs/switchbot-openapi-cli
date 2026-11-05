@@ -27,6 +27,8 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - MCP now applies destructive-command safety to cold-cache devices identified only by `controlType`.
 - HTTP MCP returns a protocol error instead of terminating if credentials change during request priming; unavailable replacement keychains cannot fall back to older file credentials.
+- HTTP MCP honors explicit `--config` credentials for named-profile requests without relaxing profile-name or bearer-token checks.
+- MCP tool credential-refresh failures retain structured runtime errors and allow recovery after credential repair.
 - Rule JSON parameters avoid a redundant parse while preserving request and audit formats.
 
 ### Compatibility

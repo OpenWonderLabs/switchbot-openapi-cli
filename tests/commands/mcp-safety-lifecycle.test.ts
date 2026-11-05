@@ -9,6 +9,19 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createSwitchBotMcpServer } from '../../src/commands/mcp.js';
 import { resetListCache, resetStatusCache } from '../../src/devices/cache.js';
 import { idempotencyCache } from '../../src/lib/idempotency.js';
+import { publishCredentialRevision, readCredentialScope } from '../../src/credentials/scope.js';
+import { __resetPrimedCredentials } from '../../src/credentials/prime.js';
+import { createFileBackend } from '../../src/credentials/backends/file.js';
+import { saveConfig } from '../../src/config.js';
+import type * as CredentialStoreModule from '../../src/credentials/keychain.js';
+
+const credentialStoreMock = vi.fn();
+vi.mock('../../src/credentials/keychain.js', async () => {
+  const actual = await vi.importActual<typeof CredentialStoreModule>(
+    '../../src/credentials/keychain.js',
+  );
+  return { ...actual, selectCredentialStore: (...args: unknown[]) => credentialStoreMock(...args) };
+});
 
 const originalArgv = process.argv;
 const originalAdapter = axios.defaults.adapter;
@@ -24,6 +37,8 @@ beforeEach(() => {
   resetListCache();
   resetStatusCache();
   idempotencyCache.clear();
+  __resetPrimedCredentials();
+  credentialStoreMock.mockReset();
 });
 
 afterEach(() => {
@@ -32,6 +47,7 @@ afterEach(() => {
   resetListCache();
   resetStatusCache();
   idempotencyCache.clear();
+  __resetPrimedCredentials();
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
   fs.rmSync(tmp, { recursive: true, force: true });
@@ -46,7 +62,88 @@ async function connectMcp() {
   return { server, client };
 }
 
+describe('MCP Light Bars live parameter validation', () => {
+  it.each([
+    { command: 'setBrightnessAndTemperature', field: 'brightness', min: 0, max: 100, base: { brightness: 50, temperature: 2700 } },
+    { command: 'setBrightnessAndTemperature', field: 'temperature', min: 2700, max: 6500, base: { brightness: 0, temperature: 2700 } },
+    { command: 'setMusicParamMode', field: 'musicMode', min: 0, max: 5, base: { musicMode: 0, musicLevel: 1, sensitivity: 100, controllerMode: 2 } },
+    { command: 'setMusicParamMode', field: 'musicLevel', min: 1, max: 100, base: { musicMode: 0, musicLevel: 1, sensitivity: 100, controllerMode: 2 } },
+    { command: 'setMusicParamMode', field: 'sensitivity', min: 1, max: 100, base: { musicMode: 0, musicLevel: 1, sensitivity: 100, controllerMode: 2 } },
+    { command: 'setMusicParamMode', field: 'controllerMode', min: 0, max: 2, base: { musicMode: 0, musicLevel: 1, sensitivity: 100, controllerMode: 2 } },
+    { command: 'setEffectSpeedMode', field: 'speed', min: 1, max: 255, base: { speed: 1 } },
+    { command: 'setSegmentColorMode', field: 'lightIndex', min: 0, max: 11, base: { color: '0:0:255', lightIndex: 0 } },
+    { command: 'setLightEffect', field: 'effectId', min: 0, max: 25, base: { effectId: 0 } },
+  ])('enforces $command.$field boundaries before dispatch', async ({ command, field, min, max, base }) => {
+    const posts: unknown[] = [];
+    axios.defaults.adapter = async config => {
+      if (config.method === 'post') posts.push(JSON.parse(String(config.data)));
+      return { status: 200, statusText: 'OK', headers: {}, config, data: { statusCode: 100,
+        body: config.method === 'get' ? {
+          deviceList: [{ deviceId: 'BARS1', deviceName: 'Bars', deviceType: 'RGBICWW Light Bars', enableCloudService: true }],
+          infraredRemoteList: [],
+        } : {},
+      } };
+    };
+    const { client, server } = await connectMcp();
+    try {
+      for (const value of [min - 1, max + 1, min + 0.5, String(min), null, undefined]) {
+        const rejected = await client.callTool({
+          name: 'send_command', arguments: { deviceId: 'BARS1', command, parameter: { ...base, [field]: value } },
+        });
+        expect(rejected.isError, `${field}=${value}`).toBe(true);
+        expect(posts).toEqual([]);
+      }
+      for (const value of [min, max]) {
+        const accepted = await client.callTool({
+          name: 'send_command', arguments: { deviceId: 'BARS1', command, parameter: { ...base, [field]: value } },
+        });
+        expect(accepted.structuredContent).toMatchObject({ ok: true });
+      }
+      expect(posts).toEqual([min, max].map(value => ({
+        command, parameter: { ...base, [field]: value }, commandType: 'command',
+      })));
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+});
+
 describe('MCP resolved device type safety', () => {
+  it('returns a structured error for unavailable replacement credentials and recovers after unlocking', async () => {
+    vi.stubEnv('SWITCHBOT_TOKEN', '');
+    vi.stubEnv('SWITCHBOT_SECRET', '');
+    process.argv = ['node', 'switchbot', '--no-quota', '--no-retry'];
+    saveConfig('obsolete-file-token', 'obsolete-file-secret');
+    publishCredentialRevision(readCredentialScope(), true);
+    credentialStoreMock.mockRejectedValue(new Error('keychain locked'));
+    const dispatched: string[] = [];
+    axios.defaults.adapter = async config => {
+      const account = String(config.headers.Authorization);
+      dispatched.push(account);
+      return { status: 200, statusText: 'OK', headers: {}, config,
+        data: { statusCode: 100, body: { deviceId: 'BOT1', deviceType: 'Bot', power: 'ON', account } } };
+    };
+    const { client, server } = await connectMcp();
+    try {
+      const failed = await client.callTool({ name: 'get_device_status', arguments: { deviceId: 'BOT1' } });
+      expect(failed.isError).toBe(true);
+      expect(failed.structuredContent).toMatchObject({ error: { kind: 'runtime', code: 1 } });
+      expect(dispatched).toEqual([]);
+
+      credentialStoreMock.mockResolvedValue({
+        ...createFileBackend(), name: 'keychain',
+        get: async () => ({ token: 'replacement-token', secret: 'replacement-secret' }),
+      });
+      const recovered = await client.callTool({ name: 'get_device_status', arguments: { deviceId: 'BOT1' } });
+      expect(recovered.structuredContent).toMatchObject({ status: { deviceId: 'BOT1', account: 'replacement-token' } });
+      expect(dispatched).toEqual(['replacement-token']);
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
   it.each([
     ['Solar Pan/Tilt Cam 2K', 'controlType', 'disableMotionDetection'],
     ['Smart Lock Ultra Max', 'controlType', 'Unlock'],

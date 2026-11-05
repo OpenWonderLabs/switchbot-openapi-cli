@@ -87,7 +87,7 @@ import { simulateRule } from '../rules/simulate.js';
 import { allowsDirectDestructiveExecution, destructiveExecutionHint } from '../lib/destructive-mode.js';
 import { writeFileSync } from 'node:fs';
 import { readAudit, type AuditEntry } from '../utils/audit.js';
-import { isDryRun, parseDurationToMs } from '../utils/flags.js';
+import { getConfigPath, isDryRun, parseDurationToMs } from '../utils/flags.js';
 import { resolveDeviceId } from '../utils/name-resolver.js';
 import { preparePlanTargets, type PlanPreflightResult } from '../lib/plan-preflight.js';
 import { parse as yamlParse } from 'yaml';
@@ -450,7 +450,11 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
     callback: (args: SchemaOutput<InputArgs>, extra: RequestHandlerExtra<ServerRequest, ServerNotification>) => CallToolResult | Promise<CallToolResult>,
   ) => {
     const primedCallback = async (args: SchemaOutput<InputArgs>, extra: RequestHandlerExtra<ServerRequest, ServerNotification>) => {
-      await primeCredentials(getActiveProfile() ?? 'default');
+      try {
+        await primeCredentials(getActiveProfile() ?? 'default');
+      } catch (error) {
+        return apiErrorToMcpError(error);
+      }
       return callback(args, extra);
     };
     // Every local tool has an input schema; the SDK also supports a separate no-input callback form.
@@ -2908,13 +2912,13 @@ process_uptime_seconds ${Math.floor(process.uptime())}
               }
             }
 
-            // Resolve keychain-only profiles after authentication, before rejecting
-            // names that have neither credentials nor a profile configuration.
+            // Explicit environment/config credentials override profile selection.
+            // Otherwise resolve keychain-only profiles before rejecting unknown names.
             if (profile) {
               try {
                 await primeCredentials(profile);
                 const envCredsPresent = !!(process.env.SWITCHBOT_TOKEN && process.env.SWITCHBOT_SECRET);
-                if (!envCredsPresent && !getPrimedCredentials(profile) && !fs.existsSync(profileFilePath(profile))) {
+                if (!envCredsPresent && !getConfigPath() && !getPrimedCredentials(profile) && !fs.existsSync(profileFilePath(profile))) {
                   res.writeHead(401, { 'Content-Type': 'application/json' });
                   res.end(JSON.stringify({
                     jsonrpc: '2.0',

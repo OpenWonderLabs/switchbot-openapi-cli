@@ -550,9 +550,26 @@ describe('authentication cache lifecycle', () => {
       .toEqual({ result: 'new result', replayed: false });
   });
 
-  it('preserves the current account caches when login fails', async () => {
-    browserLoginMock.mockRejectedValue(new Error('user cancelled'));
-    expect((await runCli(['auth', 'login', '--no-open'])).exitCode).toBe(1);
+  it.each([
+    ['login', 'cancelled'], ['login', 'verification'], ['login', 'persistence'],
+    ['set', 'persistence'], ['delete', 'persistence'], ['migrate', 'persistence'],
+  ])('preserves the current account caches after %s %s failure', async (command, failure) => {
+    browserLoginMock.mockResolvedValue({ token: 'new-token', secret: 'new-secret' });
+    verifyCredsMock.mockResolvedValue({ ok: true });
+    if (failure === 'cancelled') browserLoginMock.mockRejectedValue(new Error('user cancelled'));
+    else if (failure === 'verification') verifyCredsMock.mockResolvedValue({ ok: false, reason: 'invalid credentials' });
+    else selectMock.mockResolvedValue(makeStore({
+      writable: true,
+      getResult: { token: 'old-token', secret: 'old-secret' },
+      setImpl: async () => { throw new Error('credential store is read-only'); },
+      deleteImpl: async () => { throw new Error('credential store is read-only'); },
+    }));
+    const input = path.join(isolatedHome, 'credentials.json');
+    fs.writeFileSync(input, JSON.stringify({ token: 'new-token', secret: 'new-secret' }));
+    const args = command === 'login' ? ['auth', 'login', '--no-open']
+      : command === 'set' ? ['auth', 'keychain', 'set', '--stdin-file', input]
+        : ['auth', 'keychain', command, ...(command === 'delete' ? ['--yes'] : [])];
+    expect((await runCli(args)).exitCode).toBe(1);
     expect(loadCache()?.devices.OLD.name).toBe('Old device');
     expect(getCachedStatus('OLD', 60_000)).toEqual({ power: 'on' });
     expect(getPrimedCredentials('default')?.token).toBe('old-token');

@@ -272,6 +272,9 @@ rebound automatically. Audit, policy, and event-history files are not cleared.
 If a newly selected native keychain is locked or unavailable, requests fail
 closed rather than using older file credentials. Offline commands and
 credential-repair commands remain available.
+HTTP MCP also honors `--config` when a request selects a named profile; the
+override selects the account, while profile-name and bearer-token checks
+remain enforced.
 
 For HTTP `401`, check the active token/secret, signature and system clock;
 use `auth login` or replace the credential source locally, never paste secrets
@@ -490,7 +493,7 @@ Policy commands retain their documented specialized exit codes (including YAML p
 
 ## Development
 
-Verified CLI regression suite: 3163 tests. Plugin workspace checks are separate.
+Verified CLI regression suite: 3191 tests. Plugin workspace checks are separate.
 
 ```bash
 npm install && npm run build

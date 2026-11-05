@@ -25,6 +25,7 @@ import {
 } from '../../src/devices/cache.js';
 import { withRequestContext } from '../../src/lib/request-context.js';
 
+const originalArgv = process.argv;
 let tmpDir: string;
 
 const sampleBody = {
@@ -46,6 +47,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  process.argv = originalArgv;
   vi.restoreAllMocks();
   resetListCache();
   resetStatusCache();
@@ -80,6 +82,40 @@ describe('cache scoping — no profile (legacy path)', () => {
 
     expect(loadCache()).toBeNull();
     expect(getCachedStatus('DEV-1', 60_000)).toBeNull();
+  });
+
+  it('does not restore obsolete hashed-default inventory or status after clearing the active cache', () => {
+    const obsolete = path.join(tmpDir, '.switchbot', 'cache', sha8('default'));
+    const now = new Date().toISOString();
+    fs.mkdirSync(obsolete, { recursive: true });
+    fs.writeFileSync(path.join(obsolete, 'devices.json'), JSON.stringify({
+      lastUpdated: now, devices: { OLD: { type: 'Bot', name: 'Old account', category: 'physical' } },
+    }));
+    fs.writeFileSync(path.join(obsolete, 'status.json'), JSON.stringify({
+      entries: { OLD: { fetchedAt: now, body: { power: 'on' } } },
+    }));
+    updateCacheFromDeviceList(sampleBody);
+    setCachedStatus('DEV-1', { power: 'off' });
+
+    withRequestContext({ profile: 'default' }, () => {
+      expect(loadCache()?.devices).toEqual({
+        'DEV-1': { type: 'Bot', typeSource: 'deviceType', name: 'Bot', category: 'physical' },
+      });
+      expect(getCachedStatus('OLD', 60_000)).toBeNull();
+      expect(getCachedStatus('DEV-1', 60_000)).toEqual({ power: 'off' });
+      clearCache();
+      clearStatusCache();
+    });
+    resetListCache();
+    resetStatusCache();
+
+    for (const profile of [undefined, 'default']) {
+      withRequestContext({ profile }, () => {
+        expect(loadCache()).toBeNull();
+        expect(getCachedStatus('OLD', 60_000)).toBeNull();
+        expect(getCachedStatus('DEV-1', 60_000)).toBeNull();
+      });
+    }
   });
 });
 

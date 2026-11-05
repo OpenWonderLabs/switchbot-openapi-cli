@@ -127,6 +127,25 @@ describe('primeCredentials', () => {
     expect(dispatched).toEqual(['account-B']);
   });
 
+  it.each(['environment', 'explicit config'])('honors the %s override while a replacement keychain is unavailable', async source => {
+    saveConfig('file-account', 'file-secret');
+    publishCredentialRevision(readCredentialScope(), true);
+    selectMock.mockRejectedValue(new Error('keychain locked'));
+    if (source === 'environment') {
+      vi.stubEnv('SWITCHBOT_TOKEN', 'env-account');
+      vi.stubEnv('SWITCHBOT_SECRET', 'env-secret');
+    } else {
+      process.argv.push('--config', path.join(home, '.switchbot', 'config.json'));
+    }
+    axios.defaults.adapter = async config => ({
+      status: 200, statusText: 'OK', headers: {}, config,
+      data: { statusCode: 100, body: { account: String(config.headers.Authorization) } },
+    });
+
+    const response = await createClient().get('/v1.1/devices');
+    expect(response.data.body).toEqual({ account: source === 'environment' ? 'env-account' : 'file-account' });
+  });
+
   it('does not let synchronous credential consumers fall back to an obsolete file after keychain replacement', () => {
     saveConfig('account-A', 'secret-A');
     publishCredentialRevision(readCredentialScope(), true);

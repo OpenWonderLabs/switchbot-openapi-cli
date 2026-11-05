@@ -178,7 +178,12 @@ MQTT credentials are auto-provisioned from the startup profile's SwitchBot token
 
 HTTP profile selection uses `x-switchbot-profile` before `?profile=...`; names must start with a letter/digit and contain only letters, digits, `_` and `-`. Traversal and explicit empty names are rejected before filesystem access. Named history queries, aggregates, simulations and resets cannot read or remove another profile's history.
 
-Named HTTP profiles may store credentials only in the OS keychain; a profile JSON file is not required. Profile lookup happens after bearer authentication, and names without credentials or a configuration file are rejected.
+Named HTTP profiles may store credentials only in the OS keychain; a profile
+JSON file is not required. Profile lookup happens after bearer authentication.
+Without complete environment credentials or a `--config` override, names
+without credentials or a configuration file are rejected. An explicit override
+selects the account even when the request names another valid profile; profile
+syntax and bearer-token checks still apply.
 
 MQTT subscriptions belong to the startup profile. A request for a different profile cannot read that subscription's `switchbot://events` ring or receive its MQTT account-overview fields. Restart the subscription/server after switching its account; existing streams and event history are not rebound or cleared.
 
@@ -202,6 +207,12 @@ If the startup profile's replacement keychain is unavailable, optional MQTT
 initialization is disabled instead of using an older file credential. HTTP MCP
 can still serve other valid named profiles. Restore the keychain and restart
 the server to establish the startup subscription.
+
+Credential-refresh failures inside MCP tool callbacks retain
+`isError: true` and `structuredContent.error` with kind `runtime`; the callback
+does not dispatch an API request. After unlocking the replacement keychain or
+repairing credentials, retry explicitly. HTTP request preflight failures remain
+JSON-RPC protocol errors rather than tool results.
 
 Implicit and explicit `default` use the same legacy cache paths. Named
 profiles are isolated; `--config` places caches in the config file's

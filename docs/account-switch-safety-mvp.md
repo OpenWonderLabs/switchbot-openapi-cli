@@ -87,7 +87,7 @@ parameter shapes must remain unchanged.
 
 ## Delivery evidence
 
-- Full CLI suite: **180 files, 3163 tests passed**; its setup ran the release
+- Full CLI suite: **180 files, 3191 tests passed**; its setup ran the release
   build and TypeScript typecheck. Plugin workspace tests were not rerun.
 - `npm run lint:md` passed.
 - Isolated real CLI + MCP SDK smoke: a separate `config set-token` process
@@ -101,5 +101,20 @@ parameter shapes must remain unchanged.
   failure and repair, retained-client/429 races, HTTP MCP recovery including an
   unavailable startup profile, profile scoping, and invalid SDK output. All
   network boundaries were local adapters.
+- Follow-up coverage protects failed credential mutations, named-profile and
+  config-directory isolation, explicit credential overrides, obsolete default
+  caches, dispatched HMAC signatures, and dry-run read/mutation separation.
+  Live MCP cases exercise nine Light Bars numeric fields at both endpoints
+  and reject out-of-range, fractional, string, null, and missing values.
+  Policy and cold-cache rule cases preserve the Solar/Video Doorbell exception;
+  RGB and multiline JSON cases assert both wire and audit data, including dry-runs.
+- Two new regressions failed before the minimal MCP fixes: named-profile HTTP
+  requests ignored `--config`, and tool credential-refresh failures omitted
+  structured errors. Both now pass. The ordinal filesystem-read race probe was
+  removed; retained HTTP recovery cases verify distinct replacement accounts.
+- Built CLI HTTP/stdio smoke verified config-override dispatch, structured
+  credential failure with zero API requests, and same-process recovery after
+  an external `config set-token` repair. A local HTTP boundary replaced the
+  cloud; no real credential store was accessed.
 - No real OAuth, cloud API, MQTT broker, camera/image URL, or physical device
   was exercised.

@@ -117,6 +117,8 @@ describe('executeRuleAction', () => {
     ['Garage Door Opener', 'turnOff', false],
     ['Color Bulb', 'turnOn', true],
     [null, 'turnOn', false],
+    ['Solar Pan/Tilt Cam 2K', 'disableMotionDetection', false],
+    ['Video Doorbell', 'disableMotionDetection', true],
   ])('checks live inventory before automating %s %s', async (deviceType, command, allowed) => {
     const requests: string[] = [];
     const client = axios.create({
@@ -163,9 +165,12 @@ describe('executeRuleAction', () => {
 
     expect(result.ok).toBe(true);
     expect(posted?.parameter).toEqual({ action: 'sweep', param: { fanLevel: 2, times: 1 } });
+    expect(readAudit(auditFile).at(-1)).toMatchObject({
+      kind: 'rule-fire', result: 'ok', parameter: { action: 'sweep', param: { fanLevel: 2, times: 1 } },
+    });
   });
 
-  it('preserves spaces in JSON strings and unrelated text parameters', async () => {
+  it.each([false, true])('preserves JSON and text whitespace in wire and audit data with dryRun=%s', async dryRun => {
     updateCacheFromDeviceList({
       deviceList: [
         { deviceId: 'FRAME-1', deviceName: 'Frame', deviceType: 'AI Art Frame' },
@@ -187,55 +192,43 @@ describe('executeRuleAction', () => {
     for (const command of commands) {
       const action = { command };
       const result = await executeRuleAction(action, {
-        rule: { ...baseRule, then: [action] }, fireId: command, aliases: {}, httpClient: client,
+        rule: { ...baseRule, then: [action], dry_run: dryRun }, fireId: command, aliases: {}, httpClient: client,
       });
       expect(result.ok, command).toBe(true);
     }
-    expect(parameters).toEqual([{ imageUrl: 'https://example.test/my art.jpg' }, 'hello home']);
+    const expected = [{ imageUrl: 'https://example.test/my art.jpg' }, 'hello home'];
+    expect(parameters).toEqual(dryRun ? [] : expected);
+    const kinds = dryRun ? ['rule-fire-dry'] : ['command', 'rule-fire'];
+    expect(readAudit(auditFile).map(({ kind, result, parameter }) => ({ kind, result, parameter })))
+      .toEqual(expected.flatMap(parameter => kinds.map(kind => ({ kind, result: 'ok', parameter }))));
   });
 
-  it('sends legacy space-separated and colon-separated RGB rules identically', async () => {
+  it.each([
+    ['Color Bulb', 'setColor', false], ['Color Bulb', 'setColor', true],
+    ['RGBICWW Ceiling Light', 'setColorLightRGB', false], ['RGBICWW Ceiling Light', 'setColorLightRGB', true],
+  ] as const)('preserves both RGB formats for %s %s with dryRun=%s', async (deviceType, verb, dryRun) => {
     updateCacheFromDeviceList({
-      deviceList: [{ deviceId: 'LAMP-1', deviceName: 'Lamp', deviceType: 'Color Bulb' }],
+      deviceList: [{ deviceId: 'LAMP-1', deviceName: 'Lamp', deviceType }],
       infraredRemoteList: [],
     });
     const parameters: unknown[] = [];
     const client = axios.create({
-      adapter: async (config) => {
+      adapter: async config => {
         parameters.push(JSON.parse(config.data as string).parameter);
         return { data: { body: {} }, status: 200, statusText: 'OK', headers: {}, config };
       },
     });
-
     for (const color of ['255 0 0', '255:0:0', '255   0\t0']) {
-      const action = { command: `devices command LAMP-1 setColor ${color}` };
+      const action = { command: `devices command LAMP-1 ${verb} ${color}` };
       const result = await executeRuleAction(action, {
-        rule: { ...baseRule, then: [action] }, fireId: color, aliases: {}, httpClient: client,
+        rule: { ...baseRule, then: [action], dry_run: dryRun }, fireId: color, aliases: {}, httpClient: client,
       });
       expect(result.ok, color).toBe(true);
+      expect(readAudit(auditFile).at(-1)).toMatchObject({
+        kind: dryRun ? 'rule-fire-dry' : 'rule-fire', result: 'ok', command: verb, parameter: '255:0:0',
+      });
     }
-    expect(parameters).toEqual(['255:0:0', '255:0:0', '255:0:0']);
-  });
-
-  it('preserves space-separated RGB rules for the ceiling color light', async () => {
-    updateCacheFromDeviceList({
-      deviceList: [{ deviceId: 'CEILING-1', deviceName: 'Ceiling', deviceType: 'RGBICWW Ceiling Light' }],
-      infraredRemoteList: [],
-    });
-    let parameter: unknown;
-    const client = axios.create({
-      adapter: async (config) => {
-        parameter = JSON.parse(config.data as string).parameter;
-        return { data: { body: {} }, status: 200, statusText: 'OK', headers: {}, config };
-      },
-    });
-    const action = { command: 'devices command CEILING-1 setColorLightRGB 255 0 0' };
-    const result = await executeRuleAction(action, {
-      rule: { ...baseRule, then: [action] }, fireId: 'ceiling-rgb', aliases: {}, httpClient: client,
-    });
-
-    expect(result.ok).toBe(true);
-    expect(parameter).toBe('255:0:0');
+    expect(parameters).toEqual(dryRun ? [] : ['255:0:0', '255:0:0', '255:0:0']);
   });
 
   it('rejects invalid space-separated RGB rules before sending', async () => {

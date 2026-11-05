@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { EventEmitter, once } from 'node:events';
+import { createHmac } from 'node:crypto';
 import axios from 'axios';
 import { saveConfig } from '../../src/config.js';
 import { executeCommand, fetchDeviceList, fetchDeviceStatus } from '../../src/lib/devices.js';
@@ -11,6 +12,7 @@ import { loadCache, loadStatusCache, resetListCache, resetStatusCache, setCached
 import { __resetPrimedCredentials } from '../../src/credentials/prime.js';
 import { apiCircuitBreaker, createClient } from '../../src/api/client.js';
 import { idempotencyCache } from '../../src/lib/idempotency.js';
+import { withRequestContext } from '../../src/lib/request-context.js';
 
 const originalArgv = process.argv;
 const originalAdapter = axios.defaults.adapter;
@@ -45,11 +47,11 @@ afterEach(() => {
   fs.rmSync(home, { recursive: true, force: true });
 });
 
-function changeAccount(): void {
+function changeAccount(scopeArgs = ['--config', configPath]): void {
   const envFile = path.join(home, 'account-b.env');
   fs.writeFileSync(envFile, 'SWITCHBOT_TOKEN=account-B\nSWITCHBOT_SECRET=secret-B\n');
   const result = spawnSync(process.execPath, [
-    '--import', 'tsx', 'src/index.ts', '--config', configPath, '--json',
+    '--import', 'tsx', 'src/index.ts', ...scopeArgs, '--json',
     'config', 'set-token', '--from-env-file', envFile,
   ], {
     cwd: process.cwd(),
@@ -59,6 +61,26 @@ function changeAccount(): void {
   if (result.status !== 0) throw new Error(result.stderr || result.stdout || String(result.error));
 }
 
+describe('authenticated dry-run requests', () => {
+  it('allows inventory reads while refusing command dispatch', async () => {
+    saveConfig('account-A', 'secret-A');
+    process.argv.push('--dry-run');
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const requests: string[] = [];
+    axios.defaults.adapter = async config => {
+      requests.push(`${config.method} ${config.url}`);
+      return { status: 200, statusText: 'OK', headers: {}, config, data: {
+        statusCode: 100, body: { deviceList: [{ deviceId: 'A-DEVICE' }], infraredRemoteList: [] },
+      } };
+    };
+    const client = createClient();
+    expect((await client.get('/v1.1/devices')).data.body.deviceList).toEqual([{ deviceId: 'A-DEVICE' }]);
+    await expect(client.post('/v1.1/devices/A-DEVICE/commands', { command: 'turnOn' }))
+      .rejects.toMatchObject({ name: 'DryRunSignal' });
+    expect(requests).toEqual(['get /v1.1/devices']);
+  });
+});
+
 describe('account changes across processes', () => {
   it('stops serving the old account inventory and status after an external credential command', async () => {
     saveConfig('account-A', 'secret-A');
@@ -67,6 +89,9 @@ describe('account changes across processes', () => {
       const token = String(config.headers.Authorization);
       requests.push({ url: config.url, token });
       const oldAccount = token === 'account-A';
+      const expectedSignature = createHmac('sha256', oldAccount ? 'secret-A' : 'secret-B')
+        .update(`${token}${config.headers.t}${config.headers.nonce}`).digest('base64').toUpperCase();
+      expect(config.headers.sign).toBe(expectedSignature);
       const body = config.url === '/v1.1/devices' ? {
         deviceList: [{
           deviceId: oldAccount ? 'A-DEVICE' : 'B-DEVICE', deviceName: 'Lamp', deviceType: 'Color Bulb',
@@ -86,6 +111,52 @@ describe('account changes across processes', () => {
     expect(requests.slice(2)).toEqual([
       { url: '/v1.1/devices', token: 'account-B' },
       { url: '/v1.1/devices/SHARED-DEVICE/status', token: 'account-B' },
+    ]);
+  });
+
+  it.each(['named profiles', 'config directories'])('rotates only the selected account across %s', async mode => {
+    const scopeArgs = (name: string) => mode === 'named profiles'
+      ? ['--profile', name]
+      : ['--config', path.join(home, name, 'config.json')];
+    const inScope = <T>(name: string, run: () => T): T => {
+      process.argv = ['node', 'switchbot', ...scopeArgs(name), '--cache', '1h', '--no-quota', '--no-retry'];
+      return withRequestContext({ profile: mode === 'named profiles' ? name : 'default' }, run);
+    };
+    inScope('alpha', () => saveConfig('alpha-token', 'alpha-secret'));
+    inScope('beta', () => saveConfig('beta-token', 'beta-secret'));
+    const dispatched: Array<{ account: string; method: string | undefined }> = [];
+    axios.defaults.adapter = async config => {
+      const account = String(config.headers.Authorization);
+      dispatched.push({ account, method: config.method });
+      const body = config.url === '/v1.1/devices'
+        ? { deviceList: [{ deviceId: 'SHARED', deviceName: account, deviceType: 'Bot' }], infraredRemoteList: [] }
+        : { account };
+      return { status: 200, statusText: 'OK', headers: {}, config, data: { statusCode: 100, body } };
+    };
+    const readAccount = (name: string) => inScope(name, async () => ({
+      deviceName: (await fetchDeviceList()).deviceList[0].deviceName,
+      status: await fetchDeviceStatus('SHARED'),
+      command: await executeCommand('SHARED', 'turnOn', 'default', 'command', undefined, { idempotencyKey: 'shared-key' }),
+    }));
+
+    expect(await readAccount('alpha')).toEqual({
+      deviceName: 'alpha-token', status: { account: 'alpha-token' }, command: { account: 'alpha-token' },
+    });
+    expect(await readAccount('beta')).toEqual({
+      deviceName: 'beta-token', status: { account: 'beta-token' }, command: { account: 'beta-token' },
+    });
+    changeAccount(scopeArgs('alpha'));
+    dispatched.length = 0;
+
+    expect(await readAccount('beta')).toEqual({
+      deviceName: 'beta-token', status: { account: 'beta-token' }, command: { account: 'beta-token', replayed: true },
+    });
+    expect(dispatched).toEqual([]);
+    expect(await readAccount('alpha')).toEqual({
+      deviceName: 'account-B', status: { account: 'account-B' }, command: { account: 'account-B' },
+    });
+    expect(dispatched).toEqual([
+      { account: 'account-B', method: 'get' }, { account: 'account-B', method: 'get' }, { account: 'account-B', method: 'post' },
     ]);
   });
 
