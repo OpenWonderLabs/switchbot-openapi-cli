@@ -1,0 +1,38 @@
+CHANGELOG.md
+  h_dab4e149c2c598 30-31
+README.md
+  h_dab4e149c2c598 275-277,496
+docs/account-switch-safety-mvp.md
+  h_dab4e149c2c598 90,104-118
+docs/agent-guide.md
+  h_dab4e149c2c598 181-186,211-216
+src/commands/mcp.ts
+  h_dab4e149c2c598 90,453-457,2915-2916,2921
+tests/commands/auth.test.ts
+  h_dab4e149c2c598 553-572
+tests/commands/mcp-profile-http.test.ts
+  h_dab4e149c2c598 17,19,21-27,33,49-51,62,70-74,85-86,100,128-130,132-134,136,143,157,178,186
+tests/commands/mcp-safety-lifecycle.test.ts
+  h_dab4e149c2c598 12-24,40-41,50,65-111,113-146
+tests/credentials/prime.test.ts
+  h_dab4e149c2c598 130-148
+tests/devices/account-cache-lifecycle.test.ts
+  h_dab4e149c2c598 7,15,50,54,64-83,92-94,117-162
+tests/devices/cache-scoping.test.ts
+  h_dab4e149c2c598 28,50,86-119
+tests/policy/camera-safety-alignment.test.ts
+  h_dab4e149c2c598 7,32-62
+tests/rules/action.test.ts
+  h_dab4e149c2c598 120-121,168-170,173,195,199-203,206-209,211,216,222,224,227-229,231
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "cfc82a4310c0f5ebbc41a78f7fec716a12ec74da",
+  "prompts": {},
+  "humans": {
+    "h_dab4e149c2c598": {
+      "author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
