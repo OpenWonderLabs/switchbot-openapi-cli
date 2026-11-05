@@ -168,6 +168,120 @@ describe('mcp server', () => {
     delete process.env.SWITCHBOT_ALLOW_DIRECT_DESTRUCTIVE;
   });
 
+  it('validates structured tool errors after SDK discovery', async () => {
+    cacheMock.map.set('BULB1', { type: 'Color Bulb', name: 'Desk Lamp', category: 'physical' });
+    const { server, client } = await pair();
+    try {
+      const discovery = await client.listTools();
+      const tool = discovery.tools.find((item) => item.name === 'send_command');
+      expect(tool?.outputSchema?.type).toBe('object');
+
+      const res = await client.callTool({
+        name: 'send_command',
+        arguments: { deviceId: 'BULB1', command: 'setBrightness', parameter: '999', dryRun: true },
+      });
+      expect(res.isError).toBe(true);
+      expect(res.structuredContent).toMatchObject({ error: { kind: 'usage', code: 2 } });
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it('previews an RGBICWW strip light effect as an object', async () => {
+    cacheMock.map.set('LIGHT1', { type: 'RGBICWW Strip Light', name: 'Strip', category: 'physical' });
+    const { server, client } = await pair();
+    try {
+      await client.listTools();
+      const res = await client.callTool({
+        name: 'send_command',
+        arguments: { deviceId: 'LIGHT1', command: 'setLightEffect', parameter: '{"effectId":25}', dryRun: true },
+      });
+      expect(res.isError).toBeFalsy();
+      expect(res.structuredContent).toMatchObject({
+        ok: true, wouldSend: { command: 'setLightEffect', parameter: { effectId: 25 } },
+      });
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it('offers light effects only on the documented existing models', async () => {
+    const supported = [
+      'Permanent Outdoor Lights', 'RGBIC Neon Rope Light', 'RGBIC Neon Wire Rope Light',
+      'RGBICWW Ceiling Light', 'RGBICWW Floor Lamp', 'RGBICWW Strip Light',
+    ];
+    const { server, client } = await pair();
+    try {
+      await client.listTools();
+      for (const type of [...supported, 'Color Bulb', 'Ceiling Light']) {
+        cacheMock.map.set('LIGHT1', { type, name: 'Light', category: 'physical' });
+        const res = await client.callTool({
+          name: 'send_command',
+          arguments: { deviceId: 'LIGHT1', command: 'setLightEffect', parameter: { effectId: 0 }, dryRun: true },
+        });
+        expect(Boolean(res.isError), type).toBe(!supported.includes(type));
+      }
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it('previews Light Bars brightness at its zero boundary', async () => {
+    cacheMock.map.set('BARS1', { type: 'RGBICWW Light Bars', name: 'Bars', category: 'physical' });
+    const { server, client } = await pair();
+    try {
+      await client.listTools();
+      const res = await client.callTool({
+        name: 'send_command',
+        arguments: { deviceId: 'BARS1', command: 'setBrightness', parameter: '0', dryRun: true },
+      });
+      expect(res.isError).toBeFalsy();
+      expect(res.structuredContent).toMatchObject({
+        ok: true, wouldSend: { command: 'setBrightness', parameter: '0' },
+      });
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it('validates and previews Light Bars object commands', async () => {
+    cacheMock.map.set('BARS1', { type: 'RGBICWW Light Bars', name: 'Bars', category: 'physical' });
+    const cases = [
+      ['setBrightnessAndTemperature', { brightness: 0, temperature: 2700 }, { brightness: '0', temperature: 2700 }],
+      ['setMusicColorMode', { colorList: [] }, { colorList: ['256:0:0'] }],
+      ['setMusicParamMode', { musicMode: 0, musicLevel: 1, sensitivity: 100, controllerMode: 2 }, { musicMode: 0, musicLevel: 0, sensitivity: 1, controllerMode: 0 }],
+      ['setEffectColorMode', { style: 999, colorList: ['0:255:0'] }, { style: '1', colorList: [] }],
+      ['setEffectSpeedMode', { speed: 255 }, { speed: 0 }],
+      ['setSegmentColorMode', { color: '0:0:255', lightIndex: 11 }, { color: '0:0:255', lightIndex: 12 }],
+      ['setLightEffect', { effectId: 25 }, { effectId: 26 }],
+    ] as const;
+    const { server, client } = await pair();
+    try {
+      await client.listTools();
+      for (const [command, valid, invalid] of cases) {
+        const ok = await client.callTool({
+          name: 'send_command',
+          arguments: { deviceId: 'BARS1', command, parameter: JSON.stringify(valid), dryRun: true },
+        });
+        expect(ok.isError, command).toBeFalsy();
+        expect(ok.structuredContent, command).toMatchObject({ wouldSend: { command, parameter: valid } });
+        const rejected = await client.callTool({
+          name: 'send_command',
+          arguments: { deviceId: 'BARS1', command, parameter: invalid, dryRun: true },
+        });
+        expect(rejected.isError, command).toBe(true);
+      }
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
 
   it('send_command rejects destructive commands without confirm:true', async () => {
     cacheMock.map.set('LOCK1', { type: 'Smart Lock', name: 'Front Door', category: 'physical' });
@@ -189,6 +303,20 @@ describe('mcp server', () => {
     expect(parsed.error.context.destructiveReason).toBeTypeOf('string');
     expect(parsed.error.hint).toContain('Reason:');
     // Should not have called the API at all.
+    expect(apiMock.__instance.post).not.toHaveBeenCalled();
+  });
+
+  it('blocks mixed-case destructive commands before sending', async () => {
+    cacheMock.map.set('LOCK1', { type: 'Smart Lock', name: 'Front Door', category: 'physical' });
+    apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body: {} } });
+    const { client } = await pair();
+
+    const res = await client.callTool({
+      name: 'send_command',
+      arguments: { deviceId: 'LOCK1', command: 'Unlock', confirm: false },
+    });
+
+    expect(res.isError).toBe(true);
     expect(apiMock.__instance.post).not.toHaveBeenCalled();
   });
 

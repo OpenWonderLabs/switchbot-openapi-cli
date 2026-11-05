@@ -229,6 +229,19 @@ export const RESOURCE_CATALOG: ResourceCatalog = {
       {
         eventType: 'changeReport',
         eventVersion: '1',
+        devicePattern: 'Lock Ultra Max',
+        context: {
+          deviceType: 'Smart Lock Ultra Max',
+          fields: [
+            ...COMMON_WEBHOOK_CONTEXT_FIELDS,
+            { name: 'lockState', type: 'string', description: 'The state of the device: LOCKED, UNLOCKED, or JAMMED.' },
+            { name: 'battery', type: 'number', description: 'The current battery level (0–100).' },
+          ],
+        },
+      },
+      {
+        eventType: 'changeReport',
+        eventVersion: '1',
         devicePattern: 'Plug Mini (US)',
         context: {
           deviceType: 'WoPlugUS',
@@ -255,7 +268,7 @@ export const RESOURCE_CATALOG: ResourceCatalog = {
         eventVersion: '1',
         devicePattern: 'Plug Mini (EU)',
         context: {
-          deviceType: 'WoPlugEU',
+          deviceType: 'Plug Mini (EU)',
           fields: [
             { name: 'deviceMac', type: 'string', description: 'Device MAC address.' },
             { name: 'online', type: 'boolean', description: 'Whether the plug is connected.' },
@@ -340,6 +353,21 @@ export const RESOURCE_CATALOG: ResourceCatalog = {
           { name: 'calibrate', type: 'boolean', description: 'True if device is calibrated' },
           { name: 'group', type: 'boolean', description: 'Whether the curtain belongs to a group.' },
           { name: 'battery', type: 'number', description: 'Battery remaining (%)' },
+          ],
+        },
+      },
+      {
+        eventType: 'changeReport',
+        eventVersion: '1',
+        devicePattern: 'Curtain 4',
+        context: {
+          deviceType: 'WoCurtain4',
+          fields: [
+            ...COMMON_WEBHOOK_CONTEXT_FIELDS,
+            { name: 'calibrate', type: 'boolean', description: 'Whether the open and close positions have been calibrated.' },
+            { name: 'group', type: 'boolean', description: 'Whether the curtain is paired with or grouped with another curtain.' },
+            { name: 'slidePosition', type: 'number', description: 'Current slide position percentage (0–100).' },
+            { name: 'battery', type: 'number', description: 'Current battery level (0–100).' },
           ],
         },
       },
@@ -536,6 +564,19 @@ export const RESOURCE_CATALOG: ResourceCatalog = {
             ...COMMON_WEBHOOK_CONTEXT_FIELDS,
             { name: 'displayMode', type: 'number', description: 'display mode: 0 = Static image; 1 = Slideshow' },
             { name: 'battery', type: 'number', description: 'the current battery level, 0-100' },
+          ],
+        },
+      },
+      {
+        eventType: 'changeReport',
+        eventVersion: '1',
+        devicePattern: 'AI Art Frame 2',
+        context: {
+          deviceType: 'AI Art Frame Luma',
+          fields: [
+            ...COMMON_WEBHOOK_CONTEXT_FIELDS,
+            { name: 'displayMode', type: 'number', description: 'Display mode: 0 = Static image; 1 = Slideshow.' },
+            { name: 'battery', type: 'number', description: 'Current battery level (0–100).' },
           ],
         },
       },
@@ -835,6 +876,22 @@ export const RESOURCE_CATALOG: ResourceCatalog = {
       {
         eventType: 'changeReport',
         eventVersion: '1',
+        devicePattern: 'Robot Vacuum K11+ Pro',
+        context: {
+          deviceType: 'Robot Vacuum Cleaner K11 Plus Pro',
+          fields: [
+            ...COMMON_WEBHOOK_CONTEXT_FIELDS,
+            { name: 'workingStatus', type: 'string', description: 'Current working status.' },
+            { name: 'onlineStatus', type: 'string', description: 'Connection status: online or offline.' },
+            { name: 'battery', type: 'number', description: 'Current battery level (0–100).' },
+            { name: 'waterBaseBattery', type: 'number', description: 'Current water base battery level (0–100).' },
+            { name: 'taskType', type: 'string', description: 'Current task in progress.' },
+          ],
+        },
+      },
+      {
+        eventType: 'changeReport',
+        eventVersion: '1',
         devicePattern: 'K20+ Pro',
         context: {
           deviceType: 'Robot Vacuum Cleaner K20+ Pro',
@@ -1115,6 +1172,19 @@ export const RESOURCE_CATALOG: ResourceCatalog = {
           fields: [
             ...COMMON_WEBHOOK_CONTEXT_FIELDS,
             { name: 'detectionState', type: 'string', description: 'the detection state of the device, "DETECTED" stands for motion is detected' },
+          ],
+        },
+      },
+      {
+        eventType: 'changeReport',
+        eventVersion: '1',
+        devicePattern: 'Solar Pan/Tilt Cam 2K',
+        context: {
+          deviceType: 'Solar Pan/Tilt Cam 2K',
+          fields: [
+            ...COMMON_WEBHOOK_CONTEXT_FIELDS,
+            { name: 'battery', type: 'number', description: 'Current battery level (0–100).' },
+            { name: 'detectionState', type: 'string', description: 'Motion state; DETECTED is sent when motion is detected and is absent from battery-only events.' },
           ],
         },
       },

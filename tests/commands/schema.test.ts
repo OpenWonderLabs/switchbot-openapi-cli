@@ -100,7 +100,7 @@ describe('schema export', () => {
 
     expect(fieldType('WoMeterPlus', 'scale')).toBe('string');
     expect(fieldType('MeterPro(CO2)', 'CO2')).toBe('number');
-    expect(fieldType('WoPlugEU', 'switchStatus')).toBe('number');
+    expect(fieldType('Plug Mini (EU)', 'switchStatus')).toBe('number');
     expect(fieldType('WoKeypad', 'eventName')).toBe('string');
     expect(fieldType('Video Doorbell', 'press')).toBe('boolean');
   });

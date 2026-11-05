@@ -19,3 +19,29 @@ dates and pagination; requiring documented fields does not require a real accoun
 - [Presence Sensor](https://github.com/OpenWonderLabs/SwitchBotAPI/blob/dc9a6b0e4ad77882c72d186ecd5d134113acdad0/devices/sensors/presence-sensor.md) uses the Contact Sensor's `WoContact` context identifier in its example. [RGBIC Neon Wire Rope Light](https://github.com/OpenWonderLabs/SwitchBotAPI/blob/dc9a6b0e4ad77882c72d186ecd5d134113acdad0/devices/lighting/rgbic-neon-wire-rope-light.md) uses `RGBICWW Strip Light`. Neither ambiguous example is used to invent a distinct webhook mapping.
 - [Battery Circulator Fan](https://github.com/OpenWonderLabs/SwitchBotAPI/blob/dc9a6b0e4ad77882c72d186ecd5d134113acdad0/devices/climate-control/battery-circulator-fan.md) lists `nightStatus` as Integer but samples `"off"`; [Smart Radiator Thermostat](https://github.com/OpenWonderLabs/SwitchBotAPI/blob/dc9a6b0e4ad77882c72d186ecd5d134113acdad0/devices/climate-control/smart-radiator-thermostat.md) lists `mode` as String but samples `1`. Discovery follows the tables and flags these contradictions; it is advisory, not payload validation or coercion.
 - Documented webhook identifiers such as `Robot Vacuum Cleaner s20`, `Robot Vacuum Cleaner K20+ Pro`, and `climate Panel` are preserved separately from REST inventory names. No runtime payload is renamed to match the device catalog.
+
+## 2026-11-05 upstream snapshot
+
+The following evidence is pinned to upstream commit
+[`fa8f90c`](https://github.com/OpenWonderLabs/SwitchBotAPI/commit/fa8f90c661cfa183d633d87f18c04e0e5059fa74)
+([delta from the earlier snapshot](https://github.com/OpenWonderLabs/SwitchBotAPI/compare/dc9a6b0e4ad77882c72d186ecd5d134113acdad0...fa8f90c661cfa183d633d87f18c04e0e5059fa74)).
+It supplements, rather than replaces, the historical evidence above.
+
+- [RGBICWW Light Bars](https://github.com/OpenWonderLabs/SwitchBotAPI/blob/fa8f90c661cfa183d633d87f18c04e0e5059fa74/devices/lighting/rgbicww-light-bars.md#L5-L66)
+  documents the REST type, commands, and webhook field shape, but not an exact
+  webhook `context.deviceType` or attributable event example. No Light Bars
+  webhook identifier is registered until upstream supplies that evidence.
+- The Light Bars document gives brightness `1–100` for
+  `setBrightnessAndTemperature` while showing `0` in its example. Local
+  validation accepts `0–100` for compatibility; server acceptance of `0`
+  remains unconfirmed. Likewise, local validation accepts any integer `style`
+  and an empty `colorList`; neither a style enum nor a minimum list length is
+  confirmed server behavior.
+- [Outdoor Pan/Tilt Cam
+  3K](https://github.com/OpenWonderLabs/SwitchBotAPI/blob/fa8f90c661cfa183d633d87f18c04e0e5059fa74/devices/cameras/outdoor-pantilt-cam-3k.md#L5-L38)
+  and [Solar Pan/Tilt Cam
+  2K](https://github.com/OpenWonderLabs/SwitchBotAPI/blob/fa8f90c661cfa183d633d87f18c04e0e5059fa74/devices/cameras/solar-pantilt-cam-2k.md#L5-L86)
+  expose status `latestImage` URLs with `expireAt` in Unix seconds. A cached
+  status can retain a URL after it expires; consumers must use `expireAt`.
+  Solar webhook `timeOfSample` is milliseconds, not the status URL expiry
+  unit.

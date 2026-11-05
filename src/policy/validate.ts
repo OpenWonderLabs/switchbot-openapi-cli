@@ -14,9 +14,10 @@ import {
   type PolicySchemaVersion,
 } from './schema.js';
 import { deriveSafetyTier, findCatalogEntry, getEffectiveCatalog } from '../devices/catalog.js';
+import { validateParameter } from '../devices/param-validator.js';
 import { parseRuleCommand } from '../rules/action.js';
 import { destructiveVerbOf, DESTRUCTIVE_COMMANDS } from '../rules/destructive.js';
-import type { DeviceListBody } from '../lib/devices.js';
+import { validateCommandForDevice, type DeviceListBody } from '../lib/devices.js';
 
 type Ajv2020Type = InstanceType<typeof Ajv2020>;
 type ValidateFn = ReturnType<Ajv2020Type['compile']>;
@@ -415,7 +416,7 @@ function collectOfflineSemanticErrors(
     getEffectiveCatalog()
       .flatMap((entry) => entry.commands)
       .filter((spec) => spec.commandType !== 'customize')
-      .map((spec) => spec.command),
+      .map((spec) => spec.command.toLowerCase()),
   );
 
   const rules = data?.automation?.rules;
@@ -483,7 +484,7 @@ function collectOfflineSemanticErrors(
         continue;
       }
 
-      if (!knownDeviceCommands.has(parsed.verb)) {
+      if (!knownDeviceCommands.has(parsed.verb.toLowerCase())) {
         const { line, col } = locateInstancePath(loaded.doc, loaded.lineCounter, commandPath);
         out.push({
           path: commandPath,
@@ -554,12 +555,12 @@ export function validateLoadedPolicyAgainstInventory(
   const base = validateLoadedPolicy(loaded);
   const errors = [...base.errors];
   const aliases = collectAliasMap(loaded.data);
-  const inventoryById = new Map<string, { typeName: string }>();
+  const inventoryById = new Map<string, { typeName: string; name: string; category: 'physical' | 'ir' }>();
   for (const device of inventory.deviceList) {
-    inventoryById.set(device.deviceId, { typeName: device.deviceType ?? '' });
+    inventoryById.set(device.deviceId, { typeName: device.deviceType || device.controlType || '', name: device.deviceName, category: 'physical' });
   }
   for (const remote of inventory.infraredRemoteList) {
-    inventoryById.set(remote.deviceId, { typeName: remote.remoteType });
+    inventoryById.set(remote.deviceId, { typeName: remote.remoteType, name: remote.deviceName, category: 'ir' });
   }
 
   for (const [aliasName, deviceId] of Object.entries(aliases)) {
@@ -664,21 +665,48 @@ export function validateLoadedPolicyAgainstInventory(
           continue;
         }
 
-        // Only reached once the target device is resolved in the live
-        // inventory, so `target.typeName` came straight from the live API
-        // and is a canonical catalog key — `findCatalogEntry` almost always
-        // returns the exact entry. The `Array.isArray` branch would only
-        // fire if the live API ever returns a type that substring-matches
-        // multiple catalog rows (catalog drift / new upstream type). When
-        // that happens we'd rather stay silent than emit a false
-        // `rule-live-unsupported-command` against an ambiguous match —
-        // verb-support for the unknown type is simply not checkable here.
         const match = target.typeName ? findCatalogEntry(target.typeName) : null;
         const entry = !match || Array.isArray(match) ? null : match;
-        if (!entry) continue;
-        const spec = entry.commands.find((command) => command.commandType !== 'customize' && command.command === parsed.verb);
+        if (!entry) {
+          const { line, col } = locateInstancePath(loaded.doc, loaded.lineCounter, commandPath);
+          errors.push({
+            path: commandPath,
+            line,
+            col,
+            keyword: 'rule-live-unknown-device-type',
+            message: `rule "${ruleName}" action #${ai} cannot validate device type "${target.typeName}"`,
+            hint: 'refresh the inventory and verify that this CLI supports the target device type',
+            schemaPath: '#/properties/automation/properties/rules/items/properties/then/items/properties/command',
+          });
+          continue;
+        }
+        const spec = entry.commands.find((command) => command.commandType !== 'customize' && command.command.toLowerCase() === parsed.verb.toLowerCase());
         const destructive = spec !== undefined && deriveSafetyTier(spec, entry) === 'destructive';
-        if (spec && !destructive) continue;
+        if (spec && !destructive) {
+          const command = validateCommandForDevice(
+            effectiveDeviceId,
+            { type: target.typeName, name: target.name, category: target.category },
+            parsed.verb,
+            parsed.rawParameter,
+            'command',
+          );
+          const parameter = command.ok
+            ? validateParameter(target.typeName, spec.command, parsed.rawParameter)
+            : { ok: false as const, error: command.error.message };
+          if (!parameter.ok) {
+            const { line, col } = locateInstancePath(loaded.doc, loaded.lineCounter, commandPath);
+            errors.push({
+              path: commandPath,
+              line,
+              col,
+              keyword: 'rule-live-invalid-parameter',
+              message: `rule "${ruleName}" action #${ai}: ${parameter.error}`,
+              hint: 'correct the command parameter for the resolved device type',
+              schemaPath: '#/properties/automation/properties/rules/items/properties/then/items/properties/command',
+            });
+          }
+          continue;
+        }
 
         const { line, col } = locateInstancePath(loaded.doc, loaded.lineCounter, commandPath);
         errors.push({

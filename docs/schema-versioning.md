@@ -29,6 +29,20 @@ every command payload has the same version or shape.
 - Device descriptors in `types` retain their 1.0 shape. Resource changes do
   not imply a device-entry change.
 
+The unreleased API-alignment changes keep these payload versions: new device
+entries add catalog data, and MCP output schemas now describe existing
+structured errors as well as successful results. This does **not** make every
+behavior change compatible: cold-cache rule dry-runs, the default destructive
+command gate, and the policy `never_confirm` restriction have safety or
+compatibility implications. Both existing RGB rule forms remain supported.
+Assess the CLI release version separately; it is not yet set.
+
+Credential-scope revisions add private metadata to local device/status cache
+files; they do not add fields to the CLI JSON envelope, MCP tool results, or
+audit records. Account switching can reject an obsolete in-flight operation or
+require an MQTT subscription restart; payload-version stability does not
+remove those behavioral boundaries.
+
 ## JSON envelope
 
 Every non-streaming JSON success is shaped as follows:

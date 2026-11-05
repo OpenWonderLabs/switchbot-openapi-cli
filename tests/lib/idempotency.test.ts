@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { EventEmitter, once } from 'node:events';
 import { IdempotencyCache, IdempotencyConflictError } from '../../src/lib/idempotency.js';
 
 describe('IdempotencyCache', () => {
@@ -103,6 +104,23 @@ describe('IdempotencyCache', () => {
     expect(cache.size()).toBe(0);
     await cache.run('k', fn);
     expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['all', 'profile'])('does not repopulate a cleared %s cache from an in-flight command', async target => {
+    const cache = new IdempotencyCache();
+    const gate = new EventEmitter();
+    const waiting = once(gate, 'release');
+    const pending = cache.run('key', async () => {
+      await waiting;
+      return 'old result';
+    }, undefined, 'work');
+    if (target === 'all') cache.clear();
+    else cache.clearForProfile('work');
+    await cache.run('key', async () => 'new result', undefined, 'work');
+    gate.emit('release');
+    expect(await pending).toEqual({ result: 'old result', replayed: false });
+    expect(await cache.run('key', async () => 'unexpected repeat', undefined, 'work'))
+      .toEqual({ result: 'new result', replayed: true });
   });
 
   it('clearForProfile() removes only entries tagged with the given profile', async () => {

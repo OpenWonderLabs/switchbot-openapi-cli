@@ -25,12 +25,17 @@ export function registerCacheCommand(program: Command): void {
     .command('cache')
     .description('Inspect and manage the local SwitchBot CLI caches')
     .addHelpText('after', `
-Two caches live at ~/.switchbot/:
+Default-profile caches live at ~/.switchbot/:
   devices.json   List of known deviceIds + metadata. Refreshed by every
                  'devices list' call. Drives command validation and
                  helpful hints — keep around even if you don't use TTL.
   status.json    Per-device status bodies keyed by deviceId. Only written
                  when a status TTL is enabled (via --cache <duration>).
+
+Implicit and explicit --profile default share these files. Named profiles use
+separate cache directories; --config stores them beside its config file.
+Successful credential changes invalidate the affected scope across processes.
+Cache files contain a private, non-secret credential revision.
 
 Cache modes (global flag, apply to any read):
   --cache off | --no-cache   disable cache reads

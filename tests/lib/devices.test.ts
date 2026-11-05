@@ -37,6 +37,7 @@ vi.mock('../../src/utils/flags.js', () => ({
   getCacheMode: flagsMock.getCacheMode,
   isDryRun: flagsMock.isDryRun,
   getAuditLog: flagsMock.getAuditLog,
+  getConfigPath: vi.fn(() => undefined),
 }));
 
 vi.mock('../../src/devices/cache.js', () => ({
@@ -66,6 +67,7 @@ describe('executeCommand audit semantics', () => {
 
   beforeEach(() => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-devlib-'));
+    vi.spyOn(os, 'homedir').mockReturnValue(tmp);
     auditFile = path.join(tmp, 'audit.log');
     flagsMock.dryRun = false;
     flagsMock.auditPath = auditFile;
@@ -76,6 +78,7 @@ describe('executeCommand audit semantics', () => {
   afterEach(() => {
     flagsMock.auditPath = null;
     idempotencyCache.clear();
+    vi.restoreAllMocks();
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 

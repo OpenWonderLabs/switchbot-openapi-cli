@@ -3,7 +3,7 @@ import chalk from 'chalk';
 import { emitJsonError, isJsonMode, printJson } from './utils/output.js';
 import { commandToJson, resolveTargetCommand } from './utils/help-json.js';
 import { buildProgram } from './program-builder.js';
-import { primeCredentials } from './credentials/prime.js';
+import { KeychainCredentialsUnavailableError, primeCredentials } from './credentials/prime.js';
 import { getActiveProfile } from './lib/request-context.js';
 
 // Early initialization: check for --no-color flag or NO_COLOR env var and disable chalk.
@@ -14,12 +14,14 @@ if (process.argv.includes('--no-color') || Boolean(process.env.NO_COLOR)) {
 
 const program = buildProgram();
 
-// Prime keychain-stored credentials before any command runs. This is a
-// best-effort probe: failures are silently swallowed inside primeCredentials,
-// so the existing file-based path remains the safety net. We probe once per
-// invocation (even for --help and --version, which is harmless).
+// Offline and credential-repair commands must remain usable if a replacement
+// keychain is locked; actual credential consumers still fail closed.
 program.hook('preAction', async () => {
-  await primeCredentials(getActiveProfile() ?? 'default');
+  try {
+    await primeCredentials(getActiveProfile() ?? 'default');
+  } catch (error) {
+    if (!(error instanceof KeychainCredentialsUnavailableError)) throw error;
+  }
 });
 
 program.addHelpText('after', `

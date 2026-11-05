@@ -45,15 +45,12 @@ export function extractVerb(cmd: string): string | null {
 }
 
 export function isDestructiveCommand(cmd: string): boolean {
-  const verb = extractVerb(cmd);
-  if (!verb) return false;
-  return (DESTRUCTIVE_COMMANDS as readonly string[]).includes(verb);
+  return destructiveVerbOf(cmd) !== null;
 }
 
 export function destructiveVerbOf(cmd: string): DestructiveCommand | null {
   const verb = extractVerb(cmd);
-  if (verb && (DESTRUCTIVE_COMMANDS as readonly string[]).includes(verb)) {
-    return verb as DestructiveCommand;
-  }
-  return null;
+  return verb
+    ? DESTRUCTIVE_COMMANDS.find((candidate) => candidate.toLowerCase() === verb.toLowerCase()) ?? null
+    : null;
 }

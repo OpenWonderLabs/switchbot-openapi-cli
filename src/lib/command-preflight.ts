@@ -5,6 +5,7 @@ import { validateParameter } from "../devices/param-validator.js";
 export type CommandPreflightKind =
   | "unknown-device"
   | "unknown-device-type"
+  | "invalid-command-type"
   | "read-only-device"
   | "unknown-command"
   | "unexpected-parameter"

@@ -18,6 +18,9 @@ import {
   updateCacheFromDeviceList,
   setCachedStatus,
   resetListCache,
+  getCachedStatus,
+  clearCache,
+  clearStatusCache,
   resetStatusCache,
 } from '../../src/devices/cache.js';
 import { withRequestContext } from '../../src/lib/request-context.js';
@@ -62,6 +65,21 @@ describe('cache scoping — no profile (legacy path)', () => {
     // The scoped sub-directory must NOT exist
     const scopedDir = path.join(tmpDir, '.switchbot', 'cache');
     expect(fs.existsSync(scopedDir)).toBe(false);
+  });
+
+  it('shares inventory, status and clearing with explicit default', () => {
+    updateCacheFromDeviceList(sampleBody);
+    setCachedStatus('DEV-1', { power: 'on' });
+
+    withRequestContext({ profile: 'default' }, () => {
+      expect(loadCache()?.devices['DEV-1']?.name).toBe('Bot');
+      expect(getCachedStatus('DEV-1', 60_000)).toEqual({ power: 'on' });
+      clearCache();
+      clearStatusCache();
+    });
+
+    expect(loadCache()).toBeNull();
+    expect(getCachedStatus('DEV-1', 60_000)).toBeNull();
   });
 });
 

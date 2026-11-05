@@ -16,6 +16,7 @@
  */
 
 import crypto from 'node:crypto';
+import { readCredentialScope } from '../credentials/scope.js';
 
 const DEFAULT_TTL_MS = 60000; // 60 seconds
 const DEFAULT_MAX_ENTRIES = 1024;
@@ -81,6 +82,8 @@ export class IdempotencyCache {
   private cache = new Map<string, { result: unknown; expiresAt: number; shape: string; profile?: string }>();
   private readonly ttlMs: number;
   private readonly maxEntries: number;
+  private generation = 0;
+  private profileGenerations = new Map<string, number>();
 
   constructor(ttlMs?: number, maxEntries?: number) {
     this.ttlMs = ttlMs ?? DEFAULT_TTL_MS;
@@ -95,11 +98,10 @@ export class IdempotencyCache {
    * request fingerprint; mismatched shape raises
    * {@link IdempotencyConflictError}.
    *
-   * `profile` tags the entry so {@link clearForProfile} can evict only the
-   * entries belonging to a specific credential profile. Callers that omit
-   * `profile` store in an unscoped bucket — those entries survive
-   * {@link clearForProfile} by design; always pass the active profile for
-   * any call that should be evicted on credential rotation.
+   * `profile` resolves the credential storage scope and revision, isolating
+   * results across account replacements and explicit config directories.
+   * Callers that omit `profile` retain an unscoped bucket, which survives
+   * {@link clearForProfile} by design.
    *
    * Returns a tuple-esque object with `replayed: true` when the cached
    * result is served. The `result` field is the original cached value.
@@ -115,10 +117,11 @@ export class IdempotencyCache {
       return { result, replayed: false };
     }
 
-    // Use NUL-separated encoding to prevent collisions when a profile name
-    // contains ':' (e.g. profile="abc:123", key="def" must not hash the same
-    // as profile="abc", key="123:def").
-    const hashed = hashKey(profile ? `${profile}\x00${key}` : key);
+    const scope = profile === undefined ? undefined : readCredentialScope(profile);
+    // NUL separators prevent ambiguous scope/revision/key concatenations.
+    const hashed = hashKey(scope ? `${scope.key}\x00${scope.revision}\x00${key}` : key);
+    const generation = this.generation;
+    const profileGeneration = profile === undefined ? 0 : this.profileGenerations.get(profile) ?? 0;
     const now = Date.now();
     const cached = this.cache.get(hashed);
     const currentShape = shape ? shapeSignature(shape) : '*';
@@ -139,6 +142,18 @@ export class IdempotencyCache {
     }
 
     const result = await fn();
+    // The operation already ran: return its outcome, but never retry it or let
+    // its late completion evict/overwrite entries from a replacement account.
+    if (generation !== this.generation ||
+        (profile !== undefined && profileGeneration !== (this.profileGenerations.get(profile) ?? 0))) {
+      return { result, replayed: false };
+    }
+    if (scope) {
+      const current = readCredentialScope(profile);
+      if (current.key !== scope.key || current.revision !== scope.revision) {
+        return { result, replayed: false };
+      }
+    }
 
     if (this.cache.size >= this.maxEntries) {
       const toRemove = Math.ceil(this.maxEntries * 0.1);
@@ -162,12 +177,15 @@ export class IdempotencyCache {
 
   /** Remove all cached entries that were stored under the given profile. */
   clearForProfile(profile: string): void {
+    this.profileGenerations.set(profile, (this.profileGenerations.get(profile) ?? 0) + 1);
     for (const [k, v] of this.cache.entries()) {
       if (v.profile === profile) this.cache.delete(k);
     }
   }
 
   clear(): void {
+    this.generation++;
+    this.profileGenerations.clear();
     this.cache.clear();
   }
 
