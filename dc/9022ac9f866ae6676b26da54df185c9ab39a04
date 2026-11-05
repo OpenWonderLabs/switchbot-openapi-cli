@@ -1,0 +1,122 @@
+CHANGELOG.md
+  h_dab4e149c2c598 10-40
+README.md
+  h_dab4e149c2c598 54,56-57,60,63-64,67-75,234,236-239,248-275,397-400,493
+docs/account-switch-safety-mvp.md
+  h_dab4e149c2c598 1-105
+docs/agent-guide.md
+  h_dab4e149c2c598 110-122,183-209,329-331,394-413,420-421,488-512
+docs/openapi-alignment-ambiguities.md
+  h_dab4e149c2c598 22-47
+docs/policy-reference.md
+  h_dab4e149c2c598 133,226-266,364-370
+docs/schema-versioning.md
+  h_dab4e149c2c598 32-45
+src/api/client.ts
+  h_dab4e149c2c598 23-24,67-81,84,101-105,116,165-169
+src/commands/auth.ts
+  h_dab4e149c2c598 37,85-90,255,293,374,468
+src/commands/cache.ts
+  h_dab4e149c2c598 28,35-39
+src/commands/devices.ts
+  h_dab4e149c2c598 716
+src/commands/expand.ts
+  h_dab4e149c2c598 56
+src/commands/mcp.ts
+  h_dab4e149c2c598 110-145,457-460,949,952-968,2914-2930,2946-2950,2953-2957,2959
+src/config.ts
+  h_dab4e149c2c598 8,148-154
+src/credentials/prime.ts
+  h_dab4e149c2c598 7,9-10,15-16,20-21,25-31,33,40,42-44,47-48,55,57,62-66,69-70,72,74-79,83-88,90-91,95,101,106-112,134,136-139
+src/credentials/scope.ts
+  h_dab4e149c2c598 1-63
+src/devices/cache.ts
+  h_dab4e149c2c598 3-4,48-49,52-55,57-68,71-75,78,83,87-90,92-95,98,100-101,130-131,171-172,176,179-181,224-225,229-232,234-237,240,242-243,246-247,249,301-302,304,311-312,315-317
+src/devices/catalog.ts
+  h_dab4e149c2c598 157,228-246,276,316,498-515,521,529,537,545,558,590,656-665,800,803-811,958-977
+src/devices/param-validator.ts
+  h_dab4e149c2c598 10-18,192-205,218,333-413,431,457,475,513-514,1015-1018,1021,1249-1251
+src/devices/resources.ts
+  h_dab4e149c2c598 229-241,271,359-373,570-582,876-891,1178-1190
+src/index.ts
+  h_dab4e149c2c598 6,17-18,20-24
+src/lib/command-preflight.ts
+  h_dab4e149c2c598 8
+src/lib/devices.ts
+  h_dab4e149c2c598 20,26,87,124,163,169-170,179,183-186,192,194,331-352
+src/lib/idempotency.ts
+  h_dab4e149c2c598 19,85-86,101-104,120-124,145-156,180,187-188
+src/policy/schema/v0.2.json
+  h_dab4e149c2c598 42
+src/policy/validate.ts
+  h_dab4e149c2c598 17,20,419,487,558,560,563,670-683,685-709
+src/rules/action.ts
+  h_dab4e149c2c598 22,24,62,65,73-77,81,172,178,182-185,191-197,203-242,268
+src/rules/destructive.ts
+  h_dab4e149c2c598 48,53-55
+src/rules/engine.ts
+  h_dab4e149c2c598 1007-1013
+tests/api/art-upload-limit-alignment.test.ts
+  h_dab4e149c2c598 1-131
+tests/api/client.test.ts
+  h_dab4e149c2c598 2-17,113,115,281,284,296,299,307,485,497,504,513,530,539,553,562
+tests/commands/auth.test.ts
+  h_dab4e149c2c598 14-17,97-98,100-110,114-123,519-537,539-543,545-550,553,555-587
+tests/commands/config.test.ts
+  h_dab4e149c2c598 27-41
+tests/commands/devices.test.ts
+  h_dab4e149c2c598 2452,2454-2455,2533,2567,2571-2573,2622
+tests/commands/mcp-camera-alignment.test.ts
+  h_dab4e149c2c598 1-124
+tests/commands/mcp-profile-http.test.ts
+  h_dab4e149c2c598 17-22,31-55,66-73,91,100,126-191
+tests/commands/mcp-safety-lifecycle.test.ts
+  h_dab4e149c2c598 1-221
+tests/commands/mcp.test.ts
+  h_dab4e149c2c598 171-284,309-322
+tests/commands/schema.test.ts
+  h_dab4e149c2c598 103
+tests/config.test.ts
+  h_dab4e149c2c598 20-32
+tests/credentials/prime.test.ts
+  h_dab4e149c2c598 2-11,20-22,35-37,42,46-48,52-53,56-68,70-151
+tests/devices/account-cache-lifecycle.test.ts
+  h_dab4e149c2c598 1-267
+tests/devices/art-frame-object-alignment.test.ts
+  h_dab4e149c2c598 1-139
+tests/devices/cache-scoping.test.ts
+  h_dab4e149c2c598 21-23,69-83
+tests/devices/camera-alignment.test.ts
+  h_dab4e149c2c598 1-72
+tests/devices/curtain-lock-alignment.test.ts
+  h_dab4e149c2c598 1-80
+tests/devices/k11-pro-alignment.test.ts
+  h_dab4e149c2c598 1-126
+tests/devices/light-bars-boundary.test.ts
+  h_dab4e149c2c598 1-66
+tests/devices/webhook-alignment.test.ts
+  h_dab4e149c2c598 1-104
+tests/lib/devices.test.ts
+  h_dab4e149c2c598 40,70,81
+tests/lib/idempotency.test.ts
+  h_dab4e149c2c598 2,109-125
+tests/policy/camera-safety-alignment.test.ts
+  h_dab4e149c2c598 1-32
+tests/policy/validate.test.ts
+  h_dab4e149c2c598 673-834
+tests/rules/action.test.ts
+  h_dab4e149c2c598 3,75-114,143-329,331-334,351-354,393-396
+tests/rules/engine.test.ts
+  h_dab4e149c2c598 12,23-41,940-972
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "dc9022ac9f866ae6676b26da54df185c9ab39a04",
+  "prompts": {},
+  "humans": {
+    "h_dab4e149c2c598": {
+      "author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
