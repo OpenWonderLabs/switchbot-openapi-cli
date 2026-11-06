@@ -8,8 +8,8 @@ edit the generated file — every block in it is commented with a
 summary.
 
 The JSON Schema that backs this document lives at
-`src/policy/schema/v0.2.json` (Draft 2020-12). It is also mirrored to
-`examples/policy.schema.json` for editor autocomplete.
+`src/policy/schema/v0.2.json` (Draft 2020-12). Use that file for editor
+autocomplete.
 
 ---
 
@@ -130,7 +130,6 @@ The destructive blocklist the schema enforces on `never_confirm`:
 - `nightLatchUnlock`
 - `createKey`
 - `deleteKey`
-- `disableMotionDetection`
 - `deleteWebhook`
 - `deleteScene`
 - `factoryReset`
@@ -361,11 +360,11 @@ automation:
 **Destructive commands are refused.** The v0.2 validator rejects `lock`,
 `unlock`, `deadbolt`, `nightLatchUnlock`, `createKey`, `deleteKey`,
 `deleteWebhook`, `deleteScene`, and `factoryReset` in any `then[].command`.
-The bare `disableMotionDetection` name is globally prohibited in
-`never_confirm`. Separately, the catalog classifies disabling motion detection
-on Solar Pan/Tilt Cam 2K as locally destructive; this local safety policy does
-not classify every device with that command name or claim a server-side safety
-tier. Inventory-aware validation also rejects
+The catalog classifies `disableMotionDetection` on Solar Pan/Tilt Cam 2K as
+locally destructive: rules cannot run it, and `never_confirm` cannot bypass
+native approval. Video Doorbell keeps its existing non-destructive behavior,
+including that confirmation preference; the verb is not globally prohibited.
+Inventory-aware validation also rejects
 device-specific destructive actions, including Garage Door Opener
 `turnOn`/`turnOff`; ordinary light power actions remain allowed.
 
@@ -516,7 +515,6 @@ valid before using the rules engine.
   read and honour `policy.yaml`.
 - [`docs/audit-log.md`](./audit-log.md) — the format of the audit log
   `audit.log_path` points at.
-- `switchbot policy --help` — command-line help for the three
-  subcommands.
-- `examples/policy.schema.json` — JSON Schema for editor autocomplete
-  (VS Code `yaml.schemas`, JetBrains, etc.).
+- `switchbot policy --help` — command-line help for policy subcommands.
+- [`src/policy/schema/v0.2.json`](../src/policy/schema/v0.2.json) — JSON Schema
+  for editor autocomplete (VS Code `yaml.schemas`, JetBrains, etc.).

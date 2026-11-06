@@ -1,5 +1,8 @@
 # OpenAPI 文档对齐与当前代码审查任务计划
 
+> 历史记录：CLI 3.9.0 和四个插件/扩展 0.2.0 已发布。以下保留当时的审查与实施证据；
+> CLI 3.10.0 的合并后修复和验收见 [Account switching and command safety MVP](./account-switch-safety-mvp.md)。
+
 ## 基线与边界
 
 - 官方文档固定到 [`dc9a6b0e4ad77882c72d186ecd5d134113acdad0`](https://github.com/OpenWonderLabs/SwitchBotAPI/commit/dc9a6b0e4ad77882c72d186ecd5d134113acdad0)，提交时间 2026-10-08；对照 README 与 84 个 `devices/**/*.md`。

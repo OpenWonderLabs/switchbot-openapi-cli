@@ -2,10 +2,10 @@
 
 ## Scope
 
-Follow-up to the API-alignment review on `feat/switchbot-api-alignment`.
+API-alignment and post-merge readiness work for CLI 3.10.0.
 Keep the existing CLI commands, JSON envelopes, MCP payloads, policy grammar,
-and credential precedence. No release, hardware operation, or upstream API
-expansion is part of this work.
+and credential precedence. Verification does not use live cloud accounts,
+hardware operations, or undocumented upstream API behavior.
 
 ## Findings
 
@@ -17,7 +17,10 @@ expansion is part of this work.
 | MCP output contract regression coverage | P3 | The current implementation rejects malformed outputs, but permanent protocol tests do not protect all exclusive success/error constraints. | 2 |
 | Repeated rule JSON parsing | P3 | A valid JSON rule parameter is parsed before validation, by its validator, and again for dispatch. | 2 |
 | Cache publication and replacement races | P1 | Torn disk writes, late responses, or retained clients can mix account data unless revision and request boundaries fail closed. | 1 |
-| Keychain recovery and HTTP request errors | P1 | A locked replacement keychain must not expose stale file credentials or prevent offline credential repair; concurrent priming must not terminate MCP. | 1 |
+| Keychain recovery and HTTP request errors | P1 | A locked replacement keychain must not expose stale file credentials or prevent offline CLI/MCP operations and credential repair; concurrent priming must not terminate MCP. | 1 |
+| Short profile hash collisions | P1 | Two valid names can share credentials, disk caches, revisions, and idempotency results when only eight hash digits identify the scope. | 1 |
+| Rule audit parameter regression | P2 | JSON wire objects must not replace the established string representation in rule-fire audit records. | 2 |
+| Global camera policy rejection | P2 | A verb-wide prohibition rejects existing Video Doorbell preferences despite its non-destructive classification. | 2 |
 
 Solar's inventory-dependent automation restriction is intentional: do not
 extend it to Video Doorbell by adding a global verb prohibition. Both
@@ -51,9 +54,9 @@ parameter shapes must remain unchanged.
   Keep offline commands and credential repair available if the store is
   locked, while synchronous and asynchronous credential consumers fail closed.
 - Unify implicit and explicit default cache storage on the existing
-  `~/.switchbot/devices.json` and `status.json` paths. Keep named profiles
-  isolated and retain explicit `--config` precedence. Ignore obsolete
-  explicit-default cache data rather than restoring it into the active scope.
+  `~/.switchbot/devices.json` and `status.json` paths. Use full SHA-256 named
+  profile scopes and retain explicit `--config` precedence. Ignore obsolete
+  short-hash/default cache data rather than importing ambiguous account data.
 - Do not delete policy, audit, or event-history data. Environment credentials
   remain highest priority. Direct environment/file edits are not login events;
   document their manual invalidation/restart requirements.
@@ -87,16 +90,17 @@ parameter shapes must remain unchanged.
 
 ## Delivery evidence
 
-- Full CLI suite: **181 files, 3205 tests passed**; its setup ran the release
-  build and TypeScript typecheck. Plugin workspace tests were not rerun.
+- Full CLI suite: **181 files, 3211 tests passed**; its setup ran the release
+  build and TypeScript typecheck. Coverage: 84.28% statements/lines, 81.26%
+  branches, and 92.11% functions. Plugin workspace tests: **169 passed**;
+  workspace syntax checks also passed.
 - `npm run lint:md` passed.
 - Isolated real CLI + MCP SDK smoke: a separate `config set-token` process
   changed a warm reader from account A's inventory, status, and keyed command
   result to B's; a cold `controlType`-only lock was refused with zero POSTs.
   Implicit and explicit default shared inventory.
-- Rule smoke sent both RGB forms as `255:0:0`; a spaced JSON object and all
-  three corresponding audit parameters were unchanged. A 64 KiB JSON payload
-  was parsed twice instead of three times; this count probe was temporary.
+- Rule smoke sent both RGB forms as `255:0:0`. JSON stayed an object on the
+  HTTP wire and the original string, including whitespace, in rule-fire audits.
 - Dedicated regressions cover late cache responses and disk writes, keychain
   failure and repair, retained-client/429 races, HTTP MCP recovery including an
   unavailable startup profile, profile scoping, and invalid SDK output. All
@@ -121,5 +125,11 @@ parameter shapes must remain unchanged.
   fixtures reject CLI failures and invalid envelopes while accepting empty
   history; macOS cleanup preserves a quoted default-keychain path with spaces.
   These fixtures do not claim native macOS/Windows credential-store execution.
+- Post-merge TDD reproduced and fixed locked-keychain offline MCP failures,
+  JSON rule audit type changes, Video Doorbell policy rejection, and a real
+  profile hash collision (`profile-55372` / `profile-65052`). A local HTTP
+  smoke observed distinct account headers and unchanged rule wire/audit data;
+  a real stdio SDK session retained offline tools while online calls failed
+  closed. Model-aware policy validation allowed Doorbell and rejected Solar.
 - No real OAuth, cloud API, MQTT broker, camera/image URL, or physical device
   was exercised.

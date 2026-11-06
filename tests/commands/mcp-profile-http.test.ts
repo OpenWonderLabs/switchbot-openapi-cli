@@ -17,12 +17,12 @@ afterEach(() => {
 async function startIsolatedMcp({
   keychainOnly = false,
   rotatingProfile,
-  unavailableDefault = false,
+  unavailableProfile,
   configOverride = false,
 }: {
   keychainOnly?: boolean;
   rotatingProfile?: 'default' | 'work';
-  unavailableDefault?: boolean;
+  unavailableProfile?: 'default' | 'work';
   configOverride?: boolean;
 } = {}): Promise<number> {
   const home = mkdtempSync(join(tmpdir(), 'switchbot-http-profile-'));
@@ -34,18 +34,19 @@ async function startIsolatedMcp({
     const http = (await import('node:http')).default;
     const { syncBuiltinESMExports } = await import('node:module');
     const originalCreateServer = http.createServer;
-    ${rotatingProfile || unavailableDefault ? `
+    ${rotatingProfile || unavailableProfile ? `
     import { publishCredentialRevision, readCredentialScope } from './src/credentials/scope.ts';
     import { __resetPrimedCredentials } from './src/credentials/prime.ts';
     let acceptingRequests = false;
     let rotated = false;
     ` : ''}
-    ${unavailableDefault ? `
+    ${unavailableProfile ? `
     import path from 'node:path';
     fs.mkdirSync(path.join(process.env.HOME, '.switchbot'), { recursive: true });
     fs.writeFileSync(path.join(process.env.HOME, '.switchbot', 'config.json'), JSON.stringify({ token: 'old-token', secret: 'old-secret' }));
-    publishCredentialRevision(readCredentialScope('default'), true);
+    publishCredentialRevision(readCredentialScope(${JSON.stringify(unavailableProfile)}), true);
     ` : ''}
+    ${rotatingProfile ? `publishCredentialRevision(readCredentialScope(${JSON.stringify(rotatingProfile)}), true);` : ''}
     ${configOverride ? `
     fs.writeFileSync(${JSON.stringify(join(home, 'override.json'))}, JSON.stringify({ token: 'override-token', secret: 'override-secret' }));
     ` : ''}
@@ -66,7 +67,8 @@ async function startIsolatedMcp({
         }
         ` : ''}
         output = account === 'work:token' ? 'work-token' : account === 'work:secret' ? 'work-secret'
-          : ${unavailableDefault ? "''" : "account === 'default:token' ? 'default-token' : account === 'default:secret' ? 'default-secret' : ''"};
+          : account === 'default:token' ? 'default-token' : account === 'default:secret' ? 'default-secret' : '';
+        ${unavailableProfile ? `if (account.startsWith(${JSON.stringify(`${unavailableProfile}:`)})) output = '';` : ''}
         ${rotatingProfile ? `
         if (rotated && account.startsWith(${JSON.stringify(`${rotatingProfile}:`)})) {
           output = account.endsWith(':token') ? ${JSON.stringify(`${rotatingProfile}-replacement-token`)} : 'replacement-secret';
@@ -125,6 +127,28 @@ async function startIsolatedMcp({
 }
 
 describe('HTTP MCP profile validation', () => {
+  it.each([undefined, 'default', 'work'] as const)('serves offline HTTP tools for locked profile %s without allowing cloud fallback', async profile => {
+    const port = await startIsolatedMcp({ keychainOnly: true, unavailableProfile: profile ?? 'default' });
+    const client = new Client({ name: 'offline-locked-profile', version: '1' });
+    try {
+      await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`), {
+        requestInit: { headers: {
+          Authorization: 'Bearer isolated-profile-bearer',
+          ...(profile === undefined ? {} : { 'x-switchbot-profile': profile }),
+        } },
+      }));
+      const catalog = await client.callTool({ name: 'search_catalog', arguments: { query: 'Bot' } });
+      expect(catalog.structuredContent).toMatchObject({
+        results: expect.arrayContaining([expect.objectContaining({ type: 'Bot' })]),
+      });
+      const cloud = await client.callTool({ name: 'get_device_status', arguments: { deviceId: 'BOT1' } });
+      expect(cloud.isError).toBe(true);
+      expect(cloud.structuredContent).toMatchObject({ error: { kind: 'runtime', code: 1 } });
+    } finally {
+      await client.close();
+    }
+  });
+
   it('uses explicit config credentials for a keychain-only named profile', async () => {
     const port = await startIsolatedMcp({ keychainOnly: true, configOverride: true });
     const client = new Client({ name: 'config-override-profile', version: '1' });
@@ -140,7 +164,7 @@ describe('HTTP MCP profile validation', () => {
   });
 
   it('serves a valid named profile when the startup profile keychain is unavailable', async () => {
-    const port = await startIsolatedMcp({ keychainOnly: true, unavailableDefault: true });
+    const port = await startIsolatedMcp({ keychainOnly: true, unavailableProfile: 'default' });
     const client = new Client({ name: 'named-profile-recovery', version: '1' });
     try {
       await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`), {
@@ -153,26 +177,19 @@ describe('HTTP MCP profile validation', () => {
     }
   });
 
-  it.each(['default', 'work'] as const)('survives credential replacement during %s request priming', async profile => {
+  it.each(['default', 'work'] as const)('survives credential replacement during %s tool credential refresh', async profile => {
     const port = await startIsolatedMcp({ keychainOnly: true, rotatingProfile: profile });
     const url = new URL(`http://127.0.0.1:${port}/mcp`);
     const headers = {
       Authorization: 'Bearer isolated-profile-bearer',
       ...(profile === 'work' ? { 'x-switchbot-profile': 'work' } : {}),
     };
-    const failed = await fetch(url, {
-      method: 'POST',
-      headers: { ...headers, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {
-        protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'rotation-test', version: '1' },
-      } }),
-    });
-    expect(failed.status).toBe(500);
-    expect(await failed.json()).toMatchObject({ jsonrpc: '2.0', error: { code: -32603 } });
-
     const client = new Client({ name: 'rotation-recovery-test', version: '1' });
     try {
       await client.connect(new StreamableHTTPClientTransport(url, { requestInit: { headers } }));
+      const failed = await client.callTool({ name: 'get_device_status', arguments: { deviceId: 'BOT1' } });
+      expect(failed.isError).toBe(true);
+      expect(failed.structuredContent).toMatchObject({ error: { kind: 'runtime', code: 1 } });
       const result = await client.callTool({ name: 'get_device_status', arguments: { deviceId: 'BOT1' } });
       expect(result.structuredContent).toMatchObject({
         status: { deviceId: 'BOT1', power: profile === 'work' ? 'ON' : 'OFF', account: `${profile}-replacement-token` },

@@ -3,7 +3,7 @@
 SwitchBot CLI has separate machine-readable contracts. A version in one
 contract does not change the version of another contract.
 
-## Current versions for CLI 3.9.0
+## Current versions for CLI 3.10.0
 
 | Contract | Location | Version | What it versions |
 | --- | --- | --- | --- |
@@ -29,13 +29,12 @@ every command payload has the same version or shape.
 - Device descriptors in `types` retain their 1.0 shape. Resource changes do
   not imply a device-entry change.
 
-The unreleased API-alignment changes keep these payload versions: new device
-entries add catalog data, and MCP output schemas now describe existing
-structured errors as well as successful results. This does **not** make every
-behavior change compatible: cold-cache rule dry-runs, the default destructive
-command gate, and the policy `never_confirm` restriction have safety or
-compatibility implications. Both existing RGB rule forms remain supported.
-Assess the CLI release version separately; it is not yet set.
+CLI 3.10.0 keeps these payload versions: new device entries add catalog data,
+and MCP output schemas describe existing structured errors as well as successful
+results. Both existing RGB rule forms, Video Doorbell confirmation preferences,
+and rule audit parameter types remain supported. The release restores the
+documented destructive-command gate; cold-cache rule dry-runs now fail closed
+instead of reporting success without resolving the target.
 
 Credential-scope revisions add private metadata to local device/status cache
 files; they do not add fields to the CLI JSON envelope, MCP tool results, or

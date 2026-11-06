@@ -51,22 +51,22 @@ Run `switchbot catalog show` for the effective catalog, including aliases and pe
 
 | Category | Devices |
 | --- | --- |
-| **Lighting** | Color Bulb · Strip Light · Strip Light 3 · RGBICWW Strip Light · RGBICWW Light Bars _(unreleased)_ · Floor Lamp · RGBICWW Floor Lamp · Ceiling Light · Ceiling Light Pro · RGBICWW Ceiling Light · RGBIC Neon Rope Light · RGBIC Neon Wire Rope Light · Candle Warmer Lamp · Permanent Outdoor Lights |
+| **Lighting** | Color Bulb · Strip Light · Strip Light 3 · RGBICWW Strip Light · RGBICWW Light Bars · Floor Lamp · RGBICWW Floor Lamp · Ceiling Light · Ceiling Light Pro · RGBICWW Ceiling Light · RGBIC Neon Rope Light · RGBIC Neon Wire Rope Light · Candle Warmer Lamp · Permanent Outdoor Lights |
 | **Climate** | Humidifier · Humidifier2 · Air Purifier VOC · Air Purifier Table VOC · Air Purifier PM2.5 · Air Purifier Table PM2.5 · Smart Radiator Thermostat |
-| **Security** | Smart Lock · Smart Lock Pro · Smart Lock Pro Wifi · Smart Lock Ultra · Smart Lock Ultra Max _(unreleased)_ · Lock Lite · Lock Vision · Lock Vision Pro · Keypad · Keypad Touch · Keypad Vision · Keypad Vision Pro · Garage Door Opener · Video Doorbell |
-| **Curtains & blinds** | Curtain · Curtain3 · Curtain 4 _(unreleased)_ · Blind Tilt · Roller Shade |
+| **Security** | Smart Lock · Smart Lock Pro · Smart Lock Pro Wifi · Smart Lock Ultra · Smart Lock Ultra Max · Lock Lite · Lock Vision · Lock Vision Pro · Keypad · Keypad Touch · Keypad Vision · Keypad Vision Pro · Garage Door Opener · Video Doorbell |
+| **Curtains & blinds** | Curtain · Curtain3 · Curtain 4 · Blind Tilt · Roller Shade |
 | **Power** | Plug · Plug Mini (US) · Plug Mini (JP) · Plug Mini (EU) · Relay Switch 1 · Relay Switch 1PM · Relay Switch 2PM |
 | **Fans** | Battery Circulator Fan · Battery Circulator Fan 2 Pro · Circulator Fan · Standing Circulator Fan |
-| **Cleaning** | Robot Vacuum Cleaner S1 · Robot Vacuum Cleaner S1 Plus · K10+ · K10+ Pro · Robot Vacuum Cleaner K10+ Pro Combo · Robot Vacuum Cleaner S10 · Robot Vacuum Cleaner S20 · Robot Vacuum Cleaner K11+ · Robot Vacuum Cleaner K11 Plus Pro _(unreleased)_ · Robot Vacuum Cleaner K20 Plus Pro |
+| **Cleaning** | Robot Vacuum Cleaner S1 · Robot Vacuum Cleaner S1 Plus · K10+ · K10+ Pro · Robot Vacuum Cleaner K10+ Pro Combo · Robot Vacuum Cleaner S10 · Robot Vacuum Cleaner S20 · Robot Vacuum Cleaner K11+ · Robot Vacuum Cleaner K11 Plus Pro · Robot Vacuum Cleaner K20 Plus Pro |
 | **Sensors** _(read-only)_ | Meter · MeterPlus · WoIOSensor · MeterPro · MeterPro(CO2) · WeatherStation · Motion Sensor · Presence Sensor · Contact Sensor · Water Detector · Wallet Finder Card |
 | **Hubs** _(read-only)_ | Hub · Hub Plus · Hub Mini · Hub 2 · Hub 3 · AI Hub |
-| **Cameras** | Indoor Cam · Pan/Tilt Cam · Pan/Tilt Cam 2K · Pan/Tilt Cam Plus 2K · Pan/Tilt Cam Plus 3K · Outdoor Spotlight Cam · Outdoor Pan/Tilt Cam 3K _(unreleased; status only)_ · Solar Pan/Tilt Cam 2K _(unreleased)_ |
-| **Other** | Bot · AI Art Frame · AI Art Frame Luma _(unreleased)_ · AI MindClip · Kata Friends · Home Climate Panel · Remote |
+| **Cameras** | Indoor Cam · Pan/Tilt Cam · Pan/Tilt Cam 2K · Pan/Tilt Cam Plus 2K · Pan/Tilt Cam Plus 3K · Outdoor Spotlight Cam · Outdoor Pan/Tilt Cam 3K _(status only)_ · Solar Pan/Tilt Cam 2K |
+| **Other** | Bot · AI Art Frame · AI Art Frame Luma · AI MindClip · Kata Friends · Home Climate Panel · Remote |
 | **IR virtual remotes** _(via Hub)_ | Air Conditioner · TV · Streamer · Set Top Box · DVD · Speaker · Fan · Light · Others |
 
 ### Device contract notes
 
-**Unreleased:** The notes below describe upcoming capabilities not included in CLI 3.9.0.
+The capabilities below are available starting in CLI 3.10.0.
 
 - Light Bars accept object parameters. For example: `switchbot devices command <lightBarId> setLightEffect '{"effectId":1}'`; `effectId` is an integer from 0 through 25.
 - Outdoor Pan/Tilt Cam 3K is status-only. Camera status may include `latestImage` as `{ imageUrl, expireAt }`; `expireAt` is Unix seconds. Treat cached URLs as potentially expired, do not download or persist image bytes, and query again with `--no-cache` when a fresh status is needed.
@@ -255,7 +255,9 @@ already in flight is not automatically retried under the new account; if it
 was already sent, check its outcome before retrying.
 
 Implicit default and `--profile default` share `~/.switchbot/devices.json`
-and `status.json`. Named profiles have separate cache directories.
+and `status.json`. Named profiles use separate full-SHA-256 cache directories.
+Older short-hash inventory/status caches are ignored; refresh them with
+`switchbot --profile <name> devices list`. Profile credentials are unchanged.
 `--config` stores caches beside the selected file; config files in the same
 directory share that cache scope, so use separate directories for separate
 accounts. Internal cache files contain a non-secret credential revision; CLI,
@@ -269,9 +271,10 @@ or rules daemon after changing accounts; its existing event stream is not
 rebound automatically. Audit, policy, and event-history files are not cleared.
 [Details and safety boundaries](./docs/agent-guide.md#profiles-and-credential-refresh).
 
-If a newly selected native keychain is locked or unavailable, requests fail
-closed rather than using older file credentials. Offline commands and
-credential-repair commands remain available.
+If a newly selected native keychain is locked or unavailable, cloud requests
+fail closed rather than using older file credentials. Offline CLI commands,
+MCP catalog/history/policy tools, and credential repair remain available.
+MCP policy validation requires credentials only with `live: true`.
 HTTP MCP also honors `--config` when a request selects a named profile; the
 override selects the account, while profile-name and bearer-token checks
 remain enforced.
@@ -493,7 +496,7 @@ Policy commands retain their documented specialized exit codes (including YAML p
 
 ## Development
 
-Verified CLI regression suite: 3205 tests. Plugin workspace checks are separate.
+Verified CLI regression suite: 3211 tests. Plugin workspace checks are separate.
 
 ```bash
 npm install && npm run build

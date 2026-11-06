@@ -208,16 +208,24 @@ initialization is disabled instead of using an older file credential. HTTP MCP
 can still serve other valid named profiles. Restore the keychain and restart
 the server to establish the startup subscription.
 
-Credential-refresh failures inside MCP tool callbacks retain
+Offline catalog, history, audit, and policy tools do not require credentials;
+policy validation needs them only with `live: true`. This also applies over
+HTTP to default and known local profiles while their replacement keychain is
+locked. An unknown named profile still requires credential lookup.
+
+Credential-refresh failures inside online MCP tool callbacks retain
 `isError: true` and `structuredContent.error` with kind `runtime`; the callback
 does not dispatch an API request. After unlocking the replacement keychain or
-repairing credentials, retry explicitly. HTTP request preflight failures remain
-JSON-RPC protocol errors rather than tool results.
+repairing credentials, retry explicitly. HTTP authentication, profile-selection,
+and unknown-profile lookup failures remain transport errors.
 
 Implicit and explicit `default` use the same legacy cache paths. Named
-profiles are isolated; `--config` places caches in the config file's
-directory, so separate config files in one directory share a cache scope.
-Account changes do not erase policy, audit, or event history.
+profiles use the full SHA-256 of their name for credential/cache isolation;
+obsolete short-hash inventory/status caches are ignored, not migrated.
+Refresh inventory with `switchbot --profile <name> devices list`.
+`--config` places caches in the config file's directory, so separate config
+files in one directory share a cache scope. Account changes do not erase
+policy, audit, or event history.
 
 ---
 
@@ -404,7 +412,7 @@ Each command entry carries:
 
 ### Model-specific boundaries
 
-**Unreleased:** The following model names and capabilities are not included in CLI 3.9.0.
+The following model names and capabilities are available starting in CLI 3.10.0.
 
 The catalog recognizes the model names RGBICWW Light Bars, Smart Lock Ultra
 Max, Curtain 4, Robot Vacuum Cleaner K11 Plus Pro, AI Art Frame Luma, Outdoor

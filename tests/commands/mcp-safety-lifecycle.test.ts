@@ -110,6 +110,44 @@ describe('MCP Light Bars live parameter validation', () => {
 });
 
 describe('MCP resolved device type safety', () => {
+  it('keeps offline catalog, history and policy tools usable while replacement credentials are locked', async () => {
+    vi.stubEnv('SWITCHBOT_TOKEN', '');
+    vi.stubEnv('SWITCHBOT_SECRET', '');
+    process.argv = ['node', 'switchbot', '--no-quota', '--no-retry'];
+    saveConfig('obsolete-file-token', 'obsolete-file-secret');
+    publishCredentialRevision(readCredentialScope(), true);
+    credentialStoreMock.mockRejectedValue(new Error('keychain locked'));
+    const requests: string[] = [];
+    axios.defaults.adapter = async config => {
+      requests.push(config.url ?? '');
+      throw new Error('Offline tools must not dispatch HTTP requests');
+    };
+    const policyPath = path.join(tmp, 'offline-policy.yaml');
+    fs.writeFileSync(policyPath, 'version: "0.2"\n');
+    const { client, server } = await connectMcp();
+    try {
+      const catalog = await client.callTool({ name: 'search_catalog', arguments: { query: 'Bot' } });
+      expect(catalog.structuredContent).toMatchObject({
+        results: expect.arrayContaining([expect.objectContaining({ type: 'Bot' })]),
+      });
+      const history = await client.callTool({ name: 'device_history', arguments: { mode: 'raw' } });
+      expect(history.structuredContent).toMatchObject({ devices: [] });
+      const policy = await client.callTool({ name: 'policy_validate', arguments: { path: policyPath } });
+      expect(policy.structuredContent).toMatchObject({ present: true, valid: true, validationScope: 'schema+offline-semantics' });
+      const createdPath = path.join(tmp, 'created-policy.yaml');
+      const created = await client.callTool({ name: 'policy_new', arguments: { path: createdPath } });
+      expect(created.structuredContent).toMatchObject({ policyPath: createdPath, schemaVersion: '0.2', overwritten: false });
+      const createdPolicy = await client.callTool({ name: 'policy_validate', arguments: { path: createdPath } });
+      expect(createdPolicy.structuredContent).toMatchObject({ present: true, valid: true });
+      const live = await client.callTool({ name: 'policy_validate', arguments: { path: policyPath, live: true } });
+      expect(live.structuredContent).toMatchObject({ error: { kind: 'runtime', code: 1 } });
+      expect(requests).toEqual([]);
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
   it('returns a structured error for unavailable replacement credentials and recovers after unlocking', async () => {
     vi.stubEnv('SWITCHBOT_TOKEN', '');
     vi.stubEnv('SWITCHBOT_SECRET', '');

@@ -9,6 +9,8 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [3.10.0]
+
 ### Added
 
 - Catalog coverage for RGBICWW Light Bars, Smart Lock Ultra Max, Curtain 4, Robot Vacuum Cleaner K11 Plus Pro, AI Art Frame Luma, Outdoor Pan/Tilt Cam 3K, and Solar Pan/Tilt Cam 2K.
@@ -20,17 +22,18 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - MCP output schemas now declare the existing structured `isError` / `structuredContent.error` result alongside successful object results; successful and error payload shapes are unchanged.
 - Direct destructive commands remain blocked by default even with `--yes` or `confirm: true`; an explicit dev/override permission and confirmation, or an approved plan, is required. Physical devices cannot use IR `customize` dispatch.
-- Solar motion-detection disable is destructive and prohibited from automation/policy preapproval.
+- Solar motion-detection disable requires destructive approval and cannot run from automation rules.
 - Successful credential mutations invalidate device, status, credential, and idempotency caches across running processes; implicit and explicit default profiles now share the legacy cache paths.
 - Account changes reject obsolete in-flight reads and retained-client retries instead of crossing account boundaries. Existing MQTT subscriptions must be restarted.
 
 ### Fixed
 
 - MCP now applies destructive-command safety to cold-cache devices identified only by `controlType`.
-- HTTP MCP returns a protocol error instead of terminating if credentials change during request priming; unavailable replacement keychains cannot fall back to older file credentials.
+- Offline MCP catalog, history, and policy operations remain available when a replacement keychain is locked; online tools fail closed with structured errors and recover after credential repair.
 - HTTP MCP honors explicit `--config` credentials for named-profile requests without relaxing profile-name or bearer-token checks.
-- MCP tool credential-refresh failures retain structured runtime errors and allow recovery after credential repair.
-- Rule JSON parameters avoid a redundant parse while preserving request and audit formats.
+- Rule JSON parameters avoid redundant parsing while preserving raw string rule audits and object command/wire parameters.
+- Video Doorbell policy preferences remain valid without weakening Solar's model-specific destructive-command guard.
+- Full-length profile hashes prevent cross-account credential, inventory, status, revision, and idempotency cache collisions.
 - Publication now runs the full CLI suite on the exact release source; queued publication/promotion runs preserve pending candidates, and promotion rejects SemVer downgrades before changing any `latest` tags.
 - Historical candidate recovery uses the workflow revision's promotion policy instead of reviving older release tooling.
 - Manual hardware smoke now fails on CLI pipeline errors and invalid JSON envelopes; empty history remains valid.
@@ -39,6 +42,7 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Rule RGB parameters retain both `setColor 255 0 0` and `setColor 255:0:0`; JSON objects preserve whitespace and can use YAML literal blocks.
 - Rule dry-runs now require the target in the active profile's cache; missing inventory fails without a network request instead of reporting success.
+- Named-profile caches use full SHA-256 directories. Older short-hash inventory/status caches are ignored; refresh with `switchbot --profile <name> devices list`. Credentials, policy, audit, and event history are unchanged.
 
 ### Notes
 

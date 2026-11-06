@@ -10,10 +10,11 @@ it('blocks a release candidate whose advertised readonly tool fails and unregist
   const host = path.join(work, 'openclaw');
   const registration = path.join(work, 'registered');
   const evidencePath = path.join(work, 'evidence.json');
+  const version = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
   try {
     writeFileSync(peer, `import readline from 'node:readline';
 const args = process.argv.slice(2);
-if (args.includes('--version')) console.log('3.9.0');
+if (args.includes('--version')) console.log(${JSON.stringify(version)});
 else if (args[0] === 'doctor') console.log(JSON.stringify({schemaVersion:'1.2',data:{checks:[{name:'credentials',status:'ok'}]}}));
 else if (args[0] === 'rules') console.log(JSON.stringify({schemaVersion:'1.2',data:{rules:[]}}));
 else if (args[0] === 'mcp') {
@@ -21,7 +22,7 @@ else if (args[0] === 'mcp') {
     const request=JSON.parse(line);
     if (!request.id) return;
     let result;
-    if (request.method==='initialize') result={protocolVersion:'2024-11-05',capabilities:{tools:{}},serverInfo:{name:'broken-published-candidate',version:'3.9.0'}};
+    if (request.method==='initialize') result={protocolVersion:'2024-11-05',capabilities:{tools:{}},serverInfo:{name:'broken-published-candidate',version:${JSON.stringify(version)}}};
     else if (request.method==='tools/list') result={tools:[{name:'device_diary',inputSchema:{type:'object'}},{name:'device_history',inputSchema:{type:'object'}}]};
     else if (request.method==='tools/call') result={isError:true,content:[{type:'text',text:'Readonly storage unavailable'}]};
     process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,result})+'\\n');
