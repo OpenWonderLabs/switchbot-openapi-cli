@@ -1,0 +1,58 @@
+CHANGELOG.md
+  h_dab4e149c2c598 12-13,25,32,34-36,45
+README.md
+  h_dab4e149c2c598 54,56-57,60,63-64,69,258-260,274-277,499
+docs/account-switch-safety-mvp.md
+  h_dab4e149c2c598 5,7-8,20-23,57-59,93-96,102-103,128-133
+docs/agent-guide.md
+  h_dab4e149c2c598 211-216,219-220,223-228,415
+docs/audit-log.md
+  h_dab4e149c2c598 24
+docs/json-contract.md
+  h_dab4e149c2c598 37
+docs/openapi-alignment-and-code-review.md
+  h_dab4e149c2c598 3-5
+docs/policy-reference.md
+  h_dab4e149c2c598 11-12,363-367,518-520
+docs/schema-versioning.md
+  h_dab4e149c2c598 6,32-37
+package-lock.json
+  h_dab4e149c2c598 3,10
+package.json
+  h_dab4e149c2c598 3
+src/commands/mcp.ts
+  h_dab4e149c2c598 63,452,455-460,680,726,754,800,1219,1635,1678,1835,1916,1982,2230,2303,2346,2397,2454,2539,2586,2920-2922,2925-2928
+src/credentials/scope.ts
+  h_dab4e149c2c598 24
+src/policy/schema/v0.2.json
+  h_dab4e149c2c598 42
+src/rules/action.ts
+  h_dab4e149c2c598 172,242-243,268
+tests/build/host-readonly-tool.test.ts
+  h_dab4e149c2c598 13,17,25
+tests/commands/mcp-profile-http.test.ts
+  h_dab4e149c2c598 20,25,37,43,47,49,70-71,130-151,167,180,190-192
+tests/commands/mcp-safety-lifecycle.test.ts
+  h_dab4e149c2c598 113-150
+tests/credentials/prime.test.ts
+  h_dab4e149c2c598 12,71-97
+tests/devices/cache-scoping.test.ts
+  h_dab4e149c2c598 7,27,88-89,98-102,114,127-130,132,134-136,141,143-144,146-156,199
+tests/lib/idempotency.test.ts
+  h_dab4e149c2c598 228-240
+tests/policy/camera-safety-alignment.test.ts
+  h_dab4e149c2c598 7,24-25
+tests/rules/action.test.ts
+  h_dab4e149c2c598 145-171,196,228,230-235,308-310,320,335
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e479f78271c28cbfded94365e03dcb5df238bf39",
+  "prompts": {},
+  "humans": {
+    "h_dab4e149c2c598": {
+      "author": "chenliuyun <chenliuyun@onero.com>"
+    }
+  }
+}
