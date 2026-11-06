@@ -34,7 +34,7 @@ query` emit one JSON envelope.
 outer success or error shape changes. A command payload can have an additional
 version inside `data`.
 
-For example, schema discovery in CLI 3.9.0 is an envelope at `1.2`, an export
+For example, schema discovery in CLI 3.10.0 is an envelope at `1.2`, an export
 at `2.0`, and a resource catalog at `2.0`:
 
 ~~~json

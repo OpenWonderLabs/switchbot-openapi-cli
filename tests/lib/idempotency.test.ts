@@ -225,12 +225,18 @@ describe('IdempotencyCache — profile scoping prevents cross-profile collision'
     expect(fn2).toHaveBeenCalledTimes(1);
   });
 
-  it('same key under different profiles are independent entries', async () => {
-    const cache = new IdempotencyCache(60000);
-    const fn = vi.fn().mockResolvedValue('v');
-    await cache.run('k', fn, undefined, 'profileA');
-    const r = await cache.run('k', fn, undefined, 'profileB');
-    expect(r.replayed).toBe(false);
-    expect(fn).toHaveBeenCalledTimes(2);
+  it('does not replay or evict another profile when legacy cache hashes collide', async () => {
+    const cache = new IdempotencyCache();
+    const first = 'profile-55372';
+    const second = 'profile-65052';
+    await cache.run('k', async () => 'account-A result', undefined, first);
+    expect(await cache.run('k', async () => 'account-B result', undefined, second))
+      .toEqual({ result: 'account-B result', replayed: false });
+
+    cache.clearForProfile(first);
+    expect(await cache.run('k', async () => 'unexpected repeat', undefined, second))
+      .toEqual({ result: 'account-B result', replayed: true });
+    expect(await cache.run('k', async () => 'new account-A result', undefined, first))
+      .toEqual({ result: 'new account-A result', replayed: false });
   });
 });

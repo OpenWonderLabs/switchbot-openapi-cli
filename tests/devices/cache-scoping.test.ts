@@ -4,7 +4,7 @@
  * Each test:
  *  - Redirects os.homedir() to a fresh tmpdir so no real ~/.switchbot is touched.
  *  - Sets/clears the active profile via process.argv or withRequestContext.
- *  - Verifies that the file created on disk is at the expected scoped path.
+ *  - Verifies profile isolation in memory and after reloading from disk.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -24,6 +24,7 @@ import {
   resetStatusCache,
 } from '../../src/devices/cache.js';
 import { withRequestContext } from '../../src/lib/request-context.js';
+import { readCredentialScope } from '../../src/credentials/scope.js';
 
 const originalArgv = process.argv;
 let tmpDir: string;
@@ -84,8 +85,8 @@ describe('cache scoping — no profile (legacy path)', () => {
     expect(getCachedStatus('DEV-1', 60_000)).toBeNull();
   });
 
-  it('does not restore obsolete hashed-default inventory or status after clearing the active cache', () => {
-    const obsolete = path.join(tmpDir, '.switchbot', 'cache', sha8('default'));
+  it.each(['default', 'profile-55372'])('does not restore obsolete short-hash caches for %s', activeProfile => {
+    const obsolete = path.join(tmpDir, '.switchbot', 'cache', sha8(activeProfile));
     const now = new Date().toISOString();
     fs.mkdirSync(obsolete, { recursive: true });
     fs.writeFileSync(path.join(obsolete, 'devices.json'), JSON.stringify({
@@ -94,10 +95,11 @@ describe('cache scoping — no profile (legacy path)', () => {
     fs.writeFileSync(path.join(obsolete, 'status.json'), JSON.stringify({
       entries: { OLD: { fetchedAt: now, body: { power: 'on' } } },
     }));
-    updateCacheFromDeviceList(sampleBody);
-    setCachedStatus('DEV-1', { power: 'off' });
-
-    withRequestContext({ profile: 'default' }, () => {
+    withRequestContext({ profile: activeProfile }, () => {
+      expect(loadCache()).toBeNull();
+      expect(getCachedStatus('OLD', 60_000)).toBeNull();
+      updateCacheFromDeviceList(sampleBody);
+      setCachedStatus('DEV-1', { power: 'off' });
       expect(loadCache()?.devices).toEqual({
         'DEV-1': { type: 'Bot', typeSource: 'deviceType', name: 'Bot', category: 'physical' },
       });
@@ -109,7 +111,7 @@ describe('cache scoping — no profile (legacy path)', () => {
     resetListCache();
     resetStatusCache();
 
-    for (const profile of [undefined, 'default']) {
+    for (const profile of activeProfile === 'default' ? [undefined, 'default'] : [activeProfile]) {
       withRequestContext({ profile }, () => {
         expect(loadCache()).toBeNull();
         expect(getCachedStatus('OLD', 60_000)).toBeNull();
@@ -119,56 +121,39 @@ describe('cache scoping — no profile (legacy path)', () => {
   });
 });
 
-// ── b. Named profile → scoped path ──────────────────────────────────────────
-
-describe('cache scoping — named profile "alpha"', () => {
-  it('writes devices.json under ~/.switchbot/cache/<sha256(alpha):8>/devices.json', () => {
-    const expected = path.join(tmpDir, '.switchbot', 'cache', sha8('alpha'), 'devices.json');
-
-    withRequestContext({ profile: 'alpha' }, () => {
-      updateCacheFromDeviceList(sampleBody);
-    });
-
-    expect(fs.existsSync(expected)).toBe(true);
-
-    // Legacy path must NOT have been created
-    const legacy = path.join(tmpDir, '.switchbot', 'devices.json');
-    expect(fs.existsSync(legacy)).toBe(false);
-  });
-});
-
 // ── c. Different profiles → different directories, no cross-contamination ───
 
 describe('cache scoping — profile isolation', () => {
-  it('alpha and beta get separate directories; switching profile is a cache miss', () => {
-    // Write as "alpha"
-    withRequestContext({ profile: 'alpha' }, () => {
+  it('keeps inventory and status isolated when legacy profile hash prefixes collide', () => {
+    const first = 'profile-55372';
+    const second = 'profile-65052';
+    withRequestContext({ profile: first }, () => {
       updateCacheFromDeviceList(sampleBody);
+      setCachedStatus('DEV-1', { power: 'on' });
     });
-
-    resetListCache();
-
-    // Read as "beta" — should be a cache miss (null)
-    const result = withRequestContext({ profile: 'beta' }, () => {
-      // loadCache is imported inside the module; we test the side-effect:
-      // after writing for alpha, writing for beta creates a separate file
+    withRequestContext({ profile: second }, () => {
+      expect(loadCache()).toBeNull();
+      expect(getCachedStatus('DEV-1', 60_000)).toBeNull();
       updateCacheFromDeviceList({
         deviceList: [{ deviceId: 'DEV-2', deviceName: 'Plug', deviceType: 'Plug' }],
         infraredRemoteList: [],
       });
-      return fs.existsSync(path.join(tmpDir, '.switchbot', 'cache', sha8('beta'), 'devices.json'));
+      setCachedStatus('DEV-2', { power: 'off' });
     });
+    resetListCache();
+    resetStatusCache();
 
-    expect(result).toBe(true);
-
-    // Alpha's file must still exist independently
-    const alphaFile = path.join(tmpDir, '.switchbot', 'cache', sha8('alpha'), 'devices.json');
-    expect(fs.existsSync(alphaFile)).toBe(true);
-
-    // Alpha's content must be the original write, not beta's
-    const alphaCache = JSON.parse(fs.readFileSync(alphaFile, 'utf-8'));
-    expect(alphaCache.devices['DEV-1']).toBeDefined();
-    expect(alphaCache.devices['DEV-2']).toBeUndefined();
+    withRequestContext({ profile: first }, () => {
+      expect(Object.keys(loadCache()!.devices)).toEqual(['DEV-1']);
+      expect(getCachedStatus('DEV-1', 60_000)).toEqual({ power: 'on' });
+      expect(getCachedStatus('DEV-2', 60_000)).toBeNull();
+      clearCache();
+      clearStatusCache();
+    });
+    withRequestContext({ profile: second }, () => {
+      expect(Object.keys(loadCache()!.devices)).toEqual(['DEV-2']);
+      expect(getCachedStatus('DEV-2', 60_000)).toEqual({ power: 'off' });
+    });
   });
 });
 
@@ -183,19 +168,6 @@ describe('cache scoping — status cache follows the same rule', () => {
 
     const scopedDir = path.join(tmpDir, '.switchbot', 'cache');
     expect(fs.existsSync(scopedDir)).toBe(false);
-  });
-
-  it('profile "alpha" → status.json at ~/.switchbot/cache/<sha256(alpha):8>/status.json', () => {
-    const expected = path.join(tmpDir, '.switchbot', 'cache', sha8('alpha'), 'status.json');
-
-    withRequestContext({ profile: 'alpha' }, () => {
-      setCachedStatus('DEV-1', { power: 'on' });
-    });
-
-    expect(fs.existsSync(expected)).toBe(true);
-
-    const legacy = path.join(tmpDir, '.switchbot', 'status.json');
-    expect(fs.existsSync(legacy)).toBe(false);
   });
 });
 
@@ -224,7 +196,7 @@ describe('cache scoping — in-memory hot cache isolation across profiles', () =
     // Write beta's inventory directly to disk (bypassing the hot-cache write path),
     // simulating the scenario where beta's data was written in a prior process and
     // only the hot cache is "stale" (points to alpha).
-    const betaDir = path.join(tmpDir, '.switchbot', 'cache', sha8('beta'));
+    const betaDir = readCredentialScope('beta').cacheDir;
     fs.mkdirSync(betaDir, { recursive: true });
     const betaCache = {
       lastUpdated: new Date().toISOString(),

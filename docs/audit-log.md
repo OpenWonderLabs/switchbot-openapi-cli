@@ -21,7 +21,7 @@ Every record is a JSON object with at least the following fields:
 | `kind` | string | Record discriminator. Values: `command`, `rule-fire`, `rule-fire-dry`, `rule-throttled`, `rule-webhook-rejected`, `rule-notify`, `rule-evaluate`, `llm-suggest`, `llm-condition`, `llm-budget-exceeded`. |
 | `deviceId` | string | Target device ID. |
 | `command` | string | SwitchBot command name (e.g. `turnOn`, `setColor`). |
-| `parameter` | string \| object | Command parameter as sent — `"default"` when unused. |
+| `parameter` | string \| object | `command` records use the wire parameter. Rule-fire records retain the parameter string, including JSON whitespace; RGB values use `r:g:b`. Unused parameters are `"default"`. |
 | `commandType` | `"command" \| "customize"` | Matches the upstream SwitchBot API field. |
 | `dryRun` | boolean | `true` when the command was intercepted by `--dry-run` and never reached the network. |
 | `result` | `"ok" \| "error"` | Optional — only present once the command completed (absent for `dryRun: true`). |

@@ -9,6 +9,7 @@ import { apiCircuitBreaker, createClient } from '../../src/api/client.js';
 import { publishCredentialRevision, readCredentialScope } from '../../src/credentials/scope.js';
 import { createFileBackend } from '../../src/credentials/backends/file.js';
 import { loadConfig, saveConfig, tryLoadConfig } from '../../src/config.js';
+import { withRequestContext } from '../../src/lib/request-context.js';
 import {
   primeCredentials,
   getPrimedCredentials,
@@ -67,6 +68,33 @@ function changeAccount(): void {
 }
 
 describe('primeCredentials', () => {
+  it('dispatches each account separately when profile names share a legacy cache hash', async () => {
+    // Both valid names have the old SHA-256 prefix 4f88d2f9.
+    const first = 'profile-55372';
+    const second = 'profile-65052';
+    selectMock.mockResolvedValue({
+      ...createFileBackend(), name: 'keychain',
+      get: async (profile: string) => profile === first
+        ? { token: 'account-A', secret: 'secret-A' }
+        : { token: 'account-B', secret: 'secret-B' },
+    });
+    const accounts: string[] = [];
+    axios.defaults.adapter = async config => {
+      accounts.push(String(config.headers.Authorization));
+      return { status: 200, statusText: 'OK', headers: {}, config, data: { statusCode: 100, body: {} } };
+    };
+
+    for (const profile of [first, second, first]) {
+      await withRequestContext({ profile }, () => createClient().get('/v1.1/devices'));
+    }
+    expect(accounts).toEqual(['account-A', 'account-B', 'account-A']);
+
+    publishCredentialRevision(readCredentialScope(second), true);
+    clearPrimedCredentials(second);
+    expect(getPrimedCredentials(first)).toEqual({ token: 'account-A', secret: 'secret-A' });
+    expect(readCredentialScope(first).requireKeychain).toBe(false);
+  });
+
   it('refreshes within the TTL after another process replaces credentials', async () => {
     saveConfig('account-A', 'secret-A');
     selectMock.mockResolvedValue(createFileBackend());

@@ -169,7 +169,7 @@ export async function executeRuleAction(
   }
 
   const dryRun = ctx.globalDryRun === true || ctx.rule.dry_run === true;
-  let parameter: unknown;
+  const parameter = parsed.rawParameter;
   let safetyBlocked = false;
   try {
     // A generic verb such as turnOn can be destructive for a particular model.
@@ -194,7 +194,6 @@ export async function executeRuleAction(
       throw new Error(preflight.message);
     }
     parsed.verb = preflight.command;
-    parameter = parseParameterForWire(preflight.targets[0].parameter);
     const spec = entry.commands.find((command) => command.command === parsed.verb);
     if (!spec || deriveSafetyTier(spec, entry) === 'destructive') {
       safetyBlocked = true;
@@ -240,7 +239,8 @@ export async function executeRuleAction(
       });
       return { ok: true, deviceId, verb: parsed.verb };
     }
-    await executeCommand(deviceId, parsed.verb, parameter, 'command', ctx.httpClient);
+    // Rule audit parameters remain strings; decode JSON only for dispatch.
+    await executeCommand(deviceId, parsed.verb, parseParameterForWire(preflight.targets[0].parameter), 'command', ctx.httpClient);
     writeAudit({
       t: new Date().toISOString(),
       kind: 'rule-fire',
@@ -265,7 +265,7 @@ export async function executeRuleAction(
       kind: 'rule-fire',
       deviceId,
       command: parsed.verb,
-      parameter: parameter ?? parseParameterForWire(parsed.rawParameter),
+      parameter: parameter ?? 'default',
       commandType: 'command',
       dryRun: safetyBlocked,
       result: 'error',

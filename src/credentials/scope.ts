@@ -21,7 +21,7 @@ export function readCredentialScope(profile = getActiveProfile(), ignoreConfigOv
     ? path.dirname(path.resolve(override))
     : path.join(os.homedir(), '.switchbot');
   if (!override && profile !== undefined && profile !== 'default') {
-    const hash = createHash('sha256').update(profile).digest('hex').slice(0, 8);
+    const hash = createHash('sha256').update(profile).digest('hex');
     cacheDir = path.join(cacheDir, 'cache', hash);
   }
   let revision: string;

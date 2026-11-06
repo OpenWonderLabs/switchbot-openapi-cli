@@ -142,6 +142,33 @@ describe('executeRuleAction', () => {
     if (!allowed) expect(readAudit(auditFile).at(-1)?.result).toBe('error');
   });
 
+  it.each(['live', 'dry-run', 'error'] as const)('preserves compact JSON as a string in %s rule audit records', async mode => {
+    updateCacheFromDeviceList({
+      deviceList: [{ deviceId: 'FRAME-1', deviceName: 'Frame', deviceType: 'AI Art Frame' }],
+      infraredRemoteList: [],
+    });
+    const parameters: unknown[] = [];
+    const client = axios.create({
+      adapter: async config => {
+        parameters.push(JSON.parse(String(config.data)).parameter);
+        if (mode === 'error') throw new Error('device unavailable');
+        return { data: { body: {} }, status: 200, statusText: 'OK', headers: {}, config };
+      },
+    });
+    const raw = '{"imageUrl":"https://example.test/a.jpg"}';
+    const action = { command: `devices command FRAME-1 uploadImage ${raw}` };
+    const result = await executeRuleAction(action, {
+      rule: { ...baseRule, then: [action], dry_run: mode === 'dry-run' },
+      fireId: 'compact-json-audit', aliases: {}, httpClient: client,
+    });
+    expect(result.ok).toBe(mode !== 'error');
+    expect(parameters).toEqual(mode === 'dry-run' ? [] : [{ imageUrl: 'https://example.test/a.jpg' }]);
+    expect(readAudit(auditFile).at(-1)).toMatchObject({
+      auditVersion: 2, kind: mode === 'dry-run' ? 'rule-fire-dry' : 'rule-fire',
+      result: mode === 'error' ? 'error' : 'ok', parameter: raw,
+    });
+  });
+
   it('sends spaced JSON rule parameters as an object', async () => {
     let posted: Record<string, unknown> | undefined;
     const client = axios.create({
@@ -166,7 +193,7 @@ describe('executeRuleAction', () => {
     expect(result.ok).toBe(true);
     expect(posted?.parameter).toEqual({ action: 'sweep', param: { fanLevel: 2, times: 1 } });
     expect(readAudit(auditFile).at(-1)).toMatchObject({
-      kind: 'rule-fire', result: 'ok', parameter: { action: 'sweep', param: { fanLevel: 2, times: 1 } },
+      kind: 'rule-fire', result: 'ok', parameter: '{"action": "sweep", "param": {"fanLevel": 2, "times": 1}}',
     });
   });
 
@@ -198,9 +225,14 @@ describe('executeRuleAction', () => {
     }
     const expected = [{ imageUrl: 'https://example.test/my art.jpg' }, 'hello home'];
     expect(parameters).toEqual(dryRun ? [] : expected);
-    const kinds = dryRun ? ['rule-fire-dry'] : ['command', 'rule-fire'];
+    const ruleParameters = ['{\n  "imageUrl": "https://example.test/my art.jpg"\n}', 'hello home'];
     expect(readAudit(auditFile).map(({ kind, result, parameter }) => ({ kind, result, parameter })))
-      .toEqual(expected.flatMap(parameter => kinds.map(kind => ({ kind, result: 'ok', parameter }))));
+      .toEqual(ruleParameters.flatMap((parameter, index) => dryRun
+        ? [{ kind: 'rule-fire-dry', result: 'ok', parameter }]
+        : [
+          { kind: 'command', result: 'ok', parameter: expected[index] },
+          { kind: 'rule-fire', result: 'ok', parameter },
+        ]));
   });
 
   it.each([
@@ -273,9 +305,9 @@ describe('executeRuleAction', () => {
   });
 
   it.each([
-    { raw: '{"action": "sweep", "param": {"fanLevel": 999}}', expected: { action: 'sweep', param: { fanLevel: 999 } } },
-    { raw: '{"action":', expected: '{"action":' },
-  ])('preserves the original rule parameter in rejected-action audit records', async ({ raw, expected }) => {
+    '{"action": "sweep", "param": {"fanLevel": 999}}',
+    '{"action":',
+  ])('preserves the original rule parameter in rejected-action audit records: %s', async raw => {
     updateCacheFromDeviceList({
       deviceList: [{ deviceId: 'VAC-1', deviceName: 'Vacuum', deviceType: 'Robot Vacuum Cleaner K11+' }],
       infraredRemoteList: [],
@@ -285,7 +317,7 @@ describe('executeRuleAction', () => {
       rule: { ...baseRule, then: [action] }, fireId: 'invalid-audit', aliases: {}, skipApiCall: true,
     });
     expect(result.ok).toBe(false);
-    expect(readAudit(auditFile).at(-1)).toMatchObject({ result: 'error', parameter: expected });
+    expect(readAudit(auditFile).at(-1)).toMatchObject({ result: 'error', parameter: raw });
   });
 
   it('preserves validated JSON in the rule audit when the device request fails', async () => {
@@ -300,7 +332,7 @@ describe('executeRuleAction', () => {
     });
     expect(result.ok).toBe(false);
     expect(readAudit(auditFile).at(-1)).toMatchObject({
-      kind: 'rule-fire', result: 'error', parameter: { action: 'sweep', param: { fanLevel: 2 } },
+      kind: 'rule-fire', result: 'error', parameter: '{"action": "sweep", "param": {"fanLevel": 2}}',
     });
   });
 

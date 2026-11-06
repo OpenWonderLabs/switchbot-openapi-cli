@@ -60,6 +60,7 @@ import { todayUsage } from '../utils/quota.js';
 import { describeCache } from '../devices/cache.js';
 import { assertValidProfileName, getActiveProfile, withRequestContext } from '../lib/request-context.js';
 import { getPrimedCredentials, primeCredentials } from '../credentials/prime.js';
+import { readCredentialScope } from '../credentials/scope.js';
 import { profileFilePath, tryLoadConfig } from '../config.js';
 import {
   loadPolicyFile,
@@ -448,12 +449,15 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
     name: string,
     config: Parameters<typeof server.registerTool<OutputArgs, InputArgs>>[1],
     callback: (args: SchemaOutput<InputArgs>, extra: RequestHandlerExtra<ServerRequest, ServerNotification>) => CallToolResult | Promise<CallToolResult>,
+    requiresCredentials: boolean | ((args: SchemaOutput<InputArgs>) => boolean) = true,
   ) => {
     const primedCallback = async (args: SchemaOutput<InputArgs>, extra: RequestHandlerExtra<ServerRequest, ServerNotification>) => {
-      try {
-        await primeCredentials(getActiveProfile() ?? 'default');
-      } catch (error) {
-        return apiErrorToMcpError(error);
+      if (typeof requiresCredentials === 'function' ? requiresCredentials(args) : requiresCredentials) {
+        try {
+          await primeCredentials(getActiveProfile() ?? 'default');
+        } catch (error) {
+          return apiErrorToMcpError(error);
+        }
       }
       return callback(args, extra);
     };
@@ -673,7 +677,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
     // ---- aggregate mode ------------------------------------------------
     // Zod enum guarantees mode === 'aggregate' here
     return runDeviceHistoryAggregate(args as Parameters<typeof runDeviceHistoryAggregate>[0]);
-  })
+  }, false)
 
   // ---- deprecated aliases for device_history ------------------------------
   // 3.x backward-compat — removed in 4.0.0. query/aggregate aliases delegate
@@ -719,7 +723,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
       content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
       structuredContent: result,
     };
-  })
+  }, false)
 
   if (!skip('query_device_history')) registerTool('query_device_history',
   {
@@ -747,7 +751,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
       notes: z.array(z.string()).optional(),
     },
   },
-  async (args) => runDeviceHistoryQuery(args))
+  async (args) => runDeviceHistoryQuery(args), false)
 
   if (!skip('aggregate_device_history')) registerTool('aggregate_device_history',
   {
@@ -793,7 +797,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
       notes: z.array(z.string()).optional(),
     },
   },
-  async (args) => runDeviceHistoryAggregate(args))
+  async (args) => runDeviceHistoryAggregate(args), false)
 
   // ---- send_command ---------------------------------------------------------
   if (!skip('send_command')) registerTool('send_command',
@@ -1212,7 +1216,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
       content: [{ type: 'text', text: JSON.stringify(normalised, null, 2) }],
       structuredContent: structured,
     };
-  })
+  }, false)
 
   // ---- describe_device ------------------------------------------------------
   if (!skip('describe_device')) registerTool('describe_device',
@@ -1628,7 +1632,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
       }
       throw err;
     }
-  })
+  }, ({ live }) => live === true)
 
   // ---- policy_new ----------------------------------------------------------
   if (!skip('policy_new')) registerTool('policy_new',
@@ -1671,7 +1675,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
       content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
       structuredContent: structured,
     };
-  })
+  }, false)
 
   // ---- policy_migrate ------------------------------------------------------
   if (!skip('policy_migrate')) registerTool('policy_migrate',
@@ -1828,7 +1832,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
       content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
       structuredContent: structured,
     };
-  })
+  }, false)
 
   // ---- policy_diff ---------------------------------------------------------
   if (!skip('policy_diff')) registerTool('policy_diff',
@@ -1909,7 +1913,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
       content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
       structuredContent: result,
     };
-  },)
+  }, false)
 
   // switchbot://events resource — snapshot of recent shadow events from the ring buffer.
   // Returns up to 100 recent events. When MQTT is disabled, returns an empty list with a state note.
@@ -1975,7 +1979,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
     } catch (err) {
       return apiErrorToMcpError(err);
     }
-  },)
+  }, false)
 
   // ---- plan_run -------------------------------------------------------------
   if (!skip('plan_run')) registerTool('plan_run',
@@ -2223,7 +2227,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
     } catch (err) {
       return mcpError('usage', 2, err instanceof Error ? err.message : 'invalid audit query options');
     }
-  },)
+  }, false)
 
   // ---- audit_stats ----------------------------------------------------------
   if (!skip('audit_stats')) registerTool('audit_stats',
@@ -2296,7 +2300,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
     } catch (err) {
       return mcpError('usage', 2, err instanceof Error ? err.message : 'invalid audit stats options');
     }
-  },)
+  }, false)
 
   // ---- rule_notifications ---------------------------------------------------
   if (!skip('rule_notifications')) registerTool('rule_notifications',
@@ -2339,7 +2343,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
       content: [{ type: 'text' as const, text: JSON.stringify(out, null, 2) }],
       structuredContent: out,
     };
-  },)
+  }, false)
 
   // ---- rules_suggest --------------------------------------------------------
   if (!skip('rules_suggest')) registerTool('rules_suggest',
@@ -2390,7 +2394,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
     } catch (err) {
       return apiErrorToMcpError(err);
     }
-  },)
+  }, false)
 
   // ---- rules_explain --------------------------------------------------------
   if (!skip('rules_explain')) registerTool('rules_explain',
@@ -2447,7 +2451,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
       content: [{ type: 'text' as const, text: JSON.stringify(output, null, 2) }],
       structuredContent: { records: output, count: output.length },
     };
-  },)
+  }, false)
 
   // ---- rules_simulate -------------------------------------------------------
   if (!skip('rules_simulate')) registerTool('rules_simulate',
@@ -2532,7 +2536,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
         structuredContent: { report: null },
       };
     }
-  },)
+  }, false)
 
   // ---- policy_add_rule ------------------------------------------------------
   if (!skip('policy_add_rule')) registerTool('policy_add_rule',
@@ -2579,7 +2583,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
       }
       return apiErrorToMcpError(err);
     }
-  },)
+  }, false)
 
   return server;
 }
@@ -2913,12 +2917,15 @@ process_uptime_seconds ${Math.floor(process.uptime())}
             }
 
             // Explicit environment/config credentials override profile selection.
-            // Otherwise resolve keychain-only profiles before rejecting unknown names.
-            if (profile) {
+            // Known local profiles remain usable offline while the keychain is locked.
+            // Only unknown named profiles need a keychain lookup before dispatch.
+            if (profile && profile !== 'default') {
               try {
-                await primeCredentials(profile);
                 const envCredsPresent = !!(process.env.SWITCHBOT_TOKEN && process.env.SWITCHBOT_SECRET);
-                if (!envCredsPresent && !getConfigPath() && !getPrimedCredentials(profile) && !fs.existsSync(profileFilePath(profile))) {
+                const knownProfile = envCredsPresent || !!getConfigPath() ||
+                  fs.existsSync(profileFilePath(profile)) || readCredentialScope(profile).requireKeychain;
+                if (!knownProfile) await primeCredentials(profile);
+                if (!knownProfile && !getPrimedCredentials(profile)) {
                   res.writeHead(401, { 'Content-Type': 'application/json' });
                   res.end(JSON.stringify({
                     jsonrpc: '2.0',
@@ -2949,7 +2956,6 @@ process_uptime_seconds ${Math.floor(process.uptime())}
             // picks up this request's profile instead of the process-global flag.
             try {
               await withRequestContext({ profile: profile ?? undefined }, async () => {
-                await primeCredentials(getActiveProfile() ?? 'default');
                 if (res.destroyed) return;
                 reqServer = createSwitchBotMcpServer({ eventManager, eventManagerProfile: startupProfile, toolProfile });
                 await reqServer.connect(reqTransport);
