@@ -20,6 +20,8 @@ import { recordRequest, checkDailyCap } from '../utils/quota.js';
 import { readProfileMeta } from '../config.js';
 import { getActiveProfile } from '../lib/request-context.js';
 import { redactHeaders, warnOnceIfUnsafe } from '../utils/redact.js';
+import { primeCredentials } from '../credentials/prime.js';
+import { assertCredentialScope, readCredentialScope } from '../credentials/scope.js';
 
 class DailyCapExceededError extends Error {
   constructor(public readonly cap: number, public readonly total: number, public readonly profile?: string) {
@@ -62,9 +64,24 @@ export const apiCircuitBreaker = new CircuitBreaker('switchbot-api', {
 export { CircuitOpenError };
 
 type RetryableConfig = InternalAxiosRequestConfig & { __retryCount?: number };
+function isUploadImageCommandRequest(response: AxiosResponse): boolean {
+  const url = response.config.url;
+  if (!url || !/\/v1\.1\/devices\/[^/]+\/commands(?:\?.*)?$/.test(url)) return false;
+
+  let data: unknown = response.config.data;
+  if (typeof data === 'string') {
+    try {
+      data = JSON.parse(data) as unknown;
+    } catch {
+      return false;
+    }
+  }
+  return !!data && typeof data === 'object' && 'command' in data && data.command === 'uploadImage';
+}
+
 
 export function createClient(): AxiosInstance {
-  const { token, secret } = loadConfig();
+  const scope = readCredentialScope();
   const verbose = isVerbose();
   const dryRun = isDryRun();
   const maxRetries = getRetryOn429();
@@ -81,7 +98,11 @@ export function createClient(): AxiosInstance {
   });
 
   // Inject auth headers; optionally log the request; short-circuit on --dry-run.
-  client.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+  client.interceptors.request.use(async (config: InternalAxiosRequestConfig) => {
+    assertCredentialScope(scope);
+    await primeCredentials(profile ?? 'default');
+    assertCredentialScope(scope);
+    const { token, secret } = loadConfig();
     // Circuit breaker check — fail fast when the API is consistently down.
     apiCircuitBreaker.checkAndAllow();
 
@@ -92,6 +113,7 @@ export function createClient(): AxiosInstance {
         throw new DailyCapExceededError(dailyCap, check.total, profile);
       }
     }
+    assertCredentialScope(scope);
     const authHeaders = buildAuthHeaders(token, secret);
     Object.assign(config.headers, authHeaders);
 
@@ -140,10 +162,11 @@ export function createClient(): AxiosInstance {
       }
       const data = response.data as { statusCode?: number; message?: string };
       if (data.statusCode !== undefined && data.statusCode !== 100) {
-        const msg =
-          API_ERROR_MESSAGES[data.statusCode] ??
-          data.message ??
-          `API error code: ${data.statusCode}`;
+        const msg = data.statusCode === 402 && isUploadImageCommandRequest(response)
+          ? `Image upload quota reached${data.message ? `: ${data.message}` : ''}`
+          : API_ERROR_MESSAGES[data.statusCode] ??
+            data.message ??
+            `API error code: ${data.statusCode}`;
         throw new ApiError(msg, data.statusCode);
       }
       // Successful HTTP response — record for circuit breaker.

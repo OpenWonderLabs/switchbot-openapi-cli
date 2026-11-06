@@ -7,6 +7,43 @@ All notable changes to `@switchbot/openapi-cli` are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Catalog coverage for RGBICWW Light Bars, Smart Lock Ultra Max, Curtain 4, Robot Vacuum Cleaner K11 Plus Pro, AI Art Frame Luma, Outdoor Pan/Tilt Cam 3K, and Solar Pan/Tilt Cam 2K.
+- Light Bars object commands, including `setLightEffect` with `effectId` 0–25; six existing documented lights also expose their light effects.
+- Camera `latestImage` metadata with its expiry contract, Solar motion-detection controls, and Art Frame Luma upload/status support.
+- CI workflow-schema validation, full Markdown lint, Node 24 regression/coverage gates, and isolated native credential create/replace/delete smoke checks on Linux, macOS, and Windows.
+
+### Changed
+
+- MCP output schemas now declare the existing structured `isError` / `structuredContent.error` result alongside successful object results; successful and error payload shapes are unchanged.
+- Direct destructive commands remain blocked by default even with `--yes` or `confirm: true`; an explicit dev/override permission and confirmation, or an approved plan, is required. Physical devices cannot use IR `customize` dispatch.
+- Solar motion-detection disable is destructive and prohibited from automation/policy preapproval.
+- Successful credential mutations invalidate device, status, credential, and idempotency caches across running processes; implicit and explicit default profiles now share the legacy cache paths.
+- Account changes reject obsolete in-flight reads and retained-client retries instead of crossing account boundaries. Existing MQTT subscriptions must be restarted.
+
+### Fixed
+
+- MCP now applies destructive-command safety to cold-cache devices identified only by `controlType`.
+- HTTP MCP returns a protocol error instead of terminating if credentials change during request priming; unavailable replacement keychains cannot fall back to older file credentials.
+- HTTP MCP honors explicit `--config` credentials for named-profile requests without relaxing profile-name or bearer-token checks.
+- MCP tool credential-refresh failures retain structured runtime errors and allow recovery after credential repair.
+- Rule JSON parameters avoid a redundant parse while preserving request and audit formats.
+- Publication now runs the full CLI suite on the exact release source; queued publication/promotion runs preserve pending candidates, and promotion rejects SemVer downgrades before changing any `latest` tags.
+- Historical candidate recovery uses the workflow revision's promotion policy instead of reviving older release tooling.
+- Manual hardware smoke now fails on CLI pipeline errors and invalid JSON envelopes; empty history remains valid.
+
+### Compatibility
+
+- Rule RGB parameters retain both `setColor 255 0 0` and `setColor 255:0:0`; JSON objects preserve whitespace and can use YAML literal blocks.
+- Rule dry-runs now require the target in the active profile's cache; missing inventory fails without a network request instead of reporting success.
+
+### Notes
+
+- Light Bars webhook field shapes are documented, but the exact `context.deviceType` identifier remains unconfirmed and is deliberately not mapped.
+
 ## [3.9.0]
 
 ### Added

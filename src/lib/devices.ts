@@ -17,11 +17,13 @@ import {
   isListCacheFresh,
   getCachedStatus,
   setCachedStatus,
+  type CachedDevice,
 } from '../devices/cache.js';
 import { getCacheMode } from '../utils/flags.js';
 import { writeAudit } from '../utils/audit.js';
 import { isDryRun } from '../utils/flags.js';
 import { getActiveProfile } from '../lib/request-context.js';
+import { assertCredentialScope, readCredentialScope } from '../credentials/scope.js';
 
 export interface Device {
   deviceId: string;
@@ -82,7 +84,7 @@ export class DeviceNotFoundError extends Error {
 export class CommandValidationError extends Error {
   constructor(
     message: string,
-    public readonly kind: 'read-only-device' | 'unknown-command' | 'unknown-device-type' | 'unexpected-parameter' | 'missing-parameter',
+    public readonly kind: 'read-only-device' | 'unknown-command' | 'unknown-device-type' | 'invalid-command-type' | 'unexpected-parameter' | 'missing-parameter',
     public readonly hint?: string
   ) {
     super(message);
@@ -119,6 +121,7 @@ export async function fetchDeviceList(
   client?: AxiosInstance,
   options: { bypassCache?: boolean } = {},
 ): Promise<DeviceListBody> {
+  const scope = readCredentialScope();
   // TTL-gated read: when the on-disk cache is younger than the configured
   // list TTL, skip the API call and synthesize a DeviceListBody from the
   // metadata cache.
@@ -157,12 +160,14 @@ export async function fetchDeviceList(
           });
         }
       }
+      assertCredentialScope(scope);
       return { deviceList, infraredRemoteList };
     }
   }
   const c = client ?? createClient();
   const res = await c.get<{ body: DeviceListBody }>('/v1.1/devices');
-  updateCacheFromDeviceList(res.data.body);
+  assertCredentialScope(scope);
+  updateCacheFromDeviceList(res.data.body, scope);
   return res.data.body;
 }
 
@@ -171,17 +176,22 @@ export async function fetchDeviceStatus(
   deviceId: string,
   client?: AxiosInstance
 ): Promise<Record<string, unknown>> {
+  const scope = readCredentialScope();
   const mode = getCacheMode();
   if (mode.statusTtlMs > 0) {
     const cached = getCachedStatus(deviceId, mode.statusTtlMs);
-    if (cached) return cached;
+    if (cached) {
+      assertCredentialScope(scope);
+      return cached;
+    }
   }
   const c = client ?? createClient();
   const res = await c.get<{ body: Record<string, unknown> }>(
     `/v1.1/devices/${deviceId}/status`
   );
+  assertCredentialScope(scope);
   if (mode.statusTtlMs > 0) {
-    setCachedStatus(deviceId, res.data.body, new Date(), mode.statusTtlMs);
+    setCachedStatus(deviceId, res.data.body, new Date(), mode.statusTtlMs, scope);
   }
   return res.data.body;
 }
@@ -316,10 +326,30 @@ export function validateCommand(
   parameter: string | undefined,
   commandType: string
 ): { ok: true; normalized?: string; caseNormalizedFrom?: string } | { ok: false; error: CommandValidationError } {
-  if (commandType === 'customize') return { ok: true };
-
   const cached = getCachedDevice(deviceId);
   if (!cached) return { ok: true };
+  return validateCommandForDevice(deviceId, cached, cmd, parameter, commandType);
+}
+
+/** Validate a command against an explicit inventory entry without touching the cache. */
+export function validateCommandForDevice(
+  deviceId: string,
+  cached: CachedDevice,
+  cmd: string,
+  parameter: string | undefined,
+  commandType: string,
+): { ok: true; normalized?: string; caseNormalizedFrom?: string } | { ok: false; error: CommandValidationError } {
+  if (commandType === 'customize') {
+    if (cached.category === 'ir') return { ok: true };
+    return {
+      ok: false,
+      error: new CommandValidationError(
+        `Custom commands are only supported for infrared remotes; ${cached.name} is a physical device.`,
+        'invalid-command-type',
+        'Use the built-in command type for this device.',
+      ),
+    };
+  }
 
   const match = findCatalogEntry(cached.type);
   if (!match || Array.isArray(match)) {

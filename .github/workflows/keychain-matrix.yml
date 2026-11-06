@@ -4,23 +4,33 @@ on:
   push:
     branches: [main]
     paths:
-      - 'src/credentials/**'
-      - 'src/install/**'
-      - 'tests/credentials/**'
-      - 'tests/install/**'
+      - 'src/**'
+      - 'tests/**'
+      - 'scripts/smoke-keychain.mjs'
+      - 'package*.json'
+      - 'tsconfig*.json'
+      - '.github/workflows/keychain-matrix.yml'
   pull_request:
     branches: [main]
     paths:
-      - 'src/credentials/**'
-      - 'src/install/**'
-      - 'tests/credentials/**'
-      - 'tests/install/**'
+      - 'src/**'
+      - 'tests/**'
+      - 'scripts/smoke-keychain.mjs'
+      - 'package*.json'
+      - 'tsconfig*.json'
+      - '.github/workflows/keychain-matrix.yml'
   workflow_dispatch:
 
-# Each job installs Node, builds, and runs the credential + install-step
-# test suites against the real OS keychain backend. The unit tests (which
-# mock spawn) pass on ubuntu-latest in the main CI; here we verify
-# that the live system commands are available and callable.
+permissions:
+  contents: read
+
+concurrency:
+  group: keychain-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# Shared cache/credential/MCP regressions run on every supported OS.
+# The separate native smoke rejects file fallback and exercises actual
+# keychain create/read/replace/delete with disposable dummy credentials.
 
 jobs:
   keychain-macos:
@@ -38,19 +48,28 @@ jobs:
       # Create and unlock a temporary keychain so the macOS backend can
       # write entries without prompting the System Keychain.
       - name: Set up temporary keychain
+        shell: bash
         run: |
+          original=$(security default-keychain -d user | xargs)
+          echo "SWITCHBOT_CI_ORIGINAL_KEYCHAIN=$original" >> "$GITHUB_ENV"
           security create-keychain -p "" switchbot-ci.keychain
           security set-keychain-settings -lut 3600 switchbot-ci.keychain
           security unlock-keychain -p "" switchbot-ci.keychain
           security list-keychains -d user -s switchbot-ci.keychain $(security list-keychains -d user | sed s/\"//g)
-          echo "SWITCHBOT_CI_KEYCHAIN=switchbot-ci.keychain" >> "$GITHUB_ENV"
+          security default-keychain -d user -s switchbot-ci.keychain
 
-      - name: Run credential + install-step tests
-        run: npm test -- tests/credentials tests/install
+      - name: Run account lifecycle regressions
+        run: npm run test:account-lifecycle
+      - name: Exercise native keychain lifecycle
+        run: npm run smoke:keychain
 
       - name: Delete temporary keychain
         if: always()
+        shell: bash
         run: |
+          if [ -n "${SWITCHBOT_CI_ORIGINAL_KEYCHAIN:-}" ]; then
+            security default-keychain -d user -s "$SWITCHBOT_CI_ORIGINAL_KEYCHAIN"
+          fi
           security delete-keychain switchbot-ci.keychain || true
 
   keychain-linux:
@@ -76,12 +95,14 @@ jobs:
 
       # Start a D-Bus session and unlock gnome-keyring so secret-tool can
       # store entries. The keyring is unlocked with an empty password.
-      - name: Run credential + install-step tests inside D-Bus session
+      - name: Run lifecycle regressions and native smoke inside D-Bus session
+        shell: bash
         run: |
           eval "$(dbus-launch --sh-syntax)"
           echo "" | gnome-keyring-daemon --daemonize --unlock --components=secrets
           export DBUS_SESSION_BUS_ADDRESS
-          npm test -- tests/credentials tests/install
+          npm run test:account-lifecycle
+          npm run smoke:keychain
 
   keychain-windows:
     name: Keychain — Windows (Credential Manager)
@@ -97,5 +118,7 @@ jobs:
 
       # Windows Credential Manager is available to any logged-in user on
       # GitHub-hosted Windows runners; no extra setup required.
-      - name: Run credential + install-step tests
-        run: npm test -- tests/credentials tests/install
+      - name: Run account lifecycle regressions
+        run: npm run test:account-lifecycle
+      - name: Exercise native Credential Manager lifecycle
+        run: npm run smoke:keychain

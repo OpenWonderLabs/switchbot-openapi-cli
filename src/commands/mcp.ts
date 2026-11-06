@@ -87,7 +87,7 @@ import { simulateRule } from '../rules/simulate.js';
 import { allowsDirectDestructiveExecution, destructiveExecutionHint } from '../lib/destructive-mode.js';
 import { writeFileSync } from 'node:fs';
 import { readAudit, type AuditEntry } from '../utils/audit.js';
-import { isDryRun, parseDurationToMs } from '../utils/flags.js';
+import { getConfigPath, isDryRun, parseDurationToMs } from '../utils/flags.js';
 import { resolveDeviceId } from '../utils/name-resolver.js';
 import { preparePlanTargets, type PlanPreflightResult } from '../lib/plan-preflight.js';
 import { parse as yamlParse } from 'yaml';
@@ -106,6 +106,42 @@ import { readPolicyExampleYaml } from '../embedded-assets.js';
  */
 
 type McpErrorKind = 'api' | 'runtime' | 'usage' | 'guard';
+
+const structuredToolError = z.object({
+  error: z.object({
+    code: z.number(),
+    kind: z.enum(['api', 'runtime', 'usage', 'guard']),
+    message: z.string(),
+    hint: z.string().optional(),
+    retryable: z.boolean().optional(),
+    context: z.record(z.string(), z.unknown()).optional(),
+    subKind: z.string().optional(),
+    errorClass: z.string().optional(),
+    transient: z.boolean().optional(),
+    retryAfterMs: z.number().optional(),
+  }).strict(),
+}).strict();
+
+/**
+ * The SDK requires a root object schema and clients validate structured errors
+ * too. Keep the original success schema and error schema as exclusive branches.
+ */
+function toolOutputSchema(shape: Record<string, z.ZodType>): z.ZodObject {
+  const success = z.object(shape).strict();
+  const optionalShape: Record<string, z.ZodType> = {};
+  for (const [key, value] of Object.entries(shape)) optionalShape[key] = value.optional();
+  optionalShape.error = structuredToolError.shape.error.optional();
+  return z.object(optionalShape).strict().superRefine((value, ctx) => {
+    if (!success.safeParse(value).success && !structuredToolError.safeParse(value).success) {
+      ctx.addIssue({ code: 'custom', message: 'Expected a complete success or structured error result.' });
+    }
+  }).meta({
+    oneOf: [
+      z.toJSONSchema(success, { target: 'draft-7', io: 'output' }),
+      z.toJSONSchema(structuredToolError, { target: 'draft-7', io: 'output' }),
+    ],
+  });
+}
 
 function mcpError(
   kind: McpErrorKind,
@@ -414,11 +450,18 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
     callback: (args: SchemaOutput<InputArgs>, extra: RequestHandlerExtra<ServerRequest, ServerNotification>) => CallToolResult | Promise<CallToolResult>,
   ) => {
     const primedCallback = async (args: SchemaOutput<InputArgs>, extra: RequestHandlerExtra<ServerRequest, ServerNotification>) => {
-      await primeCredentials(getActiveProfile() ?? 'default');
+      try {
+        await primeCredentials(getActiveProfile() ?? 'default');
+      } catch (error) {
+        return apiErrorToMcpError(error);
+      }
       return callback(args, extra);
     };
     // Every local tool has an input schema; the SDK also supports a separate no-input callback form.
-    return server.registerTool(name, config, primedCallback as ToolCallback<InputArgs>);
+    const outputSchema = config.outputSchema
+      ? toolOutputSchema(config.outputSchema as Record<string, z.ZodType>)
+      : undefined;
+    return server.registerTool(name, { ...config, outputSchema } as typeof config, primedCallback as ToolCallback<InputArgs>);
   };
 
   // ---- list_devices ---------------------------------------------------------
@@ -907,9 +950,26 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
           hint: "Check the deviceId with 'switchbot devices list' (IDs are case-sensitive).",
         });
       }
-      typeName = physical ? physical.deviceType : ir!.remoteType;
+      typeName = physical ? physical.deviceType || physical.controlType : ir!.remoteType;
     }
   
+    // validateCommand covers command existence + required/unexpected-parameter.
+    // stringifiedParam was computed once at the top of the handler so dry-run
+    // and live paths share the same shape.
+    const validation = validateCommand(deviceId, effectiveCommand, stringifiedParam, effectiveType);
+    if (!validation.ok) {
+      return mcpError(
+        'usage', 2,
+        validation.error.message,
+        {
+          hint: validation.error.hint,
+          context: { validationKind: validation.error.kind, deviceType: typeName, command: effectiveCommand },
+        },
+      );
+    }
+    if (validation.normalized) {
+      effectiveCommand = validation.normalized;
+    }
     const destructive = isDestructiveCommand(typeName, effectiveCommand, effectiveType);
     if (destructive && !allowsDirectDestructiveExecution()) {
       const reason = getDestructiveReason(typeName, effectiveCommand, effectiveType);
@@ -954,23 +1014,6 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
       );
     }
   
-    // validateCommand covers command existence + required/unexpected-parameter.
-    // stringifiedParam was computed once at the top of the handler so dry-run
-    // and live paths share the same shape.
-    const validation = validateCommand(deviceId, effectiveCommand, stringifiedParam, effectiveType);
-    if (!validation.ok) {
-      return mcpError(
-        'usage', 2,
-        validation.error.message,
-        {
-          hint: validation.error.hint,
-          context: { validationKind: validation.error.kind, deviceType: typeName, command: effectiveCommand },
-        },
-      );
-    }
-    if (validation.normalized) {
-      effectiveCommand = validation.normalized;
-    }
   
     // R-2: run B-1 client-side parameter validator (range/format checks).
     // Customize commands (user-defined IR buttons) opt out — the catalog
@@ -2869,18 +2912,26 @@ process_uptime_seconds ${Math.floor(process.uptime())}
               }
             }
 
-            // Resolve keychain-only profiles after authentication, before rejecting
-            // names that have neither credentials nor a profile configuration.
+            // Explicit environment/config credentials override profile selection.
+            // Otherwise resolve keychain-only profiles before rejecting unknown names.
             if (profile) {
-              await primeCredentials(profile);
-              const envCredsPresent = !!(process.env.SWITCHBOT_TOKEN && process.env.SWITCHBOT_SECRET);
-              if (!envCredsPresent && !getPrimedCredentials(profile) && !fs.existsSync(profileFilePath(profile))) {
-                res.writeHead(401, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({
-                  jsonrpc: '2.0',
-                  error: { code: -32001, message: `Unknown profile: ${profile}` },
-                  id: null,
-                }));
+              try {
+                await primeCredentials(profile);
+                const envCredsPresent = !!(process.env.SWITCHBOT_TOKEN && process.env.SWITCHBOT_SECRET);
+                if (!envCredsPresent && !getConfigPath() && !getPrimedCredentials(profile) && !fs.existsSync(profileFilePath(profile))) {
+                  res.writeHead(401, { 'Content-Type': 'application/json' });
+                  res.end(JSON.stringify({
+                    jsonrpc: '2.0',
+                    error: { code: -32001, message: `Unknown profile: ${profile}` },
+                    id: null,
+                  }));
+                  return;
+                }
+              } catch {
+                if (!res.destroyed) {
+                  res.writeHead(500, { 'Content-Type': 'application/json' });
+                  res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32603, message: 'Internal server error' }, id: null }));
+                }
                 return;
               }
             }
@@ -2896,20 +2947,20 @@ process_uptime_seconds ${Math.floor(process.uptime())}
             });
             // Route per-request credentials via AsyncLocalStorage so loadConfig()
             // picks up this request's profile instead of the process-global flag.
-            await withRequestContext({ profile: profile ?? undefined }, async () => {
-              await primeCredentials(getActiveProfile() ?? 'default');
-              if (res.destroyed) return;
-              reqServer = createSwitchBotMcpServer({ eventManager, eventManagerProfile: startupProfile, toolProfile });
-              try {
+            try {
+              await withRequestContext({ profile: profile ?? undefined }, async () => {
+                await primeCredentials(getActiveProfile() ?? 'default');
+                if (res.destroyed) return;
+                reqServer = createSwitchBotMcpServer({ eventManager, eventManagerProfile: startupProfile, toolProfile });
                 await reqServer.connect(reqTransport);
                 await reqTransport.handleRequest(req, res);
-              } catch (err) {
-                if (!res.headersSent) {
-                  res.writeHead(500, { 'Content-Type': 'application/json' });
-                  res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32603, message: 'Internal server error' }, id: null }));
-                }
+              });
+            } catch {
+              if (!res.headersSent && !res.destroyed) {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32603, message: 'Internal server error' }, id: null }));
               }
-            });
+            }
           });
 
           // Graceful shutdown

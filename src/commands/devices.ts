@@ -713,7 +713,7 @@ Examples:
         }
 
         const destructive = isDestructiveCommand(cachedForGuard?.type, cmd, options.type);
-        if (!isDryRun() && destructive && !options.yes && !allowsDirectDestructiveExecution()) {
+        if (!isDryRun() && destructive && !allowsDirectDestructiveExecution()) {
           const typeLabel = cachedForGuard?.type ?? 'unknown';
           const reason = getDestructiveReason(cachedForGuard?.type, cmd, options.type);
           exitWithError({

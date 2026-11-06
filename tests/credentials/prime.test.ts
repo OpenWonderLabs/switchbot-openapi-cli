@@ -1,4 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { EventEmitter, once } from 'node:events';
+import axios from 'axios';
+import { apiCircuitBreaker, createClient } from '../../src/api/client.js';
+import { publishCredentialRevision, readCredentialScope } from '../../src/credentials/scope.js';
+import { createFileBackend } from '../../src/credentials/backends/file.js';
+import { loadConfig, saveConfig, tryLoadConfig } from '../../src/config.js';
 import {
   primeCredentials,
   getPrimedCredentials,
@@ -7,6 +17,9 @@ import {
 } from '../../src/credentials/prime.js';
 
 const selectMock = vi.fn();
+const originalArgv = process.argv;
+const originalAdapter = axios.defaults.adapter;
+let home: string;
 
 vi.mock('../../src/credentials/keychain.js', async () => {
   const actual = await vi.importActual<typeof import('../../src/credentials/keychain.js')>(
@@ -19,19 +32,142 @@ vi.mock('../../src/credentials/keychain.js', async () => {
 });
 
 beforeEach(() => {
+  home = fs.mkdtempSync(path.join(os.tmpdir(), 'switchbot-credential-prime-'));
+  vi.spyOn(os, 'homedir').mockReturnValue(home);
+  process.argv = ['node', 'switchbot'];
   selectMock.mockReset();
   vi.stubEnv('SWITCHBOT_TOKEN', undefined);
   vi.stubEnv('SWITCHBOT_SECRET', undefined);
   __resetPrimedCredentials();
+  apiCircuitBreaker.reset();
 });
 
 afterEach(() => {
+  process.argv = originalArgv;
+  axios.defaults.adapter = originalAdapter;
+  apiCircuitBreaker.reset();
   __resetPrimedCredentials();
   vi.unstubAllEnvs();
   vi.useRealTimers();
+  vi.restoreAllMocks();
+  fs.rmSync(home, { recursive: true, force: true });
 });
 
+function changeAccount(): void {
+  const envFile = path.join(home, 'account-b.env');
+  fs.writeFileSync(envFile, 'SWITCHBOT_TOKEN=account-B\nSWITCHBOT_SECRET=secret-B\n');
+  const changed = spawnSync(process.execPath, [
+    '--import', 'tsx', 'src/index.ts', '--json', 'config', 'set-token', '--from-env-file', envFile,
+  ], {
+    cwd: process.cwd(),
+    env: { ...process.env, HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: home, PATH: '', SWITCHBOT_TOKEN: '', SWITCHBOT_SECRET: '' },
+    encoding: 'utf8', timeout: 20_000,
+  });
+  if (changed.status !== 0) throw new Error(changed.stderr || changed.stdout);
+}
+
 describe('primeCredentials', () => {
+  it('refreshes within the TTL after another process replaces credentials', async () => {
+    saveConfig('account-A', 'secret-A');
+    selectMock.mockResolvedValue(createFileBackend());
+    await primeCredentials('default');
+    expect(loadConfig().token).toBe('account-A');
+
+    changeAccount();
+
+    await primeCredentials('default');
+    expect(loadConfig().token).toBe('account-B');
+  });
+
+  it('rejects an obsolete keychain lookup without poisoning the replacement account', async () => {
+    saveConfig('account-A', 'secret-A');
+    const gate = new EventEmitter();
+    const entered = once(gate, 'started');
+    selectMock.mockResolvedValueOnce({
+      ...createFileBackend(),
+      get: async () => {
+        const waiting = once(gate, 'release');
+        gate.emit('started');
+        await waiting;
+        return { token: 'account-A', secret: 'secret-A' };
+      },
+    });
+    const obsolete = primeCredentials('default').then(() => null, error => error);
+    await entered;
+    changeAccount();
+    selectMock.mockResolvedValue(createFileBackend());
+    const replacement = primeCredentials('default');
+    gate.emit('release');
+
+    expect(await obsolete).toMatchObject({ name: 'CredentialScopeChangedError' });
+    await replacement;
+    expect(loadConfig().token).toBe('account-B');
+  });
+
+  it.each(['throws', 'missing', 'file fallback'])('does not dispatch old file credentials when a replacement keychain %s', async failure => {
+    saveConfig('account-A', 'secret-A');
+    publishCredentialRevision(readCredentialScope(), true);
+    if (failure === 'throws') selectMock.mockRejectedValue(new Error('keychain locked'));
+    else if (failure === 'missing') selectMock.mockResolvedValue({ ...createFileBackend(), name: 'keychain', get: async () => null });
+    else selectMock.mockResolvedValue(createFileBackend());
+    const dispatched: string[] = [];
+    axios.defaults.adapter = async config => {
+      const account = String(config.headers.Authorization);
+      dispatched.push(account);
+      return { status: 200, statusText: 'OK', headers: {}, config, data: { statusCode: 100, body: { account } } };
+    };
+
+    await expect(createClient().get('/v1.1/devices')).rejects.toThrow(/credential/i);
+    expect(dispatched).toEqual([]);
+    selectMock.mockResolvedValue({
+      ...createFileBackend(), name: 'keychain',
+      get: async () => ({ token: 'account-B', secret: 'secret-B' }),
+    });
+    expect((await createClient().get('/v1.1/devices')).data.body).toEqual({ account: 'account-B' });
+    expect(dispatched).toEqual(['account-B']);
+  });
+
+  it.each(['environment', 'explicit config'])('honors the %s override while a replacement keychain is unavailable', async source => {
+    saveConfig('file-account', 'file-secret');
+    publishCredentialRevision(readCredentialScope(), true);
+    selectMock.mockRejectedValue(new Error('keychain locked'));
+    if (source === 'environment') {
+      vi.stubEnv('SWITCHBOT_TOKEN', 'env-account');
+      vi.stubEnv('SWITCHBOT_SECRET', 'env-secret');
+    } else {
+      process.argv.push('--config', path.join(home, '.switchbot', 'config.json'));
+    }
+    axios.defaults.adapter = async config => ({
+      status: 200, statusText: 'OK', headers: {}, config,
+      data: { statusCode: 100, body: { account: String(config.headers.Authorization) } },
+    });
+
+    const response = await createClient().get('/v1.1/devices');
+    expect(response.data.body).toEqual({ account: source === 'environment' ? 'env-account' : 'file-account' });
+  });
+
+  it('does not let synchronous credential consumers fall back to an obsolete file after keychain replacement', () => {
+    saveConfig('account-A', 'secret-A');
+    publishCredentialRevision(readCredentialScope(), true);
+    expect(() => loadConfig()).toThrow(/credential/i);
+    expect(tryLoadConfig()).toBeNull();
+  });
+
+  it('keeps offline commands and credential repair available when the replacement keychain is unavailable', () => {
+    saveConfig('account-A', 'secret-A');
+    publishCredentialRevision(readCredentialScope(), true);
+    const offline = spawnSync(process.execPath, ['--import', 'tsx', 'src/index.ts', '--json', 'catalog', 'show', 'Bot'], {
+      cwd: process.cwd(),
+      env: { ...process.env, HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: home, PATH: '', SWITCHBOT_TOKEN: '', SWITCHBOT_SECRET: '' },
+      encoding: 'utf8', timeout: 20_000,
+    });
+    expect(offline.status, offline.stderr).toBe(0);
+    expect(JSON.parse(offline.stdout)).toMatchObject({ schemaVersion: expect.any(String), data: expect.anything() });
+
+    changeAccount();
+    expect(loadConfig().token).toBe('account-B');
+  });
+
   it('does not wait for a stalled keychain when complete env credentials are present', async () => {
     vi.useFakeTimers();
     vi.stubEnv('SWITCHBOT_TOKEN', 'env-token');

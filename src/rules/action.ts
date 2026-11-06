@@ -19,7 +19,9 @@
 
 import type { AxiosInstance } from 'axios';
 import { executeCommand, fetchDeviceList } from '../lib/devices.js';
+import { preflightCommandTargets } from '../lib/command-preflight.js';
 import { getCachedDevice } from '../devices/cache.js';
+import { parseParameterForWire } from '../devices/param-validator.js';
 import { deriveSafetyTier, findCatalogEntry } from '../devices/catalog.js';
 import { writeAudit } from '../utils/audit.js';
 import { isDestructiveCommand } from './destructive.js';
@@ -57,10 +59,10 @@ export interface RuleActionResult {
 interface ParsedCommand {
   deviceIdSlot: string | null; // literal deviceId or "<id>" placeholder
   verb: string;
-  parameterTokens: string[];
+  rawParameter: string | undefined;
 }
 
-const DEVICES_COMMAND_RE = /^devices\s+command\s+(\S+)\s+(\S+)(?:\s+(.*))?$/;
+const DEVICES_COMMAND_RE = /^devices\s+command\s+(\S+)\s+(\S+)(?:\s+(.*))?$/s;
 
 export function parseRuleCommand(cmd: string): ParsedCommand | null {
   const m = DEVICES_COMMAND_RE.exec(cmd.trim());
@@ -68,10 +70,15 @@ export function parseRuleCommand(cmd: string): ParsedCommand | null {
   const deviceIdSlot = m[1];
   const verb = m[2];
   const rest = (m[3] ?? '').trim();
+  // Preserve the original whitespace-separated RGB rule form without
+  // rewriting JSON or unrelated text parameters.
+  const parameter = /^(?:setColor|setColorLightRGB)$/i.test(verb) && /^-?\d+\s+-?\d+\s+-?\d+$/.test(rest)
+    ? rest.replace(/\s+/g, ':')
+    : rest;
   return {
     deviceIdSlot,
     verb,
-    parameterTokens: rest.length === 0 ? [] : rest.split(/\s+/),
+    rawParameter: parameter || undefined,
   };
 }
 
@@ -88,18 +95,6 @@ export function resolveActionDevice(
   return candidate;
 }
 
-/**
- * Render a parameter for SwitchBot's command API. For the PoC we pass
- * the raw token string for single-token args, join with `:` for
- * multi-token args (matches the CLI's `devices command` convention),
- * and `undefined` when no tokens were supplied (the SDK substitutes
- * `'default'`).
- */
-function renderParameter(tokens: string[]): unknown {
-  if (tokens.length === 0) return undefined;
-  if (tokens.length === 1) return tokens[0];
-  return tokens.join(':');
-}
 
 export async function executeRuleAction(
   action: Action,
@@ -174,67 +169,76 @@ export async function executeRuleAction(
   }
 
   const dryRun = ctx.globalDryRun === true || ctx.rule.dry_run === true;
-  const parameter = renderParameter(parsed.parameterTokens);
-
-  if (dryRun) {
-    writeAudit({
-      t: new Date().toISOString(),
-      kind: 'rule-fire-dry',
-      deviceId,
-      command: parsed.verb,
-      parameter: parameter ?? 'default',
-      commandType: 'command',
-      dryRun: true,
-      result: 'ok',
-      rule: {
-        name: ctx.rule.name,
-        triggerSource: ctx.rule.when.source,
-        matchedDevice: deviceId,
-        fireId: ctx.fireId,
-      },
-    });
-    return { ok: true, dryRun: true, deviceId, verb: parsed.verb };
-  }
-
-  if (ctx.skipApiCall) {
-    writeAudit({
-      t: new Date().toISOString(),
-      kind: 'rule-fire',
-      deviceId,
-      command: parsed.verb,
-      parameter: parameter ?? 'default',
-      commandType: 'command',
-      dryRun: false,
-      result: 'ok',
-      rule: {
-        name: ctx.rule.name,
-        triggerSource: ctx.rule.when.source,
-        matchedDevice: deviceId,
-        fireId: ctx.fireId,
-        reason: 'api-skipped',
-      },
-    });
-    return { ok: true, deviceId, verb: parsed.verb };
-  }
-
+  let parameter: unknown;
   let safetyBlocked = false;
   try {
     // A generic verb such as turnOn can be destructive for a particular model.
     // Resolve inventory before any live mutation; an unknown target is not approval.
     let device = getCachedDevice(deviceId);
-    if (!device) {
+    if (!device && !dryRun && !ctx.skipApiCall) {
       await fetchDeviceList(ctx.httpClient, { bypassCache: true });
       device = getCachedDevice(deviceId);
+    }
+    if (!device) {
+      safetyBlocked = true;
+      throw new Error(`Device ${deviceId} is not in the current profile cache; refresh the inventory first.`);
     }
     const entry = device ? findCatalogEntry(device.type) : null;
     if (!entry || Array.isArray(entry)) {
       safetyBlocked = true;
       throw new Error(`Cannot verify automation safety for device ${deviceId}; no unambiguous catalog entry.`);
     }
+    const preflight = preflightCommandTargets([deviceId], parsed.verb, parsed.rawParameter, 'command');
+    if (!preflight.ok) {
+      safetyBlocked = true;
+      throw new Error(preflight.message);
+    }
+    parsed.verb = preflight.command;
+    parameter = parseParameterForWire(preflight.targets[0].parameter);
     const spec = entry.commands.find((command) => command.command === parsed.verb);
     if (!spec || deriveSafetyTier(spec, entry) === 'destructive') {
       safetyBlocked = true;
       throw new Error(`Automation refuses ${parsed.verb} for ${entry.type}: ${spec ? 'destructive command' : 'unknown command'}.`);
+    }
+    if (dryRun) {
+      writeAudit({
+        t: new Date().toISOString(),
+        kind: 'rule-fire-dry',
+        deviceId,
+        command: parsed.verb,
+        parameter: parameter ?? 'default',
+        commandType: 'command',
+        dryRun: true,
+        result: 'ok',
+        rule: {
+          name: ctx.rule.name,
+          triggerSource: ctx.rule.when.source,
+          matchedDevice: deviceId,
+          fireId: ctx.fireId,
+        },
+      });
+      return { ok: true, dryRun: true, deviceId, verb: parsed.verb };
+    }
+
+    if (ctx.skipApiCall) {
+      writeAudit({
+        t: new Date().toISOString(),
+        kind: 'rule-fire',
+        deviceId,
+        command: parsed.verb,
+        parameter: parameter ?? 'default',
+        commandType: 'command',
+        dryRun: false,
+        result: 'ok',
+        rule: {
+          name: ctx.rule.name,
+          triggerSource: ctx.rule.when.source,
+          matchedDevice: deviceId,
+          fireId: ctx.fireId,
+          reason: 'api-skipped',
+        },
+      });
+      return { ok: true, deviceId, verb: parsed.verb };
     }
     await executeCommand(deviceId, parsed.verb, parameter, 'command', ctx.httpClient);
     writeAudit({
@@ -261,7 +265,7 @@ export async function executeRuleAction(
       kind: 'rule-fire',
       deviceId,
       command: parsed.verb,
-      parameter: parameter ?? 'default',
+      parameter: parameter ?? parseParameterForWire(parsed.rawParameter),
       commandType: 'command',
       dryRun: safetyBlocked,
       result: 'error',

@@ -670,6 +670,168 @@ describe('policy validator (v0.2)', () => {
     expect(err!.path).toBe('/automation/rules/0/then/0/command');
   });
 
+  it('validates rule parameters against the supplied inventory type', () => {
+    const loaded = writeAndLoad(tmpDir, [
+      'version: "0.2"',
+      'aliases:',
+      '  vacuum: 01-202407090924-26354212',
+      'automation:',
+      '  rules:',
+      '    - name: vacuum action',
+      '      when: { source: mqtt, event: x.y }',
+      '      then:',
+      `        - command: 'devices command <id> startClean {"action":"sweep","param":{"fanLevel":999}}'`,
+      '          device: vacuum',
+    ].join('\n'));
+    const result = validateLoadedPolicyAgainstInventory(loaded, {
+      deviceList: [{
+        deviceId: '01-202407090924-26354212', deviceName: 'Vacuum',
+        deviceType: 'Robot Vacuum Cleaner K11+', enableCloudService: true, hubDeviceId: '',
+      }],
+      infraredRemoteList: [],
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContainEqual(expect.objectContaining({
+      keyword: 'rule-live-invalid-parameter', path: '/automation/rules/0/then/0/command',
+    }));
+  });
+
+  it('validates both RGB rule formats against live inventory and rejects invalid colors', () => {
+    const inventory = {
+      deviceList: [{
+        deviceId: '01-202407090924-26354212', deviceName: 'Lamp',
+        deviceType: 'Color Bulb', enableCloudService: true, hubDeviceId: '',
+      }],
+      infraredRemoteList: [],
+    };
+    for (const [color, valid] of [['255 0 0', true], ['255:0:0', true], ['256 0 0', false]] as const) {
+      const loaded = writeAndLoad(tmpDir, [
+        'version: "0.2"',
+        'aliases:',
+        '  lamp: 01-202407090924-26354212',
+        'automation:',
+        '  rules:',
+        '    - name: lamp color',
+        '      when: { source: mqtt, event: x.y }',
+        '      then:',
+        `        - command: "devices command <id> setColor ${color}"`,
+        '          device: lamp',
+      ].join('\n'));
+      const result = validateLoadedPolicyAgainstInventory(loaded, inventory);
+      expect(result.valid, color).toBe(valid);
+      if (!valid) expect(result.errors).toContainEqual(expect.objectContaining({ keyword: 'rule-live-invalid-parameter' }));
+    }
+  });
+
+  it('rejects parameters for no-argument actions against live inventory', () => {
+    const loaded = writeAndLoad(tmpDir, [
+      'version: "0.2"',
+      'aliases:',
+      '  lamp: 01-202407090924-26354212',
+      'automation:',
+      '  rules:',
+      '    - name: lamp action',
+      '      when: { source: mqtt, event: x.y }',
+      '      then:',
+      '        - command: "devices command <id> turnOn unwanted"',
+      '          device: lamp',
+    ].join('\n'));
+    const result = validateLoadedPolicyAgainstInventory(loaded, {
+      deviceList: [{
+        deviceId: '01-202407090924-26354212', deviceName: 'Lamp',
+        deviceType: 'Color Bulb', enableCloudService: true, hubDeviceId: '',
+      }],
+      infraredRemoteList: [],
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContainEqual(expect.objectContaining({
+      keyword: 'rule-live-invalid-parameter', path: '/automation/rules/0/then/0/command',
+    }));
+  });
+
+  it('accepts turnOn via controlType when deviceType is missing or empty', () => {
+    for (const deviceType of [undefined, '']) {
+      const loaded = writeAndLoad(tmpDir, [
+        'version: "0.2"',
+        'aliases:',
+        '  lamp: 01-202407090924-26354212',
+        'automation:',
+        '  rules:',
+        '    - name: lamp action',
+        '      when: { source: mqtt, event: x.y }',
+        '      then:',
+        '        - command: "devices command <id> turnOn"',
+        '          device: lamp',
+      ].join('\n'));
+      const result = validateLoadedPolicyAgainstInventory(loaded, {
+        deviceList: [{
+          deviceId: '01-202407090924-26354212',
+          deviceName: 'Lamp',
+          ...(deviceType === undefined ? {} : { deviceType }),
+          controlType: 'Color Bulb',
+          enableCloudService: true,
+          hubDeviceId: '',
+        }],
+        infraredRemoteList: [],
+      });
+
+      expect(result.valid, JSON.stringify(result.errors)).toBe(true);
+    }
+  });
+
+  it('rejects inventory targets whose device type cannot be validated', () => {
+    const loaded = writeAndLoad(tmpDir, [
+      'version: "0.2"',
+      'aliases:',
+      '  target: 01-202407090924-26354212',
+      'automation:',
+      '  rules:',
+      '    - name: unknown model',
+      '      when: { source: mqtt, event: x.y }',
+      '      then:',
+      '        - command: "devices command <id> turnOn"',
+      '          device: target',
+    ].join('\n'));
+    const result = validateLoadedPolicyAgainstInventory(loaded, {
+      deviceList: [{
+        deviceId: '01-202407090924-26354212', deviceName: 'Unknown',
+        deviceType: 'Uncatalogued Model 123', enableCloudService: true, hubDeviceId: '',
+      }],
+      infraredRemoteList: [],
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContainEqual(expect.objectContaining({
+      keyword: 'rule-live-unknown-device-type', path: '/automation/rules/0/then/0/command',
+    }));
+  });
+
+  it('accepts case-normalized commands for the supplied inventory', () => {
+    const loaded = writeAndLoad(tmpDir, [
+      'version: "0.2"',
+      'aliases:',
+      '  lamp: 01-202407090924-26354212',
+      'automation:',
+      '  rules:',
+      '    - name: lamp action',
+      '      when: { source: mqtt, event: x.y }',
+      '      then:',
+      '        - command: "devices command <id> TurnOn"',
+      '          device: lamp',
+    ].join('\n'));
+    const result = validateLoadedPolicyAgainstInventory(loaded, {
+      deviceList: [{
+        deviceId: '01-202407090924-26354212', deviceName: 'Lamp',
+        deviceType: 'Color Bulb', enableCloudService: true, hubDeviceId: '',
+      }],
+      infraredRemoteList: [],
+    });
+
+    expect(result.valid).toBe(true);
+  });
+
   it.each(['turnOn', 'turnOff'])('rejects garage %s automation after inventory resolves its safety tier', (command) => {
     const loaded = writeAndLoad(tmpDir, [
       'version: "0.2"',

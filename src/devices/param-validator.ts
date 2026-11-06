@@ -7,6 +7,15 @@ export const AC_FAN_MAP: Record<string, number> = { auto: 1, low: 2, mid: 3, hig
 export const CURTAIN_MODE_MAP: Record<string, string> = { default: 'ff', performance: '0', silent: '1' };
 export const RELAY_MODE_MAP: Record<string, number> = { toggle: 0, edge: 1, detached: 2, momentary: 3 };
 const BLIND_DIRECTION = new Set(['up', 'down']);
+const LIGHT_EFFECT_DEVICES: Record<string, true> = {
+  'Permanent Outdoor Lights': true,
+  'RGBIC Neon Rope Light': true,
+  'RGBIC Neon Wire Rope Light': true,
+  'RGBICWW Ceiling Light': true,
+  'RGBICWW Floor Lamp': true,
+  'RGBICWW Strip Light': true,
+  'RGBICWW Light Bars': true,
+};
 
 // ---- Semantic-flag builders (used by `devices expand`) --------------------
 
@@ -180,6 +189,20 @@ export function validateParameter(
     return validateIntRange(raw, 'setPosition', 0, 100, 'Relay Switch 2PM roller-shade percentage');
   }
 
+  if (command === 'setLightEffect' && LIGHT_EFFECT_DEVICES[dt] === true) {
+    return validateLightEffect(raw);
+  }
+  if (dt === 'RGBICWW Light Bars') {
+    switch (command) {
+      case 'setBrightnessAndTemperature':
+      case 'setMusicColorMode':
+      case 'setMusicParamMode':
+      case 'setEffectColorMode':
+      case 'setEffectSpeedMode':
+      case 'setSegmentColorMode':
+        return validateLightBarsObject(command, raw);
+    }
+  }
   // --- Lighting ---
   if (command === 'setBrightness' && isBrightnessDevice(dt)) {
     return validateSetBrightness(raw, dt);
@@ -192,7 +215,7 @@ export function validateParameter(
   }
 
   // --- AI Art Frame ---
-  if (dt === "AI Art Frame" && command === "uploadImage") {
+  if ((dt === "AI Art Frame" || dt === "AI Art Frame Luma") && command === "uploadImage") {
     return validateArtFrameUploadImage(raw);
   }
 
@@ -307,6 +330,87 @@ export function validateParameter(
   return { ok: true };
 }
 
+function validateLightEffect(raw: string | undefined): ValidateResult {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw ?? '');
+  } catch {
+    return { ok: false, error: 'setLightEffect requires a JSON object with integer effectId 0-25.' };
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return { ok: false, error: 'setLightEffect requires a JSON object with integer effectId 0-25.' };
+  }
+  const effectId = (value as Record<string, unknown>).effectId;
+  if (typeof effectId !== 'number' || !Number.isInteger(effectId) || effectId < 0 || effectId > 25) {
+    return { ok: false, error: 'setLightEffect requires an integer effectId between 0 and 25.' };
+  }
+  return { ok: true, normalized: JSON.stringify(value) };
+}
+
+function validateLightBarsObject(command: string, raw: string | undefined): ValidateResult {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw ?? '');
+  } catch {
+    return { ok: false, error: `${command} requires a JSON object.` };
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return { ok: false, error: `${command} requires a JSON object.` };
+  }
+  const object = value as Record<string, unknown>;
+  const integer = (key: string, min: number, max: number): boolean =>
+    typeof object[key] === 'number' && Number.isInteger(object[key]) && object[key] >= min && object[key] <= max;
+  const color = (input: unknown): string | null => {
+    if (typeof input !== 'string') return null;
+    const result = validateRgbTriplet(input, command);
+    return result.ok ? result.normalized ?? input : null;
+  };
+  const colors = (): boolean => {
+    if (!Array.isArray(object.colorList)) return false;
+    for (let i = 0; i < object.colorList.length; i++) {
+      const normalized = color(object.colorList[i]);
+      if (normalized === null) return false;
+      object.colorList[i] = normalized;
+    }
+    return true;
+  };
+  let valid = false;
+  let expected = '';
+  switch (command) {
+    case 'setBrightnessAndTemperature':
+      valid = integer('brightness', 0, 100) && integer('temperature', 2700, 6500);
+      expected = 'integer brightness 0-100 and temperature 2700-6500';
+      break;
+    case 'setMusicColorMode':
+      valid = colors();
+      expected = 'colorList array of R:G:B strings';
+      break;
+    case 'setMusicParamMode':
+      valid = integer('musicMode', 0, 5) && integer('musicLevel', 1, 100) &&
+        integer('sensitivity', 1, 100) && integer('controllerMode', 0, 2);
+      expected = 'integer musicMode 0-5, musicLevel/sensitivity 1-100, controllerMode 0-2';
+      break;
+    case 'setEffectColorMode':
+      valid = typeof object.style === 'number' && Number.isInteger(object.style) && colors();
+      expected = 'integer style and colorList array of R:G:B strings';
+      break;
+    case 'setEffectSpeedMode':
+      valid = integer('speed', 1, 255);
+      expected = 'integer speed 1-255';
+      break;
+    case 'setSegmentColorMode': {
+      const normalized = color(object.color);
+      valid = normalized !== null && integer('lightIndex', 0, 11);
+      if (normalized !== null) object.color = normalized;
+      expected = 'color R:G:B and integer lightIndex 0-11';
+      break;
+    }
+  }
+  return valid
+    ? { ok: true, normalized: JSON.stringify(object) }
+    : { ok: false, error: `${command} requires ${expected}.` };
+}
+
 function isBrightnessDevice(deviceType: string): boolean {
   return brightnessRange(deviceType) !== null;
 }
@@ -324,6 +428,7 @@ export function brightnessRange(deviceType: string): [number, number] | null {
     deviceType === 'Floor Lamp' ||
     deviceType === 'Strip Light 3' ||
     deviceType === 'RGBICWW Strip Light' ||
+    deviceType === 'RGBICWW Light Bars' ||
     deviceType === 'RGBICWW Floor Lamp' ||
     deviceType === 'RGBIC Neon Wire Rope Light' ||
     deviceType === 'RGBIC Neon Rope Light' ||
@@ -349,6 +454,7 @@ function isColorDevice(deviceType: string): boolean {
     deviceType === 'Strip Light 3' ||
     deviceType === 'Floor Lamp' ||
     deviceType === 'RGBICWW Strip Light' ||
+    deviceType === 'RGBICWW Light Bars' ||
     deviceType === 'RGBICWW Floor Lamp' ||
     deviceType === 'RGBIC Neon Wire Rope Light' ||
     deviceType === 'RGBIC Neon Rope Light' ||
@@ -366,6 +472,7 @@ function isColorTemperatureDevice(deviceType: string): boolean {
     deviceType === 'Ceiling Light' ||
     deviceType === 'Ceiling Light Pro' ||
     deviceType === 'RGBICWW Strip Light' ||
+    deviceType === 'RGBICWW Light Bars' ||
     deviceType === 'RGBICWW Floor Lamp' ||
     deviceType === 'Light Strip' ||
     deviceType === 'Dimmer' ||
@@ -403,7 +510,8 @@ function isWaterLevelVacuum(deviceType: string): boolean {
     deviceType === 'Robot Vacuum Cleaner K20 Plus Pro' ||
     deviceType === 'K11+' ||
     deviceType === 'Robot Vacuum Cleaner K11+' ||
-    deviceType === 'Robot Vacuum Cleaner K11 Plus'
+    deviceType === 'Robot Vacuum Cleaner K11 Plus' ||
+    deviceType === 'Robot Vacuum Cleaner K11 Plus Pro'
   );
 }
 
@@ -904,16 +1012,13 @@ function validateArtFrameUploadImage(raw: string | undefined): ValidateResult {
     return { ok: false, error: "uploadImage expects a JSON object with exactly one non-empty imageUrl or imageBase64 field." };
   }
 
-  const hasImageUrl = "imageUrl" in parsed
-    && typeof parsed.imageUrl === "string"
-    && parsed.imageUrl.trim().length > 0;
-  const hasImageBase64 = "imageBase64" in parsed
-    && typeof parsed.imageBase64 === "string"
-    && parsed.imageBase64.trim().length > 0;
-  if (hasImageUrl === hasImageBase64) {
+  const hasImageUrl = Object.hasOwn(parsed, "imageUrl");
+  const hasImageBase64 = Object.hasOwn(parsed, "imageBase64");
+  const source = hasImageUrl ? (parsed as Record<string, unknown>).imageUrl : (parsed as Record<string, unknown>).imageBase64;
+  if (hasImageUrl === hasImageBase64 || typeof source !== "string" || source.trim().length === 0) {
     return { ok: false, error: "uploadImage requires exactly one non-empty imageUrl or imageBase64 field." };
   }
-  return { ok: true };
+  return { ok: true, normalized: JSON.stringify(parsed) };
 }
 
 // ---- Humidifier -------------------------------------------------------------
@@ -1140,6 +1245,9 @@ function validateVacuumChangeParam(raw: string | undefined, deviceType: string):
       return { ok: false, error: `changeParam "times" must be an integer 1-2639999, got ${JSON.stringify(p.times)}.` };
     }
     normalized.times = t;
+  }
+  if (deviceType === 'Robot Vacuum Cleaner K11 Plus Pro' && Object.keys(normalized).length === 0) {
+    return { ok: false, error: 'K11+ Pro changeParam requires at least one supported parameter.' };
   }
   return { ok: true, normalized: JSON.stringify(normalized) };
 }

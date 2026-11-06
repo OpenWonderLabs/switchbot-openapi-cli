@@ -17,7 +17,19 @@ const osMock = vi.hoisted(() => ({
   homedir: vi.fn(() => '/fake/home'),
 }));
 
-vi.mock('node:fs', () => ({ default: fsMock, ...fsMock }));
+vi.mock('node:fs', () => ({
+  ...fsMock,
+  default: {
+    ...fsMock,
+    readFileSync: (file: string, ...args: unknown[]) => {
+      // Revision sidecars are absent in this mocked filesystem.
+      if (String(file).endsWith('/.credential-revision')) {
+        throw Object.assign(new Error('not found'), { code: 'ENOENT' });
+      }
+      return fsMock.readFileSync(file, ...args);
+    },
+  },
+}));
 vi.mock('node:os', () => ({ default: osMock, ...osMock }));
 
 import { configFilePath, loadConfig, saveConfig, showConfig, listProfiles, tryLoadConfig } from '../src/config.js';

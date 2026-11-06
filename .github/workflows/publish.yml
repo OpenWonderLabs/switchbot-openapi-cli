@@ -13,6 +13,12 @@ on:
         description: 'Dry run — record candidate outcomes without publishing'
         type: boolean
         default: false
+
+concurrency:
+  group: npm-candidate-publication
+  cancel-in-progress: false
+  queue: max
+
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -30,6 +36,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run verify:release-gate
+      - name: Full CLI regression gate for the exact release source
+        run: npm test
       - run: npm run verify:release
 
       - name: Verify tag matches root CLI package.json version

@@ -1,30 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
-import { createHash } from 'node:crypto';
-import { getConfigPath } from '../utils/flags.js';
-import { getActiveProfile } from '../lib/request-context.js';
-
-/**
- * Returns the directory where cache files should be stored.
- *
- * - If a profile is active, scopes into a per-profile sub-directory so that
- *   rotating credentials or switching profiles never serves stale inventory
- *   from a prior session (Bug #37).
- * - If no profile is active (unnamed / default), returns `baseDir` unchanged
- *   so the existing legacy path (~/.switchbot/devices.json) is preserved.
- *
- * Only called when `getConfigPath()` returns undefined — the --config-path
- * override takes full precedence and bypasses this helper entirely.
- */
-function scopedCacheDir(baseDir: string): string {
-  const profile = getActiveProfile();
-  if (profile === undefined) return baseDir;
-  const hash = createHash('sha256').update(profile).digest('hex').slice(0, 8);
-  const dir = path.join(baseDir, 'cache', hash);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  return dir;
-}
+import { randomUUID } from 'node:crypto';
+import { assertCredentialScope, readCredentialScope, type CredentialScope } from '../credentials/scope.js';
 
 /** GC cutoff for status entries: evict anything older than this. */
 const DEFAULT_STATUS_GC_TTL_MS = 24 * 60 * 60 * 1000; // 24 h
@@ -68,56 +45,60 @@ export interface DeviceListBodyShape {
   }>;
 }
 
-function cacheFilePath(): string {
-  const override = getConfigPath();
-  const dir = override
-    ? path.dirname(path.resolve(override))
-    : scopedCacheDir(path.join(os.homedir(), '.switchbot'));
-  return path.join(dir, 'devices.json');
+function cacheFilePath(scope = readCredentialScope()): string {
+  return path.join(scope.cacheDir, 'devices.json');
 }
 
-// In-memory hot-cache keyed by active profile (or '__default__' for no profile).
-// Using Maps instead of module-level singletons ensures that mcp serve, which
-// rotates profiles per request via withRequestContext, never leaks inventory
-// across profiles within the same process (Bug #37).
-const _listCacheByProfile = new Map<string, DeviceCache | null>();
-const _statusCacheByProfile = new Map<string, StatusCache>();
-
-function cacheKey(): string {
-  return getActiveProfile() ?? '__default__';
+interface CacheSnapshot<T> {
+  revision: string;
+  value: T;
 }
+
+/** Commit the data and its credential revision as one indivisible document. */
+function writeCacheFile(file: string, cache: DeviceCache | StatusCache, scope: CredentialScope): void {
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const temporary = `${file}.${randomUUID()}.tmp`;
+  try {
+    fs.writeFileSync(temporary, JSON.stringify({ ...cache, _credentialRevision: scope.revision }, null, 2), {
+      mode: 0o600, flag: 'wx',
+    });
+    fs.renameSync(temporary, file);
+  } finally {
+    fs.rmSync(temporary, { force: true });
+  }
+}
+
+// Storage scope includes --config precedence; revisions invalidate warm readers
+// when credentials are changed by a different process.
+const _listCacheByScope = new Map<string, CacheSnapshot<DeviceCache | null>>();
+const _statusCacheByScope = new Map<string, CacheSnapshot<StatusCache>>();
 
 /** Force the next loadCache() call to re-read from disk. Used in tests. */
 export function resetListCache(): void {
-  _listCacheByProfile.clear();
+  _listCacheByScope.clear();
 }
 
 /** Force the next loadStatusCache() call to re-read from disk. Used in tests. */
 export function resetStatusCache(): void {
-  _statusCacheByProfile.clear();
+  _statusCacheByScope.clear();
 }
 
 export function loadCache(): DeviceCache | null {
-  const key = cacheKey();
-  if (_listCacheByProfile.has(key)) return _listCacheByProfile.get(key)!;
-  const file = cacheFilePath();
-  if (!fs.existsSync(file)) {
-    _listCacheByProfile.set(key, null);
-    return null;
-  }
+  const scope = readCredentialScope();
+  const snapshot = _listCacheByScope.get(scope.key);
+  if (snapshot?.revision === scope.revision) return snapshot.value;
+  let value: DeviceCache | null = null;
   try {
-    const raw = fs.readFileSync(file, 'utf-8');
-    const cache = JSON.parse(raw) as DeviceCache;
-    if (!cache || typeof cache.devices !== 'object' || cache.devices === null) {
-      _listCacheByProfile.set(key, null);
-      return null;
+    const parsed = JSON.parse(fs.readFileSync(cacheFilePath(scope), 'utf8')) as DeviceCache & { _credentialRevision?: string };
+    if (parsed && typeof parsed.devices === 'object' && parsed.devices !== null &&
+        (parsed._credentialRevision ?? '') === scope.revision) {
+      value = { lastUpdated: parsed.lastUpdated, devices: parsed.devices };
     }
-    _listCacheByProfile.set(key, cache);
-    return cache;
   } catch {
-    _listCacheByProfile.set(key, null);
-    return null;
+    // Missing, unreadable or malformed cache data is a cache miss.
   }
+  _listCacheByScope.set(scope.key, { revision: scope.revision, value });
+  return value;
 }
 
 export function getCachedDevice(deviceId: string): CachedDevice | null {
@@ -146,7 +127,8 @@ export function getCachedTypeMap(deviceIds?: Iterable<string>): Map<string, stri
   return out;
 }
 
-export function updateCacheFromDeviceList(body: DeviceListBodyShape): void {
+export function updateCacheFromDeviceList(body: DeviceListBodyShape, scope = readCredentialScope()): void {
+  assertCredentialScope(scope);
   const devices: Record<string, CachedDevice> = {};
 
   for (const d of body.deviceList) {
@@ -186,19 +168,17 @@ export function updateCacheFromDeviceList(body: DeviceListBodyShape): void {
   };
 
   try {
-    const file = cacheFilePath();
-    const dir = path.dirname(file);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(file, JSON.stringify(cache, null, 2), { mode: 0o600 });
-    _listCacheByProfile.set(cacheKey(), cache);
+    writeCacheFile(cacheFilePath(scope), cache, scope);
+    _listCacheByScope.set(scope.key, { revision: scope.revision, value: cache });
   } catch {
     // Cache write failures must not break the command that triggered them.
   }
+  assertCredentialScope(scope);
 }
 
-export function clearCache(): void {
-  _listCacheByProfile.set(cacheKey(), null);
-  const file = cacheFilePath();
+export function clearCache(scope = readCredentialScope()): void {
+  _listCacheByScope.set(scope.key, { revision: scope.revision, value: null });
+  const file = cacheFilePath(scope);
   if (fs.existsSync(file)) {
     try { fs.unlinkSync(file); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'EBUSY') throw e; }
   }
@@ -241,47 +221,32 @@ export interface StatusCache {
   entries: Record<string, CachedStatus>;
 }
 
-function statusCacheFilePath(): string {
-  const override = getConfigPath();
-  const dir = override
-    ? path.dirname(path.resolve(override))
-    : scopedCacheDir(path.join(os.homedir(), '.switchbot'));
-  return path.join(dir, 'status.json');
+function statusCacheFilePath(scope = readCredentialScope()): string {
+  return path.join(scope.cacheDir, 'status.json');
 }
 
 export function loadStatusCache(): StatusCache {
-  const key = cacheKey();
-  if (_statusCacheByProfile.has(key)) return _statusCacheByProfile.get(key)!;
-  const file = statusCacheFilePath();
-  if (!fs.existsSync(file)) {
-    const empty = { entries: {} };
-    _statusCacheByProfile.set(key, empty);
-    return empty;
-  }
+  const scope = readCredentialScope();
+  const snapshot = _statusCacheByScope.get(scope.key);
+  if (snapshot?.revision === scope.revision) return snapshot.value;
+  let value: StatusCache = { entries: {} };
   try {
-    const raw = fs.readFileSync(file, 'utf-8');
-    const parsed = JSON.parse(raw) as StatusCache;
-    if (!parsed || typeof parsed.entries !== 'object' || parsed.entries === null) {
-      const empty = { entries: {} };
-      _statusCacheByProfile.set(key, empty);
-      return empty;
+    const parsed = JSON.parse(fs.readFileSync(statusCacheFilePath(scope), 'utf8')) as StatusCache & { _credentialRevision?: string };
+    if (parsed && typeof parsed.entries === 'object' && parsed.entries !== null &&
+        (parsed._credentialRevision ?? '') === scope.revision) {
+      value = { entries: parsed.entries };
     }
-    _statusCacheByProfile.set(key, parsed);
-    return parsed;
   } catch {
-    const empty = { entries: {} };
-    _statusCacheByProfile.set(key, empty);
-    return empty;
+    // Missing, unreadable or malformed cache data is a cache miss.
   }
+  _statusCacheByScope.set(scope.key, { revision: scope.revision, value });
+  return value;
 }
 
-function saveStatusCache(cache: StatusCache): void {
-  _statusCacheByProfile.set(cacheKey(), cache);
+function saveStatusCache(cache: StatusCache, scope: CredentialScope): void {
+  _statusCacheByScope.set(scope.key, { revision: scope.revision, value: cache });
   try {
-    const file = statusCacheFilePath();
-    const dir = path.dirname(file);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(file, JSON.stringify(cache, null, 2), { mode: 0o600 });
+    writeCacheFile(statusCacheFilePath(scope), cache, scope);
   } catch {
     /* best-effort */
   }
@@ -333,20 +298,23 @@ export function setCachedStatus(
   deviceId: string,
   body: Record<string, unknown>,
   now = new Date(),
-  ttlMsForGc = DEFAULT_STATUS_GC_TTL_MS
+  ttlMsForGc = DEFAULT_STATUS_GC_TTL_MS,
+  scope = readCredentialScope(),
 ): void {
+  assertCredentialScope(scope);
   const cache = loadStatusCache();
   cache.entries[deviceId] = {
     fetchedAt: now.toISOString(),
     body,
   };
   evictExpiredStatusEntries(cache, ttlMsForGc, now.getTime());
-  saveStatusCache(cache);
+  saveStatusCache(cache, scope);
+  assertCredentialScope(scope);
 }
 
-export function clearStatusCache(): void {
-  _statusCacheByProfile.set(cacheKey(), { entries: {} });
-  const file = statusCacheFilePath();
+export function clearStatusCache(scope = readCredentialScope()): void {
+  _statusCacheByScope.set(scope.key, { revision: scope.revision, value: { entries: {} } });
+  const file = statusCacheFilePath(scope);
   if (fs.existsSync(file)) {
     try { fs.unlinkSync(file); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'EBUSY') throw e; }
   }

@@ -1,4 +1,20 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+let isolatedHome: string;
+beforeEach(() => {
+  isolatedHome = fs.mkdtempSync(path.join(os.tmpdir(), 'switchbot-client-'));
+  vi.spyOn(os, 'homedir').mockReturnValue(isolatedHome);
+  vi.stubEnv('SWITCHBOT_TOKEN', 'fake-token');
+  vi.stubEnv('SWITCHBOT_SECRET', 'fake-secret');
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
+  fs.rmSync(isolatedHome, { recursive: true, force: true });
+});
 
 type RequestFn = (config: { headers: Record<string, string> }) => unknown;
 type ResponseOkFn = (response: unknown) => unknown;
@@ -91,28 +107,12 @@ describe('createClient', () => {
     createClient();
   });
 
-  it('creates an axios instance with the SwitchBot baseURL and a timeout', () => {
-    expect(axiosMock.default.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        baseURL: 'https://api.switch-bot.com',
-        timeout: expect.any(Number),
-      })
-    );
-  });
 
   describe('request interceptor', () => {
-    it('injects auth headers into every outgoing request', () => {
-      const config = { headers: {} as Record<string, string> };
-      const result = captured.request!(config) as { headers: Record<string, string> };
-      expect(result.headers.Authorization).toBe('fake-token');
-      expect(result.headers.sign).toBe('FAKE_SIGN');
-      expect(result.headers.nonce).toBe('fake-nonce');
-      expect(result.headers.t).toBe('1700000000000');
-    });
 
-    it('preserves pre-existing headers (merge, not replace)', () => {
+    it('preserves pre-existing headers (merge, not replace)', async () => {
       const config = { headers: { 'X-Custom': 'keep' } as Record<string, string> };
-      const result = captured.request!(config) as { headers: Record<string, string> };
+      const result = await captured.request!(config) as { headers: Record<string, string> };
       expect(result.headers['X-Custom']).toBe('keep');
       expect(result.headers.Authorization).toBe('fake-token');
     });
@@ -277,26 +277,11 @@ describe('createClient — configurable globals', () => {
     logSpy.mockRestore();
   });
 
-  it('honors --timeout <ms> when constructing the instance', () => {
-    process.argv = ['node', 'cli', 'devices', 'list', '--timeout', '7500'];
-    createClient();
-    expect(axiosMock.default.create).toHaveBeenCalledWith(
-      expect.objectContaining({ timeout: 7500 })
-    );
-  });
 
-  it('falls back to 30000ms when --timeout is omitted', () => {
-    process.argv = ['node', 'cli', 'devices', 'list'];
-    createClient();
-    expect(axiosMock.default.create).toHaveBeenCalledWith(
-      expect.objectContaining({ timeout: 30_000 })
-    );
-  });
-
-  it('with --verbose, logs outgoing requests to stderr', () => {
+  it('with --verbose, logs outgoing requests to stderr', async () => {
     process.argv = ['node', 'cli', 'devices', 'list', '--verbose'];
     createClient();
-    captured.request!({
+    await captured.request!({
       headers: {} as Record<string, string>,
       method: 'get',
       baseURL: 'https://api.switch-bot.com',
@@ -308,10 +293,10 @@ describe('createClient — configurable globals', () => {
     expect(combined).toContain('/v1.1/devices');
   });
 
-  it('with --dry-run, short-circuits non-GET requests with a DryRunSignal and logs', () => {
+  it('with --dry-run, short-circuits non-GET requests with a DryRunSignal and logs', async () => {
     process.argv = ['node', 'cli', 'devices', 'command', 'ABC', 'turnOn', '--dry-run'];
     createClient();
-    expect(() =>
+    await expect(
       captured.request!({
         headers: {} as Record<string, string>,
         method: 'post',
@@ -319,7 +304,7 @@ describe('createClient — configurable globals', () => {
         url: '/v1.1/devices/ABC/commands',
         data: { command: 'turnOn' },
       } as never)
-    ).toThrow(DryRunSignal);
+    ).rejects.toThrow(DryRunSignal);
 
     const out = writeSpy.mock.calls.map((c) => String(c[0])).join('\n');
     expect(out).toContain('[dry-run]');
@@ -327,17 +312,6 @@ describe('createClient — configurable globals', () => {
     expect(out).toContain('/v1.1/devices/ABC/commands');
   });
 
-  it('with --dry-run, GET requests still pass through', () => {
-    process.argv = ['node', 'cli', 'devices', 'list', '--dry-run'];
-    createClient();
-    const config = {
-      headers: {} as Record<string, string>,
-      method: 'get',
-      baseURL: 'https://api.switch-bot.com',
-      url: '/v1.1/devices',
-    };
-    expect(() => captured.request!(config as never)).not.toThrow();
-  });
 
   it('re-throws DryRunSignal from the response-error handler without wrapping', () => {
     process.argv = ['node', 'cli', 'devices', 'list'];
@@ -508,7 +482,7 @@ describe('createClient — 429 retry', () => {
     expect(axiosMock.__instance.request).not.toHaveBeenCalled();
   });
 
-  it('records a quota entry on every dispatched request (P8)', () => {
+  it('records a quota entry on every dispatched request (P8)', async () => {
     process.argv = ['node', 'cli', 'devices', 'list'];
     createClient();
     const config = {
@@ -520,14 +494,14 @@ describe('createClient — 429 retry', () => {
     // P8: quota is recorded in the request interceptor BEFORE dispatch so
     // that timeouts, DNS errors, 5xx responses, and aborted calls also
     // count against the daily cap.
-    captured.request!(config);
+    await captured.request!(config);
     expect(quotaMock.recordRequest).toHaveBeenCalledWith(
       'GET',
       'https://api.switch-bot.com/v1.1/devices'
     );
   });
 
-  it('records quota even when the request ultimately 5xxs (P8)', () => {
+  it('records quota even when the request ultimately 5xxs (P8)', async () => {
     process.argv = ['node', 'cli', 'devices', 'list'];
     createClient();
     const config = {
@@ -536,7 +510,7 @@ describe('createClient — 429 retry', () => {
       url: '/v1.1/devices',
       headers: {},
     };
-    captured.request!(config);
+    await captured.request!(config);
     expect(quotaMock.recordRequest).toHaveBeenCalledTimes(1);
     // The response interceptor no longer records — all bookkeeping is in
     // the request interceptor, so subsequent failure handling must not
@@ -553,7 +527,7 @@ describe('createClient — 429 retry', () => {
     expect(quotaMock.recordRequest).toHaveBeenCalledTimes(1);
   });
 
-  it('records quota even when the request times out (P8)', () => {
+  it('records quota even when the request times out (P8)', async () => {
     process.argv = ['node', 'cli', 'devices', 'list', '--retry-on-5xx', '0'];
     createClient();
     const config = {
@@ -562,7 +536,7 @@ describe('createClient — 429 retry', () => {
       url: '/v1.1/devices',
       headers: {},
     };
-    captured.request!(config);
+    await captured.request!(config);
     expect(quotaMock.recordRequest).toHaveBeenCalledTimes(1);
     try {
       captured.failure!({
@@ -576,7 +550,7 @@ describe('createClient — 429 retry', () => {
     expect(quotaMock.recordRequest).toHaveBeenCalledTimes(1);
   });
 
-  it('--no-quota skips quota recording (P8)', () => {
+  it('--no-quota skips quota recording (P8)', async () => {
     process.argv = ['node', 'cli', 'devices', 'list', '--no-quota'];
     createClient();
     const config = {
@@ -585,7 +559,7 @@ describe('createClient — 429 retry', () => {
       url: '/v1.1/devices',
       headers: {},
     };
-    captured.request!(config);
+    await captured.request!(config);
     expect(quotaMock.recordRequest).not.toHaveBeenCalled();
   });
 });

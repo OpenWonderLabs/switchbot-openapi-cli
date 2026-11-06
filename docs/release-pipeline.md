@@ -52,31 +52,46 @@ stage 5 with a message pointing to `scripts/bundle.mjs`.
 
 ## Gates before `npm publish`
 
-```text
-git commit ──▶ pre-commit hook ─── verify:pre-commit
-                                   (npm run build + tests/version.test.ts)
-
-git push   ──▶ pre-push hook  ──── verify:pre-push
-                                   (npm run build + version test +
-                                    smoke:pack-install)
-
-open PR    ──▶ ci.yml ──────────── docs-lint
-                                   test matrix (Node 18/20/22)
-                                   bundle-smoke (Node 18/20/22)
-                                   offline-smoke (size budgets)
-                                   pack-install-smoke (matches publish)
-                                   policy-schema-sync
-
-merge PR   ──▶ main
-
-release    ──▶ publish.yml ─────── 1. npm ci
-                                   2. verify:release-gate (build, tests, pack and host-independent smokes)
-                                   3. verify:release (built CLI/runtime documentation invariants)
-                                   4. root tag == package.json version
-                                   5. resolve and record five exact candidate outcomes
-                                   6. publish only new exact versions to @next
-                                      └── prepublishOnly runs before each npm publication
+```mermaid
+flowchart TD
+  Commit["git commit"] --> Precommit["verify:pre-commit"]
+  Push["git push"] --> Prepush["verify:pre-push = verify:release-gate"]
+  PR["Pull request"] --> Lint["Markdown + workflow schema lint"]
+  Lint --> Tests["CLI tests: Node 18/20/22/24<br/>Coverage thresholds: Node 24"]
+  Lint --> Bootstrap["Native OpenClaw bootstrap"]
+  PR --> Artifacts["Bundle / offline / pack-install smoke"]
+  PR --> Keychain["Native credential checks<br/>Relevant source/test/config changes"]
+  Release["Release / tag-bound dispatch"] --> Gate["verify:release-gate"]
+  Gate --> Regression["Full npm test on exact release source"]
+  Regression --> Validate["verify:release + root version/tag"]
+  Validate --> Next["Record exact outcomes<br/>Publish new versions to next"]
 ```
+
+`verify:pre-commit` builds and runs version/Codex regressions plus workspace
+checks. `verify:pre-push` delegates to the release gate, including installed
+package smokes. Publication additionally runs the complete root CLI suite;
+passing PR checks are not a substitute for testing the exact release source.
+
+CI covers Node 18/20/22/24. Node 24 runs `npm run test:coverage` and uploads
+the report; other matrix entries run `npm test`. Existing coverage thresholds
+remain blocking. All repository Markdown is checked with `npm run lint:md`.
+Workflow schemas are validated with pinned
+[check-jsonschema 0.39.0](https://pypi.org/project/check-jsonschema/0.39.0/)
+and its bundled `vendor.github-workflows` schema, including `concurrency.queue`.
+No floating remote schema or ignored validation error is required.
+
+The credential matrix runs `npm run test:account-lifecycle` and then
+`npm run smoke:keychain` on Linux, macOS, and Windows. The latter is restricted
+to isolated GitHub Actions runners: it requires the expected native backend,
+creates a unique dummy profile, verifies replacement, deletes it in `finally`,
+and verifies absence. File fallback fails this gate. Linux shares the unlocked
+D-Bus session; macOS temporarily changes and then restores the default keychain.
+It uses no cloud credentials or device calls. The regression suite's mocked
+backend tests are not evidence that native OS storage works.
+
+The separate, manually dispatched hardware smoke remains opt-in. Its Bash
+pipelines use `pipefail`; `jq -e` requires the expected JSON result shapes.
+Empty history is valid, but failed CLI commands or error envelopes fail the run.
 
 The pre-publish artifact gate runs
 `scripts/smoke-pack-install.mjs`, which:
@@ -122,7 +137,11 @@ The checkout and all five package versions come from that tag, not the workflow
 dispatcher commit. The outcome artifact records `source.tag` and
 `source.revision`; the downstream source job verifies the exact GitHub ref,
 dereferences annotated tags, and rejects missing metadata or a changed target.
-Artifact, host, and promotion jobs all check out that verified revision.
+Artifact and required-host jobs check out that verified candidate revision.
+Promotion instead checks out `github.workflow_sha`, the commit containing its
+workflow definition, so its tooling and dependencies enforce the current
+promotion policy even for a historical candidate. This does not change the
+candidate source or exact-version evidence binding.
 The npm provenance workflow reference identifies the fixed dispatcher workflow;
 the explicit source binding records the separately checked-out release code.
 
@@ -198,6 +217,31 @@ outcomes and applies `npm dist-tag add <exact-package-version> latest` only to
 entries marked `published`. The job refuses to promote when artifact,
 exact-candidate, or required-host readonly evidence is absent or failed.
 
+Publication runs share the `npm-candidate-publication` concurrency group;
+promotion jobs share `npm-latest-promotion`. Both use `cancel-in-progress: false`
+and [`queue: max`](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency#example-queueing-multiple-pending-runs),
+preserving up to 100 pending runs instead of replacing the previous pending
+release. Ordinary PR CI cancels superseded runs.
+
+Before any tag write, promotion reads every newly published candidate's tags
+with `npm view <package>@<exact-version> dist-tags --json`. Registry errors,
+invalid SemVer metadata, or any candidate older than its current `latest`
+block the whole promotion before writes begin. A missing `latest` or an equal
+version is valid; independently `already-published` entries remain untouched.
+This also prevents a slower, older candidate from undoing a newer promotion.
+Npm tag writes across packages are not atomic, and these concurrency groups
+do not lock external publishers; a registry write failure can still require
+the recovery procedure above.
+
+## Repository guardrails
+
+Recommended repository settings: protect `main`, require pull requests, and
+require the always-scheduled Markdown, workflow-schema, and Node test checks.
+Do not require path-filtered credential jobs for every PR: documentation-only
+changes would otherwise wait for checks that are never scheduled.
+Workflow files do not enable branch protection; repository settings must be
+configured separately.
+
 ## Invariants
 
 Changes to the release pipeline must preserve these invariants:
@@ -232,11 +276,11 @@ Changes to the release pipeline must preserve these invariants:
 
 7. **`bundle-smoke` must stay blocking and matrixed.** Because the bundle is
    the publish source, it has to start cleanly on every Node version the
-   package supports (`engines.node >= 18`). The job runs `npm run build +
+   package currently tests (`engines.node >= 18`). The job runs `npm run build +
    shebang count + node --check + --version + bundle size test` on Node
-   18/20/22. Adding a new supported Node version means adding it to the
-   matrix; making the job advisory again means end-users on some supported
-   Node version can install a broken CLI without CI catching it.
+   18/20/22/24. Adding another supported LTS line means adding it to the
+   matrix; making the job advisory again can let users install a broken CLI
+   without CI catching it.
 
 ## Related tests
 
@@ -246,3 +290,10 @@ Changes to the release pipeline must preserve these invariants:
   size budget).
 - `scripts/smoke-pack-install.mjs` — the end-to-end install smoke used by
   both the `pre-push` hook and the CI / publish workflows.
+- `tests/build/release-candidate-promotion.test.ts` — real npm against a local
+  registry fixture: first promotion, equal/newer versions, stale multi-package
+  candidates, prerelease ordering, malformed metadata, and registry failures.
+- `tests/build/keychain-smoke.test.ts` — isolated command fixtures verify smoke
+  cleanup, replacement, and rejection of fallback or corrupt reads.
+- `scripts/smoke-keychain.mjs` — actual native credential lifecycle in the
+  three-OS CI matrix; local fixtures do not prove those OS jobs ran.

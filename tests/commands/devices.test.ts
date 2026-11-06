@@ -2449,10 +2449,10 @@ describe('devices command', () => {
       expectPost('turnOn', 'default');
     });
 
-    it('skips validation entirely for --type customize (arbitrary IR button names)', async () => {
+    it('rejects customize commands on cached physical devices', async () => {
       const res = await runCmd('AnyCustomName', 'extra', '--type', 'customize');
-      expect(res.exitCode).toBeNull();
-      expectPost('AnyCustomName', 'extra', 'customize');
+      expect(res.exitCode).toBe(2);
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
     });
 
     it('validates against a parameterized command (Color Bulb setBrightness)', async () => {
@@ -2530,7 +2530,7 @@ describe('devices command', () => {
           { deviceId: 'LOCK-PRO-1', deviceName: 'Side Door', deviceType: 'Lock Pro Matter Enabled' },
           { deviceId: 'BULB-1', deviceName: 'Lamp', deviceType: 'Color Bulb' },
         ],
-        infraredRemoteList: [],
+        infraredRemoteList: [{ deviceId: 'IR-LOCK', deviceName: 'Remote', remoteType: 'TV' }],
       });
     });
 
@@ -2564,18 +2564,13 @@ describe('devices command', () => {
       expect(res.stderr.join("\n")).toContain(deviceType);
     });
 
-    it('allows Smart Lock unlock when --yes is passed', async () => {
-      apiMock.__instance.post.mockResolvedValue({
-        data: { statusCode: 100, body: {} },
-      });
+    it('blocks Smart Lock unlock with --yes under the default profile', async () => {
       const res = await runCli(registerDevicesCommand, [
         'devices', 'command', LOCK_ID, 'unlock', '--yes',
       ]);
-      expect(res.exitCode).toBeNull();
-      expect(apiMock.__instance.post).toHaveBeenCalledWith(
-        `/v1.1/devices/${LOCK_ID}/commands`,
-        { command: 'unlock', parameter: 'default', commandType: 'command' }
-      );
+      expect(res.exitCode).toBe(2);
+      expect(res.stderr.join('\n')).toMatch(/direct destructive execution disabled/i);
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
     });
 
     it('allows --dry-run without --yes (guard yields to dry-run preview)', async () => {
@@ -2624,7 +2619,7 @@ describe('devices command', () => {
       // Even if the button name happens to collide with a destructive command,
       // customize IR buttons are opaque to the catalog and always allowed.
       const res = await runCli(registerDevicesCommand, [
-        'devices', 'command', LOCK_ID, 'unlock', '--type', 'customize',
+        'devices', 'command', 'IR-LOCK', 'unlock', '--type', 'customize',
       ]);
       expect(res.exitCode).toBeNull();
       expect(apiMock.__instance.post).toHaveBeenCalledTimes(1);

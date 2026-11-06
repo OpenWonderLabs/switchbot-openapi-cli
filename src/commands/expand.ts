@@ -53,7 +53,7 @@ Supported expansions:
     --mode values: auto | cool | dry | fan | heat
     --fan values:  auto | low | mid | high
 
-  Curtain / Curtain 3 — setPosition
+  Curtain / Curtain 3 / Curtain 4 — setPosition
     --position 50 [--mode silent]  →  "0,1,50"
     --mode values: default (ff) | performance (0) | silent (1)
 

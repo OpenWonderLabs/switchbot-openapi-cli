@@ -154,6 +154,7 @@ const STATUS_FIELD_DESCRIPTIONS: Record<string, string> = {
   doorStatus: "Garage door position state",
   displayMode: "Art Frame display mode",
   imageUrl: "Current Art Frame image URL",
+  latestImage: 'Latest image object; empty when unavailable, otherwise imageUrl and expireAt (Unix seconds)',
   waterBaseBattery: "Vacuum water-base battery percentage",
   drying: "Humidifier drying state",
   position: "Device position percentage",
@@ -224,6 +225,25 @@ const rgbOnlyLightControls0To100: CommandSpec[] = [
   { command: 'setBrightness', parameter: '0-100', description: 'Set brightness percentage', idempotent: true, exampleParams: ['0', '50', '100'] },
   { command: 'setColor', parameter: 'R:G:B (0-255 each)', description: 'Set RGB color, e.g. "255:0:0"', idempotent: true, exampleParams: ['255:0:0', '255:255:255'] },
 ];
+const lightEffect: CommandSpec = {
+  command: 'setLightEffect',
+  parameter: '{"effectId":0-25}',
+  description: 'Set the preset lighting effect',
+  idempotent: false,
+  exampleParams: ['{"effectId":1}'],
+};
+const k11Commands: CommandSpec[] = [
+  { command: 'startClean', parameter: '\'{"action":"sweep"|"mop","param":{"fanLevel":1-4,"times":1-2639999}}\'', description: 'Begin a cleaning session', idempotent: false, exampleParams: ['{"action":"sweep","param":{"fanLevel":2,"times":1}}'] },
+  { command: 'pause', parameter: '—', description: 'Pause cleaning', idempotent: true },
+  { command: 'dock', parameter: '—', description: 'Return to dock', idempotent: true },
+  { command: 'setVolume', parameter: '0-100', description: 'Set voice volume', idempotent: true, exampleParams: ['0', '50', '100'] },
+  { command: 'changeParam', parameter: '\'{"fanLevel":1-4,"waterLevel":1-2,"times":1-2639999}\'', description: 'Change parameters mid-run', idempotent: true, exampleParams: ['{"fanLevel":3,"waterLevel":1,"times":1}'] },
+];
+const artFrameCommands: CommandSpec[] = [
+  { command: 'next', parameter: '—', description: 'Switch to the next image', idempotent: false },
+  { command: 'previous', parameter: '—', description: 'Switch to the previous image', idempotent: false },
+  { command: 'uploadImage', parameter: '{"imageUrl":"..."} or {"imageBase64":"..."}', description: 'Upload a new image from exactly one URL or base64 image source.', idempotent: true, exampleParams: ['{"imageUrl":"https://example.com/art.jpg"}', '{"imageBase64":"data:image/jpeg;base64,..."}'] },
+];
 
 export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   // ---------- Physical devices ----------
@@ -253,7 +273,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     category: 'physical',
     description: 'Motorized curtain track runner that opens/closes curtains by slide position (0=open, 100=closed).',
     role: 'curtain',
-    aliases: ['Curtain3', 'Curtain 3'],
+    aliases: ['Curtain3', 'Curtain 3', 'Curtain4', 'Curtain 4'],
     commands: [
       ...onOff,
       { command: 'pause', parameter: '—', description: 'Stop movement', idempotent: true },
@@ -293,7 +313,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     category: 'physical',
     description: 'Premium electronic deadbolt with full lock, unlock, and deadbolt control.',
     role: 'security',
-    aliases: ['Lock Ultra'],
+    aliases: ['Lock Ultra', 'Smart Lock Ultra Max', 'Lock Ultra Max'],
     commands: [
       { command: 'lock', parameter: '—', description: 'Lock the door', idempotent: true },
       { command: 'unlock', parameter: '—', description: 'Unlock the door', idempotent: true, safetyTier: 'destructive', safetyReason: 'Physically unlocks the door — anyone nearby can open it.' },
@@ -476,11 +496,29 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     statusFields: ['power', 'brightness', 'color', 'colorTemperature', 'version'],
   },
   {
+    type: 'RGBICWW Light Bars',
+    category: 'physical',
+    description: 'RGBICWW light bars with brightness, color, music and lighting effects.',
+    role: 'lighting',
+    commands: [
+      ...onOffToggle,
+      ...rgbLightControls0To100,
+      { command: 'setBrightnessAndTemperature', parameter: '{"brightness":0-100,"temperature":2700-6500}', description: 'Set brightness and color temperature together', idempotent: true, exampleParams: ['{"brightness":50,"temperature":4000}'] },
+      { command: 'setMusicColorMode', parameter: '{"colorList":["R:G:B"]}', description: 'Set music-mode colors', idempotent: false, exampleParams: ['{"colorList":["255:0:0"]}'] },
+      { command: 'setMusicParamMode', parameter: '{"musicMode":0-5,"musicLevel":1-100,"sensitivity":1-100,"controllerMode":0-2}', description: 'Set music-mode parameters', idempotent: false, exampleParams: ['{"musicMode":0,"musicLevel":50,"sensitivity":50,"controllerMode":0}'] },
+      { command: 'setEffectColorMode', parameter: '{"style":integer,"colorList":["R:G:B"]}', description: 'Set effect colors', idempotent: false, exampleParams: ['{"style":1,"colorList":["255:0:0"]}'] },
+      { command: 'setEffectSpeedMode', parameter: '{"speed":1-255}', description: 'Set effect speed', idempotent: false, exampleParams: ['{"speed":100}'] },
+      { command: 'setSegmentColorMode', parameter: '{"color":"R:G:B","lightIndex":0-11}', description: 'Set a segment color', idempotent: false, exampleParams: ['{"color":"255:0:0","lightIndex":0}'] },
+      lightEffect,
+    ],
+    statusFields: ['version', 'power', 'onlineStatus', 'brightness', 'color', 'colorTemperature'],
+  },
+  {
     type: 'RGBICWW Strip Light',
     category: 'physical',
     description: 'RGBICWW strip light with 0-100 brightness, RGB color, and color temperature control.',
     role: 'lighting',
-    commands: [...onOffToggle, ...rgbLightControls0To100],
+    commands: [...onOffToggle, ...rgbLightControls0To100, lightEffect],
     statusFields: ['power', 'brightness', 'color', 'colorTemperature', 'version', 'onlineStatus'],
   },
   {
@@ -488,7 +526,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     category: 'physical',
     description: 'RGBICWW floor lamp with 0-100 brightness, RGB color, and color temperature control.',
     role: 'lighting',
-    commands: [...onOffToggle, ...rgbLightControls0To100],
+    commands: [...onOffToggle, ...rgbLightControls0To100, lightEffect],
     statusFields: ['power', 'brightness', 'color', 'colorTemperature', 'version', 'onlineStatus'],
   },
   {
@@ -496,7 +534,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     category: 'physical',
     description: 'RGBIC neon wire rope light with 0-100 brightness and RGB color control.',
     role: 'lighting',
-    commands: [...onOffToggle, ...rgbOnlyLightControls0To100],
+    commands: [...onOffToggle, ...rgbOnlyLightControls0To100, lightEffect],
     statusFields: ['power', 'brightness', 'color', 'version', 'onlineStatus'],
   },
   {
@@ -504,7 +542,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     category: 'physical',
     description: 'RGBIC neon rope light with 0-100 brightness and RGB color control.',
     role: 'lighting',
-    commands: [...onOffToggle, ...rgbOnlyLightControls0To100],
+    commands: [...onOffToggle, ...rgbOnlyLightControls0To100, lightEffect],
     statusFields: ['power', 'brightness', 'color', 'version', 'onlineStatus'],
   },
   {
@@ -517,6 +555,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
       { command: 'setBrightness', parameter: '{0-100}', description: 'Set brightness (0-100)', idempotent: true, exampleParams: ['50'] },
       { command: 'setColor', parameter: '\'{0-255}:{0-255}:{0-255}\'', description: 'Set RGB color', idempotent: true, exampleParams: ['255:0:0'] },
       { command: 'setColorTemperature', parameter: '{2700-6500}', description: 'Set color temperature in Kelvin', idempotent: true, exampleParams: ['4000'] },
+      lightEffect,
     ],
     statusFields: ['power', 'onlineStatus', 'brightness', 'color', 'colorTemperature', 'version'],
   },
@@ -548,6 +587,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
       { command: 'setMainLightColorTemp', parameter: '{2700-6500}', description: 'Set main light color temperature (K)', idempotent: true, exampleParams: ['4000'] },
       { command: 'setColorLightBrightness', parameter: '{1-100}', description: 'Set color light brightness', idempotent: true, exampleParams: ['50'] },
       { command: 'setColorLightRGB', parameter: '\'{0-255}:{0-255}:{0-255}\'', description: 'Set color light RGB color', idempotent: true, exampleParams: ['255:0:0'] },
+      { ...lightEffect, description: 'Set the ambient color light effect' },
     ],
     statusFields: ['power', 'onlineStatus', 'mainLightPower', 'mainLightBrightness', 'mainLightColorTemp', 'colorLightPower', 'colorLightBrightness', 'colorLightRGB', 'version'],
   },
@@ -613,13 +653,16 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     description: 'Robot vacuum and mop with sweep/mop sessions, fan-level control, and adjustable mop moisture.',
     role: 'cleaning',
     aliases: ['K11+', 'Robot Vacuum Cleaner K11 Plus'],
-    commands: [
-      { command: 'startClean', parameter: '\'{"action":"sweep"|"mop","param":{"fanLevel":1-4,"times":1-2639999}}\'', description: 'Begin a cleaning session', idempotent: false, exampleParams: ['{"action":"sweep","param":{"fanLevel":2,"times":1}}'] },
-      { command: 'pause', parameter: '—', description: 'Pause cleaning', idempotent: true },
-      { command: 'dock', parameter: '—', description: 'Return to dock', idempotent: true },
-      { command: 'setVolume', parameter: '0-100', description: 'Set voice volume', idempotent: true, exampleParams: ['0', '50', '100'] },
-      { command: 'changeParam', parameter: '\'{"fanLevel":1-4,"waterLevel":1-2,"times":1-2639999}\'', description: 'Change parameters mid-run', idempotent: true, exampleParams: ['{"fanLevel":3,"waterLevel":1,"times":1}'] },
-    ],
+    commands: k11Commands,
+    statusFields: ['workingStatus', 'onlineStatus', 'battery', 'taskType'],
+  },
+  {
+    type: 'Robot Vacuum Cleaner K11 Plus Pro',
+    category: 'physical',
+    description: 'Robot vacuum and mop with sweep/mop sessions and adjustable cleaning parameters.',
+    role: 'cleaning',
+    aliases: ['K11+ Pro', 'Robot Vacuum K11+ Pro'],
+    commands: k11Commands,
     statusFields: ['workingStatus', 'onlineStatus', 'battery', 'taskType'],
   },
   {
@@ -754,12 +797,17 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     category: 'physical',
     description: 'Digital art frame that can switch images and accept new artwork uploads.',
     role: 'other',
-    commands: [
-      { command: 'next', parameter: '—', description: 'Switch to the next image', idempotent: false },
-      { command: 'previous', parameter: '—', description: 'Switch to the previous image', idempotent: false },
-      { command: 'uploadImage', parameter: '{\"imageUrl\":\"...\"} or {\"imageBase64\":\"...\"}', description: 'Upload a new image from exactly one URL or base64 image source.', idempotent: true, exampleParams: ['{\"imageUrl\":\"https://example.com/art.jpg\"}', '{\"imageBase64\":\"data:image/jpeg;base64,...\"}'] },
-    ],
+    commands: artFrameCommands,
     statusFields: ['battery', 'displayMode', 'imageUrl', 'version'],
+  },
+  {
+    type: 'AI Art Frame Luma',
+    category: 'physical',
+    description: 'Digital art frame with image uploads and online status.',
+    role: 'other',
+    aliases: ['AI Art Frame 2'],
+    commands: artFrameCommands,
+    statusFields: ['battery', 'displayMode', 'imageUrl', 'onlineStatus', 'version'],
   },
   // Status-only devices (no commands)
   {
@@ -906,6 +954,26 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     readOnly: true,
     commands: [],
     statusFields: ['battery', 'version'],
+  },
+  {
+    type: 'Outdoor Pan/Tilt Cam 3K',
+    category: 'physical',
+    description: 'Outdoor camera exposing the latest image URL and expiry through status; no cloud controls.',
+    role: 'security',
+    readOnly: true,
+    commands: [],
+    statusFields: ['latestImage'],
+  },
+  {
+    type: 'Solar Pan/Tilt Cam 2K',
+    category: 'physical',
+    description: 'Outdoor solar camera with status and motion detection control; only the outdoor unit is listed.',
+    role: 'security',
+    commands: [
+      { command: 'enableMotionDetection', parameter: '—', description: 'Enable motion detection', idempotent: true },
+      { command: 'disableMotionDetection', parameter: '—', description: 'Disable motion detection', idempotent: true, safetyTier: 'destructive', safetyReason: 'Disables camera motion detection and its security alerts.' },
+    ],
+    statusFields: ['version', 'battery', 'online', 'latestImage'],
   },
   {
     type: 'Indoor Cam',

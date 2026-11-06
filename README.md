@@ -51,18 +51,27 @@ Run `switchbot catalog show` for the effective catalog, including aliases and pe
 
 | Category | Devices |
 | --- | --- |
-| **Lighting** | Color Bulb · Strip Light · Strip Light 3 · RGBICWW Strip Light · Floor Lamp · RGBICWW Floor Lamp · Ceiling Light · Ceiling Light Pro · RGBICWW Ceiling Light · RGBIC Neon Rope Light · RGBIC Neon Wire Rope Light · Candle Warmer Lamp · Permanent Outdoor Lights |
+| **Lighting** | Color Bulb · Strip Light · Strip Light 3 · RGBICWW Strip Light · RGBICWW Light Bars _(unreleased)_ · Floor Lamp · RGBICWW Floor Lamp · Ceiling Light · Ceiling Light Pro · RGBICWW Ceiling Light · RGBIC Neon Rope Light · RGBIC Neon Wire Rope Light · Candle Warmer Lamp · Permanent Outdoor Lights |
 | **Climate** | Humidifier · Humidifier2 · Air Purifier VOC · Air Purifier Table VOC · Air Purifier PM2.5 · Air Purifier Table PM2.5 · Smart Radiator Thermostat |
-| **Security** | Smart Lock · Smart Lock Pro · Smart Lock Pro Wifi · Smart Lock Ultra · Lock Lite · Lock Vision · Lock Vision Pro · Keypad · Keypad Touch · Keypad Vision · Keypad Vision Pro · Garage Door Opener · Video Doorbell |
-| **Curtains & blinds** | Curtain · Curtain3 · Blind Tilt · Roller Shade |
+| **Security** | Smart Lock · Smart Lock Pro · Smart Lock Pro Wifi · Smart Lock Ultra · Smart Lock Ultra Max _(unreleased)_ · Lock Lite · Lock Vision · Lock Vision Pro · Keypad · Keypad Touch · Keypad Vision · Keypad Vision Pro · Garage Door Opener · Video Doorbell |
+| **Curtains & blinds** | Curtain · Curtain3 · Curtain 4 _(unreleased)_ · Blind Tilt · Roller Shade |
 | **Power** | Plug · Plug Mini (US) · Plug Mini (JP) · Plug Mini (EU) · Relay Switch 1 · Relay Switch 1PM · Relay Switch 2PM |
 | **Fans** | Battery Circulator Fan · Battery Circulator Fan 2 Pro · Circulator Fan · Standing Circulator Fan |
-| **Cleaning** | Robot Vacuum Cleaner S1 · Robot Vacuum Cleaner S1 Plus · K10+ · K10+ Pro · Robot Vacuum Cleaner K10+ Pro Combo · Robot Vacuum Cleaner S10 · Robot Vacuum Cleaner S20 · Robot Vacuum Cleaner K11+ · Robot Vacuum Cleaner K20 Plus Pro |
+| **Cleaning** | Robot Vacuum Cleaner S1 · Robot Vacuum Cleaner S1 Plus · K10+ · K10+ Pro · Robot Vacuum Cleaner K10+ Pro Combo · Robot Vacuum Cleaner S10 · Robot Vacuum Cleaner S20 · Robot Vacuum Cleaner K11+ · Robot Vacuum Cleaner K11 Plus Pro _(unreleased)_ · Robot Vacuum Cleaner K20 Plus Pro |
 | **Sensors** _(read-only)_ | Meter · MeterPlus · WoIOSensor · MeterPro · MeterPro(CO2) · WeatherStation · Motion Sensor · Presence Sensor · Contact Sensor · Water Detector · Wallet Finder Card |
 | **Hubs** _(read-only)_ | Hub · Hub Plus · Hub Mini · Hub 2 · Hub 3 · AI Hub |
-| **Cameras** _(status only)_ | Indoor Cam · Pan/Tilt Cam · Pan/Tilt Cam 2K · Pan/Tilt Cam Plus 2K · Pan/Tilt Cam Plus 3K · Outdoor Spotlight Cam |
-| **Other** | Bot · AI Art Frame · AI MindClip · Kata Friends · Home Climate Panel · Remote |
+| **Cameras** | Indoor Cam · Pan/Tilt Cam · Pan/Tilt Cam 2K · Pan/Tilt Cam Plus 2K · Pan/Tilt Cam Plus 3K · Outdoor Spotlight Cam · Outdoor Pan/Tilt Cam 3K _(unreleased; status only)_ · Solar Pan/Tilt Cam 2K _(unreleased)_ |
+| **Other** | Bot · AI Art Frame · AI Art Frame Luma _(unreleased)_ · AI MindClip · Kata Friends · Home Climate Panel · Remote |
 | **IR virtual remotes** _(via Hub)_ | Air Conditioner · TV · Streamer · Set Top Box · DVD · Speaker · Fan · Light · Others |
+
+### Device contract notes
+
+**Unreleased:** The notes below describe upcoming capabilities not included in CLI 3.9.0.
+
+- Light Bars accept object parameters. For example: `switchbot devices command <lightBarId> setLightEffect '{"effectId":1}'`; `effectId` is an integer from 0 through 25.
+- Outdoor Pan/Tilt Cam 3K is status-only. Camera status may include `latestImage` as `{ imageUrl, expireAt }`; `expireAt` is Unix seconds. Treat cached URLs as potentially expired, do not download or persist image bytes, and query again with `--no-cache` when a fresh status is needed.
+- Solar Pan/Tilt Cam 2K supports motion-detection enable/disable only. Disabling detection is destructive and follows the reviewed approval path; it is not a substitute for camera streaming or PTZ control.
+- Light Bars webhook field shapes are documented, but their exact `context.deviceType` identifier is not discoverable from the official material. The CLI does not guess a mapping.
 
 ---
 
@@ -222,9 +231,12 @@ path and is not the bundle route. See [host verification boundaries](./docs/host
 
 ## Credentials
 
-> **Recommended:** use `switchbot auth login` for browser-based OAuth — credentials are stored securely in the OS keychain and never need to be copy-pasted anywhere.
+> **Recommended:** use `switchbot auth login` for browser-based OAuth. Credentials are stored in the OS keychain when available, otherwise in the local config file.
 
-Priority: env vars → OS keychain → `~/.switchbot/config.json`
+Priority: complete env vars → OS keychain → `~/.switchbot/config.json`.
+`--config <path>` bypasses the keychain but not complete environment credentials.
+`config set-token` writes the file; an existing keychain entry still takes
+precedence unless `--config` is used.
 
 ```bash
 switchbot auth login                             # browser OAuth — opens login page, saves to OS keychain
@@ -232,6 +244,37 @@ switchbot config set-token <token> <secret>     # manual setup (alternative)
 export SWITCHBOT_TOKEN=... SWITCHBOT_SECRET=... # CI / env override
 switchbot auth keychain set/get/delete          # OS keychain management
 ```
+
+### Switching accounts and caches
+
+Successful `auth login`, `auth keychain set/delete/migrate`, and
+`config set-token` invalidate the affected credential scope's device list,
+status, primed credentials, and idempotency results. Other running CLI/MCP
+processes observe the change at their next cache or request boundary. A request
+already in flight is not automatically retried under the new account; if it
+was already sent, check its outcome before retrying.
+
+Implicit default and `--profile default` share `~/.switchbot/devices.json`
+and `status.json`. Named profiles have separate cache directories.
+`--config` stores caches beside the selected file; config files in the same
+directory share that cache scope, so use separate directories for separate
+accounts. Internal cache files contain a non-secret credential revision; CLI,
+MCP, and audit output formats are unchanged.
+
+Direct edits to credential files, environment variables, or an external
+keychain tool do not publish this invalidation. Stop affected long-running
+processes, run `switchbot [--profile <name> | --config <path>] cache clear`,
+then restart them with the intended credentials. Restart an MQTT subscription
+or rules daemon after changing accounts; its existing event stream is not
+rebound automatically. Audit, policy, and event-history files are not cleared.
+[Details and safety boundaries](./docs/agent-guide.md#profiles-and-credential-refresh).
+
+If a newly selected native keychain is locked or unavailable, requests fail
+closed rather than using older file credentials. Offline commands and
+credential-repair commands remain available.
+HTTP MCP also honors `--config` when a request selects a named profile; the
+override selects the account, while profile-name and bearer-token checks
+remain enforced.
 
 For HTTP `401`, check the active token/secret, signature and system clock;
 use `auth login` or replace the credential source locally, never paste secrets
@@ -354,6 +397,10 @@ switchbot rules suggest --intent "turn off AC at 11pm" [--llm auto]
 switchbot daemon start/stop/reload/status
 ```
 
+Existing rules may use either `setColor 255 0 0` or `setColor 255:0:0`;
+both send `255:0:0`. The same applies to `setColorLightRGB`. JSON object
+parameters and audit records retain their existing formats.
+
 ### `plan`
 
 Declarative batch operations. A plan file has `version`, `description`, and a `steps` array.
@@ -446,13 +493,20 @@ Policy commands retain their documented specialized exit codes (including YAML p
 
 ## Development
 
-Verified CLI regression suite: 3093 tests. Plugin workspace checks are separate.
+Verified CLI regression suite: 3205 tests. Plugin workspace checks are separate.
 
 ```bash
 npm install && npm run build
 npm run dev -- <args>   # run from TypeScript via tsx
 npm test                # Vitest suite
+npm run test:account-lifecycle # focused account/cache/MCP regressions
+npm run test:coverage     # suite plus coverage thresholds
 ```
+
+CI runs CLI regressions on Node 18/20/22/24, enforces coverage on Node 24,
+and checks all Markdown and workflow schemas. Native credential checks and
+candidate publication/promotion gates are described in the
+[release pipeline](docs/release-pipeline.md).
 
 ## License
 

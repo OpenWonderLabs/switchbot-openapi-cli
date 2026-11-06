@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { getConfigPath } from './utils/flags.js';
 import { assertValidProfileName, getActiveProfile } from './lib/request-context.js';
 import { emitJsonError, isJsonMode } from './utils/output.js';
-import { getPrimedCredentials, clearPrimedCredentials } from './credentials/prime.js';
+import { getPrimedCredentials, clearPrimedCredentials, KeychainCredentialsUnavailableError } from './credentials/prime.js';
 
 export interface SwitchBotConfig {
   token: string;
@@ -145,8 +145,13 @@ export function tryLoadConfig(): SwitchBotConfig | null {
   if (envToken && envSecret) return { token: envToken, secret: envSecret };
 
   if (!getConfigPath()) {
-    const primed = getPrimedCredentials(getActiveProfile() ?? 'default');
-    if (primed) return primed;
+    try {
+      const primed = getPrimedCredentials(getActiveProfile() ?? 'default');
+      if (primed) return primed;
+    } catch (error) {
+      if (error instanceof KeychainCredentialsUnavailableError) return null;
+      throw error;
+    }
   }
 
   const file = configFilePath();

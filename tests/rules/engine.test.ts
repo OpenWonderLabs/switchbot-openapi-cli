@@ -9,6 +9,7 @@ import type { AutomationBlock, Rule } from '../../src/rules/types.js';
 import { readAudit } from '../../src/utils/audit.js';
 import type { SwitchBotMqttClient } from '../../src/mqtt/client.js';
 import type { MqttCredential } from '../../src/mqtt/credential.js';
+import { resetListCache, updateCacheFromDeviceList } from '../../src/devices/cache.js';
 
 const fakeCredential: MqttCredential = {
   brokerUrl: 'ssl://broker.example.com:8883',
@@ -18,6 +19,25 @@ const fakeCredential: MqttCredential = {
   qos: 1,
   tls: { enabled: true, caBase64: '', certBase64: '', keyBase64: '' },
 };
+
+let cacheHome: string;
+beforeEach(() => {
+  cacheHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sbengine-cache-'));
+  vi.spyOn(os, 'homedir').mockReturnValue(cacheHome);
+  resetListCache();
+  updateCacheFromDeviceList({
+    deviceList: [
+      { deviceId: 'AA-BB-CC', deviceName: 'Hallway lamp', deviceType: 'Color Bulb' },
+      { deviceId: 'LAMP-ID', deviceName: 'Lamp', deviceType: 'Color Bulb' },
+    ],
+    infraredRemoteList: [],
+  });
+});
+afterEach(() => {
+  resetListCache();
+  vi.restoreAllMocks();
+  fs.rmSync(cacheHome, { recursive: true, force: true });
+});
 
 class FakeMqttClient extends EventEmitter {
   private messageHandlers = new Set<(t: string, p: Buffer) => void>();
@@ -913,6 +933,39 @@ describe('RulesEngine.reload', () => {
 
       expect(fires.at(-1)?.status).toBe('throttled');
       expect(fires.at(-1)?.reason).toMatch(/already-desired/);
+
+      await engine.stop();
+    });
+
+    it('suppresses mixed-case TurnOn when cached target status is already on', async () => {
+      const fires: EngineFireEntry[] = [];
+      const fetchStatus = vi.fn(async () => ({ power: 'on' }));
+      const rule: Rule = {
+        name: 'auto-on',
+        when: { source: 'mqtt', event: 'motion.detected' },
+        conditions: [{ device: 'hallway lamp', field: 'power', op: '==', value: 'on' }],
+        then: [{ command: 'devices command <id> TurnOn', device: 'hallway lamp' }],
+        dry_run: true,
+        suppressIfAlreadyDesired: true,
+      };
+      const engine = new RulesEngine({
+        automation: automation([rule]),
+        aliases: { 'hallway lamp': 'LAMP-ID' },
+        mqttClient: mqtt as unknown as SwitchBotMqttClient,
+        mqttCredential: fakeCredential,
+        skipApiCall: true,
+        statusFetcher: fetchStatus,
+        onFire: (e) => fires.push(e),
+      });
+      await engine.start();
+
+      await engine.ingestEventForTest({ source: 'mqtt', event: 'motion.detected', t: new Date(), deviceId: 'S1' });
+      await engine.drainForTest();
+
+      expect(fetchStatus).toHaveBeenCalledTimes(1);
+      expect(fetchStatus).toHaveBeenCalledWith('LAMP-ID');
+      expect(fires.at(-1)?.status).toBe('throttled');
+      expect(fires.at(-1)?.reason).toBe('already-desired');
 
       await engine.stop();
     });

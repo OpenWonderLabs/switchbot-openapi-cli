@@ -107,6 +107,19 @@ The default profile exposes 18 tools; `--tools readonly` exposes 15. Policy, aud
 
 The MCP server refuses destructive commands (Smart Lock `unlock` or `deadbolt`, Garage Door `open`, etc.) unless the tool call includes `confirm: true`, and the default safety profile still blocks direct destructive execution in favor of the reviewed CLI flow (`plan save` → `plan review` → `plan approve` → `plan execute`). `deadbolt` releases the latch; it does not lock the door. Discover destructive classifications with `switchbot schema export | jq '[.data.types[].commands[] | select(.safetyTier=="destructive")]'`; classification is not permission to execute.
 
+Device type resolution uses `deviceType` or, when absent, `controlType` for
+both cold and warm inventory. A `controlType`-only lock or Solar camera must
+pass the same safety and confirmation gates before any mutation is sent.
+
+MCP tool failures are structured results: `isError: true` with
+`structuredContent.error`. Inspect that error rather than treating a returned
+tool result as success. Published output schemas retain the existing success
+object and also admit this error object; no tool or machine payload was added.
+
+Physical devices must use built-in `command` dispatch. `commandType: "customize"`
+is only for a genuine user-defined button on an IR virtual remote; it cannot
+reclassify or bypass safety checks for a lock, camera, or other physical device.
+
 ### Deprecated aliases (scheduled for removal in 4.0.0)
 
 These names continue to work in 3.x but are thin wrappers over `device_history`. Migrate to the consolidated tool — it emits a single schema per session instead of three.
@@ -165,11 +178,46 @@ MQTT credentials are auto-provisioned from the startup profile's SwitchBot token
 
 HTTP profile selection uses `x-switchbot-profile` before `?profile=...`; names must start with a letter/digit and contain only letters, digits, `_` and `-`. Traversal and explicit empty names are rejected before filesystem access. Named history queries, aggregates, simulations and resets cannot read or remove another profile's history.
 
-Named HTTP profiles may store credentials only in the OS keychain; a profile JSON file is not required. Profile lookup happens after bearer authentication, and names without credentials or a configuration file are rejected.
+Named HTTP profiles may store credentials only in the OS keychain; a profile
+JSON file is not required. Profile lookup happens after bearer authentication.
+Without complete environment credentials or a `--config` override, names
+without credentials or a configuration file are rejected. An explicit override
+selects the account even when the request names another valid profile; profile
+syntax and bearer-token checks still apply.
 
-MQTT subscriptions belong to the startup profile. A request for a different profile cannot read that subscription's `switchbot://events` ring or receive its MQTT account-overview fields. Start a separate subscription/server for a different account.
+MQTT subscriptions belong to the startup profile. A request for a different profile cannot read that subscription's `switchbot://events` ring or receive its MQTT account-overview fields. Restart the subscription/server after switching its account; existing streams and event history are not rebound or cleared.
 
-MCP refreshes credentials at request/tool boundaries with a five-second cache and per-profile single-flight loading. Credential changes are picked up after that cache expires; asynchronous stale loads cannot overwrite a later invalidation. Environment credentials still take precedence over keychain and files.
+Successful CLI credential mutations publish a non-secret revision for the
+affected profile or `--config` directory. Running processes invalidate device
+inventory, status, credential snapshots, and idempotency results on their next
+use; an obsolete in-flight inventory/status response is rejected. A retained
+HTTP client from the old scope fails closed, including on a 429 retry. An
+already dispatched mutation is not repeated automatically and may have taken
+effect; check its outcome before retrying.
+
+Native-keychain replacements require the keychain to be available on the next
+refresh; the client will not silently fall back to an older file credential.
+Unchanged credentials still use the five-second keychain cache. Complete
+environment credentials take precedence; `--config` bypasses the keychain.
+`config set-token` updates the file, so an existing keychain entry still wins.
+External environment/keychain/file edits do not publish a revision: stop
+long-running processes, clear the affected scope's cache, and restart them.
+
+If the startup profile's replacement keychain is unavailable, optional MQTT
+initialization is disabled instead of using an older file credential. HTTP MCP
+can still serve other valid named profiles. Restore the keychain and restart
+the server to establish the startup subscription.
+
+Credential-refresh failures inside MCP tool callbacks retain
+`isError: true` and `structuredContent.error` with kind `runtime`; the callback
+does not dispatch an API request. After unlocking the replacement keychain or
+repairing credentials, retry explicitly. HTTP request preflight failures remain
+JSON-RPC protocol errors rather than tool results.
+
+Implicit and explicit `default` use the same legacy cache paths. Named
+profiles are isolated; `--config` places caches in the config file's
+directory, so separate config files in one directory share a cache scope.
+Account changes do not erase policy, audit, or event history.
 
 ---
 
@@ -289,8 +337,9 @@ Lock Vision's less-specific object template is not assigned these restrictions.
 ### Idempotent command retries
 
 `send_command` / `devices command` accept an idempotency key. Within the same
-running process and credential profile, reusing it for the same device, command
-type and wire parameters replays the result instead of sending another request.
+running process, credential storage scope, and account revision, reusing it for
+the same device, command type and wire parameters replays the result instead of
+sending another request.
 Changing any of those values returns an idempotency conflict; use a new key for
 a different operation. Omitted parameters and `"default"` represent the same
 wire request. The cache is process-local and expires after 60 seconds: separate
@@ -353,14 +402,34 @@ Each command entry carries:
 - `parameter` / `exampleParams` — what the agent should fill in
 - `commandType` (`command` vs `customize`) — built-in vs user-defined IR button
 
+### Model-specific boundaries
+
+**Unreleased:** The following model names and capabilities are not included in CLI 3.9.0.
+
+The catalog recognizes the model names RGBICWW Light Bars, Smart Lock Ultra
+Max, Curtain 4, Robot Vacuum Cleaner K11 Plus Pro, AI Art Frame Luma, Outdoor
+Pan/Tilt Cam 3K, and Solar Pan/Tilt Cam 2K. Use `search_catalog` and
+`describe_device` to determine the model's command and parameter contract;
+similarly named models can differ or share an alias.
+
+- Light Bars use object parameters; `setLightEffect` takes `{ "effectId": 0 }`
+  through `{ "effectId": 25 }`.
+- K11+ Pro requires at least one valid `changeParam` property. Curtain 4 uses
+  the normal curtain position tuple. Art Frame Luma accepts the established
+  one-source upload object (`imageUrl` or `imageBase64`, never both).
+- Outdoor Pan/Tilt Cam 3K is status-only. For both new cameras, `latestImage`
+  is an optional object whose `expireAt` is Unix seconds; do not download its
+  URL or assume a cached URL remains valid. Solar supports only motion-detection
+  enable/disable; disabling detection is destructive.
+
 Use `switchbot doctor` to confirm the CLI is healthy before orchestrating anything non-trivial — it validates credentials, catalog size, cache state, clock drift, and quota file access.
 
 ---
 
 ## Safety rails
 
-1. **Destructive-command guard**: Smart Lock `unlock`, Garage Door `open`, and anything else tagged `destructive: true` in the catalog **refuses to run** directly in the default profile. Use the reviewed plan workflow by default; only explicit dev profiles may pair direct execution with `--yes` / `confirm: true`.
-2. **Dry-run**: Global `--dry-run` short-circuits mutating requests; GETs still execute. Unknown physical device types and unsupported commands fail closed. Explicit custom IR buttons remain available through `commandType: "customize"`.
+1. **Destructive-command guard**: Smart Lock `unlock`/`deadbolt`, Solar motion-detection disable, Garage Door `open`, and anything else tagged `destructive: true` **refuse direct execution** in the default profile. `--yes` or `confirm: true` confirms intent; neither grants direct-execution permission. Use the reviewed plan workflow, or an explicit dev/override permission plus confirmation.
+2. **Dry-run and dispatch type**: Global `--dry-run` short-circuits mutating requests; GETs still execute. Unknown physical device types and unsupported commands fail closed. A physical device cannot use `customize`; explicit custom IR buttons remain available only for IR virtual remotes.
 3. **Quota**: The API applies account limits and throttling. `--retry-on-429 <n>` and `--backoff <linear|exponential>` handle throttling; `~/.switchbot/quota.json` is a local counter, not the authoritative server quota.
 4. **Audit log**: `--audit-log` enables JSONL mutation records; `--audit-log-path <path>` selects a custom file.
 5. **Exit codes**: Most commands use `0` success, `1` runtime error, `2` usage error. Policy commands have documented additional codes; see [Policy reference](./policy-reference.md#validation-flow).
@@ -426,6 +495,31 @@ switchbot rules lint && switchbot daemon reload
 
 MCP agents use `rules_suggest` + `policy_add_rule` tools for the same
 pipeline without shell access.
+
+### Rule command parameters
+
+Rules preserve JSON whitespace and YAML literal-block newlines. They are not
+shell commands: YAML consumes its own outer quotes; do not add shell quotes
+around JSON.
+
+Both `setColor 255 0 0` and `setColor 255:0:0` send `255:0:0`. RGBICWW Ceiling
+Light's `setColorLightRGB` also accepts both forms. Object arguments can be
+written directly in a YAML literal block:
+
+```yaml
+then:
+  - command: 'devices command <id> setColor 255:0:0'
+    device: hallway lamp
+  - command: |-
+      devices command <id> uploadImage {
+        "imageUrl": "https://example.com/art.jpg"
+      }
+    device: art frame
+```
+
+Rule dry-runs require a known target/type in the active profile's cache; a cold
+or unknown cache fails preflight without a network call. `rules simulate`
+evaluates triggers and conditions only—it does not validate or execute actions.
 
 ### Hard limits
 

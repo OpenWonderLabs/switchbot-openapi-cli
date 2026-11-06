@@ -1004,7 +1004,13 @@ export class RulesEngine {
       const firstAction = rule.then[0];
       const firstCmd = firstAction && isCommandAction(firstAction) ? firstAction : null;
       const parsed = firstCmd ? parseRuleCommand(firstCmd.command) : null;
-      const verb = parsed?.verb ?? firstCmd?.command;
+      const rawVerb = parsed?.verb ?? firstCmd?.command;
+      const normalizedVerb = rawVerb?.toLowerCase();
+      const verb = normalizedVerb === 'turnon'
+        ? 'turnOn'
+        : normalizedVerb === 'turnoff'
+          ? 'turnOff'
+          : rawVerb;
       if ((verb === 'turnOn' || verb === 'turnOff') && (firstCmd?.device || event.deviceId)) {
         const targetId = firstCmd?.device ? (this.aliases[firstCmd.device] ?? firstCmd.device) : event.deviceId!;
         try {

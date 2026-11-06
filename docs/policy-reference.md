@@ -130,6 +130,7 @@ The destructive blocklist the schema enforces on `never_confirm`:
 - `nightLatchUnlock`
 - `createKey`
 - `deleteKey`
+- `disableMotionDetection`
 - `deleteWebhook`
 - `deleteScene`
 - `factoryReset`
@@ -221,6 +222,47 @@ automation:
       suppressIfAlreadyDesired: false # skip if device already in desired state
       dry_run: true                   # default true in v0.2; writes audit but skips the API call
 ```
+
+#### Rule command parameters
+
+`then[].command` is rule text, not a shell command line. Its grammar is
+`devices command <id> <verb> [parameter]`. JSON objects and arrays retain
+their whitespace and line breaks. YAML quotes delimit the outer YAML string;
+do not add shell quotes around JSON or expect flags to be parsed.
+
+```yaml
+then:
+  - command: 'devices command <id> setColor 255:0:0'
+    device: hallway lamp
+  - command: |-
+      devices command <id> uploadImage {
+        "imageUrl": "https://example.com/art.jpg"
+      }
+    device: art frame
+```
+
+Both `setColor 255 0 0` and `setColor 255:0:0` are supported; each sends
+`255:0:0` after RGB validation. The same compatibility applies to
+`setColorLightRGB` on RGBICWW Ceiling Light. Invalid RGB components are rejected.
+
+#### Rule action inventory and simulation
+
+Rule action preflight validates the command, parameter, and catalog safety
+against the selected profile's cached inventory. Dry-run and test-only
+API-skipping execution are cache-only: they make no GET or POST request.
+Missing inventory, an unknown or ambiguous type, and invalid parameters fail
+closed; prewarm the same profile's inventory before running them. Skipping the
+API call skips only dispatch, not validation or safety checks.
+
+After a successful account change, old inventory and status snapshots are
+invalidated at the next use, including in already running processes. Refresh
+the new account's inventory before a cache-only rule dry-run. MQTT-triggered
+rules need their daemon/subscription restarted for the new account; existing
+event history is not cleared.
+
+`rules simulate` evaluates historical triggers and conditions only. A reported
+would-fire result neither executes nor preflights its actions, so it is not
+proof that an action can execute.
 
 `suppressIfAlreadyDesired` checks the target's REST status `power` value,
 case-insensitively, before `turnOn` or `turnOff`. An unknown power state or
@@ -319,11 +361,13 @@ automation:
 **Destructive commands are refused.** The v0.2 validator rejects `lock`,
 `unlock`, `deadbolt`, `nightLatchUnlock`, `createKey`, `deleteKey`,
 `deleteWebhook`, `deleteScene`, and `factoryReset` in any `then[].command`.
-Inventory-aware validation also rejects device-specific destructive actions,
-including Garage Door Opener `turnOn`/`turnOff`; ordinary light power actions remain allowed.
-Before a live rule mutation, the executor resolves missing device metadata and
-checks the catalog safety tier. Unknown devices/commands fail closed. Dry-run
-does not fetch inventory or mutate devices.
+The bare `disableMotionDetection` name is globally prohibited in
+`never_confirm`. Separately, the catalog classifies disabling motion detection
+on Solar Pan/Tilt Cam 2K as locally destructive; this local safety policy does
+not classify every device with that command name or claim a server-side safety
+tier. Inventory-aware validation also rejects
+device-specific destructive actions, including Garage Door Opener
+`turnOn`/`turnOff`; ordinary light power actions remain allowed.
 
 **Hot-path behaviour.** Every fire is serialised through a dispatch
 queue so two MQTT events arriving in the same tick respect throttle
