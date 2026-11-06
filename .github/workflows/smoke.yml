@@ -8,11 +8,18 @@ on:
   workflow_dispatch:
     inputs:
       physical_device_id:
-        description: "Physical device ID (idempotency + history). Will send turnOn, turnOn (replay), turnOff (conflict). Omit to skip."
+        description: "Physical device ID (idempotency flag + history). Sends ONE turnOn. Omit to skip."
         required: false
       ir_device_id:
         description: "IR device ID (verification flag). Will send ONE turnOn IR transmission. Omit to skip."
         required: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
   smoke:
@@ -44,15 +51,16 @@ jobs:
         run: |
           node dist/index.js devices list --json > /tmp/list.json
           echo "device count=$(jq '.data | length' /tmp/list.json)"
-          node dist/index.js doctor --json | jq '.data.summary'
+          node dist/index.js doctor --json | jq -e '.data.summary | objects'
 
       - name: IR verification flag (destructive — real IR transmission)
         if: ${{ inputs.ir_device_id != '' }}
         env:
           SWITCHBOT_TOKEN: ${{ secrets.SWITCHBOT_TOKEN }}
           SWITCHBOT_SECRET: ${{ secrets.SWITCHBOT_SECRET }}
+          DEV: ${{ inputs.ir_device_id }}
         run: |
-          node dist/index.js devices command "${{ inputs.ir_device_id }}" turnOn --json > /tmp/ir.json
+          node dist/index.js devices command "$DEV" turnOn --json > /tmp/ir.json
           cat /tmp/ir.json
           jq -e '.data.verification.verifiable == false' /tmp/ir.json
           echo "PASS: data.verification.verifiable == false"
@@ -92,6 +100,6 @@ jobs:
           kill $TAIL_PID 2>/dev/null || true
           wait $TAIL_PID 2>/dev/null || true
 
-          node dist/index.js history stats "$DEV" --json | tee /tmp/stats.json | jq '.data'
-          node dist/index.js history range "$DEV" --since 5m --json | jq '.data | length'
+          node dist/index.js history stats "$DEV" --json | tee /tmp/stats.json | jq -e '.data | objects'
+          node dist/index.js history range "$DEV" --since 5m --json | jq -e '.data.records | arrays | length'
           echo "PASS: history commands returned valid JSON"

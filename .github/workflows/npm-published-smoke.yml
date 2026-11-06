@@ -237,17 +237,23 @@ jobs:
       (github.event.workflow_run.event == 'release' || github.event.workflow_run.event == 'workflow_dispatch')
     needs: [source, smoke, required-hosts]
     runs-on: ubuntu-latest
+    concurrency:
+      group: npm-latest-promotion
+      cancel-in-progress: false
+      queue: max
     permissions:
       actions: read
       contents: read
     steps:
+      # Apply current promotion policy even when recovering an older candidate.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.source.outputs.revision }}
+          ref: ${{ github.workflow_sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 20.x
           registry-url: https://registry.npmjs.org
+      - run: npm ci --ignore-scripts
       - name: Download authoritative candidate outcomes
         uses: actions/download-artifact@v4
         with:

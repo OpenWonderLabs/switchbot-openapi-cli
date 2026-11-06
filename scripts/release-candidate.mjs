@@ -241,7 +241,7 @@ function createGates(args) {
   writeJson(required(args, "gates"), gates);
 }
 
-function promote(args) {
+async function promote(args) {
   if (!process.env.NODE_AUTH_TOKEN) fail('NPM authentication is required to promote a release candidate');
   const outcomes = readOutcomes(required(args, 'outcomes'));
   const gates = readGates(required(args, 'gates'));
@@ -259,6 +259,23 @@ function promote(args) {
     }
   }
   if (blocked.length > 0) fail(`Promotion blocked: ${blocked.join(', ')}`);
+  // Other outcome commands stay dependency-free; only promotion needs SemVer.
+  const { default: semver } = await import('semver');
+  // Preflight every tag before the first write so a stale plugin cannot leave
+  // a partially promoted candidate. The workflow serializes this whole job.
+  for (const item of outcomes.packages) {
+    if (item.outcome !== 'published') continue;
+    const result = runNpm(['view', candidateKey(item.name, item.version), 'dist-tags', '--json']);
+    if (result.status !== 0) fail(`Could not read current dist-tags for ${item.name}`);
+    const tags = JSON.parse(result.stdout);
+    if (!tags || typeof tags !== 'object' || Array.isArray(tags) ||
+        !semver.valid(item.version) || (tags.latest !== undefined && !semver.valid(tags.latest))) {
+      fail(`Invalid version metadata for ${item.name}`);
+    }
+    if (tags.latest !== undefined && semver.lt(item.version, tags.latest)) {
+      fail(`Refusing to move ${item.name} latest backward from ${tags.latest} to ${item.version}`);
+    }
+  }
   const summary = { published: [], alreadyPublished: [] };
   for (const item of outcomes.packages) {
     const candidate = candidateKey(item.name, item.version);
@@ -283,7 +300,7 @@ try {
   else if (command === 'candidate') candidate(args);
   else if (command === 'record-gate') recordGate(args);
   else if (command === 'create-gates') createGates(args);
-  else if (command === 'promote') promote(args);
+  else if (command === 'promote') await promote(args);
   else fail(`Unknown command: ${command ?? '<none>'}`);
 } catch (error) {
   process.stderr.write(`release-candidate: ${error instanceof Error ? error.message : String(error)}\n`);

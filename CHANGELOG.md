@@ -14,6 +14,7 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Catalog coverage for RGBICWW Light Bars, Smart Lock Ultra Max, Curtain 4, Robot Vacuum Cleaner K11 Plus Pro, AI Art Frame Luma, Outdoor Pan/Tilt Cam 3K, and Solar Pan/Tilt Cam 2K.
 - Light Bars object commands, including `setLightEffect` with `effectId` 0–25; six existing documented lights also expose their light effects.
 - Camera `latestImage` metadata with its expiry contract, Solar motion-detection controls, and Art Frame Luma upload/status support.
+- CI workflow-schema validation, full Markdown lint, Node 24 regression/coverage gates, and isolated native credential create/replace/delete smoke checks on Linux, macOS, and Windows.
 
 ### Changed
 
@@ -30,6 +31,9 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - HTTP MCP honors explicit `--config` credentials for named-profile requests without relaxing profile-name or bearer-token checks.
 - MCP tool credential-refresh failures retain structured runtime errors and allow recovery after credential repair.
 - Rule JSON parameters avoid a redundant parse while preserving request and audit formats.
+- Publication now runs the full CLI suite on the exact release source; queued publication/promotion runs preserve pending candidates, and promotion rejects SemVer downgrades before changing any `latest` tags.
+- Historical candidate recovery uses the workflow revision's promotion policy instead of reviving older release tooling.
+- Manual hardware smoke now fails on CLI pipeline errors and invalid JSON envelopes; empty history remains valid.
 
 ### Compatibility
 

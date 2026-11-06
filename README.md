@@ -493,13 +493,20 @@ Policy commands retain their documented specialized exit codes (including YAML p
 
 ## Development
 
-Verified CLI regression suite: 3191 tests. Plugin workspace checks are separate.
+Verified CLI regression suite: 3205 tests. Plugin workspace checks are separate.
 
 ```bash
 npm install && npm run build
 npm run dev -- <args>   # run from TypeScript via tsx
 npm test                # Vitest suite
+npm run test:account-lifecycle # focused account/cache/MCP regressions
+npm run test:coverage     # suite plus coverage thresholds
 ```
+
+CI runs CLI regressions on Node 18/20/22/24, enforces coverage on Node 24,
+and checks all Markdown and workflow schemas. Native credential checks and
+candidate publication/promotion gates are described in the
+[release pipeline](docs/release-pipeline.md).
 
 ## License
 

@@ -87,7 +87,7 @@ parameter shapes must remain unchanged.
 
 ## Delivery evidence
 
-- Full CLI suite: **180 files, 3191 tests passed**; its setup ran the release
+- Full CLI suite: **181 files, 3205 tests passed**; its setup ran the release
   build and TypeScript typecheck. Plugin workspace tests were not rerun.
 - `npm run lint:md` passed.
 - Isolated real CLI + MCP SDK smoke: a separate `config set-token` process
@@ -116,5 +116,10 @@ parameter shapes must remain unchanged.
   credential failure with zero API requests, and same-process recovery after
   an external `config set-token` repair. A local HTTP boundary replaced the
   cloud; no real credential store was accessed.
+- CI/CD follow-up verifies promotion with real npm and a local registry,
+  including stale-version rejection before any tag write. Workflow shell
+  fixtures reject CLI failures and invalid envelopes while accepting empty
+  history; macOS cleanup preserves a quoted default-keychain path with spaces.
+  These fixtures do not claim native macOS/Windows credential-store execution.
 - No real OAuth, cloud API, MQTT broker, camera/image URL, or physical device
   was exercised.
