@@ -62,6 +62,34 @@ async function connectMcp() {
   return { server, client };
 }
 
+it('keeps the entire dry-run MCP session non-mutating, even if individual calls ask to write', async () => {
+  process.argv.push('--dry-run');
+  const writes: string[] = [];
+  axios.defaults.adapter = async config => {
+    if (config.method !== 'get') writes.push(config.url!);
+    const body = config.url === '/v1.1/devices'
+      ? { deviceList: [{ deviceId: 'BOT', deviceType: 'Bot', deviceName: 'Test', enableCloudService: true }], infraredRemoteList: [] }
+      : [{ sceneId: 'TEST', sceneName: 'Test' }];
+    return { status: 200, statusText: 'OK', headers: {}, config, data: { statusCode: 100, body } };
+  };
+  const { client, server } = await connectMcp();
+  try {
+    const file = path.join(tmp, 'policy.yaml');
+    const scaffold = await client.callTool({ name: 'policy_new', arguments: { path: file } });
+    expect(fs.existsSync(file)).toBe(false);
+    expect(scaffold.isError).toBe(true);
+    await client.callTool({ name: 'list_devices', arguments: {} });
+    const device = await client.callTool({ name: 'send_command', arguments: { deviceId: 'BOT', command: 'turnOn', dryRun: false } });
+    const scene = await client.callTool({ name: 'run_scene', arguments: { sceneId: 'TEST' } });
+    expect(device.structuredContent).toMatchObject({ dryRun: true, wouldSend: { deviceId: 'BOT' } });
+    expect(scene.structuredContent).toMatchObject({ dryRun: true, wouldSend: { sceneId: 'TEST' } });
+    expect(writes).toEqual([]);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
 describe('MCP Light Bars live parameter validation', () => {
   it.each([
     { command: 'setBrightnessAndTemperature', field: 'brightness', min: 0, max: 100, base: { brightness: 50, temperature: 2700 } },

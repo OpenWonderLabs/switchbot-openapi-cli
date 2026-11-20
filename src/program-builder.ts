@@ -19,7 +19,7 @@ import { registerDoctorCommand } from './commands/doctor.js';
 import { registerSchemaCommand } from './commands/schema.js';
 import { registerHistoryCommand } from './commands/history.js';
 import { registerPlanCommand } from './commands/plan.js';
-import { registerCapabilitiesCommand } from './commands/capabilities.js';
+import { guardCommandPreview, registerCapabilitiesCommand } from './commands/capabilities.js';
 import { registerAgentBootstrapCommand } from './commands/agent-bootstrap.js';
 import { registerPolicyCommand } from './commands/policy.js';
 import { registerRulesCommand } from './commands/rules.js';
@@ -87,9 +87,9 @@ export function buildProgram(): Command {
     .option('--fields <csv>', 'Comma-separated list of columns to include (e.g. --fields=id,name,type)', stringArg('--fields', { disallow: TOP_LEVEL_COMMANDS }))
     .option('--table-style <style>', 'Table rendering style: unicode (default on TTY), ascii (default on pipes), simple, markdown', enumArg('--table-style', ['unicode', 'ascii', 'simple', 'markdown']))
     .option('-v, --verbose', 'Log HTTP request/response details to stderr')
-    .option('--dry-run', 'Print mutating requests without sending them (GETs still execute)')
+    .option('--dry-run', 'Preview supported mutations without applying them; other mutations fail before any changes (GETs may still execute)')
     .option('--timeout <ms>', 'HTTP request timeout in milliseconds (default: 30000)', intArg('--timeout', { min: 1 }))
-    .option('--retry-on-429 <n>', 'Max retries on HTTP 429 (default: 3). Art Frame deleteImage is never automatically retried.', intArg('--retry-on-429', { min: 0 }))
+    .option('--retry-on-429 <n>', 'Max retries on HTTP 429 for reads and known repeat-safe operations (default: 3). Scenes, custom buttons and image deletion are never automatically repeated.', intArg('--retry-on-429', { min: 0 }))
     .option('--backoff <strategy>', 'Backoff strategy for retries: "linear" or "exponential" (default)', enumArg('--backoff', ['linear', 'exponential']))
     .option('--no-retry', 'Disable 429 retries entirely (equivalent to --retry-on-429 0)')
     .option('--no-quota', 'Disable the local ~/.switchbot/quota.json counter for this run')
@@ -109,6 +109,7 @@ export function buildProgram(): Command {
     .option('--audit-log-path <path>', 'Custom audit log file path; use together with --audit-log', stringArg('--audit-log-path', { disallow: TOP_LEVEL_COMMANDS }))
     .showHelpAfterError('(run with --help to see usage)')
     .showSuggestionAfterError();
+  program.hook('preAction', (_, command) => guardCommandPreview(command));
 
   registerConfigCommand(program);
   registerDevicesCommand(program);

@@ -249,6 +249,16 @@ describe('capabilities B3/B4', () => {
     expect(Object.keys(surfaces)).toEqual(['mcp']);
   });
 
+  it('does not advertise a repeat-safe operation just because its command accepts a key', async () => {
+    const { commandMeta } = await runCapabilitiesWith([]);
+    const meta = commandMeta as Record<string, { idempotencySupported: boolean; idempotencyHint: string }>;
+    expect(meta['devices command']).toMatchObject({ idempotencySupported: true, idempotencyHint: 'caution' });
+    expect(meta['devices batch'].idempotencySupported).toBe(true);
+    expect(meta['plan run'].idempotencySupported).toBe(false);
+    expect(meta['history replay'].idempotencySupported).toBe(false);
+    expect(meta['devices list'].idempotencyHint).toBe('safe');
+  });
+
   it('surfaces.cli exposes idempotencyContract with replay + conflict semantics', async () => {
     const out = await runCapabilitiesWith([]);
     const cli = (out.surfaces as Record<string, Record<string, unknown>>).cli;

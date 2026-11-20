@@ -6,9 +6,10 @@ import {
   type DeviceCatalogEntry,
   type SafetyTier,
 } from '../devices/catalog.js';
+import { decideActionRisk } from '../devices/action-risk.js';
 import { RESOURCE_CATALOG } from '../devices/resources.js';
 import { loadCache } from '../devices/cache.js';
-import { printJson } from '../utils/output.js';
+import { exitWithError, printJson } from '../utils/output.js';
 import { enumArg, stringArg } from '../utils/arg-parsers.js';
 import { IDENTITY } from './identity.js';
 import { TOOL_PROFILES, DEPRECATED_MCP_TOOLS } from '../mcp/tool-profiles.js';
@@ -83,17 +84,43 @@ interface RiskMeta {
   recommendedMode: RecommendedMode;
 }
 
-function deriveRiskMeta(meta: CommandMeta): RiskMeta {
-  const riskLevel: RiskLevel = meta.agentSafetyTier === 'destructive' ? 'high'
-    : meta.agentSafetyTier === 'action' ? 'medium' : 'low';
-  return {
-    riskLevel,
-    requiresConfirmation: meta.agentSafetyTier === 'destructive',
-    supportsDryRun: meta.mutating,
-    idempotencyHint: meta.idempotencySupported ? 'safe' : meta.mutating ? 'non-idempotent' : 'safe',
-    recommendedMode: meta.agentSafetyTier === 'destructive' ? 'review-before-execute'
-      : meta.agentSafetyTier === 'action' ? 'plan' : 'direct',
-  };
+// Opt in only when the handler previews its own local effects or the HTTP
+// interceptor prevents the mutation. A mutating tier is not a preview implementation.
+const PREVIEWABLE: Readonly<Record<string, true>> = {
+  'devices command': true, 'devices batch': true, 'devices expand': true, 'history replay': true,
+  'plan run': true, 'plan execute': true, 'scenes execute': true, 'webhook setup': true,
+  'webhook update': true, 'webhook delete': true, 'quota reset': true, reset: true,
+  install: true, uninstall: true, 'codex setup': true, 'codex repair': true,
+  'claude-code setup': true, 'gemini setup': true, 'policy migrate': true, 'policy add-rule': true, 'mcp serve': true,
+};
+
+export function guardCommandPreview(command: Command): void {
+  const options = command.optsWithGlobals();
+  if (!options.dryRun) return;
+  const parts: string[] = [];
+  for (let c: Command | null = command; c?.parent; c = c.parent) parts.unshift(c.name());
+  const leaf = parts.join(' ');
+  const meta = COMMAND_META[leaf];
+  if (PREVIEWABLE[leaf] === true) {
+    // Commander consumes the root flag even when the leaf also declares it.
+    if (command.options.some(o => o.attributeName() === 'dryRun')) command.setOptionValue('dryRun', true);
+    return;
+  }
+  // These ostensibly read-only invocations start services, generate files,
+  // repair state, or send data to a sink outside the API client.
+  if (meta && !meta.mutating && !options.fix && !options.out && !options.reportOut &&
+      leaf !== 'events mqtt-tail') return;
+  exitWithError({ code: 2, kind: 'usage',
+    message: `No side-effect-free --dry-run is available for "${leaf}" with these options. Nothing was changed.`,
+    hint: leaf === 'plan approve' ? 'Inspect the saved plan with plan review instead.'
+      : leaf === 'rules run' ? 'Use rules simulate to preview rule decisions without starting the live engine.'
+      : 'Use the corresponding read or inspection command to inspect the current state.',
+  });
+}
+
+function deriveRiskMeta(name: string, meta: CommandMeta): RiskMeta {
+  const { riskLevel, requiresConfirmation, idempotencyHint, recommendedMode } = decideActionRisk(meta.agentSafetyTier);
+  return { riskLevel, requiresConfirmation, idempotencyHint, recommendedMode, supportsDryRun: PREVIEWABLE[name] === true };
 }
 
 function meta(
@@ -111,7 +138,7 @@ const READ_LOCAL = meta(false, false, false, 'read', 'local', 20);
 const READ_REMOTE = meta(false, true, false, 'read', 'local', 500);
 const ACTION_LOCAL = meta(true, false, false, 'action', 'local', 20);
 const ACTION_REMOTE = meta(true, true, false, 'action', 'deviceDependent', 900);
-const ACTION_REMOTE_IDEMPOTENT = meta(true, true, true, 'action', 'deviceDependent', 900);
+const ACTION_REMOTE_WITH_KEY = meta(true, true, true, 'action', 'deviceDependent', 900);
 const DESTRUCTIVE_LOCAL = meta(true, false, false, 'destructive', 'local', 20);
 const DESTRUCTIVE_REMOTE = meta(true, true, false, 'destructive', 'deviceDependent', 1200);
 const READ_NONE = meta(false, false, false, 'read', 'none', 50);
@@ -144,14 +171,14 @@ export const COMMAND_META: Record<string, CommandMeta> = {
   'devices list': READ_REMOTE,
   'devices status': READ_REMOTE,
   'devices diary': READ_REMOTE,
-  'devices command': ACTION_REMOTE_IDEMPOTENT,
+  'devices command': ACTION_REMOTE_WITH_KEY,
   'devices types': READ_LOCAL,
   'devices commands': READ_LOCAL,
   'devices describe': READ_REMOTE,
-  'devices batch': ACTION_REMOTE_IDEMPOTENT,
+  'devices batch': ACTION_REMOTE_WITH_KEY,
   'devices watch': READ_REMOTE,
   'devices explain': READ_LOCAL,
-  'devices expand': READ_LOCAL,
+  'devices expand': ACTION_REMOTE,
   'devices meta set': ACTION_LOCAL,
   'devices meta get': READ_LOCAL,
   'devices meta list': READ_LOCAL,
@@ -162,7 +189,7 @@ export const COMMAND_META: Record<string, CommandMeta> = {
   'health check': READ_LOCAL,
   'health serve': READ_LOCAL,
   'history show': READ_LOCAL,
-  'history replay': ACTION_REMOTE_IDEMPOTENT,
+  'history replay': ACTION_REMOTE,
   'history range': READ_LOCAL,
   'history stats': READ_LOCAL,
   'history verify': READ_LOCAL,
@@ -174,7 +201,7 @@ export const COMMAND_META: Record<string, CommandMeta> = {
   'plan schema': READ_LOCAL,
   'plan validate': READ_LOCAL,
   'plan suggest': READ_LOCAL,
-  'plan run': ACTION_REMOTE_IDEMPOTENT,
+  'plan run': ACTION_REMOTE,
   'plan save': ACTION_LOCAL,
   'plan list': READ_LOCAL,
   'plan review': READ_LOCAL,
@@ -185,7 +212,7 @@ export const COMMAND_META: Record<string, CommandMeta> = {
   'policy migrate': ACTION_LOCAL,
   'policy diff': READ_LOCAL,
   'policy add-rule': ACTION_LOCAL,
-  'policy backup': READ_LOCAL,
+  'policy backup': ACTION_LOCAL,
   'policy restore': DESTRUCTIVE_LOCAL,
   'quota status': READ_LOCAL,
   'quota reset': ACTION_LOCAL,
@@ -255,10 +282,10 @@ export const MCP_TOOLS = [...TOOL_PROFILES.all]
 const IDEMPOTENCY_CONTRACT = {
   flag: '--idempotency-key <key>',
   windowSeconds: 60,
-  replayBehavior: 'Same (command, parameter, deviceId) within window → returns cached result with replayed:true.',
-  conflictBehavior: 'Same key + different (command, parameter) within window → exit 2, error:"idempotency_conflict".',
+  replayBehavior: 'Same key, device, command type, command and wire parameter within the window → cached success with replayed:true.',
+  conflictBehavior: 'Same key with a different operation in the same scope → exit 2, error:"idempotency_conflict".',
   keyStorage: 'In-memory SHA-256 fingerprint; raw key never stored, no disk persistence.',
-  scope: 'Process-local. Replay + conflict apply within a single long-lived process (MCP session, devices batch, plan run, history replay). Independent CLI invocations do NOT share cache — each fresh `node` process starts empty.',
+  scope: 'Process-local, scoped to the active credentials. devices command and devices batch accept keys; separate CLI invocations do not share results. An unacknowledged mutation is not a cached success.',
   mcp: 'MCP send_command accepts the same idempotencyKey field with identical semantics.',
 };
 
@@ -299,7 +326,7 @@ function enumerateLeaves(program: Command, prefix = ''): CompactLeaf[] {
     if (cmd.commands.length === 0) {
       const meta = metaFor(full);
       if (!meta) throw new Error(`capabilities metadata missing for leaf command "${full}"`);
-      out.push({ name: full, ...meta, ...deriveRiskMeta(meta) });
+      out.push({ name: full, ...meta, ...deriveRiskMeta(full, meta) });
     } else {
       out.push(...enumerateLeaves(cmd, full));
     }
@@ -425,7 +452,7 @@ export function registerCapabilitiesCommand(program: Command): void {
         // carries the same fields via spread) so agents can do O(1) lookup
         // without walking the tree. Includes derived risk metadata fields.
         commandMeta: Object.fromEntries(
-          Object.entries(COMMAND_META).map(([k, v]) => [k, { ...v, ...deriveRiskMeta(v) }])
+          Object.entries(COMMAND_META).map(([k, v]) => [k, { ...v, ...deriveRiskMeta(k, v) }])
         ),
         ...(globalFlags ? { globalFlags } : {}),
         catalog: compact ? undefined : {

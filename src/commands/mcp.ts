@@ -5,8 +5,8 @@ import type { ToolCallback } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { AnySchema, SchemaOutput, ZodRawShapeCompat } from '@modelcontextprotocol/sdk/server/zod-compat.js';
 import type { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
 import type { CallToolResult, ServerNotification, ServerRequest } from '@modelcontextprotocol/sdk/types.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { connectDualEraStdio } from '../mcp/dual-era-stdio.js';
+import { serveDualEraHttp } from '../mcp/dual-era-http.js';
 import { z } from 'zod';
 import { intArg, stringArg, DATE_REGEX, WEEK_REGEX, isCalendarValidDate, isLongISOYear } from '../utils/arg-parsers.js';
 import { handleError, isJsonMode, printJson, buildErrorPayload, exitWithError, type ErrorPayload, type ErrorSubKind } from '../utils/output.js';
@@ -43,6 +43,7 @@ import {
   deriveSafetyTier,
   getCommandSafetyReason,
 } from '../devices/catalog.js';
+import { decideActionRisk } from '../devices/action-risk.js';
 import { getCachedDevice } from '../devices/cache.js';
 import { parseParameterForWire, validateParameter } from '../devices/param-validator.js';
 import { EventSubscriptionManager } from '../mcp/events-subscription.js';
@@ -265,43 +266,16 @@ function topNFromMap(counts: Map<string, number>, n: number): Array<{ key: strin
     .map(([key, count]) => ({ key, count }));
 }
 
-/**
- * Compute per-action risk metadata from the device catalog.
- * `idempotencyHint` is sourced from CommandSpec.idempotent when available;
- * falls back to "safe" only for unknown commands on non-destructive paths.
- */
-function buildRiskProfile(
-  typeName: string | undefined,
-  command: string,
-  commandType: string,
-  isDestructive: boolean,
-): {
-  riskLevel: 'high' | 'medium' | 'low';
-  requiresConfirmation: boolean;
-  supportsDryRun: true;
-  idempotencyHint: 'safe' | 'non-idempotent';
-  recommendedMode: 'review-before-execute' | 'plan' | 'direct';
-} {
-  // Look up the catalog spec to get the authoritative idempotent flag.
-  let idempotencyHint: 'safe' | 'non-idempotent' = isDestructive ? 'non-idempotent' : 'safe';
-  if (typeName && commandType === 'command') {
-    const entry = findCatalogEntry(typeName);
-    const entries = Array.isArray(entry) ? entry : entry ? [entry] : [];
-    for (const e of entries) {
-      const spec = e.commands.find((c) => c.command === command);
-      if (spec !== undefined) {
-        idempotencyHint = spec.idempotent === true ? 'safe' : 'non-idempotent';
-        break;
-      }
-    }
-  }
+/** Project the shared decision into MCP's existing two-valued repeat hint. */
+function buildRiskProfile(destructive: boolean, idempotent: boolean | undefined) {
+  const risk = decideActionRisk(destructive ? 'destructive' : 'action', idempotent);
   return {
-    riskLevel: isDestructive ? 'high' : commandType === 'command' ? 'medium' : 'low',
-    requiresConfirmation: isDestructive,
+    riskLevel: risk.riskLevel,
+    requiresConfirmation: risk.requiresConfirmation,
     supportsDryRun: true,
-    idempotencyHint,
-    recommendedMode: isDestructive ? 'review-before-execute' : 'plan',
-  };
+    idempotencyHint: risk.idempotent === true ? 'safe' : 'non-idempotent',
+    recommendedMode: risk.recommendedMode,
+  } as const;
 }
 
 // ---- device_history module-level helpers ------------------------------------
@@ -408,19 +382,15 @@ export interface SwitchBotMcpServerOptions {
 }
 
 export function createSwitchBotMcpServer(options?: SwitchBotMcpServerOptions): McpServer {
+  return registeredServer(options).server;
+}
+
+function registeredServer(options?: SwitchBotMcpServerOptions) {
   const eventManagerProfile = options?.eventManagerProfile ?? getActiveProfile() ?? 'default';
   const eventManager = eventManagerProfile === (getActiveProfile() ?? 'default') ? options?.eventManager : undefined;
   const allowedTools = TOOL_PROFILES[options?.toolProfile ?? 'default'];
   const profileName = options?.toolProfile ?? 'default';
-  const server = new McpServer(
-    {
-      name: 'switchbot',
-      version: VERSION,
-    },
-    {
-      capabilities: { tools: {}, resources: {} },
-      instructions:
-        `SwitchBot is an IoT smart home brand by Wonderlabs, Inc. This MCP server controls physical devices \
+  const instructions = `SwitchBot is an IoT smart home brand by Wonderlabs, Inc. This MCP server controls physical devices \
 (Bot, Curtain, Smart Lock, Color Bulb, Meter, Plug, Robot Vacuum, etc.) and IR remotes \
 (TV, AC, Set Top Box, etc.) via the SwitchBot Cloud API v1.1.
 
@@ -440,9 +410,10 @@ Recommended bootstrap sequence:
 
 API docs: https://github.com/OpenWonderLabs/SwitchBotAPI
 
-Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !== 'all' ? ' Use --tools all to access admin tools (policy, audit, rules).' : ''}`,
-    }
-  );
+Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !== 'all' ? ' Use --tools all to access admin tools (policy, audit, rules).' : ''}`;
+  const server = new McpServer({ name: 'switchbot', version: VERSION }, {
+    capabilities: { tools: {}, ...(eventManager && { resources: {} }) }, instructions,
+  });
 
   const skip = (name: string) => !allowedTools.has(name);
   const registerTool = <OutputArgs extends ZodRawShapeCompat | AnySchema, InputArgs extends AnySchema>(
@@ -465,7 +436,12 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
     const outputSchema = config.outputSchema
       ? toolOutputSchema(config.outputSchema as Record<string, z.ZodType>)
       : undefined;
-    return server.registerTool(name, { ...config, outputSchema } as typeof config, primedCallback as ToolCallback<InputArgs>);
+    // Advisory only. Action tools can replace local files or actuate a home;
+    // simulation can opt in to a metered model. Neither is safe to retry blindly.
+    const readOnly = config._meta?.agentSafetyTier === 'read' && name !== 'rules_simulate';
+    const annotations = readOnly ? { readOnlyHint: true } :
+      { readOnlyHint: false, destructiveHint: name !== 'rules_simulate', idempotentHint: false };
+    return server.registerTool(name, { ...config, annotations, outputSchema } as typeof config, primedCallback as ToolCallback<InputArgs>);
   };
 
   // ---- list_devices ---------------------------------------------------------
@@ -805,7 +781,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
   {
     title: 'Send a control command to a device',
     description:
-      'Execute a control command on a device (turnOn, setColor, startClean, unlock, openDoor, createKey, etc.). Safety tiers: mutation (turnOn/Off, setBrightness, setColor) — runs freely; destructive (lock, unlock, openDoor, createKey, deleteKey) — requires confirm:true and is blocked in the default safety profile. Use the reviewed plan workflow for destructive commands unless an explicit dev profile allows direct execution. Commands are validated offline against the device catalog. Use idempotencyKey to safely deduplicate retries within 60 seconds.',
+      'Execute a validated device command. Destructive operations (unlock, garage open, createKey, deleteKey, deleteImage) require a reviewed plan unless an explicit dev profile permits direct confirmation. A process-local idempotencyKey deduplicates successful matching requests for 60 seconds; it does not make an action repeat-safe after a timeout or restart.',
     _meta: { agentSafetyTier: 'action' },
     inputSchema: z.object({
       deviceId: z.string().describe('Device ID from list_devices'),
@@ -850,7 +826,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
         })
         .optional()
         .describe(
-          'Device+command-specific risk metadata. riskLevel:"high" means confirm:true was required. Always present on dryRun responses so agents can preview risk before committing.',
+          'Per-command risk, always included on preview. A safe repeat hint describes the effect, not authorization or permission to retry a failed request. Unknown effects (including custom IR buttons) use non-idempotent: do not repeat automatically.',
         ),
       verification: z
         .object({
@@ -885,7 +861,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
     // against the local cache so fabricated IDs don't silently pass
     // validation (bug #SYS-3). Dry-run is meant to catch bad inputs; a
     // dry-run that accepts anything is worse than no dry-run at all.
-    if (dryRun) {
+    if (dryRun || isDryRun()) {
       const cached = getCachedDevice(deviceId);
       if (!cached) {
         return mcpError('usage', 2, `Device "${deviceId}" not found in local cache.`, {
@@ -934,7 +910,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
         commandType: effectiveType,
       };
       const dryIsDestructive = isDestructiveCommand(cached.type, effectiveCommand, effectiveType);
-      const dryRiskProfile = buildRiskProfile(cached.type, effectiveCommand, effectiveType, dryIsDestructive);
+      const dryRiskProfile = buildRiskProfile(dryIsDestructive, dryValidation.idempotent);
       const structured = { ok: true as const, dryRun: true as const, riskProfile: dryRiskProfile, wouldSend };
       return {
         content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
@@ -1053,8 +1029,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
       return apiErrorToMcpError(err);
     }
     const isIr = getCachedDevice(deviceId)?.category === 'ir';
-    const liveIsDestructive = destructive;
-    const riskProfile = buildRiskProfile(typeName, effectiveCommand, effectiveType, liveIsDestructive);
+    const riskProfile = buildRiskProfile(destructive, validation.idempotent);
     const structured: {
       ok: true;
       command: string;
@@ -1091,7 +1066,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
       dryRun: z
         .boolean()
         .optional()
-        .describe('When true, do not call the API — return { ok:true, dryRun:true, wouldSend:{...} } instead.'),
+        .describe('Preview without executing the scene. A read of list_scenes may validate its ID.'),
     }).strict(),
     outputSchema: {
       ok: z.literal(true),
@@ -1103,7 +1078,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
     },
   },
   async ({ sceneId, dryRun }) => {
-    if (dryRun) {
+    if (dryRun || isDryRun()) {
       let scenes: Array<{ sceneId: string; sceneName: string }> = [];
       try {
         scenes = await fetchScenes();
@@ -1118,10 +1093,10 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
           context: { sceneId, candidates: scenes.map((s) => ({ sceneId: s.sceneId, sceneName: s.sceneName })).slice(0, 5) },
         });
       }
-      const wouldSend = { sceneId, sceneName: found?.sceneName ?? null };
-      const structured = { ok: true as const, dryRun: true as const, wouldSend };
+      const structured = { ok: true as const, dryRun: true as const, wouldSend: { sceneId } };
+      const display = { ...structured, wouldSend: { sceneId, sceneName: found?.sceneName ?? null } };
       return {
-        content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }],
+        content: [{ type: 'text', text: JSON.stringify(display, null, 2) }],
         structuredContent: structured,
       };
     }
@@ -1660,6 +1635,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
     },
   },
   async ({ path: pathArg, force }) => {
+    if (isDryRun()) return mcpError('usage', 2, 'policy_new cannot write in a --dry-run server.');
     const policyPath = resolvePolicyPath({ flag: pathArg });
     const doForce = force === true;
     if (fs.existsSync(policyPath) && !doForce) {
@@ -1810,7 +1786,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
     }
   
     const bytes = Buffer.byteLength(plan.nextSource, 'utf-8');
-    if (dryRun) {
+    if (dryRun || isDryRun()) {
       const structured = {
         ...base,
         status: 'dry-run' as const,
@@ -1960,7 +1936,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
       'Generate a candidate Plan JSON from a natural language intent and a list of device IDs. ' +
       'Uses keyword heuristics (no LLM) to pick the command. The returned plan is ready to pass to ' +
       '`plan run` — review and edit before executing. Recognised commands: turnOn, turnOff, press, ' +
-      'lock, unlock, open, close, pause. Falls back to turnOn with a warning when intent is unclear.',
+      'lock, unlock, open, close, pause. Read-only, conditional or unclear requests require clarification; no executable plan is returned.',
     _meta: { agentSafetyTier: 'read' },
     inputSchema: z.object({
       intent: z.string().min(1).describe('Natural language description of what to do (e.g. "turn off all lights").'),
@@ -1968,7 +1944,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
     }).strict(),
     outputSchema: {
       plan: z.unknown().describe('Candidate Plan JSON (version 1.0) ready to pass to plan run.'),
-      warnings: z.array(z.string()).describe('Informational warnings (e.g. unrecognized intent defaulted to turnOn).'),
+      warnings: z.array(z.string()).describe('Informational warnings about the proposed plan.'),
     },
   },
   ({ intent, device_ids }) => {
@@ -2577,7 +2553,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
         ruleYaml: rule_yaml,
         policyPath,
         enableAutomation: enable_automation,
-        dryRun: dry_run,
+        dryRun: dry_run || isDryRun(),
         force,
       });
       const out = { policyPath, ruleName: result.ruleName, written: result.written, diff: result.diff };
@@ -2593,7 +2569,9 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
     }
   }, false)
 
-  return server;
+  // CLI registries are static; no transport provides list-change subscriptions.
+  server.server.registerCapabilities({ tools: { listChanged: false }, ...(eventManager && { resources: { listChanged: false } }) });
+  return { server, features: { tools: allowedTools, resources: !!eventManager, instructions } };
 }
 
 /**
@@ -2778,13 +2756,13 @@ Examples:
           // account's token+secret — no extra MQTT env vars needed.
           const startupProfile = getActiveProfile() ?? 'default';
           const eventManager = new EventSubscriptionManager(undefined, undefined, startupProfile);
-          const mqttCreds = tryLoadConfig();
+          const mqttCreds = isDryRun() ? null : tryLoadConfig();
           if (mqttCreds) {
             eventManager.initialize(mqttCreds.token, mqttCreds.secret).catch((err: unknown) => {
               console.error('MQTT initialization failed:', err instanceof Error ? err.message : String(err));
             });
           } else {
-            console.error('MQTT disabled: credentials not configured.');
+            console.error(isDryRun() ? 'MQTT disabled in --dry-run mode.' : 'MQTT disabled: credentials not configured.');
           }
 
           // Helper: constant-time token comparison
@@ -2812,6 +2790,15 @@ Examples:
           };
 
           const httpServer = createServer(async (req, res) => {
+            // Origin is a browser boundary, not a credential. Never derive the
+            // allowlist from a caller-controlled Host header.
+            const origin = req.headers.origin;
+            const boundOrigin = `http://${bind.includes(':') ? `[${bind}]` : bind}:${req.socket.localPort}`;
+            if (origin !== undefined && origin !== boundOrigin && !corsOrigins.includes(origin)) {
+              res.writeHead(403, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32600, message: 'Origin not allowed' } }));
+              return;
+            }
             // Health and metrics routes (no auth required)
             if (req.url === '/healthz' && req.method === 'GET') {
               res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -2889,7 +2876,7 @@ process_uptime_seconds ${Math.floor(process.uptime())}
                   res.writeHead(200, {
                     'Access-Control-Allow-Origin': origin,
                     'Access-Control-Allow-Methods': 'POST, OPTIONS',
-                    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+                    'Access-Control-Allow-Headers': 'Content-Type, Authorization, MCP-Protocol-Version, Mcp-Method, Mcp-Name, X-SwitchBot-Profile',
                   });
                   res.end();
                   return;
@@ -2951,23 +2938,12 @@ process_uptime_seconds ${Math.floor(process.uptime())}
               }
             }
 
-            // Stateless mode: fresh transport+server per request (SDK requirement).
-            const reqTransport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-            let reqServer: McpServer | undefined;
-            // Register cleanup before any async work so it fires on both normal
-            // close and error-path close (after the 500 response ends).
-            res.on('close', () => {
-              reqTransport.close();
-              reqServer?.close();
-            });
             // Route per-request credentials via AsyncLocalStorage so loadConfig()
             // picks up this request's profile instead of the process-global flag.
             try {
               await withRequestContext({ profile: profile ?? undefined }, async () => {
                 if (res.destroyed) return;
-                reqServer = createSwitchBotMcpServer({ eventManager, eventManagerProfile: startupProfile, toolProfile });
-                await reqServer.connect(reqTransport);
-                await reqTransport.handleRequest(req, res);
+                await serveDualEraHttp(req, res, () => registeredServer({ eventManager, eventManagerProfile: startupProfile, toolProfile }));
               });
             } catch {
               if (!res.headersSent && !res.destroyed) {
@@ -3011,15 +2987,13 @@ process_uptime_seconds ${Math.floor(process.uptime())}
 
         const startupProfile = getActiveProfile() ?? 'default';
         const eventManager = new EventSubscriptionManager(undefined, undefined, startupProfile);
-        const mqttCreds = tryLoadConfig();
+        const mqttCreds = isDryRun() ? null : tryLoadConfig();
         if (mqttCreds) {
           eventManager.initialize(mqttCreds.token, mqttCreds.secret).catch((err: unknown) => {
             console.error('MQTT initialization failed:', err instanceof Error ? err.message : String(err));
           });
         }
-        const server = createSwitchBotMcpServer({ eventManager, eventManagerProfile: startupProfile, toolProfile });
-        const transport = new StdioServerTransport();
-        await server.connect(transport);
+        await connectDualEraStdio(() => registeredServer({ eventManager, eventManagerProfile: startupProfile, toolProfile }));
 
         let isShuttingDown = false;
         const gracefulShutdown = async () => {

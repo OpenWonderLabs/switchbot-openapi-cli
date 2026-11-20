@@ -1887,6 +1887,18 @@ describe('mcp server', () => {
     type RiskProfile = { idempotencyHint: string; riskLevel: string; requiresConfirmation: boolean };
     type DryRunResponse = { ok: boolean; dryRun: boolean; riskProfile: RiskProfile; wouldSend: unknown };
 
+    it('does not recommend repeating an unknown custom IR button even with a deduplication key', async () => {
+      cacheMock.map.set('TV1', { type: 'TV', name: 'Test TV', category: 'ir' });
+      const { client } = await pair();
+      const res = await client.callTool({ name: 'send_command', arguments: {
+        deviceId: 'TV1', command: 'turnOn', commandType: 'customize', idempotencyKey: 'probe', dryRun: true,
+      } });
+      expect(res.structuredContent).toMatchObject({
+        dryRun: true, riskProfile: { idempotencyHint: 'non-idempotent', riskLevel: 'medium', recommendedMode: 'plan' },
+      });
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
+    });
+
     it('turnOn → idempotencyHint:safe (catalog says idempotent:true)', async () => {
       cacheMock.map.set('BOT1', { type: 'Bot', name: 'Test Bot', category: 'physical' });
       const { client } = await pair();

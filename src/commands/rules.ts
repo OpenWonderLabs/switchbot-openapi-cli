@@ -198,7 +198,7 @@ function registerRun(rules: Command): void {
   rules
     .command('run [path]')
     .description('Start the rules engine: subscribe to MQTT and execute matching rules (long-running).')
-    .option('--dry-run', 'Force every action into dry-run mode, overriding rule-level dry_run=false.')
+    .option('--dry-run', 'Live startup provisions resources and cannot be previewed. Use rules simulate for an offline preview, or dry_run: true in a rule to suppress its actions.')
     .option('--token <token>', 'SwitchBot API token (falls back to env / config).')
     .option('--secret <secret>', 'SwitchBot API secret (falls back to env / config).')
     .option('--max-firings <n>', 'Stop after this many successful fires (test / demo use).', (v) => Number.parseInt(v, 10))
