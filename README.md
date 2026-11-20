@@ -473,7 +473,7 @@ switchbot completion bash/zsh/fish/powershell
 | `--profile <name>` | Named credential profile |
 | `--cache <dur>` | Cache TTL (`5m`, `1h`, `off`, `auto`) |
 | `--no-cache` | Disable all cache reads |
-| `--retry-on-429 <n>` | Max 429 retry attempts (default `3`) |
+| `--retry-on-429 <n>` | Max 429 retry attempts (default `3`); Art Frame `deleteImage` is never retried automatically |
 | `--audit-log` | Append mutating commands to audit log |
 | `--audit-log-path <path>` | Custom audit path; use together with `--audit-log` |
 
@@ -505,7 +505,7 @@ Policy commands retain their documented specialized exit codes (including YAML p
 
 ## Development
 
-Verified CLI regression suite: 3239 tests. Plugin workspace checks are separate.
+Verified CLI regression suite: 3240 tests. Plugin workspace checks are separate.
 
 ```bash
 npm install && npm run build

@@ -89,7 +89,7 @@ export function buildProgram(): Command {
     .option('-v, --verbose', 'Log HTTP request/response details to stderr')
     .option('--dry-run', 'Print mutating requests without sending them (GETs still execute)')
     .option('--timeout <ms>', 'HTTP request timeout in milliseconds (default: 30000)', intArg('--timeout', { min: 1 }))
-    .option('--retry-on-429 <n>', 'Max 429 retries before surfacing the error (default: 3)', intArg('--retry-on-429', { min: 0 }))
+    .option('--retry-on-429 <n>', 'Max retries on HTTP 429 (default: 3). Art Frame deleteImage is never automatically retried.', intArg('--retry-on-429', { min: 0 }))
     .option('--backoff <strategy>', 'Backoff strategy for retries: "linear" or "exponential" (default)', enumArg('--backoff', ['linear', 'exponential']))
     .option('--no-retry', 'Disable 429 retries entirely (equivalent to --retry-on-429 0)')
     .option('--no-quota', 'Disable the local ~/.switchbot/quota.json counter for this run')

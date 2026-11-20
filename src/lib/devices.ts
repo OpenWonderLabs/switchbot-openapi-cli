@@ -314,6 +314,10 @@ export async function executeCommand(
   return { value: result, replayed: true };
 }
 
+type CommandValidationResult =
+  | { ok: true; normalized?: string; caseNormalizedFrom?: string; idempotent?: boolean }
+  | { ok: false; error: CommandValidationError };
+
 /**
  * Validate a command against the locally-cached device → catalog mapping.
  * Returns `{ ok: true }` when validation passes or is skipped (unknown device,
@@ -327,7 +331,7 @@ export function validateCommand(
   cmd: string,
   parameter: string | undefined,
   commandType: string
-): { ok: true; normalized?: string; caseNormalizedFrom?: string } | { ok: false; error: CommandValidationError } {
+): CommandValidationResult {
   const cached = getCachedDevice(deviceId);
   if (!cached) return { ok: true };
   return validateCommandForDevice(deviceId, cached, cmd, parameter, commandType);
@@ -340,7 +344,7 @@ export function validateCommandForDevice(
   cmd: string,
   parameter: string | undefined,
   commandType: string,
-): { ok: true; normalized?: string; caseNormalizedFrom?: string } | { ok: false; error: CommandValidationError } {
+): CommandValidationResult {
   if (commandType === 'customize') {
     if (cached.category === 'ir') return { ok: true };
     return {
@@ -436,7 +440,7 @@ export function validateCommandForDevice(
     };
   }
 
-  return { ok: true, normalized: normalizedCmd, caseNormalizedFrom };
+  return { ok: true, normalized: normalizedCmd, caseNormalizedFrom, idempotent: spec.idempotent };
 }
 
 /**

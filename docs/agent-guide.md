@@ -285,6 +285,11 @@ ID. `oldest`, `newest`, and `random` select one eligible image from the cloud
 album, including images not downloaded to the frame. The displayed image is
 never eligible. Deletion cannot be undone.
 
+If the CLI does not know the frame ID, run `switchbot --no-cache devices list`
+to refresh the inventory for the same account. `--allow-unknown-device` cannot
+authorize deletion. Preview with `switchbot --json devices command FRAME_ID deleteImage oldest --explain`:
+`idempotent: false` means a second request could remove another image. This preview sends no command.
+
 ```json
 {
   "version": "1.0",

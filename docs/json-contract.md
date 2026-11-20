@@ -62,6 +62,12 @@ cache and MCP inventory preserve that distinction. Requesting
 `--fields deviceId,lockDeviceId` explicitly projects missing values as `null`;
 do not use projected output to distinguish missing from unbound.
 
+`switchbot --json devices command <id> <cmd> [parameter] --explain` sends no command. `data.idempotent`
+is `true` if repeating the command has the same effect, `false` if it can
+change the result again (as with Art Frame `deleteImage`), or `null` if the
+catalog does not say. A custom IR button has unknown behavior even if its
+name matches a built-in command. This field is not an approval or a retry policy.
+
 For an authorized, executed `deleteImage`, the SwitchBot response **body**
 contains integer `deletedImageIndex` and `remainingCount`. Read them at the
 location appropriate to the caller:

@@ -46,7 +46,7 @@ Examples:
   $ switchbot devices list
   $ switchbot devices list --json | jq '.data.deviceList[].deviceId'
   $ switchbot devices describe <deviceId>         # what commands does this device support?
-  $ switchbot devices commands <type>             # offline lookup, e.g. Bot / Curtain / "Smart Lock"
+  $ switchbot devices commands S30                # offline: supported commands, parameters, and status fields
   $ switchbot devices status <deviceId>           # live state: battery, position, temperature, …
   $ switchbot devices command <deviceId> turnOn
   $ switchbot devices command <deviceId> turnOn --dry-run

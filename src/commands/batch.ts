@@ -192,10 +192,10 @@ Planning:
 
 Safety:
   Destructive commands (Smart Lock unlock, Garage Door Opener turnOn/turnOff,
-  Keypad createKey/deleteKey) are blocked by default. Use the reviewed plan
-  flow instead of direct execution.
-  --dry-run intercepts every POST and reports the intended calls without
-  hitting the API.
+  Keypad createKey/deleteKey, Art Frame deleteImage) are blocked by default.
+  Use a reviewed plan instead of direct execution.
+  --dry-run sends no POST. Resolving a filter or an uncached ID can still
+  fetch the device list.
 
 Examples:
   $ switchbot devices batch turnOff --filter 'type~=Light,family=home'

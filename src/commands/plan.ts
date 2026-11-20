@@ -524,7 +524,7 @@ against the live API without executing any mutations.
     .command('run')
     .description('Validate + preview/execute a plan. Respects --dry-run; destructive steps require the reviewed plan flow by default')
     .argument('[file]', 'Path to plan.json, or "-" / omit to read stdin')
-    .option('--yes', 'Authorize destructive commands (e.g. Smart Lock unlock, Garage open)')
+    .option('--yes', 'Confirm destructive steps in an explicit dev profile. Otherwise use plan save → review → approve → execute.')
     .option('--require-approval', 'Prompt for confirmation before each destructive step (TTY only; mutually exclusive with --json)')
     .option('--continue-on-error', 'Keep running after a failed step (default: stop at first error)')
     .option('--plan <json>', 'Inline plan JSON (alternative to file argument or stdin)')

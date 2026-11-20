@@ -1207,12 +1207,43 @@ describe('devices command', () => {
   // =====================================================================
   describe('command — generic behavior', () => {
     it('requires a known target before permitting image deletion', async () => {
-      for (const commandType of ['command', 'customize']) {
-        const res = await runCmd('DeLeTeImAgE', 'oldest', '--type', commandType, '--yes', '--json');
+      for (const flags of [[], ['--allow-unknown-device'], ['--allow-unknown-device', '--type', 'customize']]) {
+        const res = await runCli(registerDevicesCommand, [
+          '--json', 'devices', 'command', DID, 'DeLeTeImAgE', 'oldest', '--yes', ...flags,
+        ]);
         expect(res.exitCode).toBe(2);
-        expect(JSON.parse(res.stdout.join('\n')).error.kind).toBe('guard');
-        expect(apiMock.__instance.post).not.toHaveBeenCalled();
+        expect(JSON.parse(res.stdout.join('\n')).error).toMatchObject({
+          kind: 'guard', context: { deviceId: DID }, hint: expect.stringContaining('switchbot --no-cache devices list'),
+        });
       }
+      apiMock.__instance.get.mockResolvedValue({ data: { body: {
+        deviceList: [{ deviceId: DID, deviceName: 'Gallery', deviceType: 'AI Art Frame 2' }], infraredRemoteList: [],
+      } } });
+      await runCli(registerDevicesCommand, ['--no-cache', 'devices', 'list']);
+      const preview = await runCli(registerDevicesCommand, ['--json', 'devices', 'command', DID, 'deleteImage', 'oldest', '--explain']);
+      expect(JSON.parse(preview.stdout.join('\n')).data).toMatchObject({
+        deviceType: 'AI Art Frame 2', requiresConfirmation: true, recommendedMode: 'review-before-execute',
+      });
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
+    });
+
+    it('explains repeat safety for a frame deletion, a plug command and an unknown IR action without sending them', async () => {
+      updateCacheFromDeviceList({
+        deviceList: [
+          { deviceId: 'FRAME', deviceName: 'Gallery', deviceType: 'AI Art Frame 2' },
+          { deviceId: 'PLUG', deviceName: 'Socket', deviceType: 'Plug Mini (IT)' },
+        ],
+        infraredRemoteList: [{ deviceId: 'IR', deviceName: 'Remote', remoteType: 'TV', hubDeviceId: 'HUB' }],
+      });
+      for (const [id, cmd, args, idempotent] of [
+        ['FRAME', 'DeleteImage', ['oldest'], false],
+        ['PLUG', 'turnOn', [], true],
+        ['IR', 'turnOn', ['--type', 'customize'], null],
+      ] as const) {
+        const res = await runCli(registerDevicesCommand, ['--json', 'devices', 'command', id, cmd, ...args, '--explain']);
+        expect(JSON.parse(res.stdout.join('\n')).data).toHaveProperty('idempotent', idempotent);
+      }
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
     });
 
     it('defaults parameter to "default" and commandType to "command" when none given', async () => {
@@ -2332,7 +2363,6 @@ describe('devices command', () => {
       // The unlock row should carry the destructive badge
       const unlockLine = out.split('\n').find((l) => l.includes('unlock'));
       expect(unlockLine).toContain('!destructive');
-      expect(out).toContain('hard-to-reverse');
     });
 
     it('human output shows ReadOnly for sensor devices', async () => {

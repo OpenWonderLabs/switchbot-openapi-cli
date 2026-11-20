@@ -19,6 +19,7 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - AI Art Frame 2 is the canonical name; AI Art Frame Luma remains a discovery alias. Both frame models support irreversible, non-idempotent `deleteImage` through the reviewed plan workflow. Rules, policy pre-approval and live command-history replay cannot authorize it; HTTP 429 does not trigger a retry.
 - Successful plan command steps retain the cloud result, including zero-valued deletion counts. Cloud acknowledgement does not confirm the physical frame has finished.
+- `devices command --explain` now reports catalog idempotency in text and JSON. An unknown `deleteImage` target points to an inventory refresh, not `--allow-unknown-device`.
 
 See the [pinned protocol notes](./docs/openapi-alignment-ambiguities.md). No new REST endpoint, CLI command, MCP tool or release version.
 
