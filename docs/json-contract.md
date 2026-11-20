@@ -53,6 +53,12 @@ upstream outer envelope separately from `context.deviceType`, and may describe
 nested context objects. It is not a validator or a promise that every listed
 field appears in every payload variant.
 
+`agent-bootstrap --compact` reports cached device types only: a cold cache has
+`data.catalog.scope: "used"` and `data.catalog.types: []`. This is not a live
+device count. A single-model `schema export --type S30` includes that model's
+webhook contracts; omit `--type` for the full resource catalog. Compact CLI
+parameter examples remain strings; S30 `selfClean` sends a JSON number.
+
 ### Device inventory and command results
 
 In unprojected `devices list --json`, a Vision Doorbell entry in
@@ -67,6 +73,10 @@ is `true` if repeating the command has the same effect, `false` if it can
 change the result again (as with Art Frame `deleteImage`), or `null` if the
 catalog does not say. A custom IR button has unknown behavior even if its
 name matches a built-in command. This field is not an approval or a retry policy.
+In MCP `riskProfile`, the existing two-valued `idempotencyHint` reports
+`non-idempotent` for both false and unknown. The generic command manifest
+uses `caution` when it cannot know more. A key deduplicates a cached success;
+it neither authorizes a mutation nor resolves an uncertain outcome.
 
 For an authorized, executed `deleteImage`, the SwitchBot response **body**
 contains integer `deletedImageIndex` and `remainingCount`. Read them at the

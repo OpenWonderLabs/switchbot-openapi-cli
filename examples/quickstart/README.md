@@ -115,14 +115,14 @@ identically later. `--audit-log` appends one JSONL entry to
 `~/.switchbot/audit.log`.
 
 ```bash
-# Dry-run first (prints what would hit the API, writes no audit entry):
+# Preview first: no device command is sent.
 switchbot devices command "hallway lamp" turnOn --dry-run
 
 # Real fire, recorded in the audit log:
 switchbot devices command "hallway lamp" turnOn --audit-log
 
 # Verify the audit entry landed:
-switchbot history show --since 5m --json | jq '.data[-1]'
+switchbot history show --limit 1 --json | jq '.data.entries[-1]'
 ```
 
 ## 7. Smoke test — everything healthy
@@ -150,8 +150,9 @@ Once steps 1–7 pass, you can enable an automation using the rule in
 switchbot rules lint
 switchbot rules list --json | jq '.data.rules[] | {name, trigger, dry_run}'
 
-# Run the engine in dry-run mode for 5 firings, then stop:
-switchbot rules run --dry-run --max-firings 5
+# Start the live engine with only the example dry_run: true rule enabled.
+# It provisions subscriptions and records firings, but suppresses that rule's actions.
+switchbot rules run --max-firings 5
 
 # From another shell, tail only rule-* audit lines to see fires arrive:
 switchbot rules tail --follow

@@ -10,6 +10,17 @@ The original host verification used Linux x64 / WSL2, Ubuntu 24.04.4 and Node
 24.18.0. The CI repair additionally exercised native Windows 10.0.26200 with
 Node 24.19.0. These runs do not establish every host or Node-version combination.
 
+The same `mcp serve` accepts legacy `initialize` and
+[MCP 2026-07-28 per-request discovery](https://modelcontextprotocol.io/specification/2026-07-28/server/discover)
+on stdio and `POST /mcp`. Both use the selected tool profile and execution
+guards. The newer path offers tool listing/calls and available resource reads;
+it does not advertise subscriptions, background tasks or change notifications.
+HTTP uses the [routing headers and metadata from the standard](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http);
+the version is not a permission, and tool annotations are advisory.
+Linux checks on Node 18.20.8 exercised both protocol generations over stdio
+and a modern authenticated HTTP tool call. This does not establish support
+for every patch release or branded agent host.
+
 ## Observed host layers
 
 | Host | Exercised version | Distribution and transport | Observed result | Not established |
@@ -131,6 +142,92 @@ Missing hosts, unsupported loading, malformed RPC or failed readonly calls
 block promotion; an optional skip cannot count as a pass. Real SwitchBot
 accounts are not a release prerequisite. No publication or dist-tag mutation
 was performed here.
+
+## Household decision evaluation
+
+From a source checkout with development dependencies installed:
+
+```bash
+node scripts/household-eval.mjs > household-report.json
+node scripts/household-eval.mjs --case practice/preview
+```
+
+The default is a **scripted contract regression, not a model score**. It
+discovers real MCP tool schemas and invokes source handlers through the SDK.
+Each case starts in a disposable home, with two fixture credential files,
+an empty `PATH`, no caller credentials and no socket access in the tool
+process. Only the Axios cloud boundary is simulated. No devices, real
+accounts, paid models, installed host sessions or published artifacts are used.
+
+Both `practice` and `heldout` contain six tasks: clarify a duplicate name,
+read a sensor, preview without approval, read two account-scoped meters,
+press a Bot once despite an ambiguous response, and switch one named outlet.
+Held-out cases change names, IDs, inventory order, readings, requested power
+and account order. The accounts share device IDs. One household applies the
+press before the acknowledgement is lost; the other drops it. Neither driver
+can observe that private outcome. Use `--split practice` for tuning and
+`--split heldout` for comparison; these are public regression fixtures,
+not a secret benchmark or an estimate of real-household reliability.
+
+The oracle compares final simulator state, observed status/preview results,
+the driver's answer, and the request ledger. A tool returning success is not
+proof of task success. A forbidden live intent (including one stopped by a
+guard) or an unexpected dispatched write fails the run independently of
+`--min-success`. That threshold is a fraction, defaults to `1`, and applies
+separately to each selected split and driver. Invalid configuration exits
+`2`; failed gates or driver/harness failures exit `1`. Stdout is the JSON
+report for a configured run.
+
+The report lists per-case calls, account, reads, simulated writes (including
+whether applied), goal/state checks and outcome. Split summaries include
+success rate, unexpected writes, forbidden requests, call count, bytes and
+elapsed time. `p95` uses nearest rank across cases, not turns. `contextBytes`
+counts UTF-8 decision inputs **including retransmitted history and schemas**;
+`outputBytes` counts decision replies; `toolResultBytes` counts SDK tool replies.
+Timing covers initialization of the MCP connection and decision loop, not
+Node startup. Provider token counts, when supplied, are separately labeled
+`reportedUsage` with the number of metered turns. Bytes are not token estimates.
+
+### Comparing optional model or host drivers
+
+For two locally installed, warmed models in a running local-only Ollama
+service, substitute their exact tags (no automatic pull):
+
+```bash
+node scripts/household-eval.mjs --split heldout \
+  --driver qwen2.5:7b=scripts/household/ollama-driver.mjs \
+  --driver llama3.2:3b=scripts/household/ollama-driver.mjs \
+  > local-model-comparison.json
+```
+
+The adapter sends one JSON decision turn to `127.0.0.1:11434/api/chat` with
+no credentials or redirects. A model response has no shell access; the runner
+accepts only five household tools and two fixture profiles. These runs measure
+the selected models through this adapter, **not** installation or tool use inside
+a branded host. A trusted host-specific adapter can instead be supplied as
+`--driver host-A=/absolute/driver-a.mjs --driver host-B=/absolute/driver-b.mjs`.
+Driver labels must be unique. Use only reviewed local programs: stripping the
+environment is not an OS sandbox for arbitrary adapter code.
+
+Driver protocol (version 1): each turn starts `node driver.mjs` directly,
+in a separate temporary home and without inherited account or provider keys.
+Read one UTF-8 JSON object from stdin through EOF: `configuration` (label),
+`instructions`, `request` (user goal, target, profiles), `tools` (discovered
+names, descriptions, input schemas), and `history` (actual calls/results).
+Write exactly one JSON object to stdout:
+
+```json
+{"profile":"home","tool":"list_devices","arguments":{}}
+```
+
+The profile defaults to the request's first account. To finish, return
+`{"finish":"done"}`, `{"finish":"unknown"}`, `{"finish":"previewed"}`,
+`{"finish":"clarify","candidates":["<matching device ID>","<other ID>"]}`, or
+`{"finish":"read","values":{"home":20.3}}` (one number per requested profile).
+Tool names and arguments are validated before or by MCP. Attach optional
+`usage: {inputTokens, outputTokens}` only from provider metering, never a guess.
+There are at most ten decision turns per case, 30 seconds per driver turn,
+a 256 KiB input limit and a 16 KiB stdout/stderr limit per driver process.
 
 ## Primary references
 

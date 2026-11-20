@@ -94,6 +94,12 @@ switchbot devices command <id> turnOn
 switchbot doctor                            # self-check
 ```
 
+For agents, start with `switchbot agent-bootstrap --compact`. An empty cache
+means the inventory is unknown; use `devices list` before choosing a target.
+Use `schema export --type S30` for a single model rather than loading the
+whole catalog. The [agent guide](docs/agent-guide.md#run-semantics) explains
+what approval binds and when an interrupted action must not be retried.
+
 ---
 
 ## Codex integration
@@ -466,14 +472,14 @@ switchbot completion bash/zsh/fish/powershell
 | `--json` | Raw JSON output |
 | `--format <fmt>` | `tsv` / `yaml` / `jsonl` / `id` |
 | `--fields <cols>` | Comma-separated column filter |
-| `--dry-run` | Preview mutating requests without sending |
+| `--dry-run` | Preview supported actions without applying changes; unsupported writes fail. Reads may consume quota. Use `rules simulate` for offline rule decisions. |
 | `--verbose` | Log HTTP request/response to stderr |
 | `--timeout <ms>` | HTTP timeout (default `30000`) |
 | `--config <path>` | Override credential file location |
 | `--profile <name>` | Named credential profile |
 | `--cache <dur>` | Cache TTL (`5m`, `1h`, `off`, `auto`) |
 | `--no-cache` | Disable all cache reads |
-| `--retry-on-429 <n>` | Max 429 retry attempts (default `3`); Art Frame `deleteImage` is never retried automatically |
+| `--retry-on-429 <n>` | Max retries for a read or verified repeat-safe write (default `3`); never automatically repeat scenes, custom IR buttons or image deletion |
 | `--audit-log` | Append mutating commands to audit log |
 | `--audit-log-path <path>` | Custom audit path; use together with `--audit-log` |
 
@@ -505,7 +511,7 @@ Policy commands retain their documented specialized exit codes (including YAML p
 
 ## Development
 
-Verified CLI regression suite: 3240 tests. Plugin workspace checks are separate.
+Verified CLI regression suite: 3300 tests. Plugin workspace checks are separate.
 
 ```bash
 npm install && npm run build
@@ -513,6 +519,7 @@ npm run dev -- <args>   # run from TypeScript via tsx
 npm test                # Vitest suite
 npm run test:account-lifecycle # focused account/cache/MCP regressions
 npm run test:coverage     # suite plus coverage thresholds
+node scripts/household-eval.mjs > household-report.json  # offline decision/authority gate, not a model score
 ```
 
 CI runs CLI regressions on Node 18/20/22/24, enforces coverage on Node 24,

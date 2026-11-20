@@ -9,6 +9,11 @@ The principles are **not aspirational** — every one of them is
 load-bearing in code shipped today. When a pull request conflicts
 with one of these, the PR changes, not the principle.
 
+Design references: the [Command Line Interface Guidelines](https://clig.dev/)
+for human and script behavior, and [Anthropic's guide to evaluating agent tools](https://www.anthropic.com/engineering/writing-tools-for-agents)
+for measuring task outcomes and context cost. The [host verification record](host-compatibility.md)
+separates protocol, simulated household tasks and real host evidence.
+
 ---
 
 ## 1. One binary, one contract
@@ -21,12 +26,10 @@ code path. No per-channel behavior drift.
 
 ## 2. JSON envelopes are the agent-facing contract
 
-Every command that returns data supports `--json` (also `--format=json`)
-and emits the envelope
-`{ schemaVersion, ok, data|error, meta }`. Errors go to the **same
-stream** as success in JSON mode so agents parse one byte-stream. The
-legacy `--json-legacy` flag still exists for pre-v1.6 consumers and
-will be removed when the last in-tree user moves off it.
+Non-streaming `--json` results write `{schemaVersion, data}` on success or
+`{schemaVersion, error}` on failure to stdout. Start `jq` projections at `.data`.
+`--format=json` can project table rows; it is not always the raw `--json` payload.
+Streaming commands use NDJSON headers: see the [JSON contract](json-contract.md).
 
 ## 3. Schema-versioned and drift-checked
 
@@ -38,41 +41,39 @@ refreshed before issuing commands.
 
 ## 4. Destructive commands always confirm, by default
 
-Unlock, garage-door-open, keypad-create-key, and the other
-destructive operations prompt for confirmation unless the user has
-explicitly overridden the tier in `policy.yaml`. The rules engine
-validator **rejects** rules that would fire a destructive command;
-automations cannot override a destructive confirmation.
+For destructive work, review and approve a saved plan for the intended account
+and targets. `--yes` or MCP `confirm: true` alone does not authorize a direct
+production write. Rules cannot use the approval or bypass their own safety
+restrictions. Review the [plan workflow](agent-guide.md#run-semantics).
 
 ## 5. Dry-run is a first-class mode, not a debug aid
 
-`--dry-run` on `devices command` / `plan run` prints the exact
-request that would have been sent and writes **no** audit entry,
-**no** quota charge, and **no** state change. A rule's per-rule
-`dry_run: true` does the same at the engine level. Dry-run output is
-byte-stable — agents can diff it against a subsequent real run.
+`--dry-run` suppresses device/scene writes and leaves approvals and business
+files unchanged. Unsupported mutations fail before their handler runs.
+An inventory or scene lookup may still read the cloud, consume quota and
+refresh a cache; explicitly enabled auditing can record a preview.
+Use `rules simulate` for an offline decision. A live engine with a
+`dry_run: true` rule still provisions subscriptions and records rule events.
 
-## 6. Aliases, not device IDs, in human-facing surfaces
+## 6. Names for selection, IDs for confirmation
 
-`policy.yaml` maps human names (`"hallway lamp"`) to opaque device
-IDs. Every CLI command, MCP tool, and rule body accepts the alias.
-The device ID never leaks into a prompt the user has to look at. IDs
-appear only in JSON output and in logs.
+`policy.yaml` maps names such as `"hallway lamp"` to device IDs. Use aliases
+on surfaces that support name resolution; otherwise look up the ID. Before
+approval, verify the resolved target, account and normalized parameters. Two
+devices named “Lamp” are not interchangeable.
 
 ## 7. Quiet hours are policy, not a flag
 
-Time-of-day gating lives in `policy.yaml` (`quiet_hours`, rule-level
-`time_between`). The same rule block guards manual `devices command`
-calls when the user opts in. No command-line flag duplicates this —
-the policy is the one place that changes.
+Rules express time-of-day constraints in their policy conditions. Agents
+should inspect the applicable policy and explicit approvals rather than
+assuming a device name or scheduled time grants permission.
 
 ## 8. Every mutation is auditable
 
-A single JSONL audit log (`~/.switchbot/audit.log` by default)
-records every mutating command, every rule firing, every dry-run
-preview, every webhook rejection. Format is documented in
-`docs/audit-log.md` and frozen at `schemaVersion: 2`. The CLI never
-trims the file; retention is the operator's responsibility.
+`--audit-log` enables a best-effort JSONL record for device/scene mutations.
+Rule events are also observable. Inspect the [audit contract](audit-log.md)
+for scope, `auditVersion: 2`, and crash limits. The audit log is not an
+execution receipt, proof of physical completion, or retry authorization.
 
 ## 9. Credentials live outside the repo, outside the shell history
 
@@ -85,21 +86,19 @@ but never prints the value.
 
 ## 10. Cold-start is one command, bounded in time
 
-`switchbot agent-bootstrap --compact` returns the full snapshot an
-agent needs to start operating — identity, device count, policy
-status, schema versions — within a single API call and a cached
-catalog read. No agent implementation ever needs to issue five
-commands in parallel to warm up.
+`switchbot agent-bootstrap --compact` uses local state. On an empty cache,
+`.data.devices` and `.data.catalog.types` are empty: this means *unknown inventory*,
+not that the account has no devices. Refresh with `devices list` when online.
+Use `schema export --type S30` for one model or `--project` to narrow the response.
 
 ---
 
 ## Non-goals (things these principles deliberately leave out)
 
-- **No "smart" error recovery.** API errors map to a small fixed
-  taxonomy (`auth-failed`, `device-offline`, `device-busy`,
-  `quota-exceeded`, `command-not-supported`, `device-not-found`,
-  `runtime`, `usage`). The CLI does **not** retry without an explicit
-  `--retry` flag; retry policy is the caller's choice.
+- **No blind retries.** A transient failure need not be safe to repeat.
+  `--retry-on-429` only applies to reads and verified repeat-safe writes.
+  Neither scenes, custom IR buttons nor image deletions are automatically
+  re-sent. A deduplication key does not make an unknown outcome repeat-safe.
 - **No hidden state migration.** Policy `0.1 → 0.2` is an explicit
   `policy migrate` run, not an auto-upgrade.
 - **No vendor-extension MQTT payloads.** The shadow event extractor
