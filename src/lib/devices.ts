@@ -31,6 +31,7 @@ export interface Device {
   deviceType?: string;
   enableCloudService: boolean;
   hubDeviceId: string;
+  lockDeviceId?: string | null;
   roomID?: string;
   roomName?: string | null;
   familyName?: string;
@@ -145,6 +146,7 @@ export async function fetchDeviceList(
             ...(cachedDeviceType && cachedDeviceType !== 'Unknown Device' ? { deviceType: cachedDeviceType } : {}),
             enableCloudService: entry.enableCloudService ?? true,
             hubDeviceId: entry.hubDeviceId ?? '',
+            ...(entry.lockDeviceId !== undefined ? { lockDeviceId: entry.lockDeviceId } : {}),
             roomID: entry.roomID,
             roomName: entry.roomName,
             familyName: entry.familyName,
@@ -624,6 +626,7 @@ export interface McpDescribeShape {
     deviceType?: string;
     enableCloudService?: boolean;
     hubDeviceId?: string;
+    lockDeviceId?: string | null;
     roomID?: string;
     roomName?: string | null;
     familyName?: string;
@@ -651,6 +654,7 @@ export function toMcpDescribeShape(r: DescribeResult): McpDescribeShape {
       ...(d.deviceType !== undefined ? { deviceType: d.deviceType } : {}),
       ...('enableCloudService' in d ? { enableCloudService: d.enableCloudService } : {}),
       ...(d.hubDeviceId !== undefined ? { hubDeviceId: d.hubDeviceId } : {}),
+      ...(d.lockDeviceId !== undefined ? { lockDeviceId: d.lockDeviceId } : {}),
       ...(d.roomID !== undefined ? { roomID: d.roomID } : {}),
       ...(d.roomName !== undefined ? { roomName: d.roomName } : {}),
       ...(d.familyName !== undefined ? { familyName: d.familyName } : {}),
@@ -679,6 +683,7 @@ export function toMcpDeviceListShape(d: Device): Record<string, unknown> {
     deviceType: d.deviceType,
     enableCloudService: d.enableCloudService,
     hubDeviceId: d.hubDeviceId,
+    ...(d.lockDeviceId !== undefined ? { lockDeviceId: d.lockDeviceId } : {}),
     roomID: d.roomID,
     roomName: d.roomName,
     familyName: d.familyName,

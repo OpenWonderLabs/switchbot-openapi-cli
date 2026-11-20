@@ -130,6 +130,7 @@ The destructive blocklist the schema enforces on `never_confirm`:
 - `nightLatchUnlock`
 - `createKey`
 - `deleteKey`
+- `deleteImage` (case-insensitive; irreversible Art Frame album deletion)
 - `deleteWebhook`
 - `deleteScene`
 - `factoryReset`
@@ -359,7 +360,7 @@ automation:
 
 **Destructive commands are refused.** The v0.2 validator rejects `lock`,
 `unlock`, `deadbolt`, `nightLatchUnlock`, `createKey`, `deleteKey`,
-`deleteWebhook`, `deleteScene`, and `factoryReset` in any `then[].command`.
+`deleteImage`, `deleteWebhook`, `deleteScene`, and `factoryReset` in any `then[].command`.
 The catalog classifies `disableMotionDetection` on Solar Pan/Tilt Cam 2K as
 locally destructive: rules cannot run it, and `never_confirm` cannot bypass
 native approval. Video Doorbell keeps its existing non-destructive behavior,
@@ -367,6 +368,12 @@ including that confirmation preference; the verb is not globally prohibited.
 Inventory-aware validation also rejects
 device-specific destructive actions, including Garage Door Opener
 `turnOn`/`turnOff`; ordinary light power actions remain allowed.
+
+An Art Frame rule may upload an image as shown above, but it cannot delete one.
+This applies to AI Art Frame, AI Art Frame 2, and its discovery alias AI Art Frame Luma.
+Use a [reviewed deletion plan](./agent-guide.md#reviewing-an-art-frame-deletion)
+instead. Vision Doorbell is a separate read-only model: the Video Doorbell
+motion-detection example does not grant it any command.
 
 **Hot-path behaviour.** Every fire is serialised through a dispatch
 queue so two MQTT events arriving in the same tick respect throttle

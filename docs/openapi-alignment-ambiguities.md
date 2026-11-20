@@ -45,3 +45,52 @@ It supplements, rather than replaces, the historical evidence above.
   status can retain a URL after it expires; consumers must use `expireAt`.
   Solar webhook `timeOfSample` is milliseconds, not the status URL expiry
   unit.
+
+## 2026-11-20 upstream snapshot (unreleased)
+
+[Official delta from `fa8f90c` to `0db92c7`](https://github.com/OpenWonderLabs/SwitchBotAPI/compare/fa8f90c661cfa183d633d87f18c04e0e5059fa74...0db92c78b56808f25b74c61535313f44bef4cd91).
+The five additions below use existing REST operations. The evidence is the
+written OpenAPI contract, not a live-device or regional availability test.
+
+- [Plug Mini (IT)](https://github.com/OpenWonderLabs/SwitchBotAPI/blob/0db92c78b56808f25b74c61535313f44bef4cd91/devices/plugs-switches/plug-mini-it.md)
+  and [Outdoor Plug (EU)](https://github.com/OpenWonderLabs/SwitchBotAPI/blob/0db92c78b56808f25b74c61535313f44bef4cd91/devices/plugs-switches/outdoor-plug-eu.md)
+  have distinct REST and webhook identities. Both support `turnOn`, `turnOff`
+  and `toggle`. REST `power` is watts, not the switch state; `switchStatus`
+  is `0`/`1`, and `usedElectricity` is daily consumption in watt-minutes.
+  The webhook instead reports switch state, `online`, `overTemperature` and
+  `overload`; it is not a periodic meter reading.
+- [Hub 4](https://github.com/OpenWonderLabs/SwitchBotAPI/blob/0db92c78b56808f25b74c61535313f44bef4cd91/devices/hubs/hub-4.md)
+  has no control commands. REST reports motion as Boolean `moveDetected`;
+  webhook context reports `detectionState` (`DETECTED` or `NOT_DETECTED`).
+- [Vision Doorbell](https://github.com/OpenWonderLabs/SwitchBotAPI/blob/0db92c78b56808f25b74c61535313f44bef4cd91/devices/cameras/vision-doorbell.md)
+  reports `battery`, Boolean `online` and firmware `version`, with no control
+  commands or webhooks. `lockDeviceId` belongs to inventory, not status: it
+  names the bound Lock, or is explicitly `null` when unbound. See the
+  [JSON contract](json-contract.md#device-inventory-and-command-results) for absent fields.
+- [Floor Cleaning Robot S30](https://github.com/OpenWonderLabs/SwitchBotAPI/blob/0db92c78b56808f25b74c61535313f44bef4cd91/devices/robot-vacuum/floor-cleaning-robot-s30.md)
+  identifies itself as `Robot Vacuum Cleaner S30`. Commands are `startClean`,
+  `pause`, `dock`, `setVolume`, `selfClean` and `changeParam`; no refill
+  command is documented. `selfClean` takes a JSON number: `1` wash mop,
+  `2` start drying, `3` stop drying, `4` empty dustbin. Do not reuse S10/S20
+  parameters. For cleaning cycles upstream specifies integer `times` but
+  gives no bounds; local acceptance does not establish server limits.
+  Each webhook includes `deviceType`, `deviceMac`, `timeOfSample` (Unix
+  milliseconds) and **only changed properties**. Missing battery or task
+  fields are not nulls or resets.
+
+The [AI Art Frame 2](https://github.com/OpenWonderLabs/SwitchBotAPI/blob/0db92c78b56808f25b74c61535313f44bef4cd91/devices/others/ai-art-frame-2.md)
+name replaces `AI Art Frame Luma` in inventory and webhook documentation.
+The old name remains a discovery alias, not a second model. Both it and the
+[original AI Art Frame](https://github.com/OpenWonderLabs/SwitchBotAPI/blob/0db92c78b56808f25b74c61535313f44bef4cd91/devices/others/ai-art-frame.md)
+document `deleteImage` with `random`, `newest` or `oldest`. Deletion is
+irreversible and includes cloud images not yet on the frame, but never the
+displayed image. If the displayed image cannot be identified, deletion fails.
+Each repeated request could delete another image: the CLI treats this as
+destructive, with no automatic retry, replay, automation or standing approval.
+See the [cloud result fields](json-contract.md#device-inventory-and-command-results).
+
+The [official glossary](https://github.com/OpenWonderLabs/SwitchBotAPI/blob/0db92c78b56808f25b74c61535313f44bef4cd91/README.md#glossary)
+lists Lock Vision and Lock Vision Pro for North America, Lock Lite for Japan,
+Smart Radiator Thermostat for Europe, and Lock Ultra Max for Japan and Europe
+(adding `W110000000` alongside `W104000000`). These are availability and
+product-code notes, not new commands or CLI restrictions on account geography.

@@ -53,20 +53,29 @@ Run `switchbot catalog show` for the effective catalog, including aliases and pe
 | --- | --- |
 | **Lighting** | Color Bulb · Strip Light · Strip Light 3 · RGBICWW Strip Light · RGBICWW Light Bars · Floor Lamp · RGBICWW Floor Lamp · Ceiling Light · Ceiling Light Pro · RGBICWW Ceiling Light · RGBIC Neon Rope Light · RGBIC Neon Wire Rope Light · Candle Warmer Lamp · Permanent Outdoor Lights |
 | **Climate** | Humidifier · Humidifier2 · Air Purifier VOC · Air Purifier Table VOC · Air Purifier PM2.5 · Air Purifier Table PM2.5 · Smart Radiator Thermostat |
-| **Security** | Smart Lock · Smart Lock Pro · Smart Lock Pro Wifi · Smart Lock Ultra · Smart Lock Ultra Max · Lock Lite · Lock Vision · Lock Vision Pro · Keypad · Keypad Touch · Keypad Vision · Keypad Vision Pro · Garage Door Opener · Video Doorbell |
+| **Security** | Smart Lock · Smart Lock Pro · Smart Lock Pro Wifi · Smart Lock Ultra · Smart Lock Ultra Max · Lock Lite · Lock Vision · Lock Vision Pro · Keypad · Keypad Touch · Keypad Vision · Keypad Vision Pro · Garage Door Opener · Video Doorbell · Vision Doorbell _(status only)_ |
 | **Curtains & blinds** | Curtain · Curtain3 · Curtain 4 · Blind Tilt · Roller Shade |
-| **Power** | Plug · Plug Mini (US) · Plug Mini (JP) · Plug Mini (EU) · Relay Switch 1 · Relay Switch 1PM · Relay Switch 2PM |
+| **Power** | Plug · Plug Mini (US) · Plug Mini (JP) · Plug Mini (EU) · Plug Mini (IT) · Outdoor Plug (EU) · Relay Switch 1 · Relay Switch 1PM · Relay Switch 2PM |
 | **Fans** | Battery Circulator Fan · Battery Circulator Fan 2 Pro · Circulator Fan · Standing Circulator Fan |
-| **Cleaning** | Robot Vacuum Cleaner S1 · Robot Vacuum Cleaner S1 Plus · K10+ · K10+ Pro · Robot Vacuum Cleaner K10+ Pro Combo · Robot Vacuum Cleaner S10 · Robot Vacuum Cleaner S20 · Robot Vacuum Cleaner K11+ · Robot Vacuum Cleaner K11 Plus Pro · Robot Vacuum Cleaner K20 Plus Pro |
+| **Cleaning** | Robot Vacuum Cleaner S1 · Robot Vacuum Cleaner S1 Plus · K10+ · K10+ Pro · Robot Vacuum Cleaner K10+ Pro Combo · Robot Vacuum Cleaner S10 · Robot Vacuum Cleaner S20 · Robot Vacuum Cleaner S30 · Robot Vacuum Cleaner K11+ · Robot Vacuum Cleaner K11 Plus Pro · Robot Vacuum Cleaner K20 Plus Pro |
 | **Sensors** _(read-only)_ | Meter · MeterPlus · WoIOSensor · MeterPro · MeterPro(CO2) · WeatherStation · Motion Sensor · Presence Sensor · Contact Sensor · Water Detector · Wallet Finder Card |
-| **Hubs** _(read-only)_ | Hub · Hub Plus · Hub Mini · Hub 2 · Hub 3 · AI Hub |
+| **Hubs** _(read-only)_ | Hub · Hub Plus · Hub Mini · Hub 2 · Hub 3 · Hub 4 · AI Hub |
 | **Cameras** | Indoor Cam · Pan/Tilt Cam · Pan/Tilt Cam 2K · Pan/Tilt Cam Plus 2K · Pan/Tilt Cam Plus 3K · Outdoor Spotlight Cam · Outdoor Pan/Tilt Cam 3K _(status only)_ · Solar Pan/Tilt Cam 2K |
-| **Other** | Bot · AI Art Frame · AI Art Frame Luma · AI MindClip · Kata Friends · Home Climate Panel · Remote |
+| **Other** | Bot · AI Art Frame · AI Art Frame 2 (also discoverable as AI Art Frame Luma) · AI MindClip · Kata Friends · Home Climate Panel · Remote |
 | **IR virtual remotes** _(via Hub)_ | Air Conditioner · TV · Streamer · Set Top Box · DVD · Speaker · Fan · Light · Others |
 
 ### Device contract notes
 
-The capabilities below are available starting in CLI 3.10.0.
+**Unreleased OpenAPI update** (after CLI 3.10.0):
+
+- **Plug Mini (IT) and Outdoor Plug (EU):** `switchbot --json devices status <plugId>` reports `power` in watts and `usedElectricity` in watt-minutes for the day. Read `switchStatus` (0 off, 1 on) for the relay state. The two models have distinct webhook identities; their events do not report energy readings.
+- **Hub 4 and Vision Doorbell:** use `switchbot --json devices status <id>` rather than sending a command. Hub 4 reports motion and environmental readings and has webhook events. Vision Doorbell reports `version`, `battery`, and `online`; no webhook is documented. Unlike Video Doorbell, it has no motion-detection controls. Its inventory entry may include `lockDeviceId` (a linked lock ID or `null`).
+- **Robot Vacuum Cleaner S30:** `switchbot --dry-run devices command <s30Id> selfClean 4` previews emptying the dustbin. S30 takes a number from 1 to 4 and has no `refill`; do not reuse an S10/S20 command list.
+- **AI Art Frame and AI Art Frame 2:** `deleteImage` permanently deletes one eligible album image by `random`, `newest`, or `oldest`. Use a [reviewed plan](./docs/agent-guide.md#reviewing-an-art-frame-deletion); do not retry on an uncertain outcome.
+
+See the [pinned protocol notes](./docs/openapi-alignment-ambiguities.md) for model-specific fields and limits of the evidence.
+
+**Available since CLI 3.10.0:**
 
 - Light Bars accept object parameters. For example: `switchbot devices command <lightBarId> setLightEffect '{"effectId":1}'`; `effectId` is an integer from 0 through 25.
 - Outdoor Pan/Tilt Cam 3K is status-only. Camera status may include `latestImage` as `{ imageUrl, expireAt }`; `expireAt` is Unix seconds. Treat cached URLs as potentially expired, do not download or persist image bytes, and query again with `--no-cache` when a fresh status is needed.
@@ -496,7 +505,7 @@ Policy commands retain their documented specialized exit codes (including YAML p
 
 ## Development
 
-Verified CLI regression suite: 3211 tests. Plugin workspace checks are separate.
+Verified CLI regression suite: 3239 tests. Plugin workspace checks are separate.
 
 ```bash
 npm install && npm run build

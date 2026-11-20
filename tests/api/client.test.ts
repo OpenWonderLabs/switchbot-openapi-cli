@@ -407,6 +407,21 @@ describe('createClient — 429 retry', () => {
     );
   });
 
+  it.each([429, 503])('does not repeat or recommend retrying an image deletion after HTTP %i', async (status) => {
+    process.argv = ['node', 'cli', '--retry-on-429', '2'];
+    createClient();
+    const config = {
+      method: 'post', url: '/v1.1/devices/FRAME/commands',
+      data: JSON.stringify({ command: 'deleteImage', commandType: 'command', parameter: 'oldest' }),
+    };
+    const result = Promise.resolve().then(() => captured.failure!({
+      response: { status, headers: {} }, config, message: 'Request failed',
+    })).catch(error => error);
+    await vi.runAllTimersAsync();
+    expect(axiosMock.__instance.request).not.toHaveBeenCalled();
+    expect(await result).toMatchObject({ code: status, retryable: false });
+  });
+
   it('respects the server Retry-After header over the default backoff', async () => {
     process.argv = ['node', 'cli', 'devices', 'list'];
     createClient();

@@ -64,19 +64,21 @@ export const apiCircuitBreaker = new CircuitBreaker('switchbot-api', {
 export { CircuitOpenError };
 
 type RetryableConfig = InternalAxiosRequestConfig & { __retryCount?: number };
-function isUploadImageCommandRequest(response: AxiosResponse): boolean {
-  const url = response.config.url;
-  if (!url || !/\/v1\.1\/devices\/[^/]+\/commands(?:\?.*)?$/.test(url)) return false;
+function builtInDeviceCommand(config?: InternalAxiosRequestConfig): unknown {
+  if (!config?.url || !/\/v1\.1\/devices\/[^/]+\/commands(?:\?.*)?$/.test(config.url)) return undefined;
 
-  let data: unknown = response.config.data;
+  let data: unknown = config.data;
   if (typeof data === 'string') {
     try {
       data = JSON.parse(data) as unknown;
     } catch {
-      return false;
+      return undefined;
     }
   }
-  return !!data && typeof data === 'object' && 'command' in data && data.command === 'uploadImage';
+  if (data && typeof data === 'object' && 'command' in data && (!('commandType' in data) || data.commandType === 'command')) {
+    return data.command;
+  }
+  return undefined;
 }
 
 
@@ -162,7 +164,7 @@ export function createClient(): AxiosInstance {
       }
       const data = response.data as { statusCode?: number; message?: string };
       if (data.statusCode !== undefined && data.statusCode !== 100) {
-        const msg = data.statusCode === 402 && isUploadImageCommandRequest(response)
+        const msg = data.statusCode === 402 && builtInDeviceCommand(response.config) === 'uploadImage'
           ? `Image upload quota reached${data.message ? `: ${data.message}` : ''}`
           : API_ERROR_MESSAGES[data.statusCode] ??
             data.message ??
@@ -206,6 +208,12 @@ export function createClient(): AxiosInstance {
           );
         }
         const status = error.response?.status;
+        const deletingImage = method === 'POST' && builtInDeviceCommand(config) === 'deleteImage';
+        if (status === 429 && deletingImage) {
+          throw new ApiError('Image deletion rate limited (HTTP 429); not retried.', 429, {
+            transient: true, retryable: false, hint: 'Check the album before approving another deletion.',
+          });
+        }
 
         // 429 → transparent retry with Retry-After / exponential backoff.
         // Skipped when: no config (shouldn't happen for real axios errors),
@@ -298,7 +306,7 @@ export function createClient(): AxiosInstance {
           `HTTP ${status ?? '?'}: ${error.message}`,
           status ?? 0,
           {
-            retryable: status !== undefined && status >= 500,
+            retryable: !deletingImage && status !== undefined && status >= 500,
             transient: status !== undefined && (status >= 500 || status === 0) // 5xx, 0 = connection error
           }
         );

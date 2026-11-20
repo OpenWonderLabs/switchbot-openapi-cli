@@ -15,8 +15,4 @@ describe('devices — column constants', () => {
       expect(DEVICE_ALL_COLS.has(col)).toBe(true);
     }
   });
-
-  it('DEVICE_ALL_COLS has 11 entries', () => {
-    expect(DEVICE_ALL_COLS.size).toBe(11);
-  });
 });

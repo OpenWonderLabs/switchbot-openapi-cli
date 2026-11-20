@@ -108,8 +108,9 @@ The default profile exposes 18 tools; `--tools readonly` exposes 15. Policy, aud
 The MCP server refuses destructive commands (Smart Lock `unlock` or `deadbolt`, Garage Door `open`, etc.) unless the tool call includes `confirm: true`, and the default safety profile still blocks direct destructive execution in favor of the reviewed CLI flow (`plan save` → `plan review` → `plan approve` → `plan execute`). `deadbolt` releases the latch; it does not lock the door. Discover destructive classifications with `switchbot schema export | jq '[.data.types[].commands[] | select(.safetyTier=="destructive")]'`; classification is not permission to execute.
 
 Device type resolution uses `deviceType` or, when absent, `controlType` for
-both cold and warm inventory. A `controlType`-only lock or Solar camera must
-pass the same safety and confirmation gates before any mutation is sent.
+both cold and warm inventory. A frame reported only by `controlType` still
+requires approval for `deleteImage`, including in a cold-cache CLI batch.
+Using HTTP MCP instead of stdio does not change a command's safety tier.
 
 MCP tool failures are structured results: `isError: true` with
 `structuredContent.error`. Inspect that error rather than treating a returned
@@ -271,14 +272,48 @@ output before running.
 ### Validate first, run later
 
 ```bash
-cat plan.json | switchbot plan validate -           # exit 2 on schema error
-cat plan.json | switchbot --dry-run plan run -      # preview — mutations skipped
-cat plan.json | switchbot plan save -               # reviewed destructive path
-switchbot plan review <planId>
-switchbot plan approve <planId>
-switchbot plan execute <planId>
-cat plan.json | switchbot --json plan run -         # machine-readable outcome
+switchbot plan validate plan.json                  # exit 2 on schema error
+switchbot --dry-run plan run plan.json              # preview; no mutations
+switchbot --json plan run plan.json                 # non-destructive plans only by default
 ```
+
+### Reviewing an Art Frame deletion
+
+For **AI Art Frame** or **AI Art Frame 2** (alias **AI Art Frame Luma**),
+save the following as `delete-image.json`, substituting the verified frame
+ID. `oldest`, `newest`, and `random` select one eligible image from the cloud
+album, including images not downloaded to the frame. The displayed image is
+never eligible. Deletion cannot be undone.
+
+```json
+{
+  "version": "1.0",
+  "steps": [
+    { "type": "command", "deviceId": "FRAME_ID", "command": "deleteImage", "parameter": "oldest" }
+  ]
+}
+```
+
+```bash
+switchbot plan save delete-image.json              # note the returned plan ID; no deletion
+switchbot plan review <planId>                     # check the account, target, and selection
+```
+
+Stop here unless the user approves that exact deletion. After approval, use
+the same profile or `--config` to run `switchbot plan approve <planId>` and
+then `switchbot --json plan execute <planId>` **once**.
+Read `.data.results[].result`: `deletedImageIndex: 0` means nothing was
+deleted; `remainingCount: 1` can mean only the displayed image remains, and
+`remainingCount: 0` means the album is empty. Cloud success does not mean
+the frame has finished. If the displayed image cannot be identified, the
+command fails rather than deleting it.
+
+Do not put this command in a rule, `never_confirm`, or a history replay.
+The client does not automatically retry deletion, even on HTTP 429. After a
+timeout or ambiguous outcome, inspect the album before proposing a new plan.
+MCP `plan_run` is not a substitute for approval: `yes: true` alone cannot
+authorize direct execution. When execution is permitted, its command step
+also returns the cloud body at `structuredContent.results[].result`.
 
 ### Run semantics
 
@@ -412,7 +447,16 @@ Each command entry carries:
 
 ### Model-specific boundaries
 
-The following model names and capabilities are available starting in CLI 3.10.0.
+**Unreleased models** (after CLI 3.10.0):
+
+- For **Plug Mini (IT)** and **Outdoor Plug (EU)**, use `get_device_status` for `switchStatus` (0 off, 1 on), `power` (W), `electricCurrent` (mA), `voltage` (V), and daily `usedElectricity` (W·min). Their separate `changeReport` events expose `online`, `overTemperature`, `overload`, and `switchStatus`, not metering samples.
+- **Hub 4** is read-only. Use status for `moveDetected` and webhook `detectionState` for motion events. **Vision Doorbell** is also read-only (`version`, `battery`, `online`), with no documented webhook. `list_devices` may report `lockDeviceId` as a string or `null`, or omit it. It is inventory metadata, not a doorbell command target. Do not offer Video Doorbell's motion-detection controls.
+- **Robot Vacuum Cleaner S30** supports `startClean`, `pause`, `dock`, `setVolume`, `selfClean`, and `changeParam` (no `refill`). Use `sweep` or `sweep_mop` for `startClean`. For `selfClean` use numeric mode 1 (wash mop), 2 (start drying), 3 (stop drying), or 4 (empty dustbin). Its webhook reports only changed fields: a missing battery value is not zero.
+- **AI Art Frame 2** is canonical in discovery and webhook metadata. **AI Art Frame Luma** resolves to it for compatibility; it is not a third frame or a second documented webhook identity. Both frame models support [reviewed deletion](#reviewing-an-art-frame-deletion).
+
+See the [pinned protocol notes](./openapi-alignment-ambiguities.md) for the upstream evidence and unresolved limits.
+
+**Models first supported in CLI 3.10.0:**
 
 The catalog recognizes the model names RGBICWW Light Bars, Smart Lock Ultra
 Max, Curtain 4, Robot Vacuum Cleaner K11 Plus Pro, AI Art Frame Luma, Outdoor
@@ -423,7 +467,7 @@ similarly named models can differ or share an alias.
 - Light Bars use object parameters; `setLightEffect` takes `{ "effectId": 0 }`
   through `{ "effectId": 25 }`.
 - K11+ Pro requires at least one valid `changeParam` property. Curtain 4 uses
-  the normal curtain position tuple. Art Frame Luma accepts the established
+  the normal curtain position tuple. AI Art Frame 2 accepts the established
   one-source upload object (`imageUrl` or `imageBase64`, never both).
 - Outdoor Pan/Tilt Cam 3K is status-only. For both new cameras, `latestImage`
   is an optional object whose `expireAt` is Unix seconds; do not download its

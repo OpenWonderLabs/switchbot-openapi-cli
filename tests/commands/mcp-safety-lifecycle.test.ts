@@ -183,10 +183,12 @@ describe('MCP resolved device type safety', () => {
   });
 
   it.each([
-    ['Solar Pan/Tilt Cam 2K', 'controlType', 'disableMotionDetection'],
-    ['Smart Lock Ultra Max', 'controlType', 'Unlock'],
-    ['Smart Lock Ultra Max', 'deviceType', 'UNLOCK'],
-  ])('blocks %s via %s before and after warming the cache', async (deviceType, typeField, command) => {
+    ['Solar Pan/Tilt Cam 2K', 'controlType', 'disableMotionDetection', undefined],
+    ['Smart Lock Ultra Max', 'controlType', 'Unlock', undefined],
+    ['Smart Lock Ultra Max', 'deviceType', 'UNLOCK', undefined],
+    ['AI Art Frame', 'deviceType', 'DeleteImage', 'oldest'],
+    ['AI Art Frame 2', 'deviceType', 'DELETEIMAGE', 'newest'],
+  ] as const)('blocks %s via %s before and after warming the cache', async (deviceType, typeField, command, parameter) => {
     let gets = 0;
     const posts: unknown[] = [];
     axios.defaults.adapter = async (config) => {
@@ -211,7 +213,7 @@ describe('MCP resolved device type safety', () => {
       for (const cacheState of ['cold', 'warm']) {
         const response = await client.callTool({
           name: 'send_command',
-          arguments: { deviceId: 'TARGET-1', command, confirm: false },
+          arguments: { deviceId: 'TARGET-1', command, parameter, confirm: cacheState === 'warm' },
         });
         expect(response.isError, cacheState).toBe(true);
         expect(response.structuredContent).toMatchObject({
@@ -220,12 +222,18 @@ describe('MCP resolved device type safety', () => {
       }
       const preview = await client.callTool({
         name: 'send_command',
-        arguments: { deviceId: 'TARGET-1', command, dryRun: true },
+        arguments: { deviceId: 'TARGET-1', command, parameter, dryRun: true },
       });
       expect(preview.structuredContent).toMatchObject({
         ok: true,
         riskProfile: { riskLevel: 'high', requiresConfirmation: true },
       });
+      if (parameter !== undefined) {
+        expect(preview.structuredContent).toMatchObject({
+          wouldSend: { command: 'deleteImage', parameter },
+          riskProfile: { idempotencyHint: 'non-idempotent', recommendedMode: 'review-before-execute' },
+        });
+      }
       expect(gets).toBe(1);
       expect(posts).toEqual([]);
     } finally {

@@ -4,7 +4,7 @@ import type { ErrorObject } from 'ajv';
 import fs from 'node:fs';
 import readline from 'node:readline';
 import { randomUUID } from 'node:crypto';
-import { printJson, isJsonMode, handleError, exitWithError, UsageError } from '../utils/output.js';
+import { printJson, printKeyValue, isJsonMode, handleError, exitWithError, UsageError } from '../utils/output.js';
 import { executeCommand } from '../lib/devices.js';
 import { executeScene } from '../lib/scenes.js';
 import { getCachedDevice } from '../devices/cache.js';
@@ -267,7 +267,7 @@ async function promptApproval(stepIdx: number, command: string, deviceId: string
 interface PlanRunResult {
   plan: Plan;
   results: Array<
-    | { step: number; type: 'command'; deviceId: string; command: string; status: 'ok' | 'error' | 'skipped' | 'dry-run'; error?: string; decision?: 'approved' | 'rejected' }
+    | { step: number; type: 'command'; deviceId: string; command: string; status: 'ok' | 'error' | 'skipped' | 'dry-run'; result?: unknown; error?: string; decision?: 'approved' | 'rejected' }
     | { step: number; type: 'scene'; sceneId: string; status: 'ok' | 'error' | 'skipped' | 'dry-run'; error?: string }
     | { step: number; type: 'wait'; ms: number; status: 'ok' | 'skipped' | 'dry-run' }
   >;
@@ -357,10 +357,15 @@ async function executePlanSteps(
       continue;
     }
     try {
-      await executeCommand(resolvedDeviceId, prepared.command, prepared.parameter, commandType, undefined, { planId });
-      out.results.push({ step: idx, type: 'command', deviceId: resolvedDeviceId, command: step.command, status: 'ok', ...(approvalDecision ? { decision: approvalDecision } : {}) });
+      const result = await executeCommand(resolvedDeviceId, prepared.command, prepared.parameter, commandType, undefined, { planId });
+      out.results.push({ step: idx, type: 'command', deviceId: resolvedDeviceId, command: prepared.command, status: 'ok', result, ...(approvalDecision ? { decision: approvalDecision } : {}) });
       out.summary.ok++;
-      if (!isJsonMode()) console.log(`  ${idx}. ✓ ${step.command} on ${resolvedDeviceId}`);
+      if (!isJsonMode()) {
+        console.log(`  ${idx}. ✓ ${prepared.command} on ${resolvedDeviceId}`);
+        if (result && typeof result === 'object' && Object.keys(result).length > 0) {
+          printKeyValue(result as Record<string, unknown>);
+        }
+      }
     } catch (err) {
       if (err instanceof Error && err.name === 'DryRunSignal') {
         out.results.push({ step: idx, type: 'command', deviceId: resolvedDeviceId, command: step.command, status: 'dry-run' });

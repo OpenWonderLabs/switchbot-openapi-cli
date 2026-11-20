@@ -278,6 +278,21 @@ export const RESOURCE_CATALOG: ResourceCatalog = {
           ],
         },
       },
+      ...['Plug Mini (IT)', 'Outdoor Plug (EU)'].map((deviceType): WebhookEventSpec => ({
+        eventType: 'changeReport',
+        eventVersion: '1',
+        devicePattern: deviceType,
+        context: {
+          deviceType,
+          fields: [
+            ...COMMON_WEBHOOK_CONTEXT_FIELDS,
+            { name: 'online', type: 'boolean', description: 'Whether the plug is connected.' },
+            { name: 'overTemperature', type: 'boolean', description: 'Whether the working temperature exceeds 100 °C.' },
+            { name: 'overload', type: 'boolean', description: 'Whether the plug is overloaded.' },
+            { name: 'switchStatus', type: 'number', description: 'Switch state: 0 off, 1 on.' },
+          ],
+        },
+      })),
       {
         eventType: 'changeReport',
         eventVersion: '1',
@@ -461,6 +476,22 @@ export const RESOURCE_CATALOG: ResourceCatalog = {
       {
         eventType: 'changeReport',
         eventVersion: '1',
+        devicePattern: 'Robot Vacuum Cleaner S30',
+        context: {
+          deviceType: 'Robot Vacuum Cleaner S30',
+          fields: [
+            ...COMMON_WEBHOOK_CONTEXT_FIELDS,
+            { name: 'workingStatus', type: 'string', description: 'Current working status; included only when changed.' },
+            { name: 'onlineStatus', type: 'string', description: 'Connection status (online/offline); included only when changed.' },
+            { name: 'battery', type: 'number', description: 'Battery level (0–100%); included only when changed.' },
+            { name: 'waterBaseBattery', type: 'number', description: 'Water base battery level (0–100%); included only when changed.' },
+            { name: 'taskType', type: 'string', description: 'Current task; included only when changed.' },
+          ],
+        },
+      },
+      {
+        eventType: 'changeReport',
+        eventVersion: '1',
         devicePattern: 'Water Leak Detector',
         context: {
           deviceType: 'Water Detector',
@@ -486,12 +517,12 @@ export const RESOURCE_CATALOG: ResourceCatalog = {
           ],
         },
       },
-      {
+      ...['Hub 3', 'Hub 4'].map((deviceType): WebhookEventSpec => ({
         eventType: 'changeReport',
         eventVersion: '1',
-        devicePattern: 'Hub 3',
+        devicePattern: deviceType,
         context: {
-          deviceType: 'Hub 3',
+          deviceType,
           fields: [
             ...COMMON_WEBHOOK_CONTEXT_FIELDS,
             { name: 'detectionState', type: 'string', description: 'Motion detection state.' },
@@ -501,7 +532,7 @@ export const RESOURCE_CATALOG: ResourceCatalog = {
             { name: 'lightLevel', type: 'number', description: 'Ambient illuminance level.' },
           ],
         },
-      },
+      })),
       {
         eventType: 'changeReport',
         eventVersion: '1',
@@ -572,7 +603,7 @@ export const RESOURCE_CATALOG: ResourceCatalog = {
         eventVersion: '1',
         devicePattern: 'AI Art Frame 2',
         context: {
-          deviceType: 'AI Art Frame Luma',
+          deviceType: 'AI Art Frame 2',
           fields: [
             ...COMMON_WEBHOOK_CONTEXT_FIELDS,
             { name: 'displayMode', type: 'number', description: 'Display mode: 0 = Static image; 1 = Slideshow.' },

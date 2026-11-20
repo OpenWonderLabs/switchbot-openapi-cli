@@ -124,30 +124,23 @@ async function resolveTargetIds(options: {
     );
   }
 
-  const typeMap = getCachedTypeMap(explicit);
-
-  let ids: string[];
   if (hasFilter) {
     const body = await fetchDeviceList(getClient?.());
     const hubLoc = buildHubLocationMap(body.deviceList);
-    for (const d of body.deviceList) if (d.deviceType) typeMap.set(d.deviceId, d.deviceType);
-    for (const ir of body.infraredRemoteList) typeMap.set(ir.deviceId, ir.remoteType);
     const clauses = parseFilter(options.filter);
     const matched = applyFilter(clauses, body.deviceList, body.infraredRemoteList, hubLoc);
     const filteredIds = new Set(matched.map((m) => m.deviceId));
-    ids =
+    const ids =
       explicit.length > 0 ? explicit.filter((id) => filteredIds.has(id)) : [...filteredIds];
-  } else {
-    ids = explicit;
-    const missingTypeInfo = ids.some((id) => !typeMap.has(id));
-    if (missingTypeInfo) {
-      const body = await fetchDeviceList(getClient?.());
-      for (const d of body.deviceList) if (d.deviceType) typeMap.set(d.deviceId, d.deviceType);
-      for (const ir of body.infraredRemoteList) typeMap.set(ir.deviceId, ir.remoteType);
-    }
+    return { ids, typeMap: getCachedTypeMap(ids) };
   }
 
-  return { ids, typeMap };
+  const typeMap = getCachedTypeMap(explicit);
+  if (explicit.every((id) => typeMap.has(id))) return { ids: explicit, typeMap };
+
+  // Use the refreshed cache's effective types (deviceType or controlType), as preflight does.
+  await fetchDeviceList(getClient?.());
+  return { ids: explicit, typeMap: getCachedTypeMap(explicit) };
 }
 
 export function registerBatchCommand(devices: Command): void {
@@ -321,7 +314,7 @@ Examples:
         }
         cmd = preflight.command;
         const targetParameters = new Map(
-          preflight.targets.map((target) => [target.deviceId, parseParameterForWire(target.parameter)])
+          preflight.targets.map((target) => [target.deviceId, parseParameterForWire(target.parameter, resolved.typeMap.get(target.deviceId), cmd)])
         );
         const dryRun = isDryRun();
 

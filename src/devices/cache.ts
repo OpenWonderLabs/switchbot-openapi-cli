@@ -12,6 +12,7 @@ export interface CachedDevice {
   name: string;
   category: 'physical' | 'ir';
   hubDeviceId?: string;
+  lockDeviceId?: string | null;
   enableCloudService?: boolean;
   roomID?: string;
   roomName?: string | null;
@@ -30,6 +31,7 @@ export interface DeviceListBodyShape {
     deviceName: string;
     deviceType?: string;
     hubDeviceId?: string;
+    lockDeviceId?: string | null;
     enableCloudService?: boolean;
     roomID?: string;
     roomName?: string | null;
@@ -139,6 +141,7 @@ export function updateCacheFromDeviceList(body: DeviceListBodyShape, scope = rea
       name: d.deviceName,
       category: 'physical',
       hubDeviceId: d.hubDeviceId,
+      ...(d.lockDeviceId !== undefined ? { lockDeviceId: d.lockDeviceId } : {}),
       enableCloudService: d.enableCloudService,
       roomID: d.roomID,
       roomName: d.roomName,

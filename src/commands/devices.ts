@@ -125,6 +125,7 @@ Pass --wide for the full operator view: + controlType, family, roomID, room, hub
                  Hub; — when unassigned/unknown)
   hub          - "—" when the device is its own hub or hubDeviceId is empty
   cloud        - ✓/✗: whether cloud service is enabled (— for IR remotes)
+  lockDeviceId - bound Lock ID for Vision Doorbell; request with --fields
 
 controlType, family/room, and roomID require the 'src: OpenClaw' header, which
 this CLI always sends. (IR family/room inheritance is computed client-side for
@@ -225,6 +226,7 @@ Cache note:
             family: d.familyName || '—', roomID: d.roomID || '—', room: d.roomName || '—',
             hub: !d.hubDeviceId || d.hubDeviceId === '000000000000' ? '—' : d.hubDeviceId,
             cloud: d.enableCloudService ?? null,
+            lockDeviceId: d.lockDeviceId,
             alias: deviceMeta.devices[d.deviceId]?.alias ?? '—',
           });
           const normIr = (d: typeof infraredRemoteList[0]): Record<string, unknown> => {
@@ -276,13 +278,14 @@ Cache note:
         const narrowHeaders = ['deviceId', 'deviceName', 'type', 'category', 'family', 'room'];
         const wideHeaders = ['deviceId', 'deviceName', 'type', 'category', 'controlType', 'family', 'roomID', 'room', 'hub', 'cloud', 'alias'];
         const userFields = resolveFields();
-        const headers = userFields ? wideHeaders : (options.wide ? wideHeaders : narrowHeaders);
+        const includeLockId = userFields?.includes('lockDeviceId');
+        if (includeLockId) wideHeaders.push('lockDeviceId');
         const rows: (string | boolean | null)[][] = [];
 
         for (const d of deviceList) {
           if (!options.showHidden && deviceMeta.devices[d.deviceId]?.hidden) continue;
           if (!matchesFilter({ deviceId: d.deviceId, type: d.deviceType || '', name: d.deviceName, category: 'physical', room: d.roomName || '', controlType: d.controlType || '', family: d.familyName || '', hub: d.hubDeviceId || '', roomID: d.roomID || '', cloud: String(d.enableCloudService), alias: deviceMeta.devices[d.deviceId]?.alias || '' })) continue;
-          rows.push([
+          const row: (string | boolean | null)[] = [
             d.deviceId,
             d.deviceName,
             d.deviceType || d.controlType || 'Unknown Device',
@@ -294,14 +297,16 @@ Cache note:
             !d.hubDeviceId || d.hubDeviceId === '000000000000' ? '—' : d.hubDeviceId,
             d.enableCloudService,
             deviceMeta.devices[d.deviceId]?.alias ?? '—',
-          ]);
+          ];
+          if (includeLockId) row.push(d.lockDeviceId ?? null);
+          rows.push(row);
         }
 
         for (const d of infraredRemoteList) {
           if (!options.showHidden && deviceMeta.devices[d.deviceId]?.hidden) continue;
           const inherited = hubLocation.get(d.hubDeviceId);
           if (!matchesFilter({ deviceId: d.deviceId, type: d.remoteType, name: d.deviceName, category: 'ir', room: inherited?.room || '', controlType: d.controlType || '', family: inherited?.family || '', hub: d.hubDeviceId || '', roomID: inherited?.roomID || '', cloud: '', alias: deviceMeta.devices[d.deviceId]?.alias || '' })) continue;
-          rows.push([
+          const row: (string | boolean | null)[] = [
             d.deviceId,
             d.deviceName,
             d.remoteType,
@@ -313,7 +318,9 @@ Cache note:
             d.hubDeviceId,
             null,
             deviceMeta.devices[d.deviceId]?.alias ?? '—',
-          ]);
+          ];
+          if (includeLockId) row.push(null);
+          rows.push(row);
         }
 
         if (rows.length === 0 && fmt === 'table') {
@@ -521,7 +528,7 @@ Examples:
     .option('--yes', 'Confirm a destructive command in an explicit dev profile. --dry-run is always allowed without --yes.')
     .option('--explain', 'Print a human-readable summary of what this command would do (risk level, device type, idempotency) then exit without executing.')
     .option('--allow-unknown-device', 'Allow targeting a deviceId that is not in the local cache. By default unknown IDs exit 2 so --dry-run is a reliable pre-flight gate; use this flag for scripted pass-through.')
-    .option('--skip-param-validation', 'Skip client-side parameter validation (escape hatch — prefer fixing the argument over using this).')
+    .option('--skip-param-validation', 'Skip client-side parameter validation except for the mandatory image-deletion selector.')
     .option('--idempotency-key <key>', 'Client-supplied key to dedupe retries. process-local 60s window; cache is per Node process (MCP session, batch run, plan run). Independent CLI invocations do not share cache.', stringArg('--idempotency-key'))
     .addHelpText('after', `
 ────────────────────────────────────────────────────────────────────────
@@ -609,6 +616,13 @@ Examples:
         _deviceId = deviceId;
         if (!getCachedDevice(deviceId)) {
           if (options.allowUnknownDevice) {
+            if (cmd.toLowerCase() === 'deleteimage') {
+              exitWithError({
+                code: 2, kind: 'guard', message: 'Image deletion requires a verified target.',
+                hint: 'Refresh the device list and submit a reviewed plan for the frame.',
+                context: { deviceId, command: cmd },
+              });
+            }
             console.error(
               `Note: device ${deviceId} is not in the local cache — run 'switchbot devices list' first to enable command validation. (--allow-unknown-device is set, continuing.)`,
             );
@@ -667,7 +681,7 @@ Examples:
 
         // Raw-parameter validation (runs for known (deviceType, command) pairs only).
         const cachedForParam = getCachedDevice(deviceId);
-        if (cachedForParam && options.type === 'command' && !options.skipParamValidation) {
+        if (cachedForParam && options.type === 'command' && (!options.skipParamValidation || cmd === 'deleteImage')) {
           const paramCheck = validateParameter(cachedForParam.type, cmd, parameter);
           if (!paramCheck.ok) {
             exitWithError({
@@ -749,9 +763,7 @@ Examples:
           console.error(`Note: --yes has no effect; "${cmd}" is not a destructive command.`);
         }
 
-        // API docs treat scalar command parameters as strings. Only JSON
-        // object/array parameter shapes are parsed before dispatch.
-        const parsedParam = parseParameterForWire(parameter);
+        const parsedParam = parseParameterForWire(parameter, cachedForParam?.type, cmd);
         // Capture for DryRunSignal catch branch (which runs after executeCommand throws).
         _cmd = cmd;
         _parsedParam = parsedParam;

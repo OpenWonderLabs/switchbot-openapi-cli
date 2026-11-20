@@ -131,6 +131,44 @@ describe('history command', () => {
       expect(res.stderr.join('\n')).toMatch(/Invalid index/);
     });
 
+    it.each(['AI Art Frame', 'AI Art Frame 2', undefined])('does not replay an image deletion for %s from an earlier approval', async (deviceType) => {
+      const deviceId = 'REPLAY-FRAME';
+      seed([{ t: 't1', kind: 'command', deviceId, command: 'DeLeTeImAgE', parameter: 'oldest', commandType: 'command', dryRun: false, result: 'ok', planId: 'prior-plan' }]);
+      apiMock.__instance.get.mockResolvedValue({
+        data: { body: { deviceList: deviceType ? [{ deviceId, deviceName: 'Gallery', deviceType }] : [], infraredRemoteList: [] } },
+      });
+      apiMock.__instance.post.mockResolvedValue({ data: { body: {} } });
+      const res = await runCli(registerHistoryCommand, [
+        '--config', path.join(tmp, 'config.json'), '--json', 'history', 'replay', '1', '--file', auditFile,
+      ]);
+      expect(res.exitCode).toBe(2);
+      expect(JSON.parse(res.stdout.join('\n')).error.kind).toBe('guard');
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
+    });
+
+    it.each(['frame', 'unknown', 'ir'])('requires a confirmed IR target to replay a custom deletion-named button (%s)', async (target) => {
+      const deviceId = 'REPLAY-BUTTON';
+      seed([{ t: 't1', kind: 'command', deviceId, command: 'deleteImage', parameter: 'oldest', commandType: 'customize', dryRun: false }]);
+      apiMock.__instance.get.mockResolvedValue({ data: { body: {
+        deviceList: target === 'frame' ? [{ deviceId, deviceName: 'Gallery', deviceType: 'AI Art Frame' }] : [],
+        infraredRemoteList: target === 'ir' ? [{ deviceId, deviceName: 'Remote', remoteType: 'Others' }] : [],
+      } } });
+      apiMock.__instance.post.mockResolvedValue({ data: { body: {} } });
+      const res = await runCli(registerHistoryCommand, [
+        '--config', path.join(tmp, 'config.json'), '--json', 'history', 'replay', '1', '--file', auditFile,
+      ]);
+      if (target === 'ir') {
+        expect(res.exitCode).toBeNull();
+        expect(apiMock.__instance.post).toHaveBeenCalledWith(`/v1.1/devices/${deviceId}/commands`, {
+          command: 'deleteImage', commandType: 'customize', parameter: 'oldest',
+        });
+      } else {
+        expect(res.exitCode).toBe(2);
+        expect(JSON.parse(res.stdout.join('\n')).error.kind).toBe('guard');
+        expect(apiMock.__instance.post).not.toHaveBeenCalled();
+      }
+    });
+
     it('re-runs the command at the requested 1-based index', async () => {
       seed([
         { t: 't1', kind: 'command', deviceId: 'BOT1', command: 'turnOn', parameter: undefined, commandType: 'command', dryRun: false, result: 'ok' },

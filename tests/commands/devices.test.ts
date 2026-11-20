@@ -1,3 +1,6 @@
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { createSwitchBotMcpServer } from '../../src/commands/mcp.js';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -144,6 +147,61 @@ describe('devices command', () => {
   // list
   // =====================================================================
   describe('list', () => {
+    it('preserves Vision Doorbell lock bindings in cold and warm JSON inventory', async () => {
+      const doorbell = { deviceName: 'Doorbell', deviceType: 'Vision Doorbell', hubDeviceId: '000000000000', enableCloudService: true };
+      const deviceList = [
+        { ...doorbell, deviceId: 'A', lockDeviceId: '112233445566' },
+        { ...doorbell, deviceId: 'B', lockDeviceId: null },
+        { ...doorbell, deviceId: 'C' },
+      ];
+      apiMock.__instance.get.mockResolvedValueOnce({ data: { body: { deviceList, infraredRemoteList: [] } } });
+      for (const cacheState of ['cold', 'warm']) {
+        resetListCache();
+        const result = await runCli(registerDevicesCommand, ['--cache', '5m', 'devices', 'list', '--json']);
+        expect(JSON.parse(result.stdout.join('\n')).data.deviceList, cacheState).toStrictEqual(deviceList);
+      }
+      expect(apiMock.__instance.get).toHaveBeenCalledTimes(1);
+
+      const server = createSwitchBotMcpServer();
+      const client = new Client({ name: 'inventory-test', version: '1' });
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      vi.stubEnv('SWITCHBOT_TOKEN', 'offline-test');
+      vi.stubEnv('SWITCHBOT_SECRET', 'offline-test');
+      try {
+        await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+        const tools = await client.listTools();
+        expect(tools.tools.find(tool => tool.name === 'list_devices')?.outputSchema)
+          .toHaveProperty('properties.deviceList.items.properties.lockDeviceId');
+        const list = await client.callTool({ name: 'list_devices', arguments: {} });
+        expect(list.isError).toBeFalsy();
+        expect(JSON.parse(JSON.stringify(list.structuredContent?.deviceList))).toStrictEqual(deviceList);
+        for (const expected of deviceList) {
+          const description = await client.callTool({ name: 'describe_device', arguments: { deviceId: expected.deviceId } });
+          expect(description.isError).toBeFalsy();
+          expect(description.structuredContent?.device).toHaveProperty('device', expected);
+        }
+        expect(apiMock.__instance.get).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.unstubAllEnvs();
+        await Promise.all([client.close(), server.close()]);
+      }
+    });
+
+    it('selects lockDeviceId in both JSON inventory field projections', async () => {
+      const deviceList = [
+        { deviceId: 'A', deviceName: 'Doorbell', deviceType: 'Vision Doorbell', lockDeviceId: '112233445566' },
+        { deviceId: 'B', deviceName: 'Meter', deviceType: 'Meter' },
+      ];
+      const expected = [{ lockDeviceId: '112233445566' }, { lockDeviceId: null }];
+      apiMock.__instance.get.mockResolvedValueOnce({ data: { body: { deviceList, infraredRemoteList: [] } } });
+      for (const flags of [['--json'], ['--format', 'json']]) {
+        const result = await runCli(registerDevicesCommand, [...flags, '--fields', 'lockDeviceId', 'devices', 'list']);
+        expect(result.exitCode).toBeNull();
+        const { data } = JSON.parse(result.stdout.join('\n'));
+        expect(flags[0] === '--json' ? data.deviceList : data).toEqual(expected);
+      }
+    });
+
     it('renders a table with physical + IR devices in default mode', async () => {
       apiMock.__instance.get.mockResolvedValue({ data: { body: sampleBody } });
       const res = await runCli(registerDevicesCommand, ['devices', 'list']);
@@ -1148,6 +1206,15 @@ describe('devices command', () => {
   // command — generic behavior (parameter parsing, flags, error paths)
   // =====================================================================
   describe('command — generic behavior', () => {
+    it('requires a known target before permitting image deletion', async () => {
+      for (const commandType of ['command', 'customize']) {
+        const res = await runCmd('DeLeTeImAgE', 'oldest', '--type', commandType, '--yes', '--json');
+        expect(res.exitCode).toBe(2);
+        expect(JSON.parse(res.stdout.join('\n')).error.kind).toBe('guard');
+        expect(apiMock.__instance.post).not.toHaveBeenCalled();
+      }
+    });
+
     it('defaults parameter to "default" and commandType to "command" when none given', async () => {
       await runCmd('turnOn');
       expectPost('turnOn', 'default');
@@ -1572,6 +1639,18 @@ describe('devices command', () => {
       await runCmd('selfClean', '3');
       expectPost('selfClean', '3');
     });
+  });
+
+  it('sends S30 dust collection as a number without changing S10 self-clean encoding', async () => {
+    for (const [deviceType, input, wire] of [
+      ['Robot Vacuum Cleaner S30', '4', 4],
+      ['Robot Vacuum Cleaner S10', '3', '3'],
+    ] as const) {
+      updateCacheFromDeviceList({ deviceList: [{ deviceId: DID, deviceName: 'Vacuum', deviceType }], infraredRemoteList: [] });
+      await runCli(registerDevicesCommand, ['devices', 'command', DID, 'selfClean', input]);
+      expectPost('selfClean', wire);
+      apiMock.__instance.post.mockClear();
+    }
   });
 
   describe('device: Battery Circulator Fan / Circulator Fan', () => {

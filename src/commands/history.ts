@@ -4,7 +4,10 @@ import os from 'node:os';
 import { intArg, stringArg } from '../utils/arg-parsers.js';
 import { printJson, isJsonMode, handleError, UsageError, exitWithError } from '../utils/output.js';
 import { readAudit, verifyAudit, type AuditEntry } from '../utils/audit.js';
-import { executeCommand } from '../lib/devices.js';
+import { executeCommand, fetchDeviceList } from '../lib/devices.js';
+import { destructiveExecutionHint } from '../lib/destructive-mode.js';
+import { canonicalDestructiveVerb } from '../rules/destructive.js';
+import { isDryRun } from '../utils/flags.js';
 import {
   queryDeviceHistory,
   queryDeviceHistoryStats,
@@ -79,9 +82,8 @@ Examples:
     .argument('<index>', 'Entry index (1 = oldest; as shown by "history show")')
     .option('--file <path>', `Path to the audit log (default ${DEFAULT_AUDIT})`, stringArg('--file'))
     .addHelpText('after', `
-Dry-run-honouring: pass --dry-run on the parent command to preview without
-sending the actual call. Errors from the recorded entry are NOT replayed —
-replay always attempts the command fresh.
+Pass --dry-run to preview without sending the actual call. Replaying an audit
+entry does not reuse its approval: destructive commands require a reviewed plan.
 
 Examples:
   $ switchbot history replay 3
@@ -105,6 +107,21 @@ Examples:
           kind: 'usage',
           message: `Entry ${idx} is not a command (kind=${entry.kind}).`,
         });
+      }
+      if (!isDryRun() && canonicalDestructiveVerb(entry.command)) {
+        // A custom IR button may share a name with a built-in command. The
+        // audit entry alone cannot establish that its target is an IR remote.
+        const isCustomButton = entry.commandType === 'customize' &&
+          (await fetchDeviceList().catch(handleError)).infraredRemoteList.some((ir) => ir.deviceId === entry.deviceId);
+        if (!isCustomButton) {
+          exitWithError({
+            code: 2,
+            kind: 'guard',
+            message: 'History replay cannot authorize a destructive command.',
+            hint: destructiveExecutionHint(),
+            context: { deviceId: entry.deviceId, command: entry.command, requiredWorkflow: 'plan-approval' },
+          });
+        }
       }
       try {
         const result = await executeCommand(

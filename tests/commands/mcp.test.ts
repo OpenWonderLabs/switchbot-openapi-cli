@@ -1442,6 +1442,27 @@ describe('mcp server', () => {
       }
     });
 
+    it('plan_run returns the cloud counts from an authorized frame deletion', async () => {
+      cacheMock.map.set('FRAME', { type: 'AI Art Frame', name: 'Frame', category: 'physical' });
+      const body = { deletedImageIndex: 7, remainingCount: 2 };
+      apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body } });
+      const { client, server } = await pair('default');
+      vi.stubEnv('SWITCHBOT_ALLOW_DIRECT_DESTRUCTIVE', '1');
+      try {
+        const result = await client.callTool({ name: 'plan_run', arguments: {
+          yes: true, plan: { version: '1.0', steps: [
+            { type: 'command', deviceId: 'FRAME', command: 'deleteImage', parameter: 'random' },
+          ] },
+        } });
+        expect(result.isError).toBeFalsy();
+        expect(result.structuredContent?.results).toMatchObject([{ status: 'ok', result: body }]);
+      } finally {
+        vi.unstubAllEnvs();
+        await client.close();
+        await server.close();
+      }
+    });
+
     it('plan_run rejects direct destructive execution when yes=true in the default profile', async () => {
       cacheMock.map.set('LOCK1', { type: 'Smart Lock', name: 'Front Door', category: 'physical' });
       const { client } = await pair();

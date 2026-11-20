@@ -137,3 +137,20 @@ describe('AI Art Frame upload plan preflight', () => {
     });
   });
 });
+
+describe('Art Frame image deletion preflight', () => {
+  it.each(['AI Art Frame', 'AI Art Frame 2'])('requires an explicit deletion selector for %s', async (deviceType) => {
+    const deviceId = 'GALLERY';
+    updateCacheFromDeviceList({ deviceList: [{ deviceId, deviceName: 'Gallery', deviceType }], infraredRemoteList: [] });
+    const command = { type: 'command', deviceId, command: 'DeleteImage' } as const;
+
+    for (const parameter of ['random', 'newest', 'oldest']) {
+      await expect(preparePlanTargets([{ ...command, parameter }])).resolves.toMatchObject({
+        ok: true, commands: [{ command: 'deleteImage', parameter, destructive: true }],
+      });
+    }
+    for (const parameter of [undefined, '', 'default', 'Newest', 'all', 1, ['oldest'], { selector: 'oldest' }]) {
+      await expect(preparePlanTargets([{ ...command, parameter }])).resolves.toMatchObject({ ok: false, deviceId });
+    }
+  });
+});

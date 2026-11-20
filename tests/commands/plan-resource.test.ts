@@ -80,6 +80,7 @@ const flagsMock = vi.hoisted(() => ({
   getCacheMode: vi.fn(() => ({ listTtlMs: 0, statusTtlMs: 0 })),
   getFormat: vi.fn(() => undefined),
   getFields: vi.fn(() => undefined),
+  getTableStyle: vi.fn(() => 'simple'),
 }));
 vi.mock('../../src/utils/flags.js', () => flagsMock);
 
@@ -190,6 +191,25 @@ describe('plan resource model', () => {
       expect(updated?.status).toBe('executed');
       expect(updated?.executedAt).toBeDefined();
       expect(updated?.failedAt).toBeUndefined();
+    });
+
+    it('returns cloud deletion counts including zero from an approved Art Frame plan', async () => {
+      cacheMock.map.set('FRAME', { type: 'AI Art Frame 2', name: 'Gallery', category: 'physical' });
+      const record = makeApproved({ version: '1.0', steps: [{ type: 'command', deviceId: 'FRAME', command: 'deleteImage', parameter: 'oldest' }] });
+      const body = { deletedImageIndex: 0, remainingCount: 1 };
+      apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body } });
+      const res = await runCli(registerPlanCommand, ['--json', 'plan', 'execute', record.planId]);
+      expect(apiMock.__instance.post).toHaveBeenCalledOnce();
+      expect(JSON.parse(res.stdout.join('\n')).data.results).toMatchObject([{ status: 'ok', result: body }]);
+    });
+
+    it('shows that no image was deleted in human-readable approved plan output', async () => {
+      cacheMock.map.set('FRAME', { type: 'AI Art Frame', name: 'Gallery', category: 'physical' });
+      const record = makeApproved({ version: '1.0', steps: [{ type: 'command', deviceId: 'FRAME', command: 'deleteImage', parameter: 'random' }] });
+      apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body: { deletedImageIndex: 0, remainingCount: 0 } } });
+      const res = await runCli(registerPlanCommand, ['plan', 'execute', record.planId]);
+      expect(res.stdout.join('\n')).toMatch(/deletedImageIndex\W+0\b/);
+      expect(res.stdout.join('\n')).toMatch(/remainingCount\W+0\b/);
     });
 
     it('writes audit entries tagged with the approved planId', async () => {

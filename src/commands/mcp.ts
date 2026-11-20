@@ -390,7 +390,7 @@ async function runDeviceHistoryAggregate(args: {
 }
 
 type McpPlanStepResult =
-  | { step: number; type: 'command'; deviceId: string; command: string; status: 'ok' | 'error' | 'skipped' | 'dry-run'; error?: string }
+  | { step: number; type: 'command'; deviceId: string; command: string; status: 'ok' | 'error' | 'skipped' | 'dry-run'; result?: unknown; error?: string }
   | { step: number; type: 'scene'; sceneId: string; status: 'ok' | 'error' | 'dry-run'; error?: string }
   | { step: number; type: 'wait'; ms: number; status: 'ok' | 'dry-run' };
 
@@ -483,6 +483,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
         deviceType: z.string().optional(),
         enableCloudService: z.boolean(),
         hubDeviceId: z.string().nullable().optional(),
+        lockDeviceId: z.string().nullable().optional(),
         roomID: z.string().nullable().optional(),
         roomName: z.string().nullable().optional(),
         familyName: z.string().optional(),
@@ -923,7 +924,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
           });
         }
         if (pv.normalized !== undefined) {
-          effectiveParameter = parseParameterForWire(pv.normalized);
+          effectiveParameter = parseParameterForWire(pv.normalized, cached.type, effectiveCommand);
         }
       }
       const wouldSend = {
@@ -1030,7 +1031,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
         });
       }
       if (pv.normalized !== undefined) {
-        effectiveParameter = parseParameterForWire(pv.normalized);
+        effectiveParameter = parseParameterForWire(pv.normalized, typeName, effectiveCommand);
       }
     }
   
@@ -1231,7 +1232,11 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
     }).strict(),
     outputSchema: {
       device: z.object({
-        device: z.object({ deviceId: z.string(), deviceName: z.string() }).passthrough(),
+        device: z.object({
+          deviceId: z.string(),
+          deviceName: z.string(),
+          lockDeviceId: z.string().nullable().optional(),
+        }).passthrough(),
         isPhysical: z.boolean(),
         typeName: z.string(),
         controlType: z.string().nullable(),
@@ -1282,6 +1287,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
         deviceId: z.string(),
         deviceName: z.string(),
         deviceType: z.string().optional(),
+        lockDeviceId: z.string().nullable().optional(),
       }).passthrough()).describe('All physical devices'),
       infraredRemotes: z.array(z.object({
         deviceId: z.string(),
@@ -2004,6 +2010,7 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
           deviceId: z.string(),
           command: z.string(),
           status: z.enum(['ok', 'error', 'skipped', 'dry-run']),
+          result: z.unknown().optional().describe('Cloud response body for an executed command; not a device completion receipt.'),
           error: z.string().optional(),
         }).passthrough(),
         z.object({
@@ -2133,13 +2140,14 @@ Tool profile: ${profileName} (${allowedTools.size} tools loaded).${profileName !
           continue;
         }
   
-        await executeCommand(target.deviceId, target.command, target.parameter, commandType);
+        const result = await executeCommand(target.deviceId, target.command, target.parameter, commandType);
         out.results.push({
           step: idx,
           type: 'command',
           deviceId: resolvedDeviceId,
           command: target.command,
           status: 'ok',
+          result,
         });
         out.summary.ok++;
       } catch (err) {

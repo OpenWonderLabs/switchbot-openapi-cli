@@ -283,7 +283,7 @@ describe('policy validator (v0.2)', () => {
     expect(result.schemaVersion).toBe('0.2');
   });
 
-  it.each(['deadbolt', 'nightLatchUnlock', 'createKey', 'deleteKey'])('rejects %s in never_confirm', (verb) => {
+  it.each(['deadbolt', 'nightLatchUnlock', 'createKey', 'deleteKey', 'deleteImage', 'DeLeTeImAgE'])('rejects %s in never_confirm', (verb) => {
     const loaded = writeAndLoad(
       tmpDir,
       [
@@ -402,6 +402,7 @@ describe('policy validator (v0.2)', () => {
     'devices command <id> nightLatchUnlock',
     'devices command <id> createKey',
     'devices command <id> deleteKey',
+    'devices command <id> DeLeTeImAgE oldest',
     'devices command <id> factoryReset',
     'webhooks delete <id>',
     'scenes delete <id>',

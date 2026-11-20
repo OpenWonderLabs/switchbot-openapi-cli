@@ -595,6 +595,26 @@ describe('validateParameter — Vacuum setVolume', () => {
   });
 });
 
+it('enforces S30 cleaning contracts without importing the S10 cycle ceiling', () => {
+  const type = 'Robot Vacuum Cleaner S30';
+  for (const [command, parameter] of [
+    ['startClean', '{"action":"mop"}'],
+    ['startClean', '{"action":"sweep_mop","param":{"waterLevel":3}}'],
+    ['changeParam', '{"fanLevel":5}'],
+    ['changeParam', '{"times":1.5}'],
+    ['setVolume', '101'],
+    ['selfClean', '5'],
+  ]) {
+    expect(validateParameter(type, command, parameter).ok, `${command}: ${parameter}`).toBe(false);
+  }
+  for (const [command, parameter] of [
+    ['startClean', '{"action":"sweep_mop","param":{"waterLevel":2,"times":2640000}}'],
+    ['changeParam', '{"fanLevel":4,"waterLevel":1,"times":2640000}'],
+  ]) {
+    expect(validateParameter(type, command, parameter)).toEqual({ ok: true, normalized: parameter });
+  }
+});
+
 describe('validateParameter — S10 selfClean', () => {
   it('accepts 1, 2, 3', () => {
     for (const v of ['1', '2', '3']) {
