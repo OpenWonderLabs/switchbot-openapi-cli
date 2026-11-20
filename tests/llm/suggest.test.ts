@@ -86,7 +86,7 @@ describe('suggestRule — LLM backend', () => {
     expect(result.warnings.some(w => w.includes('intent complexity below LLM threshold'))).toBe(true);
   });
 
-  it('auto mode falls back to heuristic when LLM throws', async () => {
+  it('refuses an unsafe heuristic fallback when the LLM fails on a compound condition', async () => {
     const { OpenAIProvider } = await import('../../src/llm/providers/openai.js');
     (OpenAIProvider as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
       name: 'openai',
@@ -98,18 +98,15 @@ describe('suggestRule — LLM backend', () => {
     const savedAnthropicKey = process.env.ANTHROPIC_API_KEY;
     delete process.env.ANTHROPIC_API_KEY;
 
-    let result;
     try {
-      result = await suggestRule({
+      await expect(suggestRule({
         intent: 'on weekdays between 9am and 6pm if someone opens the door and temp is below 20 turn on AC but skip if already on',
         devices: [{ id: 'AC_001' }],
         llm: 'auto',
-      });
+      })).rejects.toThrow(/cannot safely infer/i);
     } finally {
       if (savedAnthropicKey !== undefined) process.env.ANTHROPIC_API_KEY = savedAnthropicKey;
     }
-
-    expect(result!.warnings.some(w => w.includes('fell back to heuristic'))).toBe(true);
   });
 
   it('forces dry_run:true when LLM proposes dry_run:false', async () => {

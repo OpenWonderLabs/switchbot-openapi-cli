@@ -3,12 +3,15 @@ import { Ajv2020 } from 'ajv/dist/2020.js';
 import type { ErrorObject } from 'ajv';
 import fs from 'node:fs';
 import readline from 'node:readline';
-import { randomUUID } from 'node:crypto';
+import path from 'node:path';
+import { createHash, randomUUID } from 'node:crypto';
+import type { AxiosInstance } from 'axios';
 import { printJson, printKeyValue, isJsonMode, handleError, exitWithError, UsageError } from '../utils/output.js';
+import { ApiError, createClient } from '../api/client.js';
 import { executeCommand } from '../lib/devices.js';
 import { executeScene } from '../lib/scenes.js';
 import { getCachedDevice } from '../devices/cache.js';
-import { containsCjk, inferCommandFromIntent } from '../lib/command-keywords.js';
+import { inferCommandFromIntent } from '../lib/command-keywords.js';
 import {
   savePlanRecord,
   loadPlanRecord,
@@ -16,11 +19,16 @@ import {
   listPlanRecords,
   PLANS_DIR,
   isCurrentPlanCredentialScope,
+  PlanAccount,
+  PlanResourceError,
+  PlanStepJournal,
+  withPlanWriteClaim,
   type PlanRecord,
 } from '../lib/plan-store.js';
 import { allowsDirectDestructiveExecution, destructiveExecutionHint } from '../lib/destructive-mode.js';
 import { isDryRun } from '../utils/flags.js';
 import { preparePlanTargets, type PreparedPlanCommand } from '../lib/plan-preflight.js';
+import { maskValue } from '../utils/redact.js';
 
 export interface PlanCommandStep {
   type: 'command';
@@ -53,25 +61,46 @@ export interface Plan {
 }
 
 
-function assertPlanCredentialScope(record: PlanRecord): void {
+function loadBoundPlan(planId: string): PlanRecord {
+  const record = loadPlanRecord(planId);
+  if (!record) throw new PlanResourceError(`Plan ${planId} not found in ${PLANS_DIR}`, 'usage');
+  const context = { planId, requiredWorkflow: 're-save-review-approve' };
   if (!record.credentialScope) {
-    exitWithError({
-      code: 2,
-      kind: 'guard',
-      message: `Plan ${record.planId} has no credential binding.`,
-      hint: 'Review the legacy plan and save it again under the intended credential selector before approval.',
-      context: { planId: record.planId, requiredWorkflow: 're-save-review-approve' },
-    });
+    throw new PlanResourceError(`Plan ${planId} has no credential binding.`, 'guard',
+      'Review the legacy plan and save it again under the intended credential selector before approval.', context);
   }
   if (!isCurrentPlanCredentialScope(record.credentialScope)) {
-    exitWithError({
-      code: 2,
-      kind: 'guard',
-      message: `Plan ${record.planId} belongs to a different credential profile or config selector.`,
-      hint: 'Use the selector that saved this plan, or save and approve a new plan under the active selector.',
-      context: { planId: record.planId, requiredWorkflow: 're-save-review-approve' },
-    });
+    throw new PlanResourceError(`Plan ${planId} belongs to a different credential profile or config selector.`, 'guard',
+      'Use the selector that saved this plan, or save and approve a new plan under the active selector.', context);
   }
+  return record;
+}
+
+function reportPlanError(error: unknown): never {
+  if (error instanceof PlanResourceError) {
+    exitWithError({ code: 2, kind: error.kind, message: error.message, hint: error.hint, context: error.context });
+  }
+  return handleError(error);
+}
+
+function reviewScope(scope: PlanRecord['credentialScope']): string {
+  if (!scope) return 'unbound legacy plan (save again before approval)';
+  const value = scope.kind === 'config' ? scope.path : scope.profile;
+  const fingerprint = createHash('sha256').update(value).digest('hex').slice(0, 10);
+  return `${scope.kind} ${maskValue(scope.kind === 'config' ? path.basename(value) : value)} (#${fingerprint})`;
+}
+
+function reviewParameter(key: string, value: unknown): unknown {
+  if (/pass(word|code)|credential|secret|token|authorization|cookie|api.?key|private.?key|^pin(?:code)?$|^(?:key|code|sign|nonce)$|url|uri|base64|^image(?:data|bytes)?$/i.test(key)) {
+    return '[redacted]';
+  }
+  if (typeof value !== 'string') return value;
+  if (/^\s*[[{]/.test(value)) {
+    // Legacy records may contain JSON-encoded wire parameters.
+    try { return JSON.parse(value); } catch { return '[redacted]'; }
+  }
+  if (/(?:[a-z]+:\/\/|data:image\/|bearer\s+\S)/i.test(value) || /^[A-Za-z0-9+/=_-]{64,}$/.test(value)) return '[redacted]';
+  return value;
 }
 
 const PLAN_JSON_SCHEMA = {
@@ -188,17 +217,10 @@ export interface SuggestResult {
 }
 
 export function suggestPlan(opts: SuggestOptions): SuggestResult {
-  const warnings: string[] = [];
-  let command = inferCommandFromIntent(opts.intent) ?? '';
+  const command = inferCommandFromIntent(opts.intent);
   if (!command) {
-    if (containsCjk(opts.intent)) {
-      throw new UsageError(
-        `Intent "${opts.intent}" contains non-English command text that this heuristic cannot safely infer. Use explicit English command words (turnOn/turnOff/open/close/lock/unlock/press/pause) or author the plan manually.`,
-      );
-    }
-    command = 'turnOn';
-    warnings.push(
-      `Could not infer command from intent "${opts.intent}" — defaulted to "turnOn". Edit the generated plan to set the correct command.`,
+    throw new UsageError(
+      'Cannot safely infer a single explicit action. For a read, use switchbot devices status; otherwise specify one action (e.g. "turn off") and its target device IDs.',
     );
   }
   const steps: PlanStep[] = opts.devices.map((d): PlanCommandStep => ({
@@ -206,7 +228,7 @@ export function suggestPlan(opts: SuggestOptions): SuggestResult {
     deviceId: d.id,
     command,
   }));
-  return { plan: { version: '1.0', description: opts.intent, steps }, warnings };
+  return { plan: { version: '1.0', description: opts.intent, steps }, warnings: [] };
 }
 
 async function readPlanSource(file: string | undefined): Promise<unknown> {
@@ -253,11 +275,11 @@ function readStdin(): Promise<string> {
   });
 }
 
-async function promptApproval(stepIdx: number, command: string, deviceId: string): Promise<boolean> {
+async function promptApproval(stepIdx: number, command: string, deviceId: string, parameter: unknown): Promise<boolean> {
   if (!process.stdin.isTTY) return false;
   const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
   return new Promise<boolean>((resolve) => {
-    rl.question(`  Approve step ${stepIdx} — ${command} on ${deviceId}? [y/N] `, (answer) => {
+    rl.question(`  Approve step ${stepIdx} — ${command} on ${deviceId} parameter=${JSON.stringify(parameter ?? 'default', reviewParameter)}? [y/N] `, (answer) => {
       rl.close();
       resolve(answer.trim().toLowerCase() === 'y');
     });
@@ -274,12 +296,20 @@ interface PlanRunResult {
   summary: { total: number; ok: number; error: number; skipped: number; dryRun: number };
 }
 
+// Explicit provider refusals only. A timeout, network error, internal error or
+// undocumented status cannot prove that a non-idempotent action did not happen.
+function definitelyRejected(error: unknown): boolean {
+  return error instanceof ApiError && [151, 152, 160, 161, 171, 401, 403, 429].includes(error.code);
+}
+
 /** Shared plan-execution core used by both `plan run` and `plan execute`. */
 async function executePlanSteps(
   plan: Plan,
   planId: string,
   options: { yes?: boolean; requireApproval?: boolean; continueOnError?: boolean },
   preparedCommands: readonly PreparedPlanCommand[],
+  journal?: PlanStepJournal,
+  client?: AxiosInstance,
 ): Promise<PlanRunResult> {
   const out: PlanRunResult = {
     plan,
@@ -287,6 +317,8 @@ async function executePlanSteps(
     summary: { total: plan.steps.length, ok: 0, error: 0, skipped: 0, dryRun: 0 },
   };
   const commandsByStep = new Map(preparedCommands.map((command) => [command.stepIndex, command]));
+  const dispatch = <T>(step: number, operation: () => Promise<T>): Promise<T> =>
+    journal ? journal.dispatch(step, operation, definitelyRejected) : operation();
   for (let i = 0; i < plan.steps.length; i++) {
     const step = plan.steps[i];
     const idx = i + 1;
@@ -297,7 +329,7 @@ async function executePlanSteps(
         if (!isJsonMode()) console.error(`  ${idx}. ◦ dry-run wait ${step.ms}ms`);
         continue;
       }
-      await new Promise((resolve) => setTimeout(resolve, step.ms));
+      await dispatch(idx, () => new Promise<void>((resolve) => setTimeout(resolve, step.ms)));
       out.results.push({ step: idx, type: 'wait', ms: step.ms, status: 'ok' });
       out.summary.ok++;
       if (!isJsonMode()) console.log(`  ${idx}. wait ${step.ms}ms`);
@@ -311,7 +343,7 @@ async function executePlanSteps(
         continue;
       }
       try {
-        await executeScene(step.sceneId);
+        await dispatch(idx, () => executeScene(step.sceneId, client));
         out.results.push({ step: idx, type: 'scene', sceneId: step.sceneId, status: 'ok' });
         out.summary.ok++;
         if (!isJsonMode()) console.log(`  ${idx}. ✓ scene ${step.sceneId}`);
@@ -320,7 +352,7 @@ async function executePlanSteps(
         out.results.push({ step: idx, type: 'scene', sceneId: step.sceneId, status: 'error', error: msg });
         out.summary.error++;
         if (!isJsonMode()) console.log(`  ${idx}. ✗ scene ${step.sceneId}: ${msg}`);
-        if (!options.continueOnError) break;
+        if (!options.continueOnError || journal?.uncertain) break;
       }
       continue;
     }
@@ -332,7 +364,7 @@ async function executePlanSteps(
     let approvalDecision: 'approved' | undefined;
     if (destructive && !options.yes) {
       if (options.requireApproval) {
-        const approved = await promptApproval(idx, step.command, resolvedDeviceId);
+        const approved = await promptApproval(idx, prepared.command, resolvedDeviceId, prepared.parameter);
         if (approved) {
           approvalDecision = 'approved';
         } else {
@@ -357,7 +389,7 @@ async function executePlanSteps(
       continue;
     }
     try {
-      const result = await executeCommand(resolvedDeviceId, prepared.command, prepared.parameter, commandType, undefined, { planId });
+      const result = await dispatch(idx, () => executeCommand(resolvedDeviceId, prepared.command, prepared.parameter, commandType, client, { planId }));
       out.results.push({ step: idx, type: 'command', deviceId: resolvedDeviceId, command: prepared.command, status: 'ok', result, ...(approvalDecision ? { decision: approvalDecision } : {}) });
       out.summary.ok++;
       if (!isJsonMode()) {
@@ -377,10 +409,44 @@ async function executePlanSteps(
       out.results.push({ step: idx, type: 'command', deviceId: resolvedDeviceId, command: step.command, status: 'error', error: msg });
       out.summary.error++;
       if (!isJsonMode()) console.log(`  ${idx}. ✗ ${step.command} on ${resolvedDeviceId}: ${msg}`);
-      if (!options.continueOnError) break;
+      if (!options.continueOnError || journal?.uncertain) break;
     }
   }
   return out;
+}
+
+async function executeSavedPlan(planId: string, options: { continueOnError?: boolean; requireApproval?: boolean }) {
+  const record = loadBoundPlan(planId);
+  if (record.status !== 'approved') {
+    throw new PlanResourceError(
+      `Plan ${planId.slice(0, 8)}… cannot be executed: status is "${record.status}", expected "approved".`, 'guard',
+      record.status === 'pending' || record.status === 'failed' ? `Run: switchbot plan approve ${planId}` : undefined,
+      { planId, status: record.status });
+  }
+  const account = PlanAccount.forRecord(record, isDryRun() ? 'preview' : 'execute');
+  const journal = isDryRun() ? undefined : new PlanStepJournal(record, 'execute');
+  const preparation = await preparePlanTargets(record.plan.steps);
+  if (!preparation.ok) {
+    throw new PlanResourceError(preparation.message, preparation.safetyCritical ? 'guard' : 'usage', preparation.hint, {
+      planId, step: preparation.stepIndex + 1, deviceId: preparation.deviceId, validationKind: preparation.kind,
+    });
+  }
+  const client = journal && record.plan.steps.some(step => step.type !== 'wait')
+    ? createClient(account.assertSigningCredentials) : undefined;
+  const out = await executePlanSteps(record.plan, planId, { ...options, yes: isDryRun() || !options.requireApproval }, preparation.commands, journal, client);
+  const { error, skipped } = out.summary;
+  const succeeded = error === 0 && skipped === 0;
+  const failureReason = succeeded ? undefined : [
+    error > 0 ? `${error} error${error > 1 ? 's' : ''}` : null,
+    skipped > 0 ? `${skipped} skipped` : null,
+    journal?.uncertain ? 'step outcome unknown; inspect the target before preparing a new plan' : null,
+  ].filter(Boolean).join(', ');
+  if (journal) {
+    updatePlanRecord(planId, succeeded
+      ? { status: 'executed', executedAt: new Date().toISOString() }
+      : { status: 'failed', failedAt: new Date().toISOString(), failureReason });
+  }
+  return { out, succeeded, failureReason };
 }
 
 export function registerPlanCommand(program: Command): void {
@@ -666,6 +732,7 @@ against the live API without executing any mutations.
           context: { issues: v.issues },
         });
       }
+      const account = new PlanAccount();
       let preparation;
       try {
         preparation = await preparePlanTargets(v.plan.steps);
@@ -703,7 +770,8 @@ against the live API without executing any mutations.
           };
         }),
       };
-      const record = savePlanRecord(boundPlan);
+      let record: PlanRecord;
+      try { record = savePlanRecord(boundPlan, account); } catch (err) { return reportPlanError(err); }
       if (isJsonMode()) {
         printJson({ saved: true, planId: record.planId, status: record.status, createdAt: record.createdAt, plansDir: PLANS_DIR });
       } else {
@@ -750,6 +818,7 @@ against the live API without executing any mutations.
       }
       console.log(`planId:     ${record.planId}`);
       console.log(`status:     ${record.status}`);
+      console.log(`scope:      ${reviewScope(record.credentialScope)}`);
       console.log(`createdAt:  ${record.createdAt}`);
       if (record.approvedAt) console.log(`approvedAt: ${record.approvedAt}`);
       if (record.executedAt) console.log(`executedAt: ${record.executedAt}`);
@@ -759,7 +828,8 @@ against the live API without executing any mutations.
         const step = record.plan.steps[i];
         if (step.type === 'command') {
           const id = step.deviceId ?? step.deviceName ?? '?';
-          console.log(`  ${i + 1}. command  ${step.command} on ${id}${step.note ? `  # ${step.note}` : ''}`);
+          const preview = JSON.stringify(step.parameter ?? 'default', reviewParameter);
+          console.log(`  ${i + 1}. ${step.commandType ?? 'command'}  ${step.command} on ${id}  parameter=${preview}${step.note ? `  # ${step.note}` : ''}`);
         } else if (step.type === 'scene') {
           console.log(`  ${i + 1}. scene    ${step.sceneId}${step.note ? `  # ${step.note}` : ''}`);
         } else {
@@ -772,20 +842,16 @@ against the live API without executing any mutations.
     .command('approve')
     .description('Approve a saved plan, allowing `plan execute` to run it.')
     .argument('<planId>', 'Plan UUID from "plan list"')
-    .action((planId: string) => {
-      const record = loadPlanRecord(planId);
-      if (!record) {
-        exitWithError({ code: 2, kind: 'usage', message: `Plan ${planId} not found in ${PLANS_DIR}` });
-      }
-      assertPlanCredentialScope(record);
-      if (record.status === 'executed') {
-        exitWithError({ code: 2, kind: 'guard', message: `Plan ${planId} has already been executed.` });
-      }
-      if (record.status === 'rejected') {
-        exitWithError({ code: 2, kind: 'guard', message: `Plan ${planId} was rejected. Save a new plan to start fresh.` });
-      }
-      // 'failed' plans may be re-approved and retried — intentionally no block here.
-      const updated = updatePlanRecord(planId, { status: 'approved', approvedAt: new Date().toISOString() });
+    .action(async (planId: string) => {
+      const updated = await withPlanWriteClaim(planId, () => {
+        const record = loadBoundPlan(planId);
+        if (record.status === 'executed') throw new PlanResourceError(`Plan ${planId} has already been executed.`);
+        if (record.status === 'rejected') throw new PlanResourceError(`Plan ${planId} was rejected. Save a new plan to start fresh.`);
+        // Seal the reviewed content under the same claim as the approval write.
+        new PlanStepJournal(record, 'approve');
+        PlanAccount.forRecord(record, 'approve');
+        return updatePlanRecord(planId, { status: 'approved', approvedAt: new Date().toISOString() });
+      }).catch(reportPlanError);
       if (isJsonMode()) {
         printJson({ ok: true, planId: updated.planId, status: updated.status, approvedAt: updated.approvedAt });
       } else {
@@ -805,62 +871,14 @@ against the live API without executing any mutations.
       if (options.requireApproval && isJsonMode()) {
         exitWithError({ code: 1, kind: 'usage', message: '--require-approval cannot be used with --json' });
       }
-      const record = loadPlanRecord(planId);
-      if (!record) {
-        exitWithError({ code: 2, kind: 'usage', message: `Plan ${planId} not found in ${PLANS_DIR}` });
-      }
-      assertPlanCredentialScope(record);
-      if (record.status !== 'approved') {
-        exitWithError({
-          code: 2, kind: 'guard',
-          message: `Plan ${planId.slice(0, 8)}… cannot be executed: status is "${record.status}", expected "approved".`,
-          hint: record.status === 'pending' ? `Run: switchbot plan approve ${planId}` : record.status === 'failed' ? `Re-run: switchbot plan approve ${planId}` : undefined,
-          context: { planId, status: record.status },
-        });
-      }
-      let preparation;
-      try {
-        preparation = await preparePlanTargets(record.plan.steps);
-      } catch (err) {
-        handleError(err);
-        return;
-      }
-      if (!preparation.ok) {
-        exitWithError({
-          code: 2,
-          kind: preparation.safetyCritical ? 'guard' : 'usage',
-          message: preparation.message,
-          hint: preparation.hint,
-          context: {
-            planId,
-            step: preparation.stepIndex + 1,
-            deviceId: preparation.deviceId,
-            validationKind: preparation.kind,
-          },
-        });
-      }
-      let out: PlanRunResult;
-      try {
-        out = await executePlanSteps(record.plan, planId, { ...options, yes: true }, preparation.commands);
-      } catch (err) {
-        handleError(err);
-        return;
-      }
-      const { ok, error, skipped } = out.summary;
-      const succeeded = error === 0 && skipped === 0;
-      const failureReason = succeeded ? undefined : [error > 0 ? `${error} error${error > 1 ? 's' : ''}` : null, skipped > 0 ? `${skipped} skipped` : null].filter(Boolean).join(', ');
-      if (out.summary.dryRun === 0) {
-        if (succeeded) {
-          updatePlanRecord(planId, { status: 'executed', executedAt: new Date().toISOString() });
-        } else {
-          updatePlanRecord(planId, { status: 'failed', failedAt: new Date().toISOString(), failureReason });
-        }
-      }
+      const run = () => executeSavedPlan(planId, options);
+      const { out, succeeded, failureReason } = await (isDryRun() ? run() : withPlanWriteClaim(planId, run)).catch(reportPlanError);
       if (isJsonMode()) {
         printJson({ ran: !isDryRun(), planId, succeeded, ...out });
       } else {
-        console.log(`\nsummary: ok=${ok} error=${error} skipped=${skipped} total=${out.summary.total}`);
-        if (!succeeded) console.error(`Plan marked as failed (${failureReason}). Re-run after fixing to retry.`);
+        const { ok, error, skipped, total } = out.summary;
+        console.log(`\nsummary: ok=${ok} error=${error} skipped=${skipped} total=${total}`);
+        if (!succeeded) console.error(`Plan marked as failed (${failureReason}).`);
       }
       if (!succeeded) process.exit(1);
     });

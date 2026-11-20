@@ -63,11 +63,12 @@ describe('suggestPlan', () => {
     expect(plan.steps[0]).toMatchObject({ command: 'pause' });
   });
 
-  it('defaults to turnOn with a warning when intent is unrecognized', () => {
-    const { plan, warnings } = suggestPlan({ intent: 'do something weird', devices: [{ id: 'D1' }] });
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toContain('defaulted to "turnOn"');
-    expect(plan.steps[0]).toMatchObject({ command: 'turnOn' });
+  it.each([
+    'do something weird', 'is the lock open?', 'check whether the lights are off',
+    'do not unlock', 'turn off and check the temperature', 'press or lock',
+    '查看 lock 状态', 'turn on 灯吗', 'turn on if the room is cold',
+  ])('requires clarification rather than inventing a mutation: %s', (intent) => {
+    expect(() => suggestPlan({ intent, devices })).toThrow(/devices status/i);
   });
 
   it('fails fast on unsupported Chinese command intent instead of defaulting silently', () => {

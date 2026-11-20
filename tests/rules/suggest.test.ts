@@ -22,32 +22,37 @@ describe('suggestRule', () => {
       if (rule.when.source === 'mqtt') expect(rule.when.event).toBe('button.pressed');
     });
 
+    it('preserves the requested motion event when MQTT is selected explicitly', async () => {
+      const { rule } = await suggestRule({ intent: 'turn on hallway light when motion detected', trigger: 'mqtt' });
+      expect(rule.when).toMatchObject({ source: 'mqtt', event: 'motion.detected' });
+    });
+
     it('infers cron from "every morning"', async () => {
       const { rule } = await suggestRule({ intent: 'every morning turn on coffee maker' });
       expect(rule.when.source).toBe('cron');
     });
 
     it('infers webhook from "webhook" keyword', async () => {
-      const { rule } = await suggestRule({ intent: 'on webhook call, toggle switch' });
+      const { rule } = await suggestRule({ intent: 'on webhook call, turn on switch' });
       expect(rule.when.source).toBe('webhook');
     });
 
-    it('defaults to mqtt with warning when intent is unrecognized', async () => {
-      const { rule, warnings } = await suggestRule({ intent: 'do something weird' });
+    it('defaults to mqtt with warning for a clear action without a recognized trigger', async () => {
+      const { rule, warnings } = await suggestRule({ intent: 'turn on' });
       expect(rule.when.source).toBe('mqtt');
       expect(warnings.length).toBeGreaterThan(0);
       expect(warnings[0]).toContain('defaulted to mqtt/device.shadow');
     });
 
     it('respects explicit --trigger override over inference', async () => {
-      const { rule } = await suggestRule({ intent: 'motion detected', trigger: 'cron' });
+      const { rule } = await suggestRule({ intent: 'when motion detected, turn off', trigger: 'cron' });
       expect(rule.when.source).toBe('cron');
     });
   });
 
   describe('schedule inference (cron trigger)', () => {
     it('parses "8am" → "0 8 * * *"', async () => {
-      const { rule } = await suggestRule({ intent: 'every day at 8am', trigger: 'cron' });
+      const { rule } = await suggestRule({ intent: 'every day at 8am, turn off', trigger: 'cron' });
       if (rule.when.source === 'cron') expect(rule.when.schedule).toBe('0 8 * * *');
     });
 
@@ -56,20 +61,26 @@ describe('suggestRule', () => {
       if (rule.when.source === 'cron') expect(rule.when.schedule).toBe('0 22 * * *');
     });
 
+    it.each([['12am', '0 0 * * *'], ['12pm', '0 12 * * *']])(
+      'preserves weekdays and the wall-clock boundary at %s without extra flags', async (time, schedule) => {
+        const { rule } = await suggestRule({ intent: `weekdays at ${time}, turn on light` });
+        expect(rule.when).toMatchObject({ source: 'cron', schedule, days: ['mon', 'tue', 'wed', 'thu', 'fri'] });
+      });
+
     it('parses "every hour" → "0 * * * *"', async () => {
-      const { rule } = await suggestRule({ intent: 'every hour check lights', trigger: 'cron' });
+      const { rule } = await suggestRule({ intent: 'every hour turn off lights', trigger: 'cron' });
       if (rule.when.source === 'cron') expect(rule.when.schedule).toBe('0 * * * *');
     });
 
     it('defaults to "0 8 * * *" with warning for unrecognized schedule intent', async () => {
-      const { rule, warnings } = await suggestRule({ intent: 'on a schedule', trigger: 'cron' });
+      const { rule, warnings } = await suggestRule({ intent: 'turn on', trigger: 'cron' });
       if (rule.when.source === 'cron') expect(rule.when.schedule).toBe('0 8 * * *');
       expect(warnings.some((w) => w.includes('defaulted'))).toBe(true);
     });
 
     it('uses --schedule override when provided', async () => {
       const { rule } = await suggestRule({
-        intent: 'run every night',
+        intent: 'turn on every night',
         trigger: 'cron',
         schedule: '0 23 * * *',
       });
@@ -78,7 +89,7 @@ describe('suggestRule', () => {
 
     it('applies days filter when provided', async () => {
       const { rule } = await suggestRule({
-        intent: 'weekdays at 9am',
+        intent: 'weekdays at 9am, turn on',
         trigger: 'cron',
         days: ['mon', 'tue', 'wed', 'thu', 'fri'],
       });
@@ -103,10 +114,13 @@ describe('suggestRule', () => {
       expect(rule.then[0].command).toContain(expected);
     });
 
-    it('defaults to turnOn with warning for unrecognized command intent', async () => {
-      const { rule, warnings } = await suggestRule({ intent: 'do a thing with device', trigger: 'mqtt', event: 'motion.detected' });
-      expect(rule.then[0].command).toContain('turnOn');
-      expect(warnings.some((w) => w.includes('turnOn'))).toBe(true);
+    it.each([
+      'do a thing with device', 'is the door open?', 'when the button is pressed, check the temperature',
+      'every morning do not turn on the heater', 'on webhook call, query lock status',
+      'when motion detected, turn on then check the lights', '查看 lock 状态',
+      'check if the door is locked, turn off', 'if no motion detected, turn off',
+    ])('requires an explicit rule action instead of suggesting a write: %s', async intent => {
+      await expect(suggestRule({ intent, trigger: 'mqtt', event: 'motion.detected' })).rejects.toThrow(/devices status/i);
     });
   });
 
@@ -117,12 +131,12 @@ describe('suggestRule', () => {
     });
 
     it('sets throttle for mqtt triggers', async () => {
-      const { rule } = await suggestRule({ intent: 'motion detected', trigger: 'mqtt', event: 'motion.detected' });
+      const { rule } = await suggestRule({ intent: 'when motion detected, turn on', trigger: 'mqtt', event: 'motion.detected' });
       expect(rule.throttle?.max_per).toBe('10m');
     });
 
     it('does not set throttle for cron triggers', async () => {
-      const { rule } = await suggestRule({ intent: 'every morning', trigger: 'cron' });
+      const { rule } = await suggestRule({ intent: 'every morning turn on', trigger: 'cron' });
       expect(rule.throttle).toBeUndefined();
     });
 
