@@ -1,8 +1,19 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readAudit } from '../../src/utils/audit.js';
+
+// The real private claim and receipt paths are bound when plan-store is imported.
+const isolatedHome = await vi.hoisted(async () => {
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const home = mkdtempSync(`${tmpdir()}/plan-unit-home-`);
+  vi.stubEnv('HOME', home);
+  vi.stubEnv('USERPROFILE', home);
+  return home;
+});
+afterAll(() => { vi.unstubAllEnvs(); fs.rmSync(isolatedHome, { recursive: true, force: true }); });
 
 const apiMock = vi.hoisted(() => {
   const instance = { get: vi.fn(), post: vi.fn() };
@@ -103,6 +114,7 @@ describe('plan command', () => {
   let auditFile: string;
 
   beforeEach(() => {
+    fs.rmSync(path.join(isolatedHome, '.switchbot', 'plans'), { recursive: true, force: true });
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sbplan-'));
     auditFile = path.join(tmp, 'audit.log');
     apiMock.__instance.post.mockReset();
@@ -605,6 +617,30 @@ describe('plan command', () => {
       expect(out).toContain('turn on lights');
     });
 
+    it('reviews the actual selector and nested parameters without exposing credential or image data', async () => {
+      const credentialScope = { kind: 'profile', profile: 'household-west' };
+      const plan = { version: '1.0', steps: [
+        { type: 'command', deviceId: 'FRAME', command: 'deleteImage', parameter: 'oldest' },
+        { type: 'command', deviceId: 'LOCK', command: 'createKey', parameter: {
+          name: 'guest', passcode: '579246', payload: [{ apiKey: 'private-api-key', level: 0 }],
+          image: 'c2VjcmV0', source: 'https://example.invalid/private-token',
+        } },
+      ] };
+      const record = { planId: MOCK_ID, status: 'pending', createdAt: '2024-01-01T00:00:00Z', credentialScope, plan };
+      planStoreMock.loadPlanRecord.mockReturnValue(record);
+      const review = await runCli(registerPlanCommand, ['plan', 'review', MOCK_ID]);
+      const human = review.stdout.join('\n');
+      expect(human).toMatch(/profile.*ho\*+st/);
+      for (const detail of ['FRAME', 'deleteImage', 'oldest', 'LOCK', 'createKey', 'guest', 'level', '0']) {
+        expect(human).toContain(detail);
+      }
+      for (const secret of ['household-west', '579246', 'private-api-key', 'c2VjcmV0', 'example.invalid']) {
+        expect(human).not.toContain(secret);
+      }
+      const machine = await runCli(registerPlanCommand, ['--json', 'plan', 'review', MOCK_ID]);
+      expect(JSON.parse(machine.stdout.join('\n')).data).toEqual(record);
+    });
+
     it('plan review exits 2 when planId not found', async () => {
       planStoreMock.loadPlanRecord.mockReturnValue(null);
       const res = await runCli(registerPlanCommand, ['plan', 'review', MOCK_ID]);
@@ -720,6 +756,7 @@ describe('plan command', () => {
       });
       apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body: {} } });
 
+      expect((await runCli(registerPlanCommand, ['plan', 'approve', MOCK_ID])).exitCode).toBeNull();
       const res = await runCli(registerPlanCommand, ['plan', 'execute', MOCK_ID]);
       expect(res.exitCode).toBeNull();
       expect(planStoreMock.updatePlanRecord).toHaveBeenCalledWith(
@@ -808,6 +845,7 @@ describe('plan command', () => {
       });
       apiMock.__instance.post.mockRejectedValue(new Error('network error'));
 
+      expect((await runCli(registerPlanCommand, ['plan', 'approve', MOCK_ID])).exitCode).toBeNull();
       const res = await runCli(registerPlanCommand, ['plan', 'execute', MOCK_ID]);
       expect(res.exitCode).toBe(1);
       expect(planStoreMock.updatePlanRecord).toHaveBeenCalledWith(
@@ -830,6 +868,7 @@ describe('plan command', () => {
       });
       apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body: {} } });
 
+      expect((await runCli(registerPlanCommand, ['plan', 'approve', MOCK_ID])).exitCode).toBeNull();
       const res = await runCli(registerPlanCommand, ['--json', 'plan', 'execute', MOCK_ID]);
       expect(res.exitCode).toBeNull();
       const out = JSON.parse(res.stdout.filter((l) => l.trim().startsWith('{')).join('')) as Record<string, unknown>;

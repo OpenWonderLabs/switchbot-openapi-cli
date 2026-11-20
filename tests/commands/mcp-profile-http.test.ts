@@ -127,6 +127,62 @@ async function startIsolatedMcp({
 }
 
 describe('HTTP MCP profile validation', () => {
+  it('routes modern HTTP requests by validated metadata behind the same profile and bearer boundary', async () => {
+    const port = await startIsolatedMcp();
+    const url = `http://127.0.0.1:${port}/mcp`;
+    const version = '2026-07-28';
+    const post = async (method: string, params: Record<string, unknown> = {}, headers: Record<string, string> = {}, protocol = version) => {
+      const response = await fetch(url, { method: 'POST',
+        headers: { Accept: 'application/json, text/event-stream', 'Content-Type': 'application/json',
+          Authorization: 'Bearer isolated-profile-bearer', 'Mcp-Protocol-Version': protocol,
+          'Mcp-Method': method, ...headers },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params: {
+          _meta: { 'io.modelcontextprotocol/protocolVersion': protocol, 'io.modelcontextprotocol/clientCapabilities': {} }, ...params,
+        } }),
+      });
+      return { status: response.status, headers: response.headers, body: await response.json() };
+    };
+    expect((await post('server/discover', {}, { Authorization: 'Bearer other' })).status).toBe(401);
+    const discover = await post('server/discover');
+    expect(discover.status).toBe(200);
+    expect(discover.body.result.capabilities).toEqual({ tools: {}, resources: {} });
+    expect(discover.headers.get('Mcp-Session-Id')).toBeNull();
+    const { body } = await post('tools/list', {}, { 'Mcp-Session-Id': 'not-authorization' });
+    expect(body.result.tools).toContainEqual(expect.objectContaining({ name: 'search_catalog' }));
+    const args = { name: 'search_catalog', arguments: { query: 'Bot', limit: 1 } };
+    const call = await post('tools/call', args, { 'Mcp-Name': '=?base64?c2VhcmNoX2NhdGFsb2c=?=' });
+    expect(call.body.result).toMatchObject({ resultType: 'complete', structuredContent: { total: 1 } });
+    for (const headers of [{}, { 'Mcp-Name': 'different' }, { 'Mcp-Name': 'search_catalog', 'Mcp-Method': 'tools/list' },
+      { 'Mcp-Name': 'search_catalog', 'Mcp-Protocol-Version': '2025-11-25' }] as Record<string, string>[]) {
+      expect(await post('tools/call', args, headers)).toMatchObject({ status: 400, body: { id: 1, error: { code: -32020 } } });
+    }
+    expect(await post('tools/list', { _meta: {} })).toMatchObject({ status: 400, body: { error: { code: -32602 } } });
+    expect(await post('tools/list', {}, {}, '2099-01-01')).toMatchObject({ status: 400, body: { error: {
+      code: -32022, data: { requested: '2099-01-01', supported: expect.arrayContaining([version]) },
+    } } });
+    expect(await post('absent')).toMatchObject({ status: 404, body: { error: { code: -32601 } } });
+    expect((await post('server/discover', {}, { Origin: 'https://unconfigured.invalid' })).status).toBe(403);
+    expect((await post('server/discover', {}, { 'X-SwitchBot-Profile': '../invalid' })).status).toBe(400);
+    const other = await post('server/discover', {}, { 'X-SwitchBot-Profile': 'other' });
+    expect(other.body.result.capabilities).toEqual({ tools: {} });
+    expect(await post('resources/read', { uri: 'switchbot://events' }, {
+      'Mcp-Name': 'switchbot://events', 'X-SwitchBot-Profile': 'other', 'Mcp-Session-Id': 'not-authorization',
+    })).toMatchObject({ status: 404, body: { error: { code: -32601 } } });
+  });
+  it('keeps malformed modern HTTP messages on /mcp and preserves their readable request IDs', async () => {
+    const port = await startIsolatedMcp();
+    const headers = { Accept: 'application/json, text/event-stream', 'Content-Type': 'application/json',
+      Authorization: 'Bearer isolated-profile-bearer', 'Mcp-Protocol-Version': '2026-07-28', 'Mcp-Method': 'tools/list' };
+    const request = { jsonrpc: '2.0', id: 'known-id', method: 'tools/list', params: { _meta: null } };
+    const post = (path: string) => fetch(`http://127.0.0.1:${port}${path}`, { method: 'POST', headers, body: JSON.stringify(request) });
+    const wrongPath = await post('/not-mcp');
+    expect(wrongPath.status).toBe(404);
+    const malformed = await post('/mcp');
+    expect(malformed.status).toBe(400);
+    expect(await malformed.json()).toMatchObject({ id: 'known-id', error: { code: -32602 } });
+    const removedStream = await fetch(`http://127.0.0.1:${port}/mcp`, { headers });
+    expect(removedStream.status).toBe(405);
+  });
   it.each([undefined, 'default', 'work'] as const)('serves offline HTTP tools for locked profile %s without allowing cloud fallback', async profile => {
     const port = await startIsolatedMcp({ keychainOnly: true, unavailableProfile: profile ?? 'default' });
     const client = new Client({ name: 'offline-locked-profile', version: '1' });

@@ -22,6 +22,8 @@ import { getActiveProfile } from '../lib/request-context.js';
 import { redactHeaders, warnOnceIfUnsafe } from '../utils/redact.js';
 import { primeCredentials } from '../credentials/prime.js';
 import { assertCredentialScope, readCredentialScope } from '../credentials/scope.js';
+import { getCachedDevice } from '../devices/cache.js';
+import { deriveSafetyTier, findExactCatalogEntry } from '../devices/catalog.js';
 
 class DailyCapExceededError extends Error {
   constructor(public readonly cap: number, public readonly total: number, public readonly profile?: string) {
@@ -64,23 +66,39 @@ export const apiCircuitBreaker = new CircuitBreaker('switchbot-api', {
 export { CircuitOpenError };
 
 type RetryableConfig = InternalAxiosRequestConfig & { __retryCount?: number };
-function isUploadImageCommandRequest(response: AxiosResponse): boolean {
-  const url = response.config.url;
-  if (!url || !/\/v1\.1\/devices\/[^/]+\/commands(?:\?.*)?$/.test(url)) return false;
+interface DeviceControlRequest { deviceId: string; command?: string }
+function deviceControlRequest(config?: InternalAxiosRequestConfig): DeviceControlRequest | undefined {
+  const deviceId = config?.url?.match(/\/v1\.1\/devices\/([^/?]+)\/commands(?:\?.*)?$/)?.[1];
+  if (!config || !deviceId) return undefined;
 
-  let data: unknown = response.config.data;
+  let data: unknown = config.data;
   if (typeof data === 'string') {
     try {
       data = JSON.parse(data) as unknown;
     } catch {
-      return false;
+      return { deviceId };
     }
   }
-  return !!data && typeof data === 'object' && 'command' in data && data.command === 'uploadImage';
+  if (data && typeof data === 'object' && 'command' in data && typeof data.command === 'string' &&
+      (!('commandType' in data) || data.commandType === 'command')) {
+    return { deviceId, command: data.command };
+  }
+  return { deviceId };
+}
+
+function canRepeatRequest(method: string, config: InternalAxiosRequestConfig | undefined,
+  control: DeviceControlRequest | undefined): boolean {
+  if (method === 'GET' || (method === 'POST' && config?.url === '/v1.1/webhook/queryWebhook')) return true;
+  if (!control?.command || control.command === 'deleteImage') return false;
+  const device = getCachedDevice(control.deviceId);
+  if (!device) return false;
+  const entry = findExactCatalogEntry(device.type);
+  const spec = entry?.commands.find(c => c.command === control.command && c.commandType !== 'customize');
+  return spec?.idempotent === true && deriveSafetyTier(spec, entry ?? undefined) !== 'destructive';
 }
 
 
-export function createClient(): AxiosInstance {
+export function createClient(assertSigningCredentials?: (token: string, secret: string, revision: string) => void): AxiosInstance {
   const scope = readCredentialScope();
   const verbose = isVerbose();
   const dryRun = isDryRun();
@@ -114,6 +132,7 @@ export function createClient(): AxiosInstance {
       }
     }
     assertCredentialScope(scope);
+    assertSigningCredentials?.(token, secret, scope.revision);
     const authHeaders = buildAuthHeaders(token, secret);
     Object.assign(config.headers, authHeaders);
 
@@ -162,7 +181,7 @@ export function createClient(): AxiosInstance {
       }
       const data = response.data as { statusCode?: number; message?: string };
       if (data.statusCode !== undefined && data.statusCode !== 100) {
-        const msg = data.statusCode === 402 && isUploadImageCommandRequest(response)
+        const msg = data.statusCode === 402 && deviceControlRequest(response.config)?.command === 'uploadImage'
           ? `Image upload quota reached${data.message ? `: ${data.message}` : ''}`
           : API_ERROR_MESSAGES[data.statusCode] ??
             data.message ??
@@ -176,6 +195,8 @@ export function createClient(): AxiosInstance {
     (error) => {
       if (error instanceof DryRunSignal) throw error;
       if (axios.isAxiosError(error)) {
+        // Do not classify or retry an old account's failure using the new account's catalog.
+        assertCredentialScope(scope);
         const config = error.config as RetryableConfig | undefined;
         const method = (config?.method ?? 'get').toUpperCase();
         const isIdempotentRead = method === 'GET';
@@ -206,6 +227,15 @@ export function createClient(): AxiosInstance {
           );
         }
         const status = error.response?.status;
+        const control = method === 'POST' ? deviceControlRequest(config) : undefined;
+        const repeatable = canRepeatRequest(method, config, control);
+        if (status === 429 && !repeatable) {
+          const deletion = control?.command === 'deleteImage';
+          throw new ApiError(`${deletion ? 'Image deletion' : 'Mutation'} rate limited (HTTP 429); not retried.`, 429, {
+            transient: true, retryable: false, hint: deletion ? 'Check the album before approving another deletion.'
+              : 'The operation is not known to be safe to repeat. Check its outcome before proposing a new action.',
+          });
+        }
 
         // 429 → transparent retry with Retry-After / exponential backoff.
         // Skipped when: no config (shouldn't happen for real axios errors),
@@ -230,8 +260,8 @@ export function createClient(): AxiosInstance {
           }
         }
 
-        // 502/503/504 on idempotent GETs → transparent retry. Mutating calls
-        // never auto-retry; use --idempotency-key for safe POST retries.
+        // Unlike an explicit rate limit, a 5xx may come after the server acted.
+        // Only GETs are automatically retried on ambiguous transport failures.
         if (
           isIdempotentRead &&
           status !== undefined &&
@@ -298,7 +328,7 @@ export function createClient(): AxiosInstance {
           `HTTP ${status ?? '?'}: ${error.message}`,
           status ?? 0,
           {
-            retryable: status !== undefined && status >= 500,
+            retryable: repeatable && status !== undefined && status >= 500,
             transient: status !== undefined && (status >= 500 || status === 0) // 5xx, 0 = connection error
           }
         );

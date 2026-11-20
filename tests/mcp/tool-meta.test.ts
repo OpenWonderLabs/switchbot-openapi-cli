@@ -75,6 +75,28 @@ describe('MCP tool _meta.agentSafetyTier', () => {
     cacheMock.map.clear();
   });
 
+  it('advertises conservative standard annotations without changing the application safety tiers', async () => {
+    const server = createSwitchBotMcpServer({ toolProfile: 'all' });
+    const client = new Client({ name: 'annotations', version: '1' });
+    const [c, s] = InMemoryTransport.createLinkedPair();
+    try {
+      await Promise.all([server.connect(s), client.connect(c)]);
+      const { tools } = await client.listTools();
+      for (const tool of tools) expect(typeof tool.annotations?.readOnlyHint, tool.name).toBe('boolean');
+      const byName = new Map(tools.map(tool => [tool.name, tool]));
+      expect(byName.get('search_catalog')?.annotations?.readOnlyHint).toBe(true);
+      expect(byName.get('get_device_history')?.annotations?.readOnlyHint).toBe(true);
+      for (const name of ['send_command', 'run_scene', 'plan_run', 'policy_add_rule', 'policy_migrate', 'policy_new']) {
+        expect(byName.get(name)).toMatchObject({ _meta: { agentSafetyTier: 'action' },
+          annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false } });
+      }
+      expect(byName.get('rules_simulate')?.annotations?.readOnlyHint).not.toBe(true);
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
   it('every tool has _meta.agentSafetyTier set to read | action | destructive', async () => {
     const { client } = await pair();
 

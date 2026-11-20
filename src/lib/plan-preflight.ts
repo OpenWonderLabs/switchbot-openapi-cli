@@ -123,7 +123,7 @@ export async function preparePlanTargets(
         };
       }
       if (parameterValidation.normalized !== undefined) {
-        parameter = parseParameterForWire(parameterValidation.normalized);
+        parameter = parseParameterForWire(parameterValidation.normalized, cached.type, command);
       }
     }
 

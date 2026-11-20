@@ -42,6 +42,22 @@ audit records. Account switching can reject an obsolete in-flight operation or
 require an MQTT subscription restart; payload-version stability does not
 remove those behavioral boundaries.
 
+### Unreleased OpenAPI alignment after 3.10.0
+
+The [pinned upstream delta](openapi-alignment-ambiguities.md#2026-11-20-upstream-snapshot-unreleased)
+adds catalog entries and commands, not descriptor fields. `AI Art Frame 2`
+is the canonical discovery value; `AI Art Frame Luma` remains a lookup alias.
+Consumers enumerating catalog values should not assume a fixed set of names
+or rewrite raw upstream inventory or events. S30 webhook changes can omit
+unchanged properties without changing the normalized event shape.
+
+Optional nullable `lockDeviceId` in physical inventory and the optional cloud
+`result` on successful plan command steps are additive payload fields, not new
+envelopes. See [JSON result locations](json-contract.md#device-inventory-and-command-results).
+The envelope stays `1.2`, discovery export and resources `2.0`, device entries
+`1.0`, and normalized event payload `1`. No REST endpoint, CLI subcommand or
+MCP tool was added.
+
 ## JSON envelope
 
 Every non-streaming JSON success is shaped as follows:

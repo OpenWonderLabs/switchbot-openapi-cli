@@ -9,6 +9,25 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Plug Mini (IT) and Outdoor Plug (EU) controls, metering status and separate webhook identities; Hub 4 read-only status and events.
+- Vision Doorbell status and optional `lockDeviceId` in inventory, cache and MCP list results. This is not Video Doorbell and exposes no commands or documented webhook.
+- Robot Vacuum Cleaner S30 commands, status and change-only webhook fields. Its `selfClean` takes a numeric mode (1–4); `refill` is not supported.
+- Offline household decision checks with separate practice and held-out reports, forbidden-write gates and optional local-model comparison.
+- MCP 2026-07-28 discovery and calls over stdio and HTTP alongside legacy initialization; the existing Node minimum, profiles and tool schemas are retained.
+
+### Changed
+
+- AI Art Frame 2 is the canonical name; AI Art Frame Luma remains a discovery alias. Both frame models support irreversible, non-idempotent `deleteImage` through the reviewed plan workflow. Rules, policy pre-approval and live command-history replay cannot authorize it; HTTP 429 does not trigger a retry.
+- Successful plan command steps retain the cloud result, including zero-valued deletion counts. Cloud acknowledgement does not confirm the physical frame has finished.
+- `devices command --explain` now reports catalog idempotency in text and JSON. An unknown `deleteImage` target points to an inventory refresh, not `--allow-unknown-device`.
+- Supported dry-runs suppress cloud and local business writes; other writes refuse preview. Human review shows exact targets and redacts sensitive parameters. Approval seals the plan and account and honors extra confirmation; concurrent execution and blind retries are blocked.
+- CLI and MCP distinguish repeat safety from request-key deduplication. Unclear intent no longer generates a write; scoped replay and IR checks use the verified target. Legacy Luma overrides apply to Frame 2; DVD/Speaker discovery identifies undocumented DVD volume support.
+- Compact bootstrap no longer dumps the catalog on a cold cache. Single-model schemas narrow webhook results; help examples and byte budgets are exercised on cold and populated fixtures.
+
+See the [pinned protocol notes](./docs/openapi-alignment-ambiguities.md). No new REST endpoint, CLI command, MCP tool or release version.
+
 ## [3.10.0]
 
 ### Added

@@ -1,6 +1,6 @@
 # OpenAPI alignment ambiguities
 
-Evidence is pinned to upstream commit `dc9a6b0e4ad77882c72d186ecd5d134113acdad0`; GitHub's HEAD API still returned that SHA on the continuation check. The CLI separates written contracts, reported payloads, and unresolved server behavior.
+The latest entries use the [2026-11-20 upstream snapshot](#2026-11-20-upstream-snapshot-unreleased) (`0db92c78`). The earlier entries below retain their own `dc9a6b0e` evidence links. Written contracts, reported payloads and unresolved server behavior are distinguished throughout.
 
 - [MindClip](https://github.com/OpenWonderLabs/SwitchBotAPI/blob/dc9a6b0e4ad77882c72d186ecd5d134113acdad0/devices/others/ai-mindclip.md): the CLI, library and MCP now require the documented list/todo/date/week query fields; missing fields fail before HTTP rather than relying on an unverified server default. Extra language/time/folder/category filters, legacy numeric bounds and completed/category value meanings still require upstream confirmation; mock responses do not establish them.
 - [Curtain and Blind Tilt](https://github.com/OpenWonderLabs/SwitchBotAPI/tree/dc9a6b0e4ad77882c72d186ecd5d134113acdad0/devices/curtains-blinds): scalar Curtain position, Blind Tilt/Roller Shade on/off, and fan toggle support are not tightened without pinned evidence. The documented spaced Blind Tilt form `up; 36` is accepted and normalized to `up;36`.
@@ -45,3 +45,59 @@ It supplements, rather than replaces, the historical evidence above.
   status can retain a URL after it expires; consumers must use `expireAt`.
   Solar webhook `timeOfSample` is milliseconds, not the status URL expiry
   unit.
+
+## 2026-11-20 upstream snapshot (unreleased)
+
+[Official delta from `fa8f90c` to `0db92c7`](https://github.com/OpenWonderLabs/SwitchBotAPI/compare/fa8f90c661cfa183d633d87f18c04e0e5059fa74...0db92c78b56808f25b74c61535313f44bef4cd91).
+The five additions below use existing REST operations. The evidence is the
+written OpenAPI contract, not a live-device or regional availability test.
+
+- [Plug Mini (IT)](https://github.com/OpenWonderLabs/SwitchBotAPI/blob/0db92c78b56808f25b74c61535313f44bef4cd91/devices/plugs-switches/plug-mini-it.md)
+  and [Outdoor Plug (EU)](https://github.com/OpenWonderLabs/SwitchBotAPI/blob/0db92c78b56808f25b74c61535313f44bef4cd91/devices/plugs-switches/outdoor-plug-eu.md)
+  have distinct REST and webhook identities. Both support `turnOn`, `turnOff`
+  and `toggle`. REST `power` is watts, not the switch state; `switchStatus`
+  is `0`/`1`, and `usedElectricity` is daily consumption in watt-minutes.
+  The webhook instead reports switch state, `online`, `overTemperature` and
+  `overload`; it is not a periodic meter reading.
+- [Hub 4](https://github.com/OpenWonderLabs/SwitchBotAPI/blob/0db92c78b56808f25b74c61535313f44bef4cd91/devices/hubs/hub-4.md)
+  has no control commands. REST reports motion as Boolean `moveDetected`;
+  webhook context reports `detectionState` (`DETECTED` or `NOT_DETECTED`).
+- [Vision Doorbell](https://github.com/OpenWonderLabs/SwitchBotAPI/blob/0db92c78b56808f25b74c61535313f44bef4cd91/devices/cameras/vision-doorbell.md)
+  reports `battery`, Boolean `online` and firmware `version`, with no control
+  commands or webhooks. `lockDeviceId` belongs to inventory, not status: it
+  names the bound Lock, or is explicitly `null` when unbound. See the
+  [JSON contract](json-contract.md#device-inventory-and-command-results) for absent fields.
+- [Floor Cleaning Robot S30](https://github.com/OpenWonderLabs/SwitchBotAPI/blob/0db92c78b56808f25b74c61535313f44bef4cd91/devices/robot-vacuum/floor-cleaning-robot-s30.md)
+  identifies itself as `Robot Vacuum Cleaner S30`. Commands are `startClean`,
+  `pause`, `dock`, `setVolume`, `selfClean` and `changeParam`; no refill
+  command is documented. `selfClean` takes a JSON number: `1` wash mop,
+  `2` start drying, `3` stop drying, `4` empty dustbin. Do not reuse S10/S20
+  parameters. For cleaning cycles upstream specifies integer `times` but
+  gives no bounds; local acceptance does not establish server limits.
+  Each webhook includes `deviceType`, `deviceMac`, `timeOfSample` (Unix
+  milliseconds) and **only changed properties**. Missing battery or task
+  fields are not nulls or resets.
+
+The [AI Art Frame 2](https://github.com/OpenWonderLabs/SwitchBotAPI/blob/0db92c78b56808f25b74c61535313f44bef4cd91/devices/others/ai-art-frame-2.md)
+name replaces `AI Art Frame Luma` in inventory and webhook documentation.
+The old name is also recognized in `catalog.json` overrides and removals.
+When both keys are present the canonical model takes precedence. Both it and the
+[original AI Art Frame](https://github.com/OpenWonderLabs/SwitchBotAPI/blob/0db92c78b56808f25b74c61535313f44bef4cd91/devices/others/ai-art-frame.md)
+document `deleteImage` with `random`, `newest` or `oldest`. Deletion is
+irreversible and includes cloud images not yet on the frame, but never the
+displayed image. If the displayed image cannot be identified, deletion fails.
+Each repeated request could delete another image: the CLI treats this as
+destructive, with no automatic retry, replay, automation or standing approval.
+See the [cloud result fields](json-contract.md#device-inventory-and-command-results).
+
+The [IR control table](https://github.com/OpenWonderLabs/SwitchBotAPI/blob/0db92c78b56808f25b74c61535313f44bef4cd91/devices/others/virtual-infrared-remote-devices.md#control-commands)
+documents playback for DVD and Speaker, but `volumeAdd`/`volumeSub` only for
+Speaker. DVD volume remains accepted for compatibility and is labeled
+undocumented. A user-defined button is not a cataloged command: its name
+does not establish what it does or whether it can be repeated.
+
+The [official glossary](https://github.com/OpenWonderLabs/SwitchBotAPI/blob/0db92c78b56808f25b74c61535313f44bef4cd91/README.md#glossary)
+lists Lock Vision and Lock Vision Pro for North America, Lock Lite for Japan,
+Smart Radiator Thermostat for Europe, and Lock Ultra Max for Japan and Europe
+(adding `W110000000` alongside `W104000000`). These are availability and
+product-code notes, not new commands or CLI restrictions on account geography.

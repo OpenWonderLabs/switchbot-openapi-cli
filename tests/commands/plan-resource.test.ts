@@ -8,13 +8,25 @@
  *      error envelope under --json.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readAudit } from '../../src/utils/audit.js';
 import { currentPlanCredentialScope, type PlanCredentialScope } from '../../src/lib/plan-store.js';
+import { ApiError } from '../../src/api/client.js';
+
+// Bind the real private claim and receipt paths before the store module loads.
+const isolatedHome = await vi.hoisted(async () => {
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const home = mkdtempSync(`${tmpdir()}/plan-resource-home-`);
+  vi.stubEnv('HOME', home);
+  vi.stubEnv('USERPROFILE', home);
+  return home;
+});
+afterAll(() => { vi.unstubAllEnvs(); fs.rmSync(isolatedHome, { recursive: true, force: true }); });
 
 // ── api client mock ─────────────────────────────────────────────────────────
 const apiMock = vi.hoisted(() => {
@@ -80,6 +92,7 @@ const flagsMock = vi.hoisted(() => ({
   getCacheMode: vi.fn(() => ({ listTtlMs: 0, statusTtlMs: 0 })),
   getFormat: vi.fn(() => undefined),
   getFields: vi.fn(() => undefined),
+  getTableStyle: vi.fn(() => 'simple'),
 }));
 vi.mock('../../src/utils/flags.js', () => flagsMock);
 
@@ -142,9 +155,10 @@ function parseJsonOutput(stdout: string[]): Record<string, unknown> {
   return JSON.parse(line) as Record<string, unknown>;
 }
 
-function makeApproved(plan: StoredPlan): PlanRecord {
+async function makeApproved(plan: StoredPlan): Promise<PlanRecord> {
   const r = planStore.savePlanRecord(plan);
-  return planStore.updatePlanRecord(r.planId, { status: 'approved', approvedAt: new Date().toISOString() });
+  expect((await runCli(registerPlanCommand, ['plan', 'approve', r.planId])).exitCode).toBeNull();
+  return r;
 }
 
 // ── tests ────────────────────────────────────────────────────────────────────
@@ -181,7 +195,7 @@ describe('plan resource model', () => {
   // ── plan execute status machine ──────────────────────────────────────────
   describe('plan execute — status transitions', () => {
     it('marks status=executed when all steps succeed', async () => {
-      const record = makeApproved(simplePlan());
+      const record = await makeApproved(simplePlan());
       apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body: {} } });
 
       await runCli(registerPlanCommand, ['plan', 'execute', record.planId, '--yes']);
@@ -192,9 +206,43 @@ describe('plan resource model', () => {
       expect(updated?.failedAt).toBeUndefined();
     });
 
+    it('returns cloud deletion counts including zero from an approved Art Frame plan', async () => {
+      cacheMock.map.set('FRAME', { type: 'AI Art Frame 2', name: 'Gallery', category: 'physical' });
+      const record = await makeApproved({ version: '1.0', steps: [{ type: 'command', deviceId: 'FRAME', command: 'deleteImage', parameter: 'oldest' }] });
+      const body = { deletedImageIndex: 0, remainingCount: 1 };
+      apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body } });
+      const res = await runCli(registerPlanCommand, ['--json', 'plan', 'execute', record.planId]);
+      expect(apiMock.__instance.post).toHaveBeenCalledOnce();
+      expect(JSON.parse(res.stdout.join('\n')).data.results).toMatchObject([{ status: 'ok', result: body }]);
+    });
+
+    it('honors explicitly requested per-step approval even for an already-approved plan', async () => {
+      cacheMock.map.set('FRAME', { type: 'AI Art Frame', name: 'Gallery', category: 'physical' });
+      const record = await makeApproved({ version: '1.0', steps: [
+        { type: 'command', deviceId: 'FRAME', command: 'deleteImage', parameter: 'oldest' },
+      ] });
+      apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body: {} } });
+      const input = vi.spyOn(process, 'stdin', 'get').mockReturnValue(Object.create(process.stdin, { isTTY: { value: false } }));
+      try {
+        const result = await runCli(registerPlanCommand, ['plan', 'execute', record.planId, '--require-approval']);
+        expect(apiMock.__instance.post).not.toHaveBeenCalled();
+        expect(result.exitCode).toBe(1);
+        expect(planStore.store.get(record.planId)?.status).not.toBe('executed');
+      } finally { input.mockRestore(); }
+    });
+
+    it('shows that no image was deleted in human-readable approved plan output', async () => {
+      cacheMock.map.set('FRAME', { type: 'AI Art Frame', name: 'Gallery', category: 'physical' });
+      const record = await makeApproved({ version: '1.0', steps: [{ type: 'command', deviceId: 'FRAME', command: 'deleteImage', parameter: 'random' }] });
+      apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body: { deletedImageIndex: 0, remainingCount: 0 } } });
+      const res = await runCli(registerPlanCommand, ['plan', 'execute', record.planId]);
+      expect(res.stdout.join('\n')).toMatch(/deletedImageIndex\W+0\b/);
+      expect(res.stdout.join('\n')).toMatch(/remainingCount\W+0\b/);
+    });
+
     it('writes audit entries tagged with the approved planId', async () => {
       flagsMock.getAuditLog.mockReturnValue(auditFile);
-      const record = makeApproved(simplePlan());
+      const record = await makeApproved(simplePlan());
       apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body: {} } });
 
       await runCli(registerPlanCommand, ['plan', 'execute', record.planId, '--yes']);
@@ -207,7 +255,7 @@ describe('plan resource model', () => {
     });
 
     it('marks status=failed (not executed) when a step errors', async () => {
-      const record = makeApproved(simplePlan());
+      const record = await makeApproved(simplePlan());
       apiMock.__instance.post.mockRejectedValue(new Error('network error'));
 
       const res = await runCli(registerPlanCommand, ['plan', 'execute', record.planId, '--yes', '--continue-on-error']);
@@ -222,7 +270,7 @@ describe('plan resource model', () => {
 
     it('marks status=failed when a destructive step errors (plan execute forces yes:true)', async () => {
       cacheMock.map.set('LOCK1', { type: 'Smart Lock', name: 'Front', category: 'physical' });
-      const record = makeApproved(lockPlan());
+      const record = await makeApproved(lockPlan());
 
       // No API mock for unlock — the step is attempted (plan execute forces yes:true)
       // and fails because the mock returns undefined.
@@ -234,7 +282,27 @@ describe('plan resource model', () => {
       expect(updated?.failureReason).toMatch(/error/);
     });
 
-    it('failed plan can be re-approved and retried', async () => {
+    it('preserves the deletion receipt and never resends deleteImage after another step was refused', async () => {
+      cacheMock.map.set('FRAME', { type: 'AI Art Frame', name: 'Gallery', category: 'physical' });
+      const record = await makeApproved({ version: '1.0', steps: [
+        { type: 'command', deviceId: 'FRAME', command: 'deleteImage', parameter: 'oldest' },
+        { type: 'scene', sceneId: 'OTHER' },
+      ] });
+      const receipt = { deletedImageIndex: 0, remainingCount: 1 };
+      apiMock.__instance.post.mockResolvedValueOnce({ data: { statusCode: 100, body: receipt } })
+        .mockRejectedValueOnce(new ApiError('Device offline', 161))
+        .mockResolvedValue({ data: { statusCode: 100, body: {} } });
+      expect((await runCli(registerPlanCommand, ['--json', 'plan', 'execute', record.planId])).exitCode).toBe(1);
+      expect((await runCli(registerPlanCommand, ['plan', 'approve', record.planId])).exitCode).toBeNull();
+      const retry = await runCli(registerPlanCommand, ['--json', 'plan', 'execute', record.planId]);
+      expect(retry.exitCode).toBeNull();
+      expect(JSON.parse(retry.stdout[0]).data.results[0]).toMatchObject({ status: 'ok', result: receipt });
+      expect(apiMock.__instance.post.mock.calls.map(([url]) => url)).toEqual([
+        '/v1.1/devices/FRAME/commands', '/v1.1/scenes/OTHER/execute', '/v1.1/scenes/OTHER/execute',
+      ]);
+    });
+
+    it('does not reapprove a failed legacy plan with no step receipts', async () => {
       const record = planStore.savePlanRecord(simplePlan());
       planStore.updatePlanRecord(record.planId, {
         status: 'failed',
@@ -242,16 +310,19 @@ describe('plan resource model', () => {
         failureReason: '1 error',
       });
 
-      await runCli(registerPlanCommand, ['plan', 'approve', record.planId]);
-      expect(planStore.store.get(record.planId)?.status).toBe('approved');
+      const approval = await runCli(registerPlanCommand, ['plan', 'approve', record.planId]);
+      expect(approval.exitCode).toBe(2);
+      expect(approval.stderr.join('\n')).toMatch(/outcomes are unknown/);
+      expect(planStore.store.get(record.planId)?.status).toBe('failed');
 
       apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body: {} } });
-      await runCli(registerPlanCommand, ['plan', 'execute', record.planId, '--yes']);
-      expect(planStore.store.get(record.planId)?.status).toBe('executed');
+      const result = await runCli(registerPlanCommand, ['plan', 'execute', record.planId, '--yes']);
+      expect(result.exitCode).toBe(2);
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
     });
 
     it('--json output includes succeeded:true on clean run', async () => {
-      const record = makeApproved(simplePlan());
+      const record = await makeApproved(simplePlan());
       apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body: {} } });
 
       const res = await runCli(registerPlanCommand, ['--json', 'plan', 'execute', record.planId, '--yes']);
@@ -261,7 +332,7 @@ describe('plan resource model', () => {
     });
 
     it('--json output includes succeeded:false on failed run', async () => {
-      const record = makeApproved(simplePlan());
+      const record = await makeApproved(simplePlan());
       apiMock.__instance.post.mockRejectedValue(new Error('boom'));
 
       const res = await runCli(registerPlanCommand, ['--json', 'plan', 'execute', record.planId, '--yes', '--continue-on-error']);

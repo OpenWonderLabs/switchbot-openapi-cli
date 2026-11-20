@@ -108,8 +108,9 @@ The default profile exposes 18 tools; `--tools readonly` exposes 15. Policy, aud
 The MCP server refuses destructive commands (Smart Lock `unlock` or `deadbolt`, Garage Door `open`, etc.) unless the tool call includes `confirm: true`, and the default safety profile still blocks direct destructive execution in favor of the reviewed CLI flow (`plan save` → `plan review` → `plan approve` → `plan execute`). `deadbolt` releases the latch; it does not lock the door. Discover destructive classifications with `switchbot schema export | jq '[.data.types[].commands[] | select(.safetyTier=="destructive")]'`; classification is not permission to execute.
 
 Device type resolution uses `deviceType` or, when absent, `controlType` for
-both cold and warm inventory. A `controlType`-only lock or Solar camera must
-pass the same safety and confirmation gates before any mutation is sent.
+both cold and warm inventory. A frame reported only by `controlType` still
+requires approval for `deleteImage`, including in a cold-cache CLI batch.
+Using HTTP MCP instead of stdio does not change a command's safety tier.
 
 MCP tool failures are structured results: `isError: true` with
 `structuredContent.error`. Inspect that error rather than treating a returned
@@ -263,22 +264,66 @@ switchbot plan suggest --intent "turn off all lights" --device D1 --device D2
 # MCP — agents can call plan_suggest({intent, device_ids}) without leaving the session
 ```
 
-`plan suggest` uses keyword heuristics (no LLM) to pick a command from the intent text and generate
-one step per device. Recognised verbs: `turnOn`, `turnOff`, `press`, `lock`, `unlock`, `open`, `close`,
-`pause`. Defaults to `turnOn` with a warning when the intent is unclear. Always review and edit the
-output before running.
+`plan suggest` uses a local heuristic, not an LLM. An explicit supported
+action produces one step per supplied device. A query, negation, conflicting
+actions or unclear English/Chinese wording returns a usage error rather than
+inventing a `turnOn`. The rule heuristic follows the same principle: do not
+treat a trigger, device name or an unsupported condition as an action.
 
 ### Validate first, run later
 
 ```bash
-cat plan.json | switchbot plan validate -           # exit 2 on schema error
-cat plan.json | switchbot --dry-run plan run -      # preview — mutations skipped
-cat plan.json | switchbot plan save -               # reviewed destructive path
-switchbot plan review <planId>
-switchbot plan approve <planId>
-switchbot plan execute <planId>
-cat plan.json | switchbot --json plan run -         # machine-readable outcome
+switchbot plan validate plan.json                  # exit 2 on schema error
+switchbot --dry-run plan run plan.json              # preview; no mutations
+switchbot --json plan run plan.json                 # non-destructive plans only by default
 ```
+
+### Reviewing an Art Frame deletion
+
+For **AI Art Frame** or **AI Art Frame 2** (alias **AI Art Frame Luma**),
+save the following as `delete-image.json`, substituting the verified frame
+ID. `oldest`, `newest`, and `random` select one eligible image from the cloud
+album, including images not downloaded to the frame. The displayed image is
+never eligible. Deletion cannot be undone.
+
+If the CLI does not know the frame ID, run `switchbot --no-cache devices list`
+to refresh the inventory for the same account. `--allow-unknown-device` cannot
+authorize deletion. Preview with `switchbot --json devices command FRAME_ID deleteImage oldest --explain`:
+`idempotent: false` means a second request could remove another image. This preview sends no command.
+
+```json
+{
+  "version": "1.0",
+  "steps": [
+    { "type": "command", "deviceId": "FRAME_ID", "command": "deleteImage", "parameter": "oldest" }
+  ]
+}
+```
+
+```bash
+switchbot plan save delete-image.json              # note the returned plan ID; no deletion
+switchbot plan review <planId>                     # check the account, target, and selection
+```
+
+Human review shows the bound credential selector, target ID, command type and
+parameter (including the image selector). Sensitive values such as passcodes
+and image data are masked in the human view; treat the saved JSON as private.
+
+Stop here unless the user approves that exact deletion. After approval, use
+the same profile or `--config` to run `switchbot plan approve <planId>` and
+then `switchbot --json plan execute <planId>` **once**.
+Read `.data.results[].result`: `deletedImageIndex: 0` means nothing was
+deleted; `remainingCount: 1` can mean only the displayed image remains, and
+`remainingCount: 0` means the album is empty. Cloud success does not mean
+the frame has finished. If the displayed image cannot be identified, the
+command fails rather than deleting it.
+
+Do not put this command in a rule, `never_confirm`, or a history replay.
+The client does not automatically retry deletion, even on HTTP 429. After a
+timeout or ambiguous outcome, inspect the album before proposing a new plan.
+MCP `plan_run` is not a substitute for approval: `yes: true` alone cannot
+authorize direct execution. When execution is permitted, its command step
+also returns the cloud body at `structuredContent.results[].result`.
 
 ### Run semantics
 
@@ -287,9 +332,10 @@ cat plan.json | switchbot --json plan run -         # machine-readable outcome
 - Every command target is resolved and validated before the first mutation. Destructive direct runs without approval fail as a whole; they are not a successful skipped preview.
 - `plan run --yes` is reserved for explicit dev profiles. The default production path for destructive work is `plan save` → `plan review` → `plan approve` → `plan execute`.
 - `--require-approval` enables per-step TTY confirmation for destructive steps during execution. Non-TTY environments (CI, pipes) auto-reject.
-- `--dry-run` previews commands, scenes and waits without mutations or sleeping. Approved saved plans remain approved. MCP previews report `ran: false`, step `status: "dry-run"` and `summary.dryRun`.
-- Saved plans bind the credential selector used at save time: the profile or absolute `--config` path. Approve and execute with that same selector. Legacy unbound records require review and re-saving; changing accounts does not reuse approval.
-- Every successful/failed step lands in `--audit-log` (see [Observability](#observability)).
+- `--dry-run` previews commands, scenes and waits without applying them or sleeping. It cannot grant approval. Approved plans, even empty or wait-only plans, retain their state. Read preflight can still consume quota.
+- Saved plans bind to the active profile or absolute `--config` path **and** its effective credentials. Replacing credentials under the same selector invalidates approval. An independently changed native keychain is detectable when the normal credential resolver observes it. Old selector-only approvals must be reviewed and rebound; save a new plan after an account change.
+- Approval seals the reviewed plan contents. Editing the stored JSON cannot transfer consent to different parameters. Only one process may change a saved plan at once. Explicitly reapproved failures may resume after a **known rejection**: acknowledged steps reuse their recorded results. After an ambiguous reply, interrupted claim, or legacy failure without receipts, inspect the target and review a new plan for the remaining actions. Do not remove private files to force a retry.
+- The optional [audit log](audit-log.md) is independent of these private execution receipts.
 
 ---
 
@@ -298,7 +344,7 @@ cat plan.json | switchbot --json plan run -         # machine-readable outcome
 ### `--json` vs `--format=json` — pick the right one
 
 - `--json`
-  Output: **Raw API payload** — exact JSON the SwitchBot API returned.
+  Output: the command's full payload under `.data` (not a bare SwitchBot response).
   Use when: building `jq` pipelines or scripts that need the full response body.
 - `--format=json`
   Output: **Projected row view** — CLI column model, `--fields` applies.
@@ -312,7 +358,7 @@ Errors use the same versioned envelope on both JSON output paths, written to std
 { "schemaVersion": "1.2", "error": { "code": 152, "kind": "api", "message": "...", "hint": "...", "retryable": false } }
 ```
 
-Error `kind` values: `api` (SwitchBot API error), `runtime` (network/auth failure), `usage` (bad flag or unknown field), `guard` (destructive command blocked without `confirm:true`).
+Error `kind` distinguishes cloud, runtime, usage and guard failures. Read `.error.code`, `.error.hint` and `.error.retryable`; do not infer retry safety from a transient network status alone.
 
 ```bash
 switchbot --json devices list | jq '.data.deviceList[] | select(.deviceType=="Bot") | .deviceId'
@@ -352,6 +398,15 @@ Changing any of those values returns an idempotency conflict; use a new key for
 a different operation. Omitted parameters and `"default"` represent the same
 wire request. The cache is process-local and expires after 60 seconds: separate
 CLI invocations do not share it.
+`devices batch` also accepts a per-device key prefix. `plan run` and `history replay`
+do not accept a deduplication key. This is a cache of successful responses, not
+an exactly-once guarantee. Unknown outcomes have no cached success.
+
+For a specific target, `devices command --explain` distinguishes `true`,
+`false` and `null` in `idempotent`. A generic manifest entry can only say `caution`.
+MCP keeps its existing two-valued `idempotencyHint`: `non-idempotent` means
+**do not repeat**, including when custom IR behavior is unknown. Decisions use
+the resolved model and command type, not the command's spelling.
 
 ### `--fields` — strict column filter
 
@@ -405,14 +460,23 @@ switchbot schema export --type 'Smart Lock' | jq '.data.types[0].commands'
 
 Each command entry carries:
 
-- `idempotent` — safe to retry
+- `idempotent` — whether repeating a cataloged operation has the same effect; not a transport retry instruction
 - `safetyTier` — exported command classification; `destructive` requires the reviewed approval path
 - `parameter` / `exampleParams` — what the agent should fill in
 - `commandType` (`command` vs `customize`) — built-in vs user-defined IR button
 
 ### Model-specific boundaries
 
-The following model names and capabilities are available starting in CLI 3.10.0.
+**Unreleased models** (after CLI 3.10.0):
+
+- For **Plug Mini (IT)** and **Outdoor Plug (EU)**, use `get_device_status` for `switchStatus` (0 off, 1 on), `power` (W), `electricCurrent` (mA), `voltage` (V), and daily `usedElectricity` (W·min). Their separate `changeReport` events expose `online`, `overTemperature`, `overload`, and `switchStatus`, not metering samples.
+- **Hub 4** is read-only. Use status for `moveDetected` and webhook `detectionState` for motion events. **Vision Doorbell** is also read-only (`version`, `battery`, `online`), with no documented webhook. `list_devices` may report `lockDeviceId` as a string or `null`, or omit it. It is inventory metadata, not a doorbell command target. Do not offer Video Doorbell's motion-detection controls.
+- **Robot Vacuum Cleaner S30** supports `startClean`, `pause`, `dock`, `setVolume`, `selfClean`, and `changeParam` (no `refill`). Use `sweep` or `sweep_mop` for `startClean`. For `selfClean` use numeric mode 1 (wash mop), 2 (start drying), 3 (stop drying), or 4 (empty dustbin). Its webhook reports only changed fields: a missing battery value is not zero.
+- **AI Art Frame 2** is canonical in discovery and webhook metadata. **AI Art Frame Luma** resolves to it for compatibility; it is not a third frame or a second documented webhook identity. Both frame models support [reviewed deletion](#reviewing-an-art-frame-deletion).
+
+See the [pinned protocol notes](./openapi-alignment-ambiguities.md) for the upstream evidence and unresolved limits.
+
+**Models first supported in CLI 3.10.0:**
 
 The catalog recognizes the model names RGBICWW Light Bars, Smart Lock Ultra
 Max, Curtain 4, Robot Vacuum Cleaner K11 Plus Pro, AI Art Frame Luma, Outdoor
@@ -423,7 +487,7 @@ similarly named models can differ or share an alias.
 - Light Bars use object parameters; `setLightEffect` takes `{ "effectId": 0 }`
   through `{ "effectId": 25 }`.
 - K11+ Pro requires at least one valid `changeParam` property. Curtain 4 uses
-  the normal curtain position tuple. Art Frame Luma accepts the established
+  the normal curtain position tuple. AI Art Frame 2 accepts the established
   one-source upload object (`imageUrl` or `imageBase64`, never both).
 - Outdoor Pan/Tilt Cam 3K is status-only. For both new cameras, `latestImage`
   is an optional object whose `expireAt` is Unix seconds; do not download its
@@ -485,17 +549,16 @@ programmatically — no manual policy.yaml editing required.
 ### Workflow
 
 ```bash
-# Step 1: Generate candidate rule YAML (no side effects)
-switchbot rules suggest \
-  --intent "turn on hallway light when motion detected" \
-  --trigger mqtt \
-  --device "hallway-sensor" --device "hallway-lamp"
+# Step 1: Save a candidate rule locally; do not change the active policy.
+switchbot rules suggest --intent "turn on hallway light when motion detected" \
+  --trigger mqtt --device "hallway-sensor" --device "hallway-lamp" \
+  --out candidate.yaml
 
 # Step 2: Dry-run into policy.yaml (shows diff, no write)
-switchbot rules suggest --intent "..." | switchbot policy add-rule --dry-run
+switchbot policy add-rule --dry-run < candidate.yaml
 
 # Step 3: Show diff to user, wait for approval, then inject
-switchbot rules suggest --intent "..." | switchbot policy add-rule --enable
+switchbot policy add-rule --enable < candidate.yaml
 
 # Step 4: Lint and reload
 switchbot rules lint && switchbot daemon reload
@@ -554,7 +617,7 @@ Use `switchbot rules replay --since 24h --json` regularly to surface misfires.
 
 ```bash
 switchbot --audit-log devices command <id> turnOff        # writes ~/.switchbot/audit.log
-switchbot --audit-log=/tmp/agent.log plan run plan.json   # custom path
+switchbot --audit-log --audit-log-path /tmp/agent.log plan run plan.json
 switchbot history show --limit 20                         # pretty-print recent entries
 switchbot history replay 7                                # re-run entry #7
 switchbot --json history show --limit 50 | jq '.data.entries[] | select(.result=="error")'
@@ -563,22 +626,26 @@ switchbot --json history show --limit 50 | jq '.data.entries[] | select(.result=
 The audit format is JSONL with this shape:
 
 ```json
-{ "t": "2026-04-18T10:00:00.000Z", "kind": "command", "deviceId": "BOT1",
-  "command": "turnOn", "parameter": null, "commandType": "command",
+{ "auditVersion": 2, "t": "2026-04-18T10:00:00.000Z", "kind": "command", "deviceId": "BOT1",
+  "command": "turnOn", "parameter": "default", "commandType": "command",
   "dryRun": false, "result": "ok" }
 ```
 
-Pair with `switchbot devices watch --interval=30s` for continuous state diffs (add `--include-unchanged` to emit every tick even when nothing changed), `switchbot events tail` to receive webhook pushes locally, or `switchbot events mqtt-tail` for real-time MQTT shadow updates.
+Pair with `switchbot devices watch <id> --interval=30s` for field-level diffs (`--include-unchanged` emits unchanged ticks). Use `events tail` for local webhook events or `events mqtt-tail` for live MQTT shadow updates.
 
 ---
 
 ## Performance and token budget
 
-Agent contexts are expensive; the CLI is designed to be frugal.
+CI measures serialized **bytes**, not estimated tokens. Compact bootstrap is
+budgeted below 20,000 bytes on empty and four-device fixture caches; the
+scoped S30 schema is budgeted below 15,000. These are fixture budgets, not
+limits on a large household. Measured decision-loop costs, including repeated
+history, are reported by the [household evaluator](host-compatibility.md#household-decision-evaluation).
 
-- `switchbot devices list --format=tsv --fields=deviceId,deviceName,type,cloud` — typical output ≤ 500 chars for a 20-device account (vs ~5 KB for the default JSON).
-- `switchbot devices status --format=yaml` — compact key/value, no array noise.
-- `switchbot schema export --type <t>` — bring only the relevant part of the catalog into context.
+- Use `switchbot devices list --format=tsv --fields=deviceId,deviceName,type` for a narrow inventory.
+- Use `switchbot devices status <id> --format=yaml` for a key/value view.
+- Use `switchbot schema export --type <type>` to include only the relevant part of the catalog.
 - `switchbot devices describe <id> --live` returns **both** the static catalog entry and live status in one call — prefer it over separate `status` + `commands <type>` calls.
 - Use `--cache=5m` when polling the same device repeatedly in a session; it caches live status locally so you don't burn the daily quota.
 

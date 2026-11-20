@@ -11,6 +11,7 @@ export const DESTRUCTIVE_COMMANDS = [
   'nightLatchUnlock',
   'createKey',
   'deleteKey',
+  'deleteImage',
   'deadbolt',
   'deleteWebhook',
   'deleteScene',
@@ -48,9 +49,12 @@ export function isDestructiveCommand(cmd: string): boolean {
   return destructiveVerbOf(cmd) !== null;
 }
 
+export function canonicalDestructiveVerb(verb: string): DestructiveCommand | null {
+  const lower = verb.toLowerCase();
+  return DESTRUCTIVE_COMMANDS.find((candidate) => candidate.toLowerCase() === lower) ?? null;
+}
+
 export function destructiveVerbOf(cmd: string): DestructiveCommand | null {
   const verb = extractVerb(cmd);
-  return verb
-    ? DESTRUCTIVE_COMMANDS.find((candidate) => candidate.toLowerCase() === verb.toLowerCase()) ?? null
-    : null;
+  return verb ? canonicalDestructiveVerb(verb) : null;
 }

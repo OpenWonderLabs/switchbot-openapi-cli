@@ -2,19 +2,33 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import type * as ChildProcess from 'node:child_process';
 
+import * as keychain from '../../src/credentials/keychain.js';
+import { createFileBackend } from '../../src/credentials/backends/file.js';
 import { runPreflight } from '../../src/install/preflight.js';
+
+// Exercise the Codex CLI-present/plugin-absent case without inspecting the
+// developer's global npm installation. Native probes have their own OS matrix.
+vi.mock('node:child_process', async (importOriginal) => ({
+  ...(await importOriginal<typeof ChildProcess>()),
+  spawnSync(command: string) {
+    if (command === 'where' || command === 'which') return { status: 0 };
+    if (command === 'npm') return { status: 1, stdout: '{"dependencies":{}}' };
+    throw new Error(`Unexpected preflight subprocess: ${command}`);
+  },
+}));
 
 describe('runPreflight', () => {
   let tmp: string;
-  let homedirSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-preflight-'));
-    homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(tmp);
+    vi.spyOn(os, 'homedir').mockReturnValue(tmp);
+    vi.spyOn(keychain, 'selectCredentialStore').mockResolvedValue(createFileBackend());
   });
   afterEach(() => {
-    homedirSpy.mockRestore();
+    vi.restoreAllMocks();
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
@@ -97,11 +111,11 @@ describe('runPreflight', () => {
     }
   });
 
-  it('keychain check returns a backend name', async () => {
+  it('reports the selected credential backend', async () => {
     const res = await runPreflight();
-    const keychain = res.checks.find((c) => c.name === 'keychain');
-    expect(keychain).toBeDefined();
-    expect(keychain?.message).toMatch(/credential backend|keychain probe/);
+    expect(res.checks.find(c => c.name === 'keychain')).toMatchObject({
+      status: 'ok', message: expect.stringContaining(createFileBackend().describe().backend),
+    });
   });
 
   it('result.ok is false when any check is fail', async () => {
@@ -172,21 +186,9 @@ describe('runPreflight', () => {
   });
 
   it('codex agent: missing global npm package is warn (not fail) — Route B does not need it', async () => {
-    // npm list -g will return non-zero / empty in the test environment; that used
-    // to be a hard 'fail' blocking the entire install. With Route B it should
-    // only be a warning so registerCodexPluginAuto() gets a chance to run.
     const res = await runPreflight({ agent: 'codex' });
-    const npmCheck = res.checks.find((c) => c.name === 'codex-plugin-npm');
-    if (npmCheck) {
-      // When the npm package is absent the check must be at most 'warn'.
-      expect(npmCheck.status).not.toBe('fail');
-    }
-    // Overall preflight must not be blocked by this check alone.
-    const nonNpmFails = res.checks.filter(
-      (c) => c.status === 'fail' && c.name !== 'codex-plugin-npm',
-    );
-    if (nonNpmFails.length === 0) {
-      expect(res.ok).toBe(true);
-    }
+    expect(res.checks.find(c => c.name === 'codex-cli')?.status).toBe('ok');
+    expect(res.checks.find(c => c.name === 'codex-plugin-npm')?.status).toBe('warn');
+    expect(res.ok).toBe(true);
   });
 });

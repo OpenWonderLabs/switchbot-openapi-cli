@@ -1442,6 +1442,27 @@ describe('mcp server', () => {
       }
     });
 
+    it('plan_run returns the cloud counts from an authorized frame deletion', async () => {
+      cacheMock.map.set('FRAME', { type: 'AI Art Frame', name: 'Frame', category: 'physical' });
+      const body = { deletedImageIndex: 7, remainingCount: 2 };
+      apiMock.__instance.post.mockResolvedValue({ data: { statusCode: 100, body } });
+      const { client, server } = await pair('default');
+      vi.stubEnv('SWITCHBOT_ALLOW_DIRECT_DESTRUCTIVE', '1');
+      try {
+        const result = await client.callTool({ name: 'plan_run', arguments: {
+          yes: true, plan: { version: '1.0', steps: [
+            { type: 'command', deviceId: 'FRAME', command: 'deleteImage', parameter: 'random' },
+          ] },
+        } });
+        expect(result.isError).toBeFalsy();
+        expect(result.structuredContent?.results).toMatchObject([{ status: 'ok', result: body }]);
+      } finally {
+        vi.unstubAllEnvs();
+        await client.close();
+        await server.close();
+      }
+    });
+
     it('plan_run rejects direct destructive execution when yes=true in the default profile', async () => {
       cacheMock.map.set('LOCK1', { type: 'Smart Lock', name: 'Front Door', category: 'physical' });
       const { client } = await pair();
@@ -1865,6 +1886,18 @@ describe('mcp server', () => {
   describe('send_command riskProfile.idempotencyHint', () => {
     type RiskProfile = { idempotencyHint: string; riskLevel: string; requiresConfirmation: boolean };
     type DryRunResponse = { ok: boolean; dryRun: boolean; riskProfile: RiskProfile; wouldSend: unknown };
+
+    it('does not recommend repeating an unknown custom IR button even with a deduplication key', async () => {
+      cacheMock.map.set('TV1', { type: 'TV', name: 'Test TV', category: 'ir' });
+      const { client } = await pair();
+      const res = await client.callTool({ name: 'send_command', arguments: {
+        deviceId: 'TV1', command: 'turnOn', commandType: 'customize', idempotencyKey: 'probe', dryRun: true,
+      } });
+      expect(res.structuredContent).toMatchObject({
+        dryRun: true, riskProfile: { idempotencyHint: 'non-idempotent', riskLevel: 'medium', recommendedMode: 'plan' },
+      });
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
+    });
 
     it('turnOn → idempotencyHint:safe (catalog says idempotent:true)', async () => {
       cacheMock.map.set('BOT1', { type: 'Bot', name: 'Test Bot', category: 'physical' });

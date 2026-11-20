@@ -26,10 +26,9 @@ program.hook('preAction', async () => {
 
 program.addHelpText('after', `
 Credentials:
-  Provide SwitchBot API v1.1 credentials via either:
-    • environment variables SWITCHBOT_TOKEN and SWITCHBOT_SECRET (take priority), or
-    • ~/.switchbot/config.json written by 'switchbot config set-token'
-    • override the file path with --config <path>
+  Set SWITCHBOT_TOKEN and SWITCHBOT_SECRET, sign in with 'switchbot auth login'
+  to use the OS credential store, or use the config written by 'config set-token'.
+  Use --config <path> to select an explicit credentials file.
 
 Exit codes:
   0  success (including --dry-run intercept)
@@ -46,7 +45,7 @@ Examples:
   $ switchbot devices list
   $ switchbot devices list --json | jq '.data.deviceList[].deviceId'
   $ switchbot devices describe <deviceId>         # what commands does this device support?
-  $ switchbot devices commands <type>             # offline lookup, e.g. Bot / Curtain / "Smart Lock"
+  $ switchbot devices commands S30                # offline: supported commands, parameters, and status fields
   $ switchbot devices status <deviceId>           # live state: battery, position, temperature, …
   $ switchbot devices command <deviceId> turnOn
   $ switchbot devices command <deviceId> turnOn --dry-run

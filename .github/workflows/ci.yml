@@ -151,8 +151,23 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
-      - name: Seed device-cache fixture
+      - name: Check offline discovery budgets on cold and populated caches
         run: |
+          set -euo pipefail
+          export HOME="$RUNNER_TEMP/discovery-home"
+          mkdir -p "$HOME"
+          output="$RUNNER_TEMP/discovery.json"
+          check_budget() {
+            local limit=$1
+            shift
+            node dist/index.js "$@" > "$output"
+            local bytes
+            bytes=$(wc -c < "$output")
+            echo "$* = $bytes bytes (limit: $limit)"
+            test "$bytes" -lt "$limit"
+          }
+          check_budget 20000 agent-bootstrap --compact
+          jq -e '(.data.devices | length) == 0 and .data.catalog == {"scope":"used","types":[]}' "$output"
           mkdir -p "$HOME/.switchbot"
           cat > "$HOME/.switchbot/devices.json" <<'JSON'
           {
@@ -165,24 +180,23 @@ jobs:
             }
           }
           JSON
-      - name: agent-bootstrap --compact must stay under 20 KB
-        run: |
-          OUT=$(node dist/index.js agent-bootstrap --compact)
-          BYTES=$(printf '%s' "$OUT" | wc -c)
-          echo "agent-bootstrap --compact = $BYTES bytes"
-          if [ "$BYTES" -ge 20000 ]; then
-            echo "FAIL: budget is 20000, got $BYTES"
-            exit 1
-          fi
-      - name: schema export --compact --used must stay under 15 KB
-        run: |
-          OUT=$(node dist/index.js schema export --compact --used)
-          BYTES=$(printf '%s' "$OUT" | wc -c)
-          echo "schema export --compact --used = $BYTES bytes"
-          if [ "$BYTES" -ge 15000 ]; then
-            echo "FAIL: budget is 15000, got $BYTES"
-            exit 1
-          fi
+          check_budget 20000 agent-bootstrap --compact
+          # Evaluate the jq expressions advertised to users, not copies of them.
+          mapfile -t projections < <(node dist/index.js agent-bootstrap --help | sed -n "s/.*| jq '\\([^']*\\)'.*/\\1/p")
+          test "${#projections[@]}" -eq 2
+          test "$(jq -e "${projections[0]}" "$output")" -eq 4
+          jq -e "${projections[1]} | .discovery | length > 0" "$output"
+          check_budget 15000 schema export --compact --used
+          check_budget 15000 schema export --type S30
+          jq -e '[.data.resources.webhooks.events[].context.deviceType] == ["Robot Vacuum Cleaner S30"]' "$output"
+      - name: Evaluate isolated household decisions
+        run: node scripts/household-eval.mjs > "$RUNNER_TEMP/household-report.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: household-contract-report
+          path: ${{ runner.temp }}/household-report.json
+          if-no-files-found: ignore
 
   pack-install-smoke:
     name: Packed install smoke (${{ matrix.os }})

@@ -152,6 +152,50 @@ describe('schema export', () => {
     expect(Array.isArray(data.types)).toBe(true);
   });
 
+  it('gives an S30 caller a small targeted schema with unambiguous CLI and wire parameters', async () => {
+    const res = await runCli(registerSchemaCommand, ['schema', 'export', '--type', 'S30']);
+    const stdout = res.stdout.join('\n') + '\n';
+    const { data } = JSON.parse(stdout);
+    expect(data.types).toHaveLength(1);
+    const [device] = data.types;
+    const mode = device.commands.find((c: { command: string }) => c.command === 'selfClean');
+    expect(mode.exampleParams).toEqual(['1', '2', '3', '4']);
+    expect.soft(`${mode.parameter} ${mode.description}`).toMatch(/CLI/i);
+    expect.soft(`${mode.parameter} ${mode.description}`).toMatch(/JSON number/i);
+    expect.soft(Buffer.byteLength(stdout)).toBeLessThan(15_000);
+    const resources: ResourceCatalog = data.resources;
+    expect(resources.webhooks.events.map((e) => e.context.deviceType)).toEqual([device.type]);
+    expect(resources.keys).toEqual([]);
+    expect(resources.scenes.operations).toEqual([]);
+    expect(resources.webhooks.endpoints).toEqual([]);
+  });
+
+  it('keeps applicable webhook and key metadata when projecting a keypad', async () => {
+    const res = await runCli(registerSchemaCommand, ['schema', 'export', '--type', 'Keypad', '--project', 'type']);
+    const { types, resources } = JSON.parse(res.stdout.join('\n')).data as { types: unknown[]; resources: ResourceCatalog };
+    expect(types).toEqual([{ type: 'Keypad' }]);
+    expect(resources.webhooks.events.map((e) => e.context.deviceType)).toEqual(['WoKeypad']);
+    expect(resources.keys.map((k) => k.keyType)).toContain('disposable');
+  });
+
+  it('selects the Touch webhook rather than the other keypad event for its explicit alias', async () => {
+    const res = await runCli(registerSchemaCommand, ['schema', 'export', '--type', 'Keypad Touch']);
+    const { resources } = JSON.parse(res.stdout.join('')).data as { resources: ResourceCatalog };
+    expect(resources.webhooks.events.map(e => e.context.deviceType)).toEqual(['WoKeypadTouch']);
+    expect(resources.keys.find(k => k.keyType === 'disposable')?.requiredParams).toContain('startTime');
+  });
+
+  it('uses the schema help projection tip to retrieve only type and commands', async () => {
+    const help = await runCli(registerSchemaCommand, ['schema', 'export', '--help']);
+    const projection = help.stdout.join('\n').match(/^\s*(--[\w-]+ type,commands)\s/m)?.[1];
+    expect(projection).toBeDefined();
+    const res = await runCli(registerSchemaCommand, ['schema', 'export', '--type', 'Bot', ...projection!.split(' ')]);
+    const [bot] = JSON.parse(res.stdout.join('\n')).data.types;
+    expect(Object.keys(bot).sort()).toEqual(['commands', 'type']);
+    expect(bot.type).toBe('Bot');
+    expect(bot.commands.length).toBeGreaterThan(0);
+  });
+
   it('filters by --type (matches name + aliases, case-insensitive)', async () => {
     const res = await runCli(registerSchemaCommand, ['schema', 'export', '--type', 'bot']);
     const parsed = JSON.parse(res.stdout.join('')).data;

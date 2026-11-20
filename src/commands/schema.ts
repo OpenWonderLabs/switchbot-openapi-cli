@@ -9,7 +9,7 @@ import {
   type DeviceCatalogEntry,
   type SafetyTier,
 } from '../devices/catalog.js';
-import { RESOURCE_CATALOG } from '../devices/resources.js';
+import { RESOURCE_CATALOG, type ResourceCatalog } from '../devices/resources.js';
 import { loadCache } from '../devices/cache.js';
 
 interface SchemaEntry {
@@ -103,6 +103,33 @@ function projectFields<T extends Record<string, unknown>>(entry: T, fields: stri
   return out;
 }
 
+function resourcesForTypes(types: DeviceCatalogEntry[], requested?: string): ResourceCatalog {
+  const { version, scenes, webhooks, keys } = RESOURCE_CATALOG;
+  // A catalog alias can be a model with its own event (Keypad Touch) or
+  // just a spelling with no event of its own (S30). Prefer an exact event.
+  const eventModel = (event: ResourceCatalog['webhooks']['events'][number]) =>
+    event.context.deviceType === 'WoKeypad' ? 'keypad' : event.devicePattern.toLowerCase();
+  const requestedNames = new Set(requested?.toLowerCase().split(',').map(s => s.trim()));
+  const eventNames = new Set(webhooks.events.flatMap(e => [eventModel(e), e.context.deviceType.toLowerCase()]));
+  const names = new Set<string>();
+  const selectedEvents = new Set<string>();
+  for (const entry of types) {
+    const aliases = [entry.type.toLowerCase(), ...(entry.aliases ?? []).map(a => a.toLowerCase())];
+    for (const name of aliases) names.add(name);
+    const distinct = aliases.filter(a => requestedNames.has(a) && eventNames.has(a));
+    for (const name of distinct.length ? distinct : aliases) selectedEvents.add(name);
+  }
+  return {
+    version,
+    scenes: { description: scenes.description, operations: [] },
+    webhooks: {
+      endpoints: [],
+      events: webhooks.events.filter(e => selectedEvents.has(eventModel(e)) || selectedEvents.has(e.context.deviceType.toLowerCase())),
+    },
+    keys: keys.filter((key) => key.supportedDevices.some((name) => names.has(name.toLowerCase()))),
+  };
+}
+
 function runSchemaExport(options: { type?: string; types?: string; role?: string; category?: string; compact?: boolean; used?: boolean; project?: string; capabilities?: boolean }): Promise<void> | void {
   const catalog = getEffectiveCatalog();
   let filtered = catalog;
@@ -161,7 +188,7 @@ function runSchemaExport(options: { type?: string; types?: string; role?: string
     };
     if (!options.compact) {
       payload.generatedAt = new Date().toISOString();
-      payload.resources = RESOURCE_CATALOG;
+      payload.resources = filtered === catalog ? RESOURCE_CATALOG : resourcesForTypes(filtered, options.type ?? options.types);
       payload.cliAddedFields = [
         {
           field: 'fetchedAt',
@@ -244,20 +271,19 @@ catalog export — not a formal JSON Schema standard document — suitable for
 pre-baking LLM prompts or regenerating docs when the catalog changes.
 \`statusFields\` are advisory offline hints; actual live status can differ by
 firmware and device variant.
+When device types are filtered, resources include matching webhook events and
+key types only. Use an unfiltered export for all events and account operations.
 
 Size tips:
-  --compact --used          Smallest realistic payload for a given account
-                            (< 15 KB on most accounts).
-  --fields type,commands    Strip statusFields / role / etc. when only
-                            commands are needed.
-  --type + --compact        Inspect one type with minimum footprint.
+  --compact --used          List only cached device types, without descriptions.
+  --project type,commands   Keep only type and commands on each device entry.
+  --type S30 --compact      Inspect one type with minimum footprint.
 
 Common top-level fields:
   schemaVersion             CLI schema version (stable for agent contracts)
   data.version              Catalog schema version
   data.types                Array of SchemaEntry (or CompactSchemaEntry with --compact)
-  data.fetchedAt            CLI-added; present on live-query responses ('devices status'),
-                            not on this offline export.
+  data.generatedAt          Time of export (omitted with --compact)
 
 Examples:
   $ switchbot schema export > catalog.json

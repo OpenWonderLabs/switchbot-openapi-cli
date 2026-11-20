@@ -1,5 +1,5 @@
 import { stringify as yamlStringify, parse as yamlParse, parseDocument, LineCounter, type Document } from 'yaml';
-import { containsCjk, inferCommandFromIntent } from '../lib/command-keywords.js';
+import { inferCommandFromIntent } from '../lib/command-keywords.js';
 import { UsageError } from '../utils/output.js';
 import { writeAudit } from '../utils/audit.js';
 import type { Rule, MqttTrigger, CronTrigger, WebhookTrigger, Action } from './types.js';
@@ -39,7 +39,7 @@ const TRIGGER_KEYWORDS: Array<{
   { pattern: /\bdoor\b|\bcontact\b|\bopen.*sensor/i, trigger: 'mqtt', event: 'contact.opened' },
   { pattern: /\bbutton\b|\bpress/i, trigger: 'mqtt', event: 'button.pressed' },
   { pattern: /\bwebhook\b|\bhttp\b|\bifttt\b/i, trigger: 'webhook' },
-  { pattern: /\bevery\b|\bdaily\b|\bmorning\b|\bnight\b|\bevening\b|\b\d{1,2}\s*[ap]m\b/i, trigger: 'cron' },
+  { pattern: /\bevery\b|\bweekdays\b|\bdaily\b|\bmorning\b|\bnight\b|\bevening\b|\b\d{1,2}\s*[ap]m\b/i, trigger: 'cron' },
 ];
 
 function inferTrigger(intent: string): { trigger: 'mqtt' | 'cron' | 'webhook'; event?: string } {
@@ -50,11 +50,8 @@ function inferTrigger(intent: string): { trigger: 'mqtt' | 'cron' | 'webhook'; e
 }
 
 function inferSchedule(intent: string, warnings: string[]): string {
-  const amMatch = /\b(\d{1,2})\s*am\b/i.exec(intent);
-  if (amMatch) return `0 ${parseInt(amMatch[1], 10)} * * *`;
-
-  const pmMatch = /\b(\d{1,2})\s*pm\b/i.exec(intent);
-  if (pmMatch) return `0 ${parseInt(pmMatch[1], 10) + 12} * * *`;
+  const time = /\b(\d{1,2})\s*(am|pm)\b/i.exec(intent);
+  if (time) return `0 ${Number(time[1]) % 12 + (time[2].toLowerCase() === 'pm' ? 12 : 0)} * * *`;
 
   if (/\bevery\s*hour/i.test(intent)) return '0 * * * *';
   if (/\bnight\b|\bevening\b/i.test(intent)) return '0 22 * * *';
@@ -66,18 +63,27 @@ function inferSchedule(intent: string, warnings: string[]): string {
   return '0 8 * * *';
 }
 
-function inferCommand(intent: string, warnings: string[]): string {
-  const command = inferCommandFromIntent(intent);
-  if (command) return command;
-  if (containsCjk(intent)) {
-    throw new UsageError(
-      `Intent "${intent}" contains non-English command text that this heuristic cannot safely infer. Use explicit English command words (turnOn/turnOff/open/close/lock/unlock/press/pause) or edit the generated rule manually.`,
-    );
-  }
-  warnings.push(
-    `Could not infer command from intent "${intent}" — defaulted to "turnOn". Edit the generated rule to set the correct command.`,
-  );
-  return 'turnOn';
+// Strip only triggers the heuristic can actually represent. In particular,
+// words such as "open" or "press" in an event are not actions on the target.
+const TIME = String.raw`(?:1[0-2]|[1-9])\s*[ap]m`;
+const RULE_TRIGGER = [
+  String.raw`(?:when |on )?(?:the )?(?:motion(?: is)? detected|door opens|button(?: is)? pressed)`,
+  String.raw`on (?:motion|webhook(?: call)?)`,
+  String.raw`(?:every (?:day|morning|night|evening|hour)|weekdays)(?: at ${TIME})?`,
+  String.raw`at (?:${TIME}(?: every (?:morning|night|evening|day))?|night)`,
+].join('|');
+const TRIGGER_FIRST = new RegExp(`^(${RULE_TRIGGER})(?:,\\s*|\\s+)(?:then )?(.+)$`, 'i');
+const TRIGGER_LAST = new RegExp(`^(.+?)\\s+(${RULE_TRIGGER})$`, 'i');
+
+function ruleClauses(intent: string): { action: string; trigger?: string } {
+  const text = intent.trim().replace(/\s+/g, ' ').replace(/[.!]$/, '');
+  const first = TRIGGER_FIRST.exec(text);
+  if (first) return { trigger: first[1], action: first[2] };
+  const last = TRIGGER_LAST.exec(text);
+  if (last) return { trigger: last[2], action: last[1] };
+  const motion = /^motion turns (on|off) (.+)$/i.exec(text);
+  if (motion) return { trigger: 'motion detected', action: `turn ${motion[1]} ${motion[2]}` };
+  return { action: text };
 }
 
 export async function suggestRule(opts: SuggestRuleOptions): Promise<SuggestRuleResult> {
@@ -262,31 +268,24 @@ async function suggestRuleWithLlm(opts: SuggestRuleOptions, backend: Exclude<LLM
 
 function suggestRuleHeuristic(opts: SuggestRuleOptions): SuggestRuleResult {
   const warnings: string[] = [];
-  const cjkIntent = containsCjk(opts.intent);
+  const clauses = ruleClauses(opts.intent);
+  const command = inferCommandFromIntent(clauses.action);
+  if (!command) {
+    throw new UsageError('Cannot safely infer a single explicit rule action. For a read, use switchbot devices status; otherwise specify the trigger and an action such as "when motion detected, turn on light".');
+  }
 
-  // Resolve trigger
-  let triggerSource = opts.trigger;
-  let inferredEvent: string | undefined;
-  if (!triggerSource) {
-    const inferred = inferTrigger(opts.intent);
-    triggerSource = inferred.trigger;
-    inferredEvent = inferred.event;
-    if (inferredEvent === 'device.shadow') {
-      if (cjkIntent) {
-        throw new UsageError(
-          `Intent "${opts.intent}" contains non-English trigger text that this heuristic cannot safely infer. Re-run with --trigger and, for mqtt rules, --event explicitly.`,
-        );
-      }
-      warnings.push(
-        `Could not infer trigger type from intent "${opts.intent}" — defaulted to mqtt/device.shadow. Set --trigger and --event explicitly.`,
-      );
-    }
+  // Only trigger wording can identify an event. "Press the button" is an
+  // action, not permission to fire on a button press.
+  const inferred = inferTrigger(clauses.trigger ?? '');
+  const triggerSource = opts.trigger ?? inferred.trigger;
+  if (!opts.trigger && inferred.event === 'device.shadow') {
+    warnings.push(`Could not infer trigger type from intent "${opts.intent}" — defaulted to mqtt/device.shadow. Set --trigger and --event explicitly.`);
   }
 
   // Build the when block
   let when: MqttTrigger | CronTrigger | WebhookTrigger;
   if (triggerSource === 'mqtt') {
-    const event = opts.event ?? inferredEvent ?? 'device.shadow';
+    const event = opts.event ?? (inferred.trigger === 'mqtt' ? inferred.event : undefined) ?? 'device.shadow';
     const mqttTrigger: MqttTrigger = { source: 'mqtt', event };
     if (opts.devices && opts.devices.length > 0) {
       const sensorDevice = opts.devices[0];
@@ -294,21 +293,16 @@ function suggestRuleHeuristic(opts: SuggestRuleOptions): SuggestRuleResult {
     }
     when = mqttTrigger;
   } else if (triggerSource === 'cron') {
-    if (cjkIntent && !opts.schedule) {
-      throw new UsageError(
-        `Intent "${opts.intent}" contains non-English scheduling text that this heuristic cannot safely infer. Re-run with --schedule "<cron>" explicitly.`,
-      );
-    }
     const schedule = opts.schedule ?? inferSchedule(opts.intent, warnings);
     const cronTrigger: CronTrigger = { source: 'cron', schedule };
     if (opts.days && opts.days.length > 0) cronTrigger.days = opts.days as never;
+    else if (/\bweekdays\b/i.test(clauses.trigger ?? '')) cronTrigger.days = ['mon', 'tue', 'wed', 'thu', 'fri'];
     when = cronTrigger;
   } else {
     when = { source: 'webhook', path: opts.webhookPath ?? '/action' };
   }
 
   // Build then[] — one action per device (skip the sensor device for mqtt)
-  const command = inferCommand(opts.intent, warnings);
   const actionDevices =
     triggerSource === 'mqtt' && opts.devices && opts.devices.length > 1
       ? opts.devices.slice(1)

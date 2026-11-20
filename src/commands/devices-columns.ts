@@ -8,5 +8,5 @@ export const DEVICE_FIELD_ALIAS: Record<string, string> = {
 
 export const DEVICE_ALL_COLS: Set<string> = new Set([
   'deviceId', 'deviceName', 'type', 'category', 'controlType',
-  'family', 'roomID', 'room', 'hub', 'cloud', 'alias',
+  'family', 'roomID', 'room', 'hub', 'cloud', 'alias', 'lockDeviceId',
 ]);

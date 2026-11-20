@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { enumArg, intArg, stringArg } from '../utils/arg-parsers.js';
 import { printTable, printKeyValue, printJson, isJsonMode, handleError, UsageError, StructuredUsageError, exitWithError } from '../utils/output.js';
 import { resolveFormat, resolveFields, renderRows } from '../utils/format.js';
+import { decideActionRisk } from '../devices/action-risk.js';
 import {
   findCatalogEntry,
   getEffectiveCatalog,
@@ -125,6 +126,7 @@ Pass --wide for the full operator view: + controlType, family, roomID, room, hub
                  Hub; — when unassigned/unknown)
   hub          - "—" when the device is its own hub or hubDeviceId is empty
   cloud        - ✓/✗: whether cloud service is enabled (— for IR remotes)
+  lockDeviceId - bound Lock ID for Vision Doorbell; request with --fields
 
 controlType, family/room, and roomID require the 'src: OpenClaw' header, which
 this CLI always sends. (IR family/room inheritance is computed client-side for
@@ -225,6 +227,7 @@ Cache note:
             family: d.familyName || '—', roomID: d.roomID || '—', room: d.roomName || '—',
             hub: !d.hubDeviceId || d.hubDeviceId === '000000000000' ? '—' : d.hubDeviceId,
             cloud: d.enableCloudService ?? null,
+            lockDeviceId: d.lockDeviceId,
             alias: deviceMeta.devices[d.deviceId]?.alias ?? '—',
           });
           const normIr = (d: typeof infraredRemoteList[0]): Record<string, unknown> => {
@@ -276,13 +279,14 @@ Cache note:
         const narrowHeaders = ['deviceId', 'deviceName', 'type', 'category', 'family', 'room'];
         const wideHeaders = ['deviceId', 'deviceName', 'type', 'category', 'controlType', 'family', 'roomID', 'room', 'hub', 'cloud', 'alias'];
         const userFields = resolveFields();
-        const headers = userFields ? wideHeaders : (options.wide ? wideHeaders : narrowHeaders);
+        const includeLockId = userFields?.includes('lockDeviceId');
+        if (includeLockId) wideHeaders.push('lockDeviceId');
         const rows: (string | boolean | null)[][] = [];
 
         for (const d of deviceList) {
           if (!options.showHidden && deviceMeta.devices[d.deviceId]?.hidden) continue;
           if (!matchesFilter({ deviceId: d.deviceId, type: d.deviceType || '', name: d.deviceName, category: 'physical', room: d.roomName || '', controlType: d.controlType || '', family: d.familyName || '', hub: d.hubDeviceId || '', roomID: d.roomID || '', cloud: String(d.enableCloudService), alias: deviceMeta.devices[d.deviceId]?.alias || '' })) continue;
-          rows.push([
+          const row: (string | boolean | null)[] = [
             d.deviceId,
             d.deviceName,
             d.deviceType || d.controlType || 'Unknown Device',
@@ -294,14 +298,16 @@ Cache note:
             !d.hubDeviceId || d.hubDeviceId === '000000000000' ? '—' : d.hubDeviceId,
             d.enableCloudService,
             deviceMeta.devices[d.deviceId]?.alias ?? '—',
-          ]);
+          ];
+          if (includeLockId) row.push(d.lockDeviceId ?? null);
+          rows.push(row);
         }
 
         for (const d of infraredRemoteList) {
           if (!options.showHidden && deviceMeta.devices[d.deviceId]?.hidden) continue;
           const inherited = hubLocation.get(d.hubDeviceId);
           if (!matchesFilter({ deviceId: d.deviceId, type: d.remoteType, name: d.deviceName, category: 'ir', room: inherited?.room || '', controlType: d.controlType || '', family: inherited?.family || '', hub: d.hubDeviceId || '', roomID: inherited?.roomID || '', cloud: '', alias: deviceMeta.devices[d.deviceId]?.alias || '' })) continue;
-          rows.push([
+          const row: (string | boolean | null)[] = [
             d.deviceId,
             d.deviceName,
             d.remoteType,
@@ -313,7 +319,9 @@ Cache note:
             d.hubDeviceId,
             null,
             deviceMeta.devices[d.deviceId]?.alias ?? '—',
-          ]);
+          ];
+          if (includeLockId) row.push(null);
+          rows.push(row);
         }
 
         if (rows.length === 0 && fmt === 'table') {
@@ -520,9 +528,9 @@ Examples:
     .option('--type <commandType>', 'Command type: "command" for built-in commands (default), "customize" for user-defined IR buttons', enumArg('--type', COMMAND_TYPES), 'command')
     .option('--yes', 'Confirm a destructive command in an explicit dev profile. --dry-run is always allowed without --yes.')
     .option('--explain', 'Print a human-readable summary of what this command would do (risk level, device type, idempotency) then exit without executing.')
-    .option('--allow-unknown-device', 'Allow targeting a deviceId that is not in the local cache. By default unknown IDs exit 2 so --dry-run is a reliable pre-flight gate; use this flag for scripted pass-through.')
-    .option('--skip-param-validation', 'Skip client-side parameter validation (escape hatch — prefer fixing the argument over using this).')
-    .option('--idempotency-key <key>', 'Client-supplied key to dedupe retries. process-local 60s window; cache is per Node process (MCP session, batch run, plan run). Independent CLI invocations do not share cache.', stringArg('--idempotency-key'))
+    .option('--allow-unknown-device', 'Allow an uncached device ID (otherwise exit 2). Cannot bypass target verification for deleteImage.')
+    .option('--skip-param-validation', 'Skip client-side parameter validation except for the required deleteImage selector.')
+    .option('--idempotency-key <key>', 'Deduplicate an acknowledged result within a process-local 60s window. Independent CLI invocations do not share cache; a key does not resolve an unknown outcome.', stringArg('--idempotency-key'))
     .addHelpText('after', `
 ────────────────────────────────────────────────────────────────────────
 For the full list of commands a specific device supports — and their
@@ -535,9 +543,9 @@ covers the generic mechanics that apply to every device.
 ────────────────────────────────────────────────────────────────────────
 
 Rules:
-  • Command names are CASE-SENSITIVE (e.g. SetChannel, FastForward, volumeAdd).
+  • Use the command spelling in the catalog. Known built-in names are normalized for case.
   • Quote any parameter containing ':' ',' ';' or '{ }' to protect it from the shell.
-  • The parameter is parsed as JSON when possible; otherwise passed through as a string.
+  • JSON objects and arrays are parsed. Scalars stay strings, except S30 selfClean uses a JSON number.
   • Omit the parameter for no-arg commands — it auto-defaults to "default".
   • Use --type customize to trigger a user-defined IR button by name.
 
@@ -557,8 +565,9 @@ Common errors:
 
 Safety:
   Destructive commands (Smart Lock unlock, Garage Door Opener turnOn/turnOff,
-  Keypad createKey/deleteKey, …) are blocked by default. Use the reviewed plan
-  flow instead, or --dry-run to preview without sending.
+  Keypad createKey/deleteKey, Art Frame deleteImage) are blocked by default.
+  Use plan save → review → approve → execute, or --dry-run to preview.
+  deleteImage (random | newest | oldest) can permanently remove one album image. It is never automatically retried.
 
 Examples:
   $ switchbot devices command ABC123 turnOn
@@ -566,7 +575,8 @@ Examples:
   $ switchbot devices command ABC123 setAll "26,1,3,on"
   $ switchbot devices command ABC123 startClean '{"action":"sweep","param":{"fanLevel":2,"times":1}}'
   $ switchbot devices command ABC123 "MyButton" --type customize
-  $ switchbot devices command <lockId> unlock --dry-run
+  $ switchbot --dry-run devices command <s30Id> selfClean 4
+  $ switchbot devices command <frameId> deleteImage oldest --explain
 `)
     .action(async (deviceIdArg: string | undefined, cmdArg: string | undefined, parameter: string | undefined, options: { name?: string; nameStrategy?: string; nameType?: string; nameCategory?: 'physical' | 'ir'; nameRoom?: string; type: string; yes?: boolean; explain?: boolean; allowUnknownDevice?: boolean; skipParamValidation?: boolean; idempotencyKey?: string }) => {
       // Declared outside try so the DryRunSignal catch branch can reference them.
@@ -608,6 +618,13 @@ Examples:
         });
         _deviceId = deviceId;
         if (!getCachedDevice(deviceId)) {
+          if (cmd.toLowerCase() === 'deleteimage') {
+            exitWithError({
+              kind: 'guard', message: `Image deletion requires a verified target; "${deviceId}" is not in the local cache.`,
+              hint: "Run 'switchbot --no-cache devices list' to verify the frame ID, then submit a reviewed plan.",
+              context: { error: 'unknown_device_id', deviceId, command: cmd },
+            });
+          }
           if (options.allowUnknownDevice) {
             console.error(
               `Note: device ${deviceId} is not in the local cache — run 'switchbot devices list' first to enable command validation. (--allow-unknown-device is set, continuing.)`,
@@ -667,7 +684,7 @@ Examples:
 
         // Raw-parameter validation (runs for known (deviceType, command) pairs only).
         const cachedForParam = getCachedDevice(deviceId);
-        if (cachedForParam && options.type === 'command' && !options.skipParamValidation) {
+        if (cachedForParam && options.type === 'command' && (!options.skipParamValidation || cmd === 'deleteImage')) {
           const paramCheck = validateParameter(cachedForParam.type, cmd, parameter);
           if (!paramCheck.ok) {
             exitWithError({
@@ -684,8 +701,7 @@ Examples:
         if (options.explain) {
           const isDestructive = isDestructiveCommand(cachedForGuard?.type, cmd, options.type);
           const reason = getDestructiveReason(cachedForGuard?.type, cmd, options.type);
-          const riskLevel = isDestructive ? 'high' : options.type === 'command' ? 'medium' : 'low';
-          const recommendedMode = isDestructive ? 'review-before-execute' : 'direct';
+          const { riskLevel, recommendedMode, idempotent } = decideActionRisk(isDestructive ? 'destructive' : 'action', validation.idempotent);
           if (isJsonMode()) {
             printJson({
               intent: `Send command "${cmd}" to device ${deviceId}`,
@@ -695,6 +711,7 @@ Examples:
               parameter: parameter ?? null,
               commandType: options.type,
               riskLevel,
+              idempotent,
               requiresConfirmation: isDestructive,
               safetyReason: reason ?? null,
               recommendedMode,
@@ -705,9 +722,11 @@ Examples:
             console.log(`Device type: ${cachedForGuard?.type ?? 'unknown'}${cachedForGuard?.name ? ` (${cachedForGuard.name})` : ''}`);
             console.log(`Parameter: ${parameter ?? '(none)'}`);
             console.log(`Risk level: ${riskLevel}`);
+            console.log(`Idempotent: ${idempotent ?? 'unknown'}`);
+            console.log(`Recommended mode: ${recommendedMode}`);
             if (reason) console.log(`Safety reason: ${reason}`);
             if (isDestructive) console.log(`Requires plan approval by default. ${destructiveExecutionHint()}`);
-            console.log('(not executed — remove --explain to run)');
+            console.log('Command not sent.');
           }
           process.exit(0);
         }
@@ -749,9 +768,7 @@ Examples:
           console.error(`Note: --yes has no effect; "${cmd}" is not a destructive command.`);
         }
 
-        // API docs treat scalar command parameters as strings. Only JSON
-        // object/array parameter shapes are parsed before dispatch.
-        const parsedParam = parseParameterForWire(parameter);
+        const parsedParam = parseParameterForWire(parameter, cachedForParam?.type, cmd);
         // Capture for DryRunSignal catch branch (which runs after executeCommand throws).
         _cmd = cmd;
         _parsedParam = parsedParam;
@@ -869,7 +886,8 @@ Multi-word types can be passed either quoted or unquoted — both work:
 Examples:
   $ switchbot devices commands Bot
   $ switchbot devices commands curtain
-  $ switchbot devices commands Robot --json
+  $ switchbot --json devices commands S30
+  $ switchbot devices commands "Hub 4" "Vision Doorbell"
 `)
     .action((typeParts: string[]) => {
       try {
@@ -941,7 +959,7 @@ metadata alongside the matching catalog entry (supported commands + parameter
 formats + status field names). With --live, makes a second call to fetch the
 current status values and merges them into the output.
 
-JSON output shape (--json):
+Fields under .data in the --json response:
   {
     device: <raw API fields>,
     controlType: <string|null>,
@@ -949,7 +967,7 @@ JSON output shape (--json):
     capabilities: {
       role: <functional role>,
       readOnly: <boolean>,
-      commands: [{command, parameter, description, idempotent?, destructive?, exampleParams?}],
+      commands: [{command, parameter, description, safetyTier, safetyReason?, idempotent?, exampleParams?}],
       statusFields: [<name>],
       liveStatus: <status payload when --live was passed>
     },
@@ -962,7 +980,7 @@ Examples:
   $ switchbot devices describe ABC123DEF456
   $ switchbot devices describe ABC123DEF456 --live
   $ switchbot devices describe ABC123DEF456 --json
-  $ switchbot devices describe <lockId> --json | jq '.capabilities.commands[] | select(.destructive)'
+  $ switchbot --json devices describe <frameId> | jq -r '.data.capabilities.commands[] | select(.safetyTier == "destructive") | .command'
 `)
     .action(async (deviceIdArg: string | undefined, options: { name?: string; nameStrategy?: string; nameType?: string; nameCategory?: 'physical' | 'ir'; nameRoom?: string; live?: boolean }) => {
       try {
@@ -1142,7 +1160,7 @@ function renderCatalogEntry(entry: DeviceCatalogEntry): void {
       (c) => deriveSafetyTier(c, entry) === 'destructive',
     );
     if (hasDestructive) {
-      console.log('\n[!destructive] commands have hard-to-reverse real-world effects — confirm before issuing.');
+      console.log('\n[!destructive] commands require a reviewed plan by default: plan save → review → approve → execute.');
     }
   }
 

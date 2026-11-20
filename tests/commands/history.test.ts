@@ -120,6 +120,28 @@ describe('history command', () => {
   });
 
   describe('replay', () => {
+    it('uses target catalog risk for lock, garage and unverified targets', async () => {
+      for (const [deviceType, command, permitted] of [
+        ['Smart Lock', 'lock', true],
+        ['Smart Lock', 'unlock', false],
+        ['Garage Door Opener', 'turnOn', false],
+        ['Not a Known Device', 'turnOn', false],
+      ] as const) {
+        const deviceId = 'REPLAY-TARGET';
+        seed([{ t: 't1', kind: 'command', deviceId, command, commandType: 'command', result: 'ok' }]);
+        apiMock.__instance.get.mockResolvedValue({ data: { body: {
+          deviceList: [{ deviceId, deviceType, deviceName: 'Test target' }], infraredRemoteList: [],
+        } } });
+        apiMock.__instance.post.mockReset().mockResolvedValue({ data: { body: {} } });
+        const res = await runCli(registerHistoryCommand, [
+          '--no-cache', '--config', path.join(tmp, 'config.json'), '--json', 'history', 'replay', '1', '--file', auditFile,
+        ]);
+        expect(res.exitCode, `${deviceType} ${command}`).toBe(permitted ? null : 2);
+        expect(apiMock.__instance.post).toHaveBeenCalledTimes(permitted ? 1 : 0);
+        if (!permitted) expect(JSON.parse(res.stdout.join('\n')).error.kind).toBe('guard');
+      }
+    });
+
     it('rejects an out-of-range index with exit 2', async () => {
       seed([
         { t: 't1', kind: 'command', deviceId: 'A', command: 'turnOn', parameter: undefined, commandType: 'command', dryRun: false, result: 'ok' },
@@ -131,17 +153,58 @@ describe('history command', () => {
       expect(res.stderr.join('\n')).toMatch(/Invalid index/);
     });
 
+    it.each(['AI Art Frame', 'AI Art Frame 2', undefined])('does not replay an image deletion for %s from an earlier approval', async (deviceType) => {
+      const deviceId = 'REPLAY-FRAME';
+      seed([{ t: 't1', kind: 'command', deviceId, command: 'DeLeTeImAgE', parameter: 'oldest', commandType: 'command', dryRun: false, result: 'ok', planId: 'prior-plan' }]);
+      apiMock.__instance.get.mockResolvedValue({
+        data: { body: { deviceList: deviceType ? [{ deviceId, deviceName: 'Gallery', deviceType }] : [], infraredRemoteList: [] } },
+      });
+      apiMock.__instance.post.mockResolvedValue({ data: { body: {} } });
+      const res = await runCli(registerHistoryCommand, [
+        '--config', path.join(tmp, 'config.json'), '--json', 'history', 'replay', '1', '--file', auditFile,
+      ]);
+      expect(res.exitCode).toBe(2);
+      expect(JSON.parse(res.stdout.join('\n')).error.kind).toBe('guard');
+      expect(apiMock.__instance.post).not.toHaveBeenCalled();
+    });
+
+    it.each(['frame', 'unknown', 'ir'])('requires a confirmed IR target to replay a custom deletion-named button (%s)', async (target) => {
+      const deviceId = 'REPLAY-BUTTON';
+      seed([{ t: 't1', kind: 'command', deviceId, command: 'deleteImage', parameter: 'oldest', commandType: 'customize', dryRun: false }]);
+      apiMock.__instance.get.mockResolvedValue({ data: { body: {
+        deviceList: target === 'frame' ? [{ deviceId, deviceName: 'Gallery', deviceType: 'AI Art Frame' }] : [],
+        infraredRemoteList: target === 'ir' ? [{ deviceId, deviceName: 'Remote', remoteType: 'Others' }] : [],
+      } } });
+      apiMock.__instance.post.mockResolvedValue({ data: { body: {} } });
+      const res = await runCli(registerHistoryCommand, [
+        '--config', path.join(tmp, 'config.json'), '--json', 'history', 'replay', '1', '--file', auditFile,
+      ]);
+      if (target === 'ir') {
+        expect(res.exitCode).toBeNull();
+        expect(apiMock.__instance.post).toHaveBeenCalledWith(`/v1.1/devices/${deviceId}/commands`, {
+          command: 'deleteImage', commandType: 'customize', parameter: 'oldest',
+        });
+      } else {
+        expect(res.exitCode).toBe(2);
+        expect(JSON.parse(res.stdout.join('\n')).error.kind).toBe('guard');
+        expect(apiMock.__instance.post).not.toHaveBeenCalled();
+      }
+    });
+
     it('re-runs the command at the requested 1-based index', async () => {
       seed([
         { t: 't1', kind: 'command', deviceId: 'BOT1', command: 'turnOn', parameter: undefined, commandType: 'command', dryRun: false, result: 'ok' },
         { t: 't2', kind: 'command', deviceId: 'BOT2', command: 'turnOff', parameter: undefined, commandType: 'command', dryRun: false, result: 'ok' },
       ]);
+      apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {
+        deviceList: [{ deviceId: 'BOT2', deviceType: 'Bot', deviceName: 'Test Bot' }], infraredRemoteList: [],
+      } } });
       apiMock.__instance.post.mockResolvedValueOnce({
         data: { statusCode: 100, body: {} },
       });
 
       const res = await runCli(registerHistoryCommand, [
-        'history', 'replay', '2', '--file', auditFile,
+        '--config', path.join(tmp, 'config.json'), 'history', 'replay', '2', '--file', auditFile,
       ]);
       expect(apiMock.__instance.post).toHaveBeenCalledTimes(1);
       const [url, body] = apiMock.__instance.post.mock.calls[0];

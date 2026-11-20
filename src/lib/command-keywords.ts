@@ -1,25 +1,23 @@
-export const COMMAND_KEYWORDS: Array<{ pattern: RegExp; command: string }> = [
-  // Compound patterns FIRST — disambiguate open+lock before single-word rules fire
-  { pattern: /\bopen\b.{0,30}\block\b|\bunlock\b/i, command: 'unlock' },
-  { pattern: /\bclose\b.{0,30}\block\b|\block\b.{0,30}\bclose\b/i, command: 'lock' },
-  // Single-word rules
-  { pattern: /\boff\b|\bturn.?off\b|\bstop\b/i, command: 'turnOff' },
-  { pattern: /\bon\b|\bturn.?on\b|\bstart\b/i, command: 'turnOn' },
-  { pattern: /\bpress\b|\bclick\b|\btap\b/i, command: 'press' },
-  { pattern: /\block\b/i, command: 'lock' },
-  { pattern: /\bunlock\b/i, command: 'unlock' },
-  { pattern: /\bopen\b|\braise\b|\bup\b/i, command: 'open' },
-  { pattern: /\bclose\b|\blower\b|\bdown\b/i, command: 'close' },
-  { pattern: /\bpause\b/i, command: 'pause' },
-];
+// A whole action clause, not a keyword inside a question, trigger or condition.
+// Device IDs are supplied separately. Ask for clarification on unfamiliar prose.
+const TARGET = /^(?:(?:all(?: the)?|the|my) )?(?:(?:front|back|kitchen|bedroom|living room|porch|hallway|desk) )?(?:lights?|lamps?|fans?|bots?|devices?|buttons?|locks?|doors?(?: lock)?|deadbolts?|curtains?|blinds?|(?:robot )?vacuums?|heaters?|ac|coffee makers?|switch(?:es)?|everything)$/;
+
+const ACTION: Record<string, string> = {
+  turnon: 'turnOn', 'turn on': 'turnOn', start: 'turnOn',
+  turnoff: 'turnOff', 'turn off': 'turnOff', stop: 'turnOff',
+  press: 'press', click: 'press', tap: 'press', lock: 'lock', unlock: 'unlock',
+  open: 'open', raise: 'open', close: 'close', lower: 'close', pause: 'pause',
+};
 
 export function inferCommandFromIntent(intent: string): string | undefined {
-  for (const k of COMMAND_KEYWORDS) {
-    if (k.pattern.test(intent)) return k.command;
+  const text = intent.trim().toLowerCase().replace(/\s+/g, ' ').replace(/^please /, '').replace(/[.!]$/, '');
+  const power = /^turn (.+) (on|off)$/.exec(text);
+  if (power && TARGET.test(power[1])) return power[2] === 'on' ? 'turnOn' : 'turnOff';
+  const match = /^(turn on|turn off|[a-z]+)(?: (.+))?$/.exec(text);
+  if (!match || !Object.hasOwn(ACTION, match[1]) || (match[2] && !TARGET.test(match[2]))) return undefined;
+  if (/\blocks?$/.test(match[2] ?? '')) {
+    if (match[1] === 'open') return 'unlock';
+    if (match[1] === 'close') return 'lock';
   }
-  return undefined;
-}
-
-export function containsCjk(intent: string): boolean {
-  return /[\u3400-\u9FFF]/u.test(intent);
+  return ACTION[match[1]];
 }

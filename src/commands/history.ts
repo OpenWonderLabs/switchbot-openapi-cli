@@ -4,7 +4,10 @@ import os from 'node:os';
 import { intArg, stringArg } from '../utils/arg-parsers.js';
 import { printJson, isJsonMode, handleError, UsageError, exitWithError } from '../utils/output.js';
 import { readAudit, verifyAudit, type AuditEntry } from '../utils/audit.js';
-import { executeCommand } from '../lib/devices.js';
+import { executeCommand, fetchDeviceList } from '../lib/devices.js';
+import { deriveSafetyTier, findExactCatalogEntry } from '../devices/catalog.js';
+import { destructiveExecutionHint } from '../lib/destructive-mode.js';
+import { isDryRun } from '../utils/flags.js';
 import {
   queryDeviceHistory,
   queryDeviceHistoryStats,
@@ -79,9 +82,8 @@ Examples:
     .argument('<index>', 'Entry index (1 = oldest; as shown by "history show")')
     .option('--file <path>', `Path to the audit log (default ${DEFAULT_AUDIT})`, stringArg('--file'))
     .addHelpText('after', `
-Dry-run-honouring: pass --dry-run on the parent command to preview without
-sending the actual call. Errors from the recorded entry are NOT replayed —
-replay always attempts the command fresh.
+Pass --dry-run to preview without sending the actual call. Replaying an audit
+entry does not reuse its approval: destructive commands require a reviewed plan.
 
 Examples:
   $ switchbot history replay 3
@@ -106,10 +108,41 @@ Examples:
           message: `Entry ${idx} is not a command (kind=${entry.kind}).`,
         });
       }
+      let command = entry.command;
+      if (!isDryRun()) {
+        // The same verb can power a lamp or open a garage. The old audit
+        // entry establishes neither today's device type nor its authorization.
+        const { deviceList, infraredRemoteList } = await fetchDeviceList().catch(handleError);
+        const physical = deviceList.find((device) => device.deviceId === entry.deviceId);
+        const remote = infraredRemoteList.find((device) => device.deviceId === entry.deviceId);
+        const type = physical?.deviceType ?? remote?.remoteType;
+        const catalog = type ? findExactCatalogEntry(type) : undefined;
+        const customIR = entry.commandType === 'customize' && remote && !physical;
+        const spec = entry.commandType === 'command' && catalog?.commands.find((candidate) =>
+          candidate.commandType !== 'customize' && candidate.command.toLowerCase() === command.toLowerCase());
+        const destructive = (spec && deriveSafetyTier(spec, catalog) === 'destructive')
+          || (!customIR && command.toLowerCase() === 'deleteimage');
+        if (destructive) {
+          exitWithError({
+            code: 2, kind: 'guard', message: 'History replay cannot authorize a destructive command.',
+            hint: destructiveExecutionHint(),
+            context: { deviceId: entry.deviceId, command, requiredWorkflow: 'plan-approval' },
+          });
+        }
+        const verifiedBuiltin = spec && catalog?.category === (physical ? 'physical' : 'ir');
+        if ((physical && remote) || catalog?.readOnly || (!customIR && !verifiedBuiltin)) {
+          exitWithError({
+            code: 2, kind: 'guard', message: 'Cannot verify the recorded command for this device.',
+            hint: "Refresh the inventory with 'switchbot --no-cache devices list' and inspect the target before executing.",
+            context: { deviceId: entry.deviceId, command },
+          });
+        }
+        if (spec) command = spec.command;
+      }
       try {
         const result = await executeCommand(
           entry.deviceId,
-          entry.command,
+          command,
           entry.parameter,
           entry.commandType,
         );

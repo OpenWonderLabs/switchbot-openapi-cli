@@ -211,6 +211,21 @@ const onOffToggle: CommandSpec[] = [
   ...onOff,
   { command: 'toggle', parameter: '—', description: 'Toggle power', idempotent: false },
 ];
+const irPlayback: CommandSpec[] = [
+  ...onOff,
+  { command: 'setMute', parameter: '—', description: 'Toggle mute', idempotent: false },
+  { command: 'FastForward', parameter: '—', description: 'Fast forward', idempotent: false },
+  { command: 'Rewind', parameter: '—', description: 'Rewind', idempotent: false },
+  { command: 'Next', parameter: '—', description: 'Next track', idempotent: false },
+  { command: 'Previous', parameter: '—', description: 'Previous track', idempotent: false },
+  { command: 'Pause', parameter: '—', description: 'Pause', idempotent: true },
+  { command: 'Play', parameter: '—', description: 'Play', idempotent: true },
+  { command: 'Stop', parameter: '—', description: 'Stop', idempotent: true },
+];
+const irVolume: CommandSpec[] = [
+  { command: 'volumeAdd', parameter: '—', description: 'Volume up', idempotent: false },
+  { command: 'volumeSub', parameter: '—', description: 'Volume down', idempotent: false },
+];
 const lightControls: CommandSpec[] = [
   { command: 'setBrightness', parameter: '1-100', description: 'Set brightness percentage', idempotent: true, exampleParams: ['50', '80'] },
   { command: 'setColor', parameter: 'R:G:B (0-255 each)', description: 'Set RGB color, e.g. "255:0:0"', idempotent: true, exampleParams: ['255:0:0', '255:255:255'] },
@@ -242,8 +257,25 @@ const k11Commands: CommandSpec[] = [
 const artFrameCommands: CommandSpec[] = [
   { command: 'next', parameter: '—', description: 'Switch to the next image', idempotent: false },
   { command: 'previous', parameter: '—', description: 'Switch to the previous image', idempotent: false },
+  {
+    command: 'deleteImage', parameter: 'random | newest | oldest', description: 'Delete one non-displayed image from the album, including images not yet downloaded to the frame.',
+    idempotent: false, safetyTier: 'destructive', safetyReason: 'Deleted images cannot be recovered.',
+    exampleParams: ['random', 'newest', 'oldest'],
+  },
   { command: 'uploadImage', parameter: '{"imageUrl":"..."} or {"imageBase64":"..."}', description: 'Upload a new image from exactly one URL or base64 image source.', idempotent: true, exampleParams: ['{"imageUrl":"https://example.com/art.jpg"}', '{"imageBase64":"data:image/jpeg;base64,..."}'] },
 ];
+
+// On these metering plugs `power` is measured load, not the relay state.
+const meteredPlugStatusQueries: ReadOnlyQuerySpec[] = Object.entries({
+  switchStatus: 'Relay state: 0 off, 1 on',
+  voltage: 'Line voltage in volts',
+  power: 'Instantaneous power in watts',
+  electricCurrent: 'Instantaneous current draw in mA',
+  usedElectricity: 'Daily energy consumption in watt-minutes',
+  version: 'BLE and Wi-Fi firmware version',
+  onlineStatus: 'Connection status: online or offline',
+}).map(([field, description]) => ({ field, description, endpoint: 'status', safetyTier: 'read' }));
+const meteredPlugStatusFields = meteredPlugStatusQueries.map(({ field }) => field);
 
 export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   // ---------- Physical devices ----------
@@ -386,6 +418,15 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     commands: onOffToggle,
     statusFields: ['switchStatus', 'voltage', 'power', 'electricCurrent', 'usedElectricity', 'version'],
   },
+  ...['Plug Mini (IT)', 'Outdoor Plug (EU)'].map((type): DeviceCatalogEntry => ({
+    type,
+    category: 'physical',
+    description: `${type} reports switchStatus (0 off, 1 on), voltage in volts, power in watts, electricCurrent in mA, and daily usedElectricity in watt-minutes.`,
+    role: 'power',
+    commands: onOffToggle,
+    statusFields: meteredPlugStatusFields,
+    statusQueries: meteredPlugStatusQueries,
+  })),
   {
     type: 'Relay Switch 1',
     category: 'physical',
@@ -683,6 +724,22 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     statusFields: ['workingStatus', 'onlineStatus', 'battery', 'waterBaseBattery', 'taskType'],
   },
   {
+    type: 'Robot Vacuum Cleaner S30',
+    category: 'physical',
+    description: 'Floor cleaning robot with sweep and sweep/mop modes and a self-cleaning dock.',
+    role: 'cleaning',
+    aliases: ['Floor Cleaning Robot S30', 'S30'],
+    commands: [
+      { command: 'startClean', parameter: '\'{"action":"sweep"|"sweep_mop","param":{"fanLevel":1-4,"waterLevel":1-2,"times":<cycles>}}\'', description: 'Begin a cleaning session', idempotent: false, exampleParams: ['{"action":"sweep_mop","param":{"fanLevel":2,"waterLevel":1,"times":1}}'] },
+      { command: 'pause', parameter: '—', description: 'Pause cleaning', idempotent: true },
+      { command: 'dock', parameter: '—', description: 'Return to the base station and charge', idempotent: true },
+      { command: 'setVolume', parameter: '0-100', description: 'Set voice volume', idempotent: true, exampleParams: ['0', '50', '100'] },
+      { command: 'selfClean', parameter: '1 | 2 | 3 | 4 (CLI text; JSON number on the wire)', description: 'Numeric mode: 1 wash mop, 2 start drying, 3 stop drying, 4 empty dustbin', idempotent: false, exampleParams: ['1', '2', '3', '4'] },
+      { command: 'changeParam', parameter: '\'{"fanLevel":1-4,"waterLevel":1-2,"times":<cycles>}\'', description: 'Change parameters mid-run', idempotent: true, exampleParams: ['{"fanLevel":3,"waterLevel":1,"times":1}'] },
+    ],
+    statusFields: ['workingStatus', 'onlineStatus', 'battery', 'waterBaseBattery', 'taskType'],
+  },
+  {
     type: 'Battery Circulator Fan',
     category: 'physical',
     description: 'Rechargeable table/floor fan with wind modes, speed control, night-light, and auto-off timer.',
@@ -758,6 +815,15 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     statusFields: ['battery', 'version', 'online'],
   },
   {
+    type: 'Vision Doorbell',
+    category: 'physical',
+    description: 'Read-only doorbell reporting firmware version, battery level, and connectivity.',
+    role: 'security',
+    readOnly: true,
+    commands: [],
+    statusFields: ['version', 'battery', 'online'],
+  },
+  {
     type: 'Keypad',
     category: 'physical',
     description: 'PIN-pad access controller that creates and deletes door passcodes for a Smart Lock.',
@@ -801,11 +867,11 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     statusFields: ['battery', 'displayMode', 'imageUrl', 'version'],
   },
   {
-    type: 'AI Art Frame Luma',
+    type: 'AI Art Frame 2',
     category: 'physical',
     description: 'Digital art frame with image uploads and online status.',
     role: 'other',
-    aliases: ['AI Art Frame 2'],
+    aliases: ['AI Art Frame Luma'],
     commands: artFrameCommands,
     statusFields: ['battery', 'displayMode', 'imageUrl', 'onlineStatus', 'version'],
   },
@@ -914,6 +980,15 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     type: 'Hub 3',
     category: 'physical',
     description: 'Wi-Fi hub with built-in temperature, humidity, and light sensors; manages local BLE devices.',
+    role: 'hub',
+    readOnly: true,
+    commands: [],
+    statusFields: ['version', 'temperature', 'humidity', 'lightLevel', 'moveDetected', 'onlineStatus'],
+  },
+  {
+    type: 'Hub 4',
+    category: 'physical',
+    description: 'Read-only hub reporting temperature, humidity, illuminance, motion, and connectivity.',
     role: 'hub',
     readOnly: true,
     commands: [],
@@ -1046,8 +1121,7 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
     commands: [
       ...onOff,
       { command: 'SetChannel', parameter: '1-999 (channel number)', description: 'Switch to a specific channel', idempotent: true, exampleParams: ['1', '15'] },
-      { command: 'volumeAdd', parameter: '—', description: 'Volume up', idempotent: false },
-      { command: 'volumeSub', parameter: '—', description: 'Volume down', idempotent: false },
+      ...irVolume,
       { command: 'channelAdd', parameter: '—', description: 'Channel up', idempotent: false },
       { command: 'channelSub', parameter: '—', description: 'Channel down', idempotent: false },
     ],
@@ -1055,22 +1129,19 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   {
     type: 'DVD',
     category: 'ir',
-    description: 'IR-controlled disc player or speaker with playback, track navigation, and volume commands.',
+    description: 'IR-controlled disc player with playback and track navigation. Volume commands are accepted for CLI compatibility, not documented for DVD by the Cloud API.',
     role: 'media',
-    aliases: ['Speaker'],
     commands: [
-      ...onOff,
-      { command: 'setMute', parameter: '—', description: 'Toggle mute', idempotent: false },
-      { command: 'FastForward', parameter: '—', description: 'Fast forward', idempotent: false },
-      { command: 'Rewind', parameter: '—', description: 'Rewind', idempotent: false },
-      { command: 'Next', parameter: '—', description: 'Next track', idempotent: false },
-      { command: 'Previous', parameter: '—', description: 'Previous track', idempotent: false },
-      { command: 'Pause', parameter: '—', description: 'Pause', idempotent: true },
-      { command: 'Play', parameter: '—', description: 'Play', idempotent: true },
-      { command: 'Stop', parameter: '—', description: 'Stop', idempotent: true },
-      { command: 'volumeAdd', parameter: '—', description: 'Volume up', idempotent: false },
-      { command: 'volumeSub', parameter: '—', description: 'Volume down', idempotent: false },
+      ...irPlayback,
+      ...irVolume.map((cmd) => ({ ...cmd, description: `${cmd.description} (legacy compatibility; undocumented for DVD)` })),
     ],
+  },
+  {
+    type: 'Speaker',
+    category: 'ir',
+    description: 'IR-controlled speaker with playback, track navigation, and volume commands.',
+    role: 'media',
+    commands: [...irPlayback, ...irVolume],
   },
   {
     type: 'Fan',
@@ -1108,27 +1179,25 @@ export const DEVICE_CATALOG: DeviceCatalogEntry[] = [
   },
 ];
 
+/** Inventory and dispatch must not infer a type from a partial name. */
+export function findExactCatalogEntry(type: string, catalog = getEffectiveCatalog()): DeviceCatalogEntry | undefined {
+  const lower = type.toLowerCase();
+  return catalog.find((entry) => entry.type.toLowerCase() === lower)
+    ?? catalog.find((entry) => entry.aliases?.some((alias) => alias.toLowerCase() === lower));
+}
+
 export function canonicalizeDeviceType(deviceType: string): string {
-  const catalog = getEffectiveCatalog();
-  const lower = deviceType.toLowerCase();
-  for (const entry of catalog) {
-    if (entry.type.toLowerCase() === lower) return entry.type;
-    if (entry.aliases?.some((a) => a.toLowerCase() === lower)) return entry.type;
-  }
-  return deviceType;
+  return findExactCatalogEntry(deviceType)?.type ?? deviceType;
 }
 
 /** Find a catalog entry by exact name, alias, or case-insensitive substring. */
-export function findCatalogEntry(query: string): DeviceCatalogEntry | DeviceCatalogEntry[] | null {
+export function findCatalogEntry(query: string, catalog = getEffectiveCatalog()): DeviceCatalogEntry | DeviceCatalogEntry[] | null {
   const q = query.trim().toLowerCase();
   if (!q) return null;
 
   const names = (e: DeviceCatalogEntry) => [e.type, ...(e.aliases ?? [])];
-  const catalog = getEffectiveCatalog();
 
-  const exact = catalog.find((e) =>
-    names(e).some((n) => n.toLowerCase() === q)
-  );
+  const exact = findExactCatalogEntry(q, catalog);
   if (exact) return exact;
 
   const matches = catalog.filter((e) =>
@@ -1284,6 +1353,16 @@ export function resetCatalogOverlayCache(): void {
   overlayCache = null;
 }
 
+/** Migrate persisted type keys, not search aliases or partial names. A current
+ * key is authoritative when both spellings are present, in either file order. */
+export function effectiveOverlayEntries(entries: CatalogOverlayEntry[]): CatalogOverlayEntry[] {
+  const legacy = 'AI Art Frame Luma';
+  const canonical = 'AI Art Frame 2';
+  if (!entries.some((entry) => entry.type === legacy)) return entries;
+  if (entries.some((entry) => entry.type === canonical)) return entries.filter((entry) => entry.type !== legacy);
+  return entries.map((entry) => entry.type === legacy ? { ...entry, type: canonical } : entry);
+}
+
 /** Merge built-in catalog with the on-disk overlay. */
 export function getEffectiveCatalog(): DeviceCatalogEntry[] {
   const overlay = overlayOnce();
@@ -1292,7 +1371,7 @@ export function getEffectiveCatalog(): DeviceCatalogEntry[] {
   const byType = new Map<string, DeviceCatalogEntry>();
   for (const e of DEVICE_CATALOG) byType.set(e.type, e);
 
-  for (const entry of overlay.entries) {
+  for (const entry of effectiveOverlayEntries(overlay.entries)) {
     if (entry.remove) {
       byType.delete(entry.type);
       continue;

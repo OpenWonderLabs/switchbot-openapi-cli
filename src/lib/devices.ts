@@ -3,6 +3,7 @@ import { createClient, ApiError } from '../api/client.js';
 import { idempotencyCache, fingerprintIdempotencyKey } from './idempotency.js';
 import {
   findCatalogEntry,
+  findExactCatalogEntry,
   suggestedActions,
   getEffectiveCatalog,
   deriveSafetyTier,
@@ -31,6 +32,7 @@ export interface Device {
   deviceType?: string;
   enableCloudService: boolean;
   hubDeviceId: string;
+  lockDeviceId?: string | null;
   roomID?: string;
   roomName?: string | null;
   familyName?: string;
@@ -145,6 +147,7 @@ export async function fetchDeviceList(
             ...(cachedDeviceType && cachedDeviceType !== 'Unknown Device' ? { deviceType: cachedDeviceType } : {}),
             enableCloudService: entry.enableCloudService ?? true,
             hubDeviceId: entry.hubDeviceId ?? '',
+            ...(entry.lockDeviceId !== undefined ? { lockDeviceId: entry.lockDeviceId } : {}),
             roomID: entry.roomID,
             roomName: entry.roomName,
             familyName: entry.familyName,
@@ -312,6 +315,10 @@ export async function executeCommand(
   return { value: result, replayed: true };
 }
 
+type CommandValidationResult =
+  | { ok: true; normalized?: string; caseNormalizedFrom?: string; idempotent?: boolean }
+  | { ok: false; error: CommandValidationError };
+
 /**
  * Validate a command against the locally-cached device → catalog mapping.
  * Returns `{ ok: true }` when validation passes or is skipped (unknown device,
@@ -325,7 +332,7 @@ export function validateCommand(
   cmd: string,
   parameter: string | undefined,
   commandType: string
-): { ok: true; normalized?: string; caseNormalizedFrom?: string } | { ok: false; error: CommandValidationError } {
+): CommandValidationResult {
   const cached = getCachedDevice(deviceId);
   if (!cached) return { ok: true };
   return validateCommandForDevice(deviceId, cached, cmd, parameter, commandType);
@@ -338,8 +345,9 @@ export function validateCommandForDevice(
   cmd: string,
   parameter: string | undefined,
   commandType: string,
-): { ok: true; normalized?: string; caseNormalizedFrom?: string } | { ok: false; error: CommandValidationError } {
-  if (commandType === 'customize') {
+): CommandValidationResult {
+  const match = findExactCatalogEntry(cached.type);
+  if (commandType === 'customize' && !match?.readOnly) {
     if (cached.category === 'ir') return { ok: true };
     return {
       ok: false,
@@ -351,19 +359,17 @@ export function validateCommandForDevice(
     };
   }
 
-  const match = findCatalogEntry(cached.type);
-  if (!match || Array.isArray(match)) {
-    if (cached.category === 'physical') {
-      return {
-        ok: false,
-        error: new CommandValidationError(
-          `Cannot validate built-in commands for ${cached.name} (${cached.type}) because no unambiguous catalog entry exists.`,
-          'unknown-device-type',
-          'Refresh the device list after upgrading the CLI, or use the documented command type for this device.',
-        ),
-      };
-    }
-    return { ok: true };
+  if (!match) {
+    return {
+      ok: false,
+      error: new CommandValidationError(
+        `Cannot validate built-in commands for ${cached.name} (${cached.type}) because no exact catalog entry exists.`,
+        'unknown-device-type',
+        cached.category === 'ir'
+          ? 'For a user-defined IR button, use the customize command type.'
+          : 'Refresh the device list after upgrading the CLI, or use the documented command type for this device.',
+      ),
+    };
   }
 
   const builtinCommands = match.commands.filter((c) => c.commandType !== 'customize');
@@ -371,9 +377,13 @@ export function validateCommandForDevice(
     return {
       ok: false,
       error: new CommandValidationError(
-        `${cached.name} (${cached.type}) is a read-only sensor — it has no control commands.`,
+        match.role === 'sensor'
+          ? `${cached.name} (${cached.type}) is a read-only sensor — it has no control commands.`
+          : `${cached.name} (${cached.type}) does not allow this command in the effective catalog.`,
         'read-only-device',
-        `Use 'switchbot devices status ${deviceId}' to read this device instead.`,
+        match.category === 'ir'
+          ? `Use 'switchbot catalog show "${cached.type}"' to inspect this remote's catalog entry.`
+          : `Use 'switchbot devices status ${deviceId}' to read this device instead.`,
       ),
     };
   }
@@ -434,7 +444,7 @@ export function validateCommandForDevice(
     };
   }
 
-  return { ok: true, normalized: normalizedCmd, caseNormalizedFrom };
+  return { ok: true, normalized: normalizedCmd, caseNormalizedFrom, idempotent: spec.idempotent };
 }
 
 /**
@@ -451,8 +461,8 @@ export function isDestructiveCommand(
 ): boolean {
   if (commandType === 'customize') return false;
   if (!deviceType) return false;
-  const match = findCatalogEntry(deviceType);
-  if (!match || Array.isArray(match)) return false;
+  const match = findExactCatalogEntry(deviceType);
+  if (!match) return false;
   const spec = match.commands.find((c) => c.command === cmd);
   if (!spec) return false;
   return deriveSafetyTier(spec, match) === 'destructive';
@@ -466,8 +476,8 @@ export function getDestructiveReason(
 ): string | null {
   if (commandType === 'customize') return null;
   if (!deviceType) return null;
-  const match = findCatalogEntry(deviceType);
-  if (!match || Array.isArray(match)) return null;
+  const match = findExactCatalogEntry(deviceType);
+  if (!match) return null;
   const spec = match.commands.find((c) => c.command === cmd);
   return spec ? getCommandSafetyReason(spec) : null;
 }
@@ -624,6 +634,7 @@ export interface McpDescribeShape {
     deviceType?: string;
     enableCloudService?: boolean;
     hubDeviceId?: string;
+    lockDeviceId?: string | null;
     roomID?: string;
     roomName?: string | null;
     familyName?: string;
@@ -651,6 +662,7 @@ export function toMcpDescribeShape(r: DescribeResult): McpDescribeShape {
       ...(d.deviceType !== undefined ? { deviceType: d.deviceType } : {}),
       ...('enableCloudService' in d ? { enableCloudService: d.enableCloudService } : {}),
       ...(d.hubDeviceId !== undefined ? { hubDeviceId: d.hubDeviceId } : {}),
+      ...(d.lockDeviceId !== undefined ? { lockDeviceId: d.lockDeviceId } : {}),
       ...(d.roomID !== undefined ? { roomID: d.roomID } : {}),
       ...(d.roomName !== undefined ? { roomName: d.roomName } : {}),
       ...(d.familyName !== undefined ? { familyName: d.familyName } : {}),
@@ -679,6 +691,7 @@ export function toMcpDeviceListShape(d: Device): Record<string, unknown> {
     deviceType: d.deviceType,
     enableCloudService: d.enableCloudService,
     hubDeviceId: d.hubDeviceId,
+    ...(d.lockDeviceId !== undefined ? { lockDeviceId: d.lockDeviceId } : {}),
     roomID: d.roomID,
     roomName: d.roomName,
     familyName: d.familyName,

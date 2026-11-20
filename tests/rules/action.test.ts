@@ -55,7 +55,7 @@ describe('executeRuleAction', () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
-  it.each(['unlock', 'nightLatchUnlock', 'createKey', 'deleteKey'])('refuses %s and records the safety rejection', async (verb) => {
+  it.each(['unlock', 'nightLatchUnlock', 'createKey', 'deleteKey', 'DeLeTeImAgE'])('refuses %s and records the safety rejection', async (verb) => {
     const action = { command: `devices command LOCK-1 ${verb}` };
     const result = await executeRuleAction(action, {
       rule: { ...baseRule, then: [action] },

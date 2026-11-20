@@ -4,6 +4,7 @@ import { printTable, printJson, isJsonMode, handleError, UsageError } from '../u
 import { resolveFormat, resolveFields, renderRows } from '../utils/format.js';
 import {
   DEVICE_CATALOG,
+  effectiveOverlayEntries,
   findCatalogEntry,
   getCatalogOverlayPath,
   getEffectiveCatalog,
@@ -31,6 +32,8 @@ Overlay rules (applied in order):
   • Entry with a new "type" is appended. New entries MUST supply both
     "category" and "commands"; otherwise they are ignored silently.
   • Entry like { "type": "X", "remove": true } deletes the built-in "X".
+  • AI Art Frame Luma targets AI Art Frame 2, including removals. If both
+    names occur, the canonical AI Art Frame 2 entry takes precedence.
 
 Subcommands:
   path        Print the overlay file path and whether it exists
@@ -122,7 +125,7 @@ Examples:
 
         const typeQuery = typeParts.join(' ').trim();
         if (typeQuery) {
-          const match = findCatalogEntry(typeQuery);
+          const match = findCatalogEntry(typeQuery, entries);
           if (!match) {
             throw new UsageError(`No device type matches "${typeQuery}".`);
           }
@@ -130,16 +133,11 @@ Examples:
             const types = match.map((m) => m.type).join(', ');
             throw new UsageError(`"${typeQuery}" matches multiple types: ${types}. Be more specific.`);
           }
-          // Restrict the match to the requested source if needed.
-          const picked = entries.find((e) => e.type === match.type);
-          if (!picked) {
-            throw new UsageError(`"${match.type}" exists in the effective catalog but not in source "${source}".`);
-          }
           if (isJsonMode()) {
-            printJson([picked]);
+            printJson([match]);
             return;
           }
-          renderEntry(picked);
+          renderEntry(match);
           return;
         }
 
@@ -262,7 +260,7 @@ Examples:
       const removed: string[] = [];
       const ignored: Array<{ type: string; reason: string }> = [];
 
-      for (const e of overlay.entries) {
+      for (const e of effectiveOverlayEntries(overlay.entries)) {
         if (e.remove) {
           if (builtInByType.has(e.type)) removed.push(e.type);
           else ignored.push({ type: e.type, reason: 'remove: type not in built-in catalog' });

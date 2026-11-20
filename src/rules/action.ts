@@ -239,8 +239,8 @@ export async function executeRuleAction(
       });
       return { ok: true, deviceId, verb: parsed.verb };
     }
-    // Rule audit parameters remain strings; decode JSON only for dispatch.
-    await executeCommand(deviceId, parsed.verb, parseParameterForWire(preflight.targets[0].parameter), 'command', ctx.httpClient);
+    // Preserve raw parameters in the rule audit; dispatch the model's wire value.
+    await executeCommand(deviceId, parsed.verb, parseParameterForWire(preflight.targets[0].parameter, entry.type, parsed.verb), 'command', ctx.httpClient);
     writeAudit({
       t: new Date().toISOString(),
       kind: 'rule-fire',

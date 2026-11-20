@@ -30,16 +30,16 @@ import { VERSION as pkgVersion } from '../version.js';
 export const AGENT_BOOTSTRAP_SCHEMA_VERSION = CATALOG_SCHEMA_VERSION;
 
 const SAFETY_TIERS = {
-  read: 'No state mutation; safe to call freely.',
-  action: 'Mutates device/cloud state but reversible (turnOn, setColor).',
-  destructive: 'Hard to reverse / physical-world side effects (unlock). Requires confirmation.',
+  read: 'Does not mutate device state. Live reads can consume API quota.',
+  action: 'Mutates state. Check the command before acting; a repeat may have additional effects.',
+  destructive: 'High-impact or hard to reverse (unlock, deleteImage). Requires explicit authorization.',
 };
 
 const QUICK_REFERENCE = {
-  discovery: ['devices list', 'devices describe <id>', 'devices status <id>'],
+  discovery: ['schema export --type <type>', 'schema export', 'devices list', 'devices describe <id>', 'devices status <id>'],
   action: ['devices command <id> <cmd>', 'devices command --name <q> <cmd>', 'scenes execute <id>'],
-  safety: ['--dry-run', '--idempotency-key <k>', '--audit-log', '--no-quota'],
-  observability: ['doctor --json', 'quota status', 'cache status', 'events mqtt-tail'],
+  safety: ['devices command <id> <cmd> --explain', '--dry-run devices command <id> <cmd>', 'plan review <id>'],
+  observability: ['doctor --json', 'quota status', 'cache show', 'events mqtt-tail'],
   history: ['history range <id> --since 7d', 'history stats <id>'],
   meta: ['devices meta set <id> --alias <name>', 'devices meta list', 'devices meta get <id>'],
   policy: ['policy validate', 'policy new', 'policy migrate'],
@@ -111,7 +111,7 @@ export function registerAgentBootstrapCommand(program: Command): void {
     )
     .option(
       '--compact',
-      'Emit an even smaller payload by dropping catalog descriptions and non-essential fields (target: <20 KB).',
+      'Summarize only cached device types, omitting descriptions and detailed command metadata (target: <20 KB).',
     )
     .option(
       '--sections <csv>',
@@ -126,19 +126,18 @@ spending quota. It reads from local cache (devices + quota + profile) and the
 bundled catalog — no network calls.
 
 For fresher device state, have the agent follow up with:
-  $ switchbot devices list --json               # refreshes cache
+  $ switchbot --no-cache devices list --json    # refreshes cache
   $ switchbot devices status <id> --json
 
 Examples:
   $ switchbot agent-bootstrap --compact | wc -c   # fit in agent context window
-  $ switchbot agent-bootstrap | jq '.devices | length'
-  $ switchbot agent-bootstrap --compact | jq '.quickReference'
+  $ switchbot agent-bootstrap | jq '.data.devices | length'
+  $ switchbot agent-bootstrap --compact | jq '.data.quickReference'
 `,
     )
     .action(async (opts: BootstrapOptions) => {
       const compact = Boolean(opts.compact);
       const cache = loadCache();
-      const catalog = getEffectiveCatalog();
       const usage = todayUsage();
       const meta = readProfileMeta(undefined);
       const credentialsBackend = await readCredentialsBackend();
@@ -154,13 +153,15 @@ Examples:
         : [];
 
       const usedTypes = new Set(cachedDevices.map((d) => d.type.toLowerCase()));
-      const relevantCatalog = cachedDevices.length > 0
-        ? catalog.filter(
-            (e) =>
-              usedTypes.has(e.type.toLowerCase()) ||
-              (e.aliases ?? []).some((a) => usedTypes.has(a.toLowerCase())),
-          )
-        : catalog;
+      // Compact bootstrap only describes cached types; no cache is not a reason
+      // to expand the whole catalog (or imply its devices are installed).
+      const scope = compact || usedTypes.size > 0 ? 'used' : 'all';
+      const relevantCatalog = scope === 'all'
+        ? getEffectiveCatalog()
+        : usedTypes.size === 0 ? [] : getEffectiveCatalog().filter(
+          (e) => usedTypes.has(e.type.toLowerCase()) ||
+            (e.aliases ?? []).some((a) => usedTypes.has(a.toLowerCase())),
+        );
 
       const catalogTypes = relevantCatalog.map((e) => {
         if (compact) {
@@ -217,14 +218,14 @@ Examples:
         credentialsBackend,
         devices: cachedDevices,
         catalog: {
-          scope: cachedDevices.length > 0 ? 'used' : 'all',
+          scope,
           types: catalogTypes,
         },
         // hints: empty array means no hints to report; always emitted, never null.
         // An empty array signals "nothing to act on" — agents should not treat
         // it as a disabled or missing field.
         hints: cachedDevices.length === 0
-          ? ['Run `switchbot devices list` once to populate the device cache for richer bootstrap output.']
+          ? ['No cached devices. Run `switchbot devices list` to refresh the cache, or `switchbot schema export` for the full offline catalog.']
           : [],
       };
 

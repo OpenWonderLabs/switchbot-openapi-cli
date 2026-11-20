@@ -1,7 +1,18 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, afterAll } from 'vitest';
 import fs from 'node:fs';
 import { loadPlanRecord, updatePlanRecord, savePlanRecord, listPlanRecords, type PlanRecord } from '../../src/lib/plan-store.js';
 import type { Plan } from '../../src/commands/plan.js';
+
+// The store binds its real directory at import time.
+const home = await vi.hoisted(async () => {
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const dir = mkdtempSync(`${tmpdir()}/plan-store-home-`);
+  vi.stubEnv('HOME', dir);
+  vi.stubEnv('USERPROFILE', dir);
+  return dir;
+});
+afterAll(() => { vi.unstubAllEnvs(); fs.rmSync(home, { recursive: true, force: true }); });
 
 describe('plan-store security', () => {
   it('loadPlanRecord rejects non-UUID planId (path traversal guard)', () => {
@@ -25,9 +36,6 @@ describe('plan-store write + list paths', () => {
   });
 
   it('savePlanRecord returns a pending record with a UUID v4 planId', () => {
-    vi.spyOn(fs, 'mkdirSync').mockReturnValue(undefined);
-    vi.spyOn(fs, 'writeFileSync').mockReturnValue(undefined);
-
     const plan: Plan = { version: '1.0', steps: [] };
     const record = savePlanRecord(plan);
 
@@ -36,7 +44,7 @@ describe('plan-store write + list paths', () => {
     expect(record.planId).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
     );
-    expect(fs.writeFileSync).toHaveBeenCalledOnce();
+    expect(loadPlanRecord(record.planId)).toEqual(record);
   });
 
   it('updatePlanRecord throws when the plan record does not exist on disk', () => {

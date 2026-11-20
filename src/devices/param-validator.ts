@@ -126,9 +126,13 @@ export type ValidateResult =
   | { ok: true; normalized?: string }
   | { ok: false; error: string };
 
-export function parseParameterForWire(parameter: string | undefined): unknown {
+export function parseParameterForWire(parameter: string | undefined, deviceType?: string, command?: string): unknown {
   if (parameter === undefined) return 'default';
   const trimmed = parameter.trim();
+  // S30 selfClean explicitly takes a JSON number; other scalar commands use strings.
+  if (command === 'selfClean' && deviceType && canonicalizeDeviceType(deviceType) === 'Robot Vacuum Cleaner S30' && /^[1-4]$/.test(trimmed)) {
+    return Number(trimmed);
+  }
   if (
     (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
     (trimmed.startsWith('[') && trimmed.endsWith(']'))
@@ -215,8 +219,9 @@ export function validateParameter(
   }
 
   // --- AI Art Frame ---
-  if ((dt === "AI Art Frame" || dt === "AI Art Frame Luma") && command === "uploadImage") {
-    return validateArtFrameUploadImage(raw);
+  if (dt === 'AI Art Frame' || dt === 'AI Art Frame 2') {
+    if (command === 'uploadImage') return validateArtFrameUploadImage(raw);
+    if (command === 'deleteImage') return validateExactEnum(raw, command, ['random', 'newest', 'oldest']);
   }
 
   // --- Humidifier ---
@@ -273,6 +278,9 @@ export function validateParameter(
   }
   if ((isComboVacuum(dt) || isWaterLevelVacuum(dt) || isFloorCleaningVacuum(dt)) && command === 'changeParam') {
     return validateVacuumChangeParam(raw, dt);
+  }
+  if (dt === 'Robot Vacuum Cleaner S30' && command === 'selfClean') {
+    return validateIntRange(raw, command, 1, 4, '1=wash mop, 2=start drying, 3=stop drying, 4=empty dustbin');
   }
   if (isFloorCleaningVacuum(dt) && command === 'selfClean') {
     return validateEnum(raw, 'selfClean', ['1', '2', '3'], '1=wash mop, 2=dry, 3=terminate');
@@ -518,6 +526,7 @@ function isWaterLevelVacuum(deviceType: string): boolean {
 function isFloorCleaningVacuum(deviceType: string): boolean {
   return (
     deviceType === 'Floor Cleaning Robot S10' ||
+    deviceType === 'Robot Vacuum Cleaner S30' ||
     deviceType === 'S20' ||
     deviceType === 'Robot Vacuum Cleaner S20'
   );
@@ -1124,6 +1133,14 @@ function validateAirPurifierSetMode(raw: string | undefined): ValidateResult {
 
 // ---- Robot Vacuums ----------------------------------------------------------
 
+function parseVacuumCycles(raw: unknown, deviceType: string, field: string): number | string {
+  // S30 documents an integer but gives no cycle bounds. Do not import the older models' cap.
+  const unbounded = deviceType === 'Robot Vacuum Cleaner S30';
+  const cycles = isNumericish(raw) ? Number(raw) : NaN;
+  if (Number.isSafeInteger(cycles) && (unbounded || (cycles >= 1 && cycles <= 2639999))) return cycles;
+  return `${field} must be ${unbounded ? 'a safe integer' : 'an integer 1-2639999'}, got ${JSON.stringify(raw)}.`;
+}
+
 function validateVacuumStartClean(raw: string | undefined, deviceType: string): ValidateResult {
   if (raw === undefined || raw === '' || raw === 'default') {
     const actions = isFloorCleaningVacuum(deviceType) ? 'sweep | sweep_mop' : 'sweep | mop';
@@ -1168,7 +1185,7 @@ function validateVacuumStartClean(raw: string | undefined, deviceType: string): 
     }
     if (p.waterLevel !== undefined) {
       if (!isFloorCleaningVacuum(deviceType)) {
-        return { ok: false, error: `${deviceType} startClean "param.waterLevel" is only supported for Floor Cleaning Robot S10/S20.` };
+        return { ok: false, error: `${deviceType} does not support startClean "param.waterLevel".` };
       }
       if (!isNumericish(p.waterLevel)) {
         return { ok: false, error: `${deviceType} startClean "param.waterLevel" must be a number or numeric string, got ${JSON.stringify(p.waterLevel)}.` };
@@ -1180,14 +1197,9 @@ function validateVacuumStartClean(raw: string | undefined, deviceType: string): 
       normalizedParam.waterLevel = wl;
     }
     if (p.times !== undefined) {
-      if (!isNumericish(p.times)) {
-        return { ok: false, error: `${deviceType} startClean "param.times" must be a number or numeric string, got ${JSON.stringify(p.times)}.` };
-      }
-      const t = Number(p.times); // number-ok: isNumericish-guarded
-      if (!Number.isInteger(t) || t < 1 || t > 2639999) {
-        return { ok: false, error: `${deviceType} startClean "param.times" must be an integer 1-2639999, got ${JSON.stringify(p.times)}.` };
-      }
-      normalizedParam.times = t;
+      const cycles = parseVacuumCycles(p.times, deviceType, `${deviceType} startClean "param.times"`);
+      if (typeof cycles === 'string') return { ok: false, error: cycles };
+      normalizedParam.times = cycles;
     }
     normalized.param = normalizedParam;
   }
@@ -1237,14 +1249,9 @@ function validateVacuumChangeParam(raw: string | undefined, deviceType: string):
     normalized.waterLevel = wl;
   }
   if (p.times !== undefined) {
-    if (!isNumericish(p.times)) {
-      return { ok: false, error: `changeParam "times" must be a number or numeric string, got ${JSON.stringify(p.times)}.` };
-    }
-    const t = Number(p.times); // number-ok: isNumericish-guarded
-    if (!Number.isInteger(t) || t < 1 || t > 2639999) {
-      return { ok: false, error: `changeParam "times" must be an integer 1-2639999, got ${JSON.stringify(p.times)}.` };
-    }
-    normalized.times = t;
+    const cycles = parseVacuumCycles(p.times, deviceType, 'changeParam "times"');
+    if (typeof cycles === 'string') return { ok: false, error: cycles };
+    normalized.times = cycles;
   }
   if (deviceType === 'Robot Vacuum Cleaner K11 Plus Pro' && Object.keys(normalized).length === 0) {
     return { ok: false, error: 'K11+ Pro changeParam requires at least one supported parameter.' };

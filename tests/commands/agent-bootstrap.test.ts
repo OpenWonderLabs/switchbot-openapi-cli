@@ -5,6 +5,7 @@ import path from 'node:path';
 
 import { Command } from 'commander';
 import { registerAgentBootstrapCommand } from '../../src/commands/agent-bootstrap.js';
+import { registerSchemaCommand } from '../../src/commands/schema.js';
 import { resetListCache } from '../../src/devices/cache.js';
 import { runCli } from '../helpers/cli.js';
 import { expectJsonEnvelopeContainingKeys } from '../helpers/contracts.js';
@@ -139,6 +140,46 @@ describe('agent-bootstrap', () => {
         expect.objectContaining({ deviceId: 'AI999', type: '', name: 'AI MindClip' }),
       ]),
     );
+  });
+
+  it('fits a cold compact bootstrap in 20000 bytes without claiming catalog types are installed', async () => {
+    fs.unlinkSync(path.join(tmpDir, '.switchbot', 'devices.json'));
+    const compact = await runCli(registerAgentBootstrapCommand, ['agent-bootstrap', '--compact']);
+    const stdout = compact.stdout.join('\n') + '\n';
+    expect(Buffer.byteLength(stdout)).toBeLessThan(20_000);
+    const { data } = JSON.parse(stdout);
+    expect(data.devices).toEqual([]);
+    expect(data.catalog).toEqual({ scope: 'used', types: [] });
+    expect(Object.keys(data.safetyTiers).sort()).toEqual(['action', 'destructive', 'read']);
+    expect(data.hints.length).toBeGreaterThan(0);
+    const full = await runCli(registerAgentBootstrapCommand, ['agent-bootstrap']);
+    const all = JSON.parse(full.stdout.join('\n')).data.catalog;
+    expect(all.scope).toBe('all');
+    expect(all.types.length).toBeGreaterThan(10);
+  });
+
+  it('lets a user count cached devices and follow the quick reference from the help examples', async () => {
+    const help = await runCli(registerAgentBootstrapCommand, ['agent-bootstrap', '--help']);
+    const examples = [...help.stdout.join('\n').matchAll(/\$ switchbot (agent-bootstrap[^|\n]*)\| jq '(\.[\w.]+)( \| length)?'/g)];
+    expect(examples).toHaveLength(2);
+    for (const [, cli, selector, count] of examples) {
+      const result = await runCli(registerAgentBootstrapCommand, cli.trim().split(/\s+/));
+      const envelope = JSON.parse(result.stdout.join('\n'));
+      if (count) {
+        expect(envelope).toHaveProperty(selector.slice(1), [
+          expect.objectContaining({ deviceId: 'ABC123' }),
+        ]);
+      } else {
+        expect(envelope).toHaveProperty(selector.slice(1), envelope.data.quickReference);
+        const discovery: string[] = envelope.data.quickReference.discovery;
+        const schema = discovery.find((command) => command.startsWith('schema export --type '));
+        expect(schema).toBeDefined();
+        const result = await runCli(registerSchemaCommand, schema!.replace('<type>', envelope.data.devices[0].type).split(' '));
+        expect(JSON.parse(result.stdout.join('\n')).data.types).toEqual([
+          expect.objectContaining({ type: 'Bot' }),
+        ]);
+      }
+    }
   });
 
   it('stays below 20 KB on a small account with --compact', async () => {
