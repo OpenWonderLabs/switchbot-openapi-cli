@@ -1,6 +1,6 @@
 # OpenAPI alignment ambiguities
 
-Evidence is pinned to upstream commit `dc9a6b0e4ad77882c72d186ecd5d134113acdad0`; GitHub's HEAD API still returned that SHA on the continuation check. The CLI separates written contracts, reported payloads, and unresolved server behavior.
+The latest entries use the [2026-11-20 upstream snapshot](#2026-11-20-upstream-snapshot-unreleased) (`0db92c78`). The earlier entries below retain their own `dc9a6b0e` evidence links. Written contracts, reported payloads and unresolved server behavior are distinguished throughout.
 
 - [MindClip](https://github.com/OpenWonderLabs/SwitchBotAPI/blob/dc9a6b0e4ad77882c72d186ecd5d134113acdad0/devices/others/ai-mindclip.md): the CLI, library and MCP now require the documented list/todo/date/week query fields; missing fields fail before HTTP rather than relying on an unverified server default. Extra language/time/folder/category filters, legacy numeric bounds and completed/category value meanings still require upstream confirmation; mock responses do not establish them.
 - [Curtain and Blind Tilt](https://github.com/OpenWonderLabs/SwitchBotAPI/tree/dc9a6b0e4ad77882c72d186ecd5d134113acdad0/devices/curtains-blinds): scalar Curtain position, Blind Tilt/Roller Shade on/off, and fan toggle support are not tightened without pinned evidence. The documented spaced Blind Tilt form `up; 36` is accepted and normalized to `up;36`.
@@ -80,7 +80,8 @@ written OpenAPI contract, not a live-device or regional availability test.
 
 The [AI Art Frame 2](https://github.com/OpenWonderLabs/SwitchBotAPI/blob/0db92c78b56808f25b74c61535313f44bef4cd91/devices/others/ai-art-frame-2.md)
 name replaces `AI Art Frame Luma` in inventory and webhook documentation.
-The old name remains a discovery alias, not a second model. Both it and the
+The old name is also recognized in `catalog.json` overrides and removals.
+When both keys are present the canonical model takes precedence. Both it and the
 [original AI Art Frame](https://github.com/OpenWonderLabs/SwitchBotAPI/blob/0db92c78b56808f25b74c61535313f44bef4cd91/devices/others/ai-art-frame.md)
 document `deleteImage` with `random`, `newest` or `oldest`. Deletion is
 irreversible and includes cloud images not yet on the frame, but never the
@@ -88,6 +89,12 @@ displayed image. If the displayed image cannot be identified, deletion fails.
 Each repeated request could delete another image: the CLI treats this as
 destructive, with no automatic retry, replay, automation or standing approval.
 See the [cloud result fields](json-contract.md#device-inventory-and-command-results).
+
+The [IR control table](https://github.com/OpenWonderLabs/SwitchBotAPI/blob/0db92c78b56808f25b74c61535313f44bef4cd91/devices/others/virtual-infrared-remote-devices.md#control-commands)
+documents playback for DVD and Speaker, but `volumeAdd`/`volumeSub` only for
+Speaker. DVD volume remains accepted for compatibility and is labeled
+undocumented. A user-defined button is not a cataloged command: its name
+does not establish what it does or whether it can be repeated.
 
 The [official glossary](https://github.com/OpenWonderLabs/SwitchBotAPI/blob/0db92c78b56808f25b74c61535313f44bef4cd91/README.md#glossary)
 lists Lock Vision and Lock Vision Pro for North America, Lock Lite for Japan,

@@ -5,8 +5,8 @@ import { intArg, stringArg } from '../utils/arg-parsers.js';
 import { printJson, isJsonMode, handleError, UsageError, exitWithError } from '../utils/output.js';
 import { readAudit, verifyAudit, type AuditEntry } from '../utils/audit.js';
 import { executeCommand, fetchDeviceList } from '../lib/devices.js';
+import { deriveSafetyTier, findExactCatalogEntry } from '../devices/catalog.js';
 import { destructiveExecutionHint } from '../lib/destructive-mode.js';
-import { canonicalDestructiveVerb } from '../rules/destructive.js';
 import { isDryRun } from '../utils/flags.js';
 import {
   queryDeviceHistory,
@@ -108,25 +108,41 @@ Examples:
           message: `Entry ${idx} is not a command (kind=${entry.kind}).`,
         });
       }
-      if (!isDryRun() && canonicalDestructiveVerb(entry.command)) {
-        // A custom IR button may share a name with a built-in command. The
-        // audit entry alone cannot establish that its target is an IR remote.
-        const isCustomButton = entry.commandType === 'customize' &&
-          (await fetchDeviceList().catch(handleError)).infraredRemoteList.some((ir) => ir.deviceId === entry.deviceId);
-        if (!isCustomButton) {
+      let command = entry.command;
+      if (!isDryRun()) {
+        // The same verb can power a lamp or open a garage. The old audit
+        // entry establishes neither today's device type nor its authorization.
+        const { deviceList, infraredRemoteList } = await fetchDeviceList().catch(handleError);
+        const physical = deviceList.find((device) => device.deviceId === entry.deviceId);
+        const remote = infraredRemoteList.find((device) => device.deviceId === entry.deviceId);
+        const type = physical?.deviceType ?? remote?.remoteType;
+        const catalog = type ? findExactCatalogEntry(type) : undefined;
+        const customIR = entry.commandType === 'customize' && remote && !physical;
+        const spec = entry.commandType === 'command' && catalog?.commands.find((candidate) =>
+          candidate.commandType !== 'customize' && candidate.command.toLowerCase() === command.toLowerCase());
+        const destructive = (spec && deriveSafetyTier(spec, catalog) === 'destructive')
+          || (!customIR && command.toLowerCase() === 'deleteimage');
+        if (destructive) {
           exitWithError({
-            code: 2,
-            kind: 'guard',
-            message: 'History replay cannot authorize a destructive command.',
+            code: 2, kind: 'guard', message: 'History replay cannot authorize a destructive command.',
             hint: destructiveExecutionHint(),
-            context: { deviceId: entry.deviceId, command: entry.command, requiredWorkflow: 'plan-approval' },
+            context: { deviceId: entry.deviceId, command, requiredWorkflow: 'plan-approval' },
           });
         }
+        const verifiedBuiltin = spec && catalog?.category === (physical ? 'physical' : 'ir');
+        if ((physical && remote) || catalog?.readOnly || (!customIR && !verifiedBuiltin)) {
+          exitWithError({
+            code: 2, kind: 'guard', message: 'Cannot verify the recorded command for this device.',
+            hint: "Refresh the inventory with 'switchbot --no-cache devices list' and inspect the target before executing.",
+            context: { deviceId: entry.deviceId, command },
+          });
+        }
+        if (spec) command = spec.command;
       }
       try {
         const result = await executeCommand(
           entry.deviceId,
-          entry.command,
+          command,
           entry.parameter,
           entry.commandType,
         );

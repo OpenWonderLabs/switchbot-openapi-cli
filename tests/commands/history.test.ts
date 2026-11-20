@@ -120,6 +120,28 @@ describe('history command', () => {
   });
 
   describe('replay', () => {
+    it('uses target catalog risk for lock, garage and unverified targets', async () => {
+      for (const [deviceType, command, permitted] of [
+        ['Smart Lock', 'lock', true],
+        ['Smart Lock', 'unlock', false],
+        ['Garage Door Opener', 'turnOn', false],
+        ['Not a Known Device', 'turnOn', false],
+      ] as const) {
+        const deviceId = 'REPLAY-TARGET';
+        seed([{ t: 't1', kind: 'command', deviceId, command, commandType: 'command', result: 'ok' }]);
+        apiMock.__instance.get.mockResolvedValue({ data: { body: {
+          deviceList: [{ deviceId, deviceType, deviceName: 'Test target' }], infraredRemoteList: [],
+        } } });
+        apiMock.__instance.post.mockReset().mockResolvedValue({ data: { body: {} } });
+        const res = await runCli(registerHistoryCommand, [
+          '--no-cache', '--config', path.join(tmp, 'config.json'), '--json', 'history', 'replay', '1', '--file', auditFile,
+        ]);
+        expect(res.exitCode, `${deviceType} ${command}`).toBe(permitted ? null : 2);
+        expect(apiMock.__instance.post).toHaveBeenCalledTimes(permitted ? 1 : 0);
+        if (!permitted) expect(JSON.parse(res.stdout.join('\n')).error.kind).toBe('guard');
+      }
+    });
+
     it('rejects an out-of-range index with exit 2', async () => {
       seed([
         { t: 't1', kind: 'command', deviceId: 'A', command: 'turnOn', parameter: undefined, commandType: 'command', dryRun: false, result: 'ok' },
@@ -174,12 +196,15 @@ describe('history command', () => {
         { t: 't1', kind: 'command', deviceId: 'BOT1', command: 'turnOn', parameter: undefined, commandType: 'command', dryRun: false, result: 'ok' },
         { t: 't2', kind: 'command', deviceId: 'BOT2', command: 'turnOff', parameter: undefined, commandType: 'command', dryRun: false, result: 'ok' },
       ]);
+      apiMock.__instance.get.mockResolvedValueOnce({ data: { body: {
+        deviceList: [{ deviceId: 'BOT2', deviceType: 'Bot', deviceName: 'Test Bot' }], infraredRemoteList: [],
+      } } });
       apiMock.__instance.post.mockResolvedValueOnce({
         data: { statusCode: 100, body: {} },
       });
 
       const res = await runCli(registerHistoryCommand, [
-        'history', 'replay', '2', '--file', auditFile,
+        '--config', path.join(tmp, 'config.json'), 'history', 'replay', '2', '--file', auditFile,
       ]);
       expect(apiMock.__instance.post).toHaveBeenCalledTimes(1);
       const [url, body] = apiMock.__instance.post.mock.calls[0];

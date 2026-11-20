@@ -307,6 +307,10 @@ describe('account changes across processes', () => {
 
   it.each(['initial', 'retry'])('rejects an account replacement during %s request credential resolution', async phase => {
     saveConfig('account-A', 'secret-A');
+    // A retry can only reach credential resolution when the target and command are verified.
+    updateCacheFromDeviceList({
+      deviceList: [{ deviceId: 'SHARED', deviceName: 'Test outlet', deviceType: 'Plug' }], infraredRemoteList: [],
+    });
     process.argv = process.argv.filter(arg => arg !== '--no-retry');
     process.argv.push('--retry-on-429', '1');
     let rotateOnRead = phase === 'initial';

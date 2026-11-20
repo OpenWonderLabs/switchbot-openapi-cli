@@ -70,6 +70,22 @@ describe('catalog path', () => {
 });
 
 describe('catalog show', () => {
+  it('distinguishes documented Speaker volume controls from legacy DVD compatibility', async () => {
+    for (const type of ['DVD', 'Speaker']) {
+      const { stdout } = await runCli(registerCatalogCommand, ['--json', 'catalog', 'show', type]);
+      const [entry] = JSON.parse(stdout.join('\n')).data;
+      expect(entry.type).toBe(type);
+      const commands = entry.commands as Array<{ command: string; description: string }>;
+      expect(commands.some(({ command }) => command === 'Play')).toBe(true);
+      for (const name of ['volumeAdd', 'volumeSub']) {
+        const description = commands.find(({ command }) => command === name)?.description;
+        expect(description).toBeDefined();
+        if (type === 'DVD') expect(description).toMatch(/undocumented.*DVD/i);
+        else expect(description).not.toMatch(/undocumented/i);
+      }
+    }
+  });
+
   it('lists the effective catalog by default', async () => {
     const { stdout, exitCode } = await runCli(registerCatalogCommand, ['catalog', 'show']);
     expect(exitCode).toBeNull();
@@ -169,6 +185,38 @@ describe('catalog show', () => {
 });
 
 describe('catalog diff', () => {
+  it('applies persisted Luma changes to the canonical type in lookup and diff', async () => {
+    // The exact persisted name migrates; lookalike names are independent entries.
+    const canonical = 'AI Art Frame 2';
+    const legacy = 'AI Art Frame Luma';
+    writeOverlay([{ type: legacy, readOnly: true }]);
+    const json = async (...args: string[]) =>
+      JSON.parse((await runCli(registerCatalogCommand, ['--json', 'catalog', ...args])).stdout.join('\n'));
+    for (const name of [canonical, legacy]) {
+      expect((await json('show', name)).data[0]).toMatchObject({ type: canonical, readOnly: true });
+    }
+    expect((await json('diff')).data.replaced).toEqual([{ type: canonical, changedKeys: ['readOnly'] }]);
+
+    writeOverlay([{ type: legacy, remove: true }]);
+    resetCatalogOverlayCache();
+    expect((await json('show')).data.map((entry: { type: string }) => entry.type)).not.toContain(canonical);
+    expect((await json('diff')).data.removed).toEqual([canonical]);
+    expect((await json('show', '--source', 'built-in', legacy)).data[0].type).toBe(canonical);
+
+    for (const entries of [
+      [{ type: legacy, remove: true }, { type: canonical, readOnly: true }],
+      [{ type: canonical, readOnly: true }, { type: legacy, remove: true }],
+    ]) {
+      writeOverlay([...entries, { type: 'Art Frame', readOnly: true }]);
+      resetCatalogOverlayCache();
+      expect((await json('show', legacy)).data[0]).toMatchObject({ type: canonical, readOnly: true });
+      expect((await json('diff')).data).toMatchObject({
+        replaced: [{ type: canonical, changedKeys: ['readOnly'] }], removed: [],
+        ignored: [{ type: 'Art Frame', reason: expect.any(String) }],
+      });
+    }
+  });
+
   it('reports no diff when no overlay exists', async () => {
     const { stdout } = await runCli(registerCatalogCommand, ['catalog', 'diff']);
     const out = stdout.join('\n');

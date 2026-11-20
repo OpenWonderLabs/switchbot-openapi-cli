@@ -159,7 +159,7 @@ export function registerBatchCommand(devices: Command): void {
     .option('--yes', 'Allow destructive commands only from an explicit dev profile')
     .option('--type <commandType>', '"command" (default) or "customize" for user-defined IR buttons', enumArg('--type', COMMAND_TYPES), 'command')
     .option('--stdin', 'Read deviceIds from stdin, one per line (same as trailing "-")')
-    .option('--idempotency-key-prefix <prefix>', 'Client-supplied prefix for idempotency keys (key per device: <prefix>-<deviceId>). process-local 60s window; cache is per Node process (MCP session, batch run, plan run). Independent CLI invocations do not share cache.', stringArg('--idempotency-key-prefix'))
+    .option('--idempotency-key-prefix <prefix>', 'Key per device: <prefix>-<deviceId>. Deduplicates acknowledged results within a process-local 60s window. Independent CLI invocations do not share cache.', stringArg('--idempotency-key-prefix'))
     .option('--idempotency-key <prefix>', 'Alias for --idempotency-key-prefix.', stringArg('--idempotency-key'))
     .option('--skip-offline', 'Skip devices whose cached status is offline (no API call; cache miss → send as usual).')
     .addHelpText('after', `

@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { enumArg, intArg, stringArg } from '../utils/arg-parsers.js';
 import { printTable, printKeyValue, printJson, isJsonMode, handleError, UsageError, StructuredUsageError, exitWithError } from '../utils/output.js';
 import { resolveFormat, resolveFields, renderRows } from '../utils/format.js';
+import { decideActionRisk } from '../devices/action-risk.js';
 import {
   findCatalogEntry,
   getEffectiveCatalog,
@@ -529,7 +530,7 @@ Examples:
     .option('--explain', 'Print a human-readable summary of what this command would do (risk level, device type, idempotency) then exit without executing.')
     .option('--allow-unknown-device', 'Allow an uncached device ID (otherwise exit 2). Cannot bypass target verification for deleteImage.')
     .option('--skip-param-validation', 'Skip client-side parameter validation except for the required deleteImage selector.')
-    .option('--idempotency-key <key>', 'Client-supplied key to dedupe retries. process-local 60s window; cache is per Node process (MCP session, batch run, plan run). Independent CLI invocations do not share cache.', stringArg('--idempotency-key'))
+    .option('--idempotency-key <key>', 'Deduplicate an acknowledged result within a process-local 60s window. Independent CLI invocations do not share cache; a key does not resolve an unknown outcome.', stringArg('--idempotency-key'))
     .addHelpText('after', `
 ────────────────────────────────────────────────────────────────────────
 For the full list of commands a specific device supports — and their
@@ -700,8 +701,7 @@ Examples:
         if (options.explain) {
           const isDestructive = isDestructiveCommand(cachedForGuard?.type, cmd, options.type);
           const reason = getDestructiveReason(cachedForGuard?.type, cmd, options.type);
-          const riskLevel = isDestructive ? 'high' : options.type === 'command' ? 'medium' : 'low';
-          const recommendedMode = isDestructive ? 'review-before-execute' : 'direct';
+          const { riskLevel, recommendedMode, idempotent } = decideActionRisk(isDestructive ? 'destructive' : 'action', validation.idempotent);
           if (isJsonMode()) {
             printJson({
               intent: `Send command "${cmd}" to device ${deviceId}`,
@@ -711,7 +711,7 @@ Examples:
               parameter: parameter ?? null,
               commandType: options.type,
               riskLevel,
-              idempotent: validation.idempotent ?? null,
+              idempotent,
               requiresConfirmation: isDestructive,
               safetyReason: reason ?? null,
               recommendedMode,
@@ -722,7 +722,8 @@ Examples:
             console.log(`Device type: ${cachedForGuard?.type ?? 'unknown'}${cachedForGuard?.name ? ` (${cachedForGuard.name})` : ''}`);
             console.log(`Parameter: ${parameter ?? '(none)'}`);
             console.log(`Risk level: ${riskLevel}`);
-            console.log(`Idempotent: ${validation.idempotent ?? 'unknown'}`);
+            console.log(`Idempotent: ${idempotent ?? 'unknown'}`);
+            console.log(`Recommended mode: ${recommendedMode}`);
             if (reason) console.log(`Safety reason: ${reason}`);
             if (isDestructive) console.log(`Requires plan approval by default. ${destructiveExecutionHint()}`);
             console.log('Command not sent.');
