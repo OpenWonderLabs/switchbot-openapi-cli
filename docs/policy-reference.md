@@ -27,8 +27,8 @@ Override order (first hit wins):
 3. The default path above
 
 `switchbot policy new` writes to the resolved path; `switchbot policy
-validate` reads from it; `switchbot policy migrate` reads, upgrades in
-memory, and writes back.
+validate` reads from it. `policy migrate` checks its declared version; there
+is no upgrade path between two different versions in this release.
 
 ---
 
@@ -41,8 +41,8 @@ The top-level `version` field is **required**. This CLI validates only v0.2; v0.
 | `"0.1"` | **Removed in v3.0** — migrate with `policy migrate` (CLI ≤2.15) | aliases, confirmations, quiet_hours, audit, cli |
 | `"0.2"` | **Current (required)** | typed `automation.rules[]` for the rules engine |
 
-A file with anything other than `"0.2"` fails validation
-with a named `unsupported-version` error. v0.2 is the default emitted
+A file declaring a different version string fails validation
+with an `unsupported-version` error. v0.2 is the default emitted
 by `switchbot policy new`. Existing v0.1 files must be migrated using
 CLI ≤2.15 before upgrading to v3.0+:
 
@@ -50,10 +50,6 @@ CLI ≤2.15 before upgrading to v3.0+:
 # On a temporary legacy CLI <=2.15, before upgrading:
 switchbot policy migrate
 ```
-
-`policy migrate` applies additive changes only (new optional fields,
-tighter types on reserved blocks), rewrites the `version` constant, and
-refuses to migrate if any user edits would conflict (exit code 7).
 
 ```yaml
 version: "0.2"  # current default
@@ -71,7 +67,7 @@ defaults.
 | Block | Purpose | Default when missing |
 | --- | --- | --- |
 | `aliases` | Map user-spoken names to deviceIds | No aliases — name resolution falls through to the CLI's match strategies |
-| `confirmations` | Override per-action confirmation policy | Default tier behaviour (see [Safety tiers](./audit-log.md)) |
+| `confirmations` | Override per-action confirmation policy | Default tier behaviour (see [Safety rails](./agent-guide.md#safety-rails)) |
 | `quiet_hours` | Require confirmation during a daily window | No quiet hours |
 | `audit` | Where to write and how long to keep the audit log | `~/.switchbot/audit.log`, retention `90d` |
 | `automation` | Configure the v0.2 rule engine and its triggers, conditions, and actions | `enabled: false` |
@@ -96,8 +92,8 @@ Rules:
 
 - Keys are free-form strings. Quote them if they contain spaces or
   non-ASCII characters.
-- Values must match `^[A-Za-z0-9][A-Za-z0-9_-]{1,63}$` — also accepts
-  hex MAC format and hyphenated multi-segment IDs.
+- Values must match `^[A-Za-z0-9][A-Za-z0-9_-]{1,63}$` and pass the
+  offline plausibility check for a hex MAC or hyphenated device ID.
   Get IDs from `switchbot devices list --format=tsv`.
 
 ---
@@ -193,7 +189,7 @@ automation:
     evaluate_trace: sampled  # full | sampled | off (default sampled)
     evaluate_retention_days: 7  # min 1 (default 7)
   llm_budget:
-    max_calls_per_hour: 60   # global limit across all LLM conditions (default 60)
+    max_calls_per_hour: 60   # fallback hourly cap for each LLM condition
   rules:
     - name: hallway motion at night   # unique per file; audit label
       enabled: true                   # default true; false silences the rule
@@ -215,12 +211,11 @@ automation:
           on_failure: log             # log | retry | ignore
       throttle:
         max_per: "10m"                # minimum spacing: \d+[smh]
-        dedupe_window: null           # event deduplication window
-      cooldown: null                  # shorthand for throttle.max_per
-      requires_stable_for: null       # hysteresis guard duration
-      maxFiringsPerHour: null         # per-hour rate limit
+        dedupe_window: "5s"           # optional event deduplication window
+      requires_stable_for: "10s"      # optional hysteresis guard duration
+      maxFiringsPerHour: 6            # optional per-hour rate limit
       suppressIfAlreadyDesired: false # skip if device already in desired state
-      dry_run: true                   # default true in v0.2; writes audit but skips the API call
+      dry_run: true                   # set explicitly to skip action dispatch
 ```
 
 #### Rule command parameters
@@ -286,7 +281,7 @@ too.
 | Keyword | Meaning | Status |
 | --- | --- | --- |
 | `time_between` | `[HH:MM, HH:MM]` local-time window, `start > end` → overnight | active |
-| `device_state` | `{ device, field, op, value }` read device status inline | active |
+| `device`, `field`, `op`, `value` | Compare a device status field; use these four keys directly, without a `device_state` wrapper | active |
 | `event_count` | Count events in a rolling window over device history | active |
 | `all` | AND-join multiple sub-conditions | active |
 | `any` | OR-join multiple sub-conditions | active |
@@ -300,7 +295,7 @@ conditions:
   - event_count:
       device: hallway-motion       # alias or deviceId (required)
       event: motion.detected       # MQTT event name; omit to count all
-      window: "5m"                 # rolling window: \d+[smh] (required)
+      window: "5m"                 # integer + ms, s, m, h or d (required)
       min: 3                       # fire only if count >= min (required)
       max: 10                      # optional upper bound (count <= max)
 ```
@@ -316,47 +311,32 @@ path: an "alarm if motion ≥3 times in 5m" guard does not need a model.
 conditions:
   - llm:
       prompt: "Is the temperature above normal comfort range?"
-      provider: auto          # auto | openai | anthropic | local
+      provider: auto          # auto | openai | anthropic
       timeout_ms: 5000        # 500–10000 (default 5000)
       cache_ttl: 5m           # none | \d+[smh] (default 5m)
-      recent_events: 5        # 0–20 (default 5) — last N events of the
-                              # trigger device included verbatim in prompt
+      recent_events: 5        # 0–20; matching history contributes to the cache key
       budget:
-        max_calls_per_hour: 10        # per-condition limit (default 10)
-        max_tokens_per_hour: 100000   # optional rolling 1h token cap
-        max_cost_per_day_usd: 1.00    # optional rolling 24h USD cap
+        max_calls_per_hour: 10        # per-condition call limit
+        max_tokens_per_hour: 100000   # optional hourly token cap
+        max_cost_per_day_usd: 1.00    # optional daily USD cap
       on_error: fail          # fail | pass | skip (default fail)
 ```
 
-Set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` for the cloud providers.
-For `provider: local`, point `SWITCHBOT_LOCAL_LLM_URL` at any
-OpenAI-compatible `/v1/chat/completions` endpoint (Ollama defaults
-to `http://localhost:11434/v1`, llama.cpp / vLLM / LM Studio also
-work). Models without tool-use call into a structured-output
-fallback (JSON instruction prompt + lenient parser + one repair
-retry); set `SWITCHBOT_LOCAL_LLM_TOOL_USE=1` if your local model
-does support tool use.
+Set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` for the selected provider.
+`provider: local` is not accepted by the policy schema.
 
-`rules lint` flags misconfigured LLM conditions, including
-`condition-llm-tokens-budget-zero` (token cap set to 0 — never
-allowed) and `condition-llm-cost-without-known-model` (cost cap on a
-model not in the pricing table — won't be enforced).
+`rules lint` warns when a zero token cap forces the `on_error` path, or when
+`provider: auto` makes cost accounting depend on the model selected at runtime.
 
-The audit log records every LLM condition outcome as
-`kind: llm-condition` with `usage: { tokensIn, tokensOut, costUsd? }`
-and emits `kind: llm-budget-exceeded` with
-`dimension: "calls" | "tokens" | "cost"` when a cap fires.
+When evaluation tracing is enabled, an LLM condition can report token usage
+in its `rule-evaluate` trace. A budget rejection writes `llm-budget-exceeded`
+with `budgetDimension` (`calls`, `tokens` or `cost`), `budgetLimit`, and
+`budgetObserved` when auditing is enabled.
 
-Global LLM budget (applied across all LLM conditions, in addition to
-each condition's per-rule budget):
-
-```yaml
-automation:
-  llm_budget:
-    max_calls_per_hour: 60        # default 60
-    max_tokens_per_hour: 1000000  # optional
-    max_cost_per_day_usd: 10.00   # optional
-```
+In `rules run`, `automation.llm_budget.max_calls_per_hour` is a fallback per
+condition, not an aggregate across rules. A condition's own call cap overrides
+it. Set token and cost caps on `conditions[].llm.budget`; the engine does not
+pass automation-level token or cost caps to the evaluator.
 
 **Destructive commands are refused.** The v0.2 validator rejects `lock`,
 `unlock`, `deadbolt`, `nightLatchUnlock`, `createKey`, `deleteKey`,
@@ -381,8 +361,7 @@ windows. Rules are executed in the order declared; `on_error: stop`
 halts the remaining actions in a single rule's `then[]` but doesn't
 affect other rules.
 
-See [`docs/design/phase4-rules.md`](./design/phase4-rules.md) for the
-pipeline and [`examples/policies/automation.yaml`](../examples/policies/automation.yaml)
+See [`examples/policies/automation.yaml`](../examples/policies/automation.yaml)
 for a working walkthrough.
 
 ---
@@ -424,20 +403,13 @@ Exit codes:
 | Code | Meaning |
 | --- | --- |
 | 0 | File is valid and matches schema v0.2 |
-| 1 | Schema violation (line-accurate error with hint) |
+| 1 | Invalid policy (schema, semantics, or safety checks); also used for missing `--live` credentials |
 | 2 | File is missing |
 | 3 | YAML is malformed (parse error, with line/col) |
 | 4 | Internal error |
 
-Every non-zero exit prints a compiler-style block:
-
-```text
-policy.yaml:12:14  error  lowercase deviceId
-   |
-12 |   "bedroom ac": "02-202502111234-abc123"
-   |                                 ^^^^^^^^
-   = hint: SwitchBot deviceIds are uppercase. Try "ABC123".
-```
+Human output for an invalid policy includes diagnostics; file-loading errors
+instead report why the file could not be read or parsed.
 
 For machine consumption, pass `--json`. Schema violations exit `1` with
 `data.valid: false` and `data.errors[]`; file/parse/internal failures use
@@ -479,14 +451,14 @@ live inventory validation is explicitly requested.
 | `missing version` | Top-level `version` is absent | Add `version: "0.2"` |
 | `unsupported version` | `version` is not `"0.2"` | Use a supported policy schema; v0.1 requires a legacy CLI <=2.15 for migration |
 | `wrong version` | `version: "0.1"` on this CLI | Migrate with CLI <=2.15, then upgrade back |
-| `lowercase deviceId` | `aliases` value doesn't match the accepted patterns | Copy the exact ID from `devices list` |
+| `alias-device-id` | Alias value is not a plausible SwitchBot device ID | Copy the exact ID from `devices list` |
 | `destructive in never_confirm` | `lock`/`unlock`/etc in `confirmations.never_confirm` | Remove it; intentional by design |
 | `quiet_hours.start without end` | Only one of the two times is set | Set both, or remove the block |
 | `invalid retention` | `audit.retention` isn't `never` / `Nd` / `Nw` / `Nm` | Use one of the documented formats |
 | `unknown top-level key` | You misspelled a block (e.g. `alias:` not `aliases:`) | Check the spelling against this reference |
 
-Every error includes the offending line and column, and most include a
-machine-readable `rule` field so tooling can suggest fixes.
+Validation errors include a machine-readable `keyword` and can include a
+source `line`, `col` and a suggested `hint`.
 
 ---
 
@@ -499,14 +471,12 @@ v0.2 is the current required schema. This CLI cannot migrate v0.1. Use CLI <=2.1
 switchbot policy migrate
 ```
 
-`policy migrate`:
-
-1. Detects your current `version` field.
-2. Applies additive changes only (new optional fields, tighter types on
-   reserved blocks).
-3. Rewrites the file with the new `version` constant.
-4. Refuses to migrate if any user edits conflict, and explains what
-   conflicts (exit code 7).
+On the current CLI, a v0.2 file targeting v0.2 returns `already-current`
+without rewriting or validating the file. A missing or non-string version
+returns `no-version-field` (exit 0, no write). An unsupported source or
+target version exits 6. File-not-found, YAML parse and internal loading errors
+exit 2, 3 and 4 respectively. Exit 7 is reserved for a migration that fails
+prevalidation; with only one supported version there is no such upgrade here.
 
 After migrating, run `switchbot policy validate` to confirm the file is
 valid before using the rules engine.

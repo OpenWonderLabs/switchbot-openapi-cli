@@ -3,14 +3,14 @@
 SwitchBot CLI has separate machine-readable contracts. A version in one
 contract does not change the version of another contract.
 
-## Current versions for CLI 3.10.0
+## Current versions for CLI 3.11.0
 
 | Contract | Location | Version | What it versions |
 | --- | --- | --- | --- |
 | JSON envelope | top-level JSON success and error output | `1.2` | `{ schemaVersion, data }` and `{ schemaVersion, error }` |
 | Discovery export | `schema export` data `version` | `2.0` | the discoverable catalog payload, including resources |
-| Resource catalog | `schema export` data `resources.version` | `2.0` | scenes, webhooks, and keypad resource metadata |
-| Device entry shape | each item in `schema export` data `types` | `1.0` | device command and status-field descriptors |
+| Resource catalog | non-compact `schema export` data `resources.version` | `2.0` | scenes, webhooks, and keypad resource metadata |
+| Device entry shape | `schema export` data `types` (no per-entry version field) | `1.0` | device command and status-field descriptors |
 | Event payload | streaming event data `payloadVersion` | `1` | normalized event record inside the JSON envelope |
 
 The top-level JSON envelope remains `1.2`. Its version does not mean that
@@ -42,9 +42,9 @@ audit records. Account switching can reject an obsolete in-flight operation or
 require an MQTT subscription restart; payload-version stability does not
 remove those behavioral boundaries.
 
-### Unreleased OpenAPI alignment after 3.10.0
+### OpenAPI alignment in CLI 3.11.0
 
-The [pinned upstream delta](openapi-alignment-ambiguities.md#2026-11-20-upstream-snapshot-unreleased)
+The [pinned upstream delta](openapi-alignment-ambiguities.md#2026-11-20-upstream-snapshot)
 adds catalog entries and commands, not descriptor fields. `AI Art Frame 2`
 is the canonical discovery value; `AI Art Frame Luma` remains a lookup alias.
 Consumers enumerating catalog values should not assume a fixed set of names
@@ -106,5 +106,5 @@ JSON envelopes at `schemaVersion` `1.2`. Their `data.payloadVersion` is `1`.
 The payload version applies to the normalized event record, not to the outer
 JSON envelope or the upstream raw payload.
 
-A historical `batch.summary.schemaVersion` remains a compatibility field.
-Prefer the top-level envelope version for CLI output parsing.
+For `batch` output, read the top-level envelope version; do not require a
+`schemaVersion` inside `data.summary`.

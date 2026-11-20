@@ -34,7 +34,7 @@ query` emit one JSON envelope.
 outer success or error shape changes. A command payload can have an additional
 version inside `data`.
 
-For example, schema discovery in CLI 3.10.0 is an envelope at `1.2`, an export
+For example, schema discovery in CLI 3.11.0 is an envelope at `1.2`, an export
 at `2.0`, and a resource catalog at `2.0`:
 
 ~~~json
@@ -95,7 +95,7 @@ displayed image remains and nothing was deleted. With both values `0`, the
 album was empty. Do not treat zero as missing. The count is for the **cloud
 album**, including images not downloaded to the frame. A successful deletion
 means the cloud removed the image and sent the instruction, not that the frame
-has finished. See the [pinned device evidence](openapi-alignment-ambiguities.md#2026-11-20-upstream-snapshot-unreleased).
+has finished. See the [pinned device evidence](openapi-alignment-ambiguities.md#2026-11-20-upstream-snapshot).
 
 ## 2. Streaming commands
 

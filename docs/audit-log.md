@@ -1,8 +1,8 @@
 # Audit Log Format
 
-The SwitchBot CLI writes a JSONL audit record for every mutating device or
-scene command when either `--audit-log` is passed or a profile sets
-`defaults.flags` including `--audit-log`.
+Pass `--audit-log` to record device commands. A device command with a
+`planId` uses the default log even without the flag. Direct scene execution
+does not write a command record.
 
 - **Default path:** `~/.switchbot/audit.log`
 - **Override:** `--audit-log-path <file>`
@@ -12,7 +12,10 @@ scene command when either `--audit-log` is passed or a profile sets
 
 ## Schema
 
-Every record is a JSON object with at least the following fields:
+New records share `auditVersion`, `t`, and `kind`. The remaining fields below
+describe command records; other kinds have different payloads. For example,
+`rule-evaluate` has `rule`, `trigger`, `fireId`, `conditions`, `decision` and
+`evaluationMs` instead of command fields.
 
 | Field | Type | Notes |
 | --- | --- | --- |
@@ -21,11 +24,15 @@ Every record is a JSON object with at least the following fields:
 | `kind` | string | Record discriminator. Values: `command`, `rule-fire`, `rule-fire-dry`, `rule-throttled`, `rule-webhook-rejected`, `rule-notify`, `rule-evaluate`, `llm-suggest`, `llm-condition`, `llm-budget-exceeded`. |
 | `deviceId` | string | Target device ID. |
 | `command` | string | SwitchBot command name (e.g. `turnOn`, `setColor`). |
-| `parameter` | string \| object | `command` records use the wire parameter. Rule-fire records retain the parameter string, including JSON whitespace; RGB values use `r:g:b`. Unused parameters are `"default"`. |
+| `parameter` | JSON value | Device command parameter (for example, a string, number or object). Rule-fire records retain parsed command text, including JSON whitespace; RGB values use `r:g:b`. |
 | `commandType` | `"command" \| "customize"` | Matches the upstream SwitchBot API field. |
 | `dryRun` | boolean | `true` when the command was intercepted by `--dry-run` and never reached the network. |
-| `result` | `"ok" \| "error"` | Optional — only present once the command completed (absent for `dryRun: true`). |
+| `result` | `"ok"` \| `"error"` \| `"dry-run"` | Optional. An intercepted device command records `"dry-run"`; a successful `rule-fire-dry` records `"ok"`. |
 | `error` | string | Optional — populated when `result === "error"`. |
+
+`llm-condition` is a declared kind. Do not expect a separate record for
+each LLM call: the evaluator puts condition details in `rule-evaluate`
+traces and writes `llm-budget-exceeded` on budget rejection.
 
 ### Example
 
@@ -54,19 +61,17 @@ Every record is a JSON object with at least the following fields:
 
 ## `history verify`
 
-`switchbot history verify` inspects the log and reports:
-
-- total / parsed / skipped / malformed line counts
-- histogram of `auditVersion` values (`unversioned` for pre-v1 records)
-- earliest / latest timestamp
-- per-line problem details for anything that failed to parse
+`switchbot history verify` ignores blank lines. Human output includes parsed
+and malformed counts, an `auditVersion` histogram, earliest/latest timestamps
+when available, and line numbers for malformed JSON. `--json` instead reports
+`data.status`, `fileMissing`, `parsed`, `malformed`, `unversioned` and `message`.
 
 Exit codes:
 
-| Code | Meaning                                                                          |
-|------|----------------------------------------------------------------------------------|
-| 0    | Every line parsed; no malformed entries.                                         |
-| 1    | File missing OR one or more malformed lines.                                     |
+| Code | Meaning |
+| --- | --- |
+| 0 | No malformed or unversioned entries (`ok`), or file missing (`warn`). |
+| 1 | At least one malformed or unversioned entry (`fail`). |
 
 ## Rotation
 

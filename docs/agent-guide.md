@@ -9,7 +9,7 @@ If you're a human looking for a tour, start with the [top-level README](../READM
 > its Skill + MCP architecture and existing startup contract.
 > The documented CLI/MCP surfaces are the shared contract. Check offline
 > catalog/bootstrap compatibility with
-> `switchbot doctor --json | jq '.data.checks[] | select(.name=="catalog-schema")'`.
+> `switchbot doctor --section catalog-schema --json`.
 
 ---
 
@@ -74,7 +74,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 
 ### Available tools (29, including 3 deprecated aliases)
 
-The default profile exposes 18 tools; `--tools readonly` exposes 15. Policy, audit and rule-administration tools require `--tools all`. Installations keep the safe default rather than enabling all tools merely for onboarding.
+`switchbot mcp serve` exposes 18 tools by default; `--tools readonly` exposes 15. Policy, audit and rule-administration tools require `--tools all`. To inspect a profile without starting the server, run `switchbot mcp tools --tools default --json` (or substitute `readonly` or `all`). Unlike `serve`, `mcp tools` lists all 29 when no profile is specified.
 
 | Tool | Purpose | Safety tier |
 | --- | --- | --- |
@@ -88,6 +88,9 @@ The default profile exposes 18 tools; `--tools readonly` exposes 15. Policy, aud
 | `describe_device` | Catalog-derived capabilities + optional live status | read |
 | `account_overview` | Cold-start snapshot (devices/scenes/quota/cache/MQTT) | read |
 | `device_history` | Read locally-persisted history. mode: "raw" (latest + ring) / "query" (time-range JSONL) / "aggregate" (bucketed stats) | read |
+| `get_device_history` | Deprecated; use `device_history` with `mode: "raw"` | read |
+| `query_device_history` | Deprecated; use `device_history` with `mode: "query"` | read |
+| `aggregate_device_history` | Deprecated; use `device_history` with `mode: "aggregate"` | read |
 | `mindclip_recordings` | AI MindClip recordings. action: `"list"`, `"get"` metadata, `"summary"`, or `"transcript"` transcription status/result | read |
 | `mindclip_list_todos` | List AI-extracted to-dos pulled from voice recordings | read |
 | `mindclip_recall` | AI-curated recall views. period: `"daily"` daily recall / `"weekly"` weekly summary / `"urgent_todos"` urgent to-dos | read |
@@ -467,7 +470,7 @@ Each command entry carries:
 
 ### Model-specific boundaries
 
-**Unreleased models** (after CLI 3.10.0):
+**Model changes in CLI 3.11.0:**
 
 - For **Plug Mini (IT)** and **Outdoor Plug (EU)**, use `get_device_status` for `switchStatus` (0 off, 1 on), `power` (W), `electricCurrent` (mA), `voltage` (V), and daily `usedElectricity` (W·min). Their separate `changeReport` events expose `online`, `overTemperature`, `overload`, and `switchStatus`, not metering samples.
 - **Hub 4** is read-only. Use status for `moveDetected` and webhook `detectionState` for motion events. **Vision Doorbell** is also read-only (`version`, `battery`, `online`), with no documented webhook. `list_devices` may report `lockDeviceId` as a string or `null`, or omit it. It is inventory metadata, not a doorbell command target. Do not offer Video Doorbell's motion-detection controls.
