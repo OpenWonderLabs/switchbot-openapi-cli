@@ -5,6 +5,7 @@
 [![license](https://img.shields.io/npm/l/@switchbot/openapi-cli.svg)](./LICENSE)
 [![node](https://img.shields.io/node/v/@switchbot/openapi-cli.svg)](https://nodejs.org)
 [![CI](https://github.com/OpenWonderLabs/switchbot-openapi-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/OpenWonderLabs/switchbot-openapi-cli/actions/workflows/ci.yml)
+[![Fully tested: 3300 tests](https://img.shields.io/badge/tests-3300-blue)](#development)
 
 SwitchBot smart home CLI — control devices, run scenes, stream events, and plug AI agents into your home via the built-in MCP server.
 
@@ -66,7 +67,7 @@ Run `switchbot catalog show` for the effective catalog, including aliases and pe
 
 ### Device contract notes
 
-**Unreleased OpenAPI update** (after CLI 3.10.0):
+**OpenAPI changes in CLI 3.11.0:**
 
 - **Plug Mini (IT) and Outdoor Plug (EU):** `switchbot --json devices status <plugId>` reports `power` in watts and `usedElectricity` in watt-minutes for the day. Read `switchStatus` (0 off, 1 on) for the relay state. The two models have distinct webhook identities; their events do not report energy readings.
 - **Hub 4 and Vision Doorbell:** use `switchbot --json devices status <id>` rather than sending a command. Hub 4 reports motion and environmental readings and has webhook events. Vision Doorbell reports `version`, `battery`, and `online`; no webhook is documented. Unlike Video Doorbell, it has no motion-detection controls. Its inventory entry may include `lockDeviceId` (a linked lock ID or `null`).
@@ -377,7 +378,7 @@ switchbot config list-profiles
 switchbot mcp serve    # stdio — default 18 tools; readonly 15; --tools all 29
 ```
 
-Read endpoints added in CLI 3.9.0: `mindclip transcript <id>` and `devices diary <id> --start <unix-ms> --end <unix-ms>`. Both have readonly MCP equivalents; diary windows are limited to 31 days and embedded detail strings remain raw.
+Read endpoints added in CLI 3.9.0: `mindclip transcript <id>` and `devices diary <id> --start <unix-ms> --end <unix-ms>`. Both are available in the readonly MCP profile; diary windows are limited to 31 days and embedded detail strings remain raw.
 
 ### `webhook`
 
@@ -470,7 +471,7 @@ switchbot completion bash/zsh/fish/powershell
 | Flag | Description |
 | --- | --- |
 | `--json` | Raw JSON output |
-| `--format <fmt>` | `tsv` / `yaml` / `jsonl` / `id` |
+| `--format <fmt>` | `table` (default), `json`, `jsonl`, `tsv`, `yaml`, `id`, or `markdown` |
 | `--fields <cols>` | Comma-separated column filter |
 | `--dry-run` | Preview supported actions without applying changes; unsupported writes fail. Reads may consume quota. Use `rules simulate` for offline rule decisions. |
 | `--verbose` | Log HTTP request/response to stderr |

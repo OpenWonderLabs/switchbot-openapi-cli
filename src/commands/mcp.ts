@@ -2645,13 +2645,16 @@ export function registerMcpCommand(program: Command): void {
   - list_devices            fetch all physical + IR devices
   - get_device_status       live status for a physical device
   - device_diary            Kata diary reads over integer-millisecond windows up to 31 days
-  - send_command            control a device (destructive commands need confirm:true)
+  - send_command            control a device (destructive writes require a reviewed plan by default)
   - list_scenes             list all manual scenes
   - run_scene               execute a manual scene
   - search_catalog          offline catalog search by type/alias
   - describe_device         metadata + commands + (optionally) live status for one device
   - account_overview        single cold-start snapshot: devices + scenes + quota + cache + MQTT state
   - device_history          read locally-persisted device history (mode: "raw" | "query" | "aggregate")
+  - get_device_history      deprecated: use device_history with mode "raw"
+  - query_device_history    deprecated: use device_history with mode "query"
+  - aggregate_device_history deprecated: use device_history with mode "aggregate"
   - mindclip_recordings     AI MindClip recordings (action: "list" | "get" | "summary" | "transcript")
   - mindclip_list_todos     list AI-extracted to-dos (filters: completion, category, source recording, time range)
   - mindclip_recall         AI-curated assistant views (period: "daily" | "weekly" | "urgent_todos")

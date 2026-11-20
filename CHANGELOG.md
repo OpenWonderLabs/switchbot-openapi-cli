@@ -7,7 +7,7 @@ All notable changes to `@switchbot/openapi-cli` are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [3.11.0]
 
 ### Added
 
@@ -26,7 +26,7 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - CLI and MCP distinguish repeat safety from request-key deduplication. Unclear intent no longer generates a write; scoped replay and IR checks use the verified target. Legacy Luma overrides apply to Frame 2; DVD/Speaker discovery identifies undocumented DVD volume support.
 - Compact bootstrap no longer dumps the catalog on a cold cache. Single-model schemas narrow webhook results; help examples and byte budgets are exercised on cold and populated fixtures.
 
-See the [pinned protocol notes](./docs/openapi-alignment-ambiguities.md). No new REST endpoint, CLI command, MCP tool or release version.
+See the [pinned protocol notes](./docs/openapi-alignment-ambiguities.md). No new REST endpoint, CLI command or MCP tool.
 
 ## [3.10.0]
 

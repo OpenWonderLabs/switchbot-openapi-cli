@@ -1,6 +1,6 @@
 # OpenAPI alignment ambiguities
 
-The latest entries use the [2026-11-20 upstream snapshot](#2026-11-20-upstream-snapshot-unreleased) (`0db92c78`). The earlier entries below retain their own `dc9a6b0e` evidence links. Written contracts, reported payloads and unresolved server behavior are distinguished throughout.
+The latest entries use the [2026-11-20 upstream snapshot](#2026-11-20-upstream-snapshot) (`0db92c78`). The earlier entries below retain their own `dc9a6b0e` evidence links. Written contracts, reported payloads and unresolved server behavior are distinguished throughout.
 
 - [MindClip](https://github.com/OpenWonderLabs/SwitchBotAPI/blob/dc9a6b0e4ad77882c72d186ecd5d134113acdad0/devices/others/ai-mindclip.md): the CLI, library and MCP now require the documented list/todo/date/week query fields; missing fields fail before HTTP rather than relying on an unverified server default. Extra language/time/folder/category filters, legacy numeric bounds and completed/category value meanings still require upstream confirmation; mock responses do not establish them.
 - [Curtain and Blind Tilt](https://github.com/OpenWonderLabs/SwitchBotAPI/tree/dc9a6b0e4ad77882c72d186ecd5d134113acdad0/devices/curtains-blinds): scalar Curtain position, Blind Tilt/Roller Shade on/off, and fan toggle support are not tightened without pinned evidence. The documented spaced Blind Tilt form `up; 36` is accepted and normalized to `up;36`.
@@ -46,10 +46,10 @@ It supplements, rather than replaces, the historical evidence above.
   Solar webhook `timeOfSample` is milliseconds, not the status URL expiry
   unit.
 
-## 2026-11-20 upstream snapshot (unreleased)
+## 2026-11-20 upstream snapshot
 
 [Official delta from `fa8f90c` to `0db92c7`](https://github.com/OpenWonderLabs/SwitchBotAPI/compare/fa8f90c661cfa183d633d87f18c04e0e5059fa74...0db92c78b56808f25b74c61535313f44bef4cd91).
-The five additions below use existing REST operations. The evidence is the
+CLI 3.11.0 supports the five additions below through existing REST operations. The evidence is the
 written OpenAPI contract, not a live-device or regional availability test.
 
 - [Plug Mini (IT)](https://github.com/OpenWonderLabs/SwitchBotAPI/blob/0db92c78b56808f25b74c61535313f44bef4cd91/devices/plugs-switches/plug-mini-it.md)
